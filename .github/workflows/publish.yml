@@ -36,7 +36,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           # 全量历史：publish-gate 靠 git tag 判定「该版本是否已发布归档」，
           # 浅克隆会漏 tag 导致重复发布尝试。
