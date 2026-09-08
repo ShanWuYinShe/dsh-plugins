@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.13-alpha.0 (2026-09-08)
+
+### Changes
+
+* 适配 DSH 0.1.3-alpha.2：全部 `@deepseek-ai/dsh-*` 依赖升至 `^0.1.3-alpha.2`，`dsh.host` 更新为 `0.1.3-alpha.2`
+* 对齐上游 `@deepseek-ai/dsh-llm-pi-ai` 依赖更新：`@earendil-works/pi-ai` 升级为 `^0.85.1`，消除类型冲突
+* 测试与 DSH 真实测试实例验证通过
+
 ## 0.3.12 (2026-09-05)
 
 ### Refactoring

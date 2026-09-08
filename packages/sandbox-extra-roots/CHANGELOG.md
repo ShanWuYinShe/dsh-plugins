@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.9-alpha.0 (2026-09-08)
+
+### Changes
+
+* 适配 DSH 0.1.3-alpha.2：`@deepseek-ai/dsh-sandbox` 与 `@deepseek-ai/dsh-typert-protocol` 依赖升至 `^0.1.3-alpha.2`，`dsh.host` 更新为 `0.1.3-alpha.2`
+* 测试与 DSH 真实测试实例验证通过
+
 ## 0.4.8 (2026-09-05)
 
 ### Refactoring
