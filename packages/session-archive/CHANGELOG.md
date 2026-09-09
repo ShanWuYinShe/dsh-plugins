@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.9-alpha.2 (2026-09-09)
+
+### Changes
+
+* 全面接入官方契约类型：`dsh.d.ts` 不再手写任何宿主方法形状，改为映射
+  `@deepseek-ai/dsh-workspace` / `dsh-session` / `dsh-session-persistence` /
+  `dsh-session-title` 官方 d.ts（新增 devDependencies，自带 cordis Context
+  增强）——宿主契约漂移从此在 typecheck 期暴露，而非运行时
+* host 逻辑仅走官方契约路径并移除全部旧宿主版本兼容分支：读事件流用
+  `open(id,'read')` 句柄（官方 `SessionHandle`）；标题折叠改用官方
+  `foldSessionTitle`（`dsh-session-title` 纯函数，行为与宿主逐字一致，
+  含 `ignorable`/来源语义），替代手写折叠；assistant 消息文本按官方
+  `SessionEventMap` 从 `data.message.content` 提取
+* 归档集合移除通道（官方无 unarchive API）显式标注为宿主内部形状依赖
+  （官方 d.ts 上 `enqueueOperation`/`requireState`/`setState` 为 private），
+  运行时探测可用性，形状变化自动降级
+* 测试夹具重写为官方契约形状（快照 + 句柄 + 官方事件 data），title 事件
+  data 补全官方 `SessionTitleEventData` 必备字段（`messageSeqs`/`source`）
+* 已在 DSH 0.1.5-alpha.1 隔离测试实例真实验证：列表/标题/详情/恢复全通过，
+  控制台零报错
+
 ## 0.3.9-alpha.1 (2026-09-09)
 
 ### Fixes

@@ -5,20 +5,18 @@
  * 会话（列表 + 会话内容只读浏览）、一次多选批量恢复归档（unarchive，
  * 会话回到会话树原位置）或彻底删除归档（删除持久化文件与归档记录）。
  *
- * host 端全部逻辑基于官方 service 接口（workspaceRegistry /
- * sessionPersistence / sessions），不依赖 dsh 内部实现：
+ * host 端全部逻辑基于官方 service 契约类型（@deepseek-ai/dsh-workspace /
+ * dsh-session / dsh-session-persistence / dsh-session-title 的官方 d.ts），
+ * 面向 DSH 0.1.5-alpha 宿主线，不保留旧宿主版本兼容：
  *   1. list()       — archivedSessionIds ∩ sessionPersistence.list()，
- *                     每条附带标题（从事件流折叠 session/title）、目录、
+ *                     每条附带标题（官方 foldSessionTitle 折叠）、目录、
  *                     创建时间、最后修改时间（文件 mtime）、体积与
  *                     live 状态（会话仍在内存中运行时禁止删除）。
- *                     兼容两条宿主线的持久化枚举形状：0.1.2 返回
- *                     SessionHeader[]，0.1.3+ 返回
- *                     SessionPersistenceSnapshot[]（header 在 .header 上）。
- *   2. detail(id)   — 只读会话事件流（标题 + 文本消息 user/assistant），
- *                     供面板"查看"展开；0.1.2 走 readFrom，0.1.3+ 走
- *                     open(id,'read') 句柄（readFrom 已从契约移除）。
+ *   2. detail(id)   — open(id,'read') 句柄只读会话事件流（标题 + 文本
+ *                     消息 user/assistant），供面板"查看"展开。
  *   3. delete(ids)  — 批量彻底删除：live 会话拒绝；逐个删除持久化文件
- *                     （locate() 定位）+ 会话目录。删除后**保留**该会话在
+ *                     （jsonl 后端的 locate() 定位，落空时按会话目录扫
+ *                     实际代际文件）+ 会话目录。删除后**保留**该会话在
  *                     归档集合中的 ghost id（不调用移除）：宿主的
  *                     archiveSession 只改归档注册表、不停止内存会话，web
  *                     客户端重连还会把旧 tab 恢复进内存——删除时若把 id
@@ -30,17 +28,29 @@
  *                     会话 id（文件已删的 ghost id 拒绝恢复，防止已彻底
  *                     删除的会话"复活"回侧边栏）；会话数据不动。
  *
- * 归档集合（workspaceRegistry.archivedSessionIds）的写入没有官方 API，
- * 这里复用 registry 自身的串行化写入通道（enqueueOperation → requireState
- * → setState，与 archiveSession 相同的路径）；若 registry 内部形状变化，
- * 自动降级为"仅删文件"，归档列表会以存在性过滤幽灵 id，功能仍正确。
+ * 归档集合（workspaceRegistry.archivedSessionIds）的移除没有官方 API
+ * （官方只有 archiveSession 方向），这里复用 registry 自身的串行化写入
+ * 通道（enqueueOperation → requireState → setState，与 archiveSession
+ * 相同的路径；官方 d.ts 上为 private，运行时探测）；若 registry 内部形状
+ * 变化，自动降级为"仅删文件"，归档列表会以存在性过滤幽灵 id，功能仍正确。
  *
- * 本文件不依赖任何 dsh 内部包（纯 ESM + ctx.* service），可独立安装。
+ * 本文件运行时不依赖任何 dsh 内部包（纯 ESM + ctx.* service + 官方
+ * foldSessionTitle 纯函数），可独立安装；官方包仅作为 devDependency 提供
+ * 契约类型。
  */
 
 import { readdir, stat, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
+import type {
+  SessionEvent,
+  SessionHeader,
+  SessionId,
+} from '@deepseek-ai/dsh-session';
+import type { SessionHandle, SessionPersistence, SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence';
+import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace';
+import { foldSessionTitle } from '@deepseek-ai/dsh-session-title';
+import type { LocatableSessionPersistence } from './dsh.js';
 import { createConfigStore } from './config-store.js';
 
 // remote 服务（侧边栏面板 UI 的读写）可选：typert-protocol 不可用时
@@ -141,35 +151,22 @@ function normalizeConfig(source: any, defaults: any = DEFAULT_CONFIG): Record<st
 }
 
 /**
- * 从持久化枚举项取会话头。dsh 0.1.3 起 `sessionPersistence.list()` 返回
- * `SessionPersistenceSnapshot[]`（`{ header, revision, sizeBytes }`），
- * 0.1.2 及更早返回 `SessionHeader[]`。旧代码直接读 `item.id`，在新宿主上
- * 全是 undefined —— 归档 id 一个也匹配不上，面板恒空（这正是"归档列表
- * 显示不出来"的直接成因）。这里归一成 header，两线都正确。
+ * 读取一个会话的完整事件流与头（官方契约路径：open 一个 read 句柄再
+ * read(0)，用完 close——不 close 会漏句柄；头从句柄上取）。
  */
-function headerOf(entry: any): any {
-  if (entry === null || entry === undefined || typeof entry !== 'object') return entry;
-  return entry.header !== undefined && entry.header !== null ? entry.header : entry;
-}
-
-/**
- * 读取一个会话的完整事件流，附带头信息。dsh 0.1.3 的持久化契约移除了
- * `readFrom`（连带抽象类上的 `locate`），读事件流必须 open 一个 read 句柄
- * 再 read(0)，用完 close（不 close 会漏句柄）；头从句柄上取。旧 `readFrom`
- * 仍在时优先用旧的；两条宿主线都覆盖。
- */
-async function readSession(persistence: any, sessionId: string): Promise<{ header: any; events: any[] }> {
-  if (typeof persistence.readFrom === 'function') {
-    const { meta, events } = await persistence.readFrom(sessionId, 0);
-    return { header: meta, events };
-  }
-  const handle = await persistence.open(sessionId, 'read');
+async function readSession(persistence: SessionPersistence, sessionId: SessionId): Promise<{ header: SessionHeader; events: SessionEvent[] }> {
+  const handle: SessionHandle = await persistence.open(sessionId, 'read');
   try {
     const { events } = await handle.read(0);
-    return { header: handle.header, events };
+    return { header: handle.header, events: [...events] };
   } finally {
     await handle.close();
   }
+}
+
+/** 从快照列表里取某会话的头（ghost 分支拿 cwd 供 locate 兜底用）。 */
+function headerFromList(snapshots: readonly SessionPersistenceSnapshot[], sessionId: string): SessionHeader | undefined {
+  return snapshots.find((snapshot) => snapshot.header.id === sessionId)?.header;
 }
 
 /** 并发限制器：最多 N 个任务并行，其余排队。 */
@@ -186,25 +183,14 @@ function limitedConcurrency(limit: number, tasks: Array<() => Promise<any>>): Pr
   return Promise.all(workers).then(() => results);
 }
 
-/** 从事件流折叠最新会话标题（与 dsh-session-title 相同的折叠规则）。 */
-function foldTitle(events: any[]): string | null {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event && event.type === 'session/title') {
-      const title = event.data && typeof event.data.title === 'string' ? event.data.title.trim() : '';
-      return title.length > 0 ? title : null;
-    }
-  }
-  return null;
-}
-
-/** 从一条消息（Message 结构）提取纯文本（text 块拼接，忽略图片/工具块）。 */
-function messageText(message: any, maxChars: number): string {
-  if (!message || !Array.isArray(message.content)) return '';
+/** 从一条消息提取纯文本（text 块拼接，忽略图片/工具块）。
+ * 官方 Message.content 是 ContentBlock[]，这里只取 type:'text' 的块。 */
+function messageText(content: unknown, maxChars: number): string {
+  if (!Array.isArray(content)) return '';
   let text = '';
-  for (const block of message.content) {
-    if (block && block.type === 'text' && typeof block.text === 'string') {
-      text += block.text;
+  for (const block of content) {
+    if (block && typeof block === 'object' && (block as any).type === 'text' && typeof (block as any).text === 'string') {
+      text += (block as any).text;
       if (text.length > maxChars) break;
     }
   }
@@ -216,15 +202,11 @@ function messageText(message: any, maxChars: number): string {
  * 只读操作失败各自容错：单个会话的标题/详情读取失败不拖垮列表。
  */
 export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
-  const registry = ctx.workspaceRegistry;
-  const persistence = ctx.sessionPersistence;
+  const registry: WorkspaceRegistry = ctx.workspaceRegistry;
+  const persistence: SessionPersistence & LocatableSessionPersistence = ctx.sessionPersistence;
 
-  /** 当前归档集合快照。 */
-  const archivedSet = (): Set<string> => new Set(
-    typeof registry.archivedSessionIds === 'function'
-      ? registry.archivedSessionIds()
-      : (Array.isArray(registry.archivedSessionIds) ? registry.archivedSessionIds : []),
-  );
+  /** 当前归档集合快照（官方契约：getter 返回只读 SessionId 数组）。 */
+  const archivedSet = (): Set<string> => new Set<string>(registry.archivedSessionIds);
 
   /** 会话是否"活跃"（不能安全删除）。
    * 宿主的 archiveSession 只改归档注册表、不停止内存会话，web 客户端
@@ -233,33 +215,48 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
    * 若把内存存在当作 live，归档面板会永远显示"运行中"且无法勾选删除。
    * 因此 live 仅对"内存存在且**未归档**"的会话为真（防将来误用），
    * 归档面板中恒为 false。 */
-  const isLive = (sessionId: string) =>
+  const isLive = (sessionId: SessionId) =>
     ctx.sessions.get(sessionId) !== undefined && !archivedSet().has(sessionId);
 
   /** 归档瞬间的生成流兜底：会话仍在内存且文件最近有写入（60s 内）时
    * 视为忙碌——删除文件后进行中的请求会把半截日志 append 回来。 */
-  const isBusy = (sessionId: string, file: { mtimeMs: number }) =>
+  const isBusy = (sessionId: SessionId, file: { mtimeMs: number }) =>
     ctx.sessions.get(sessionId) !== undefined && Date.now() - file.mtimeMs < BUSY_WRITE_WINDOW_MS;
 
-  /** 从归档集合移除若干 id（恢复用；删除不调用——见 deleteArchived），返回实际移除的 id。
+  /**
+   * 从归档集合移除若干 id（恢复用；删除不调用——见 deleteArchived），返回实际移除的 id。
+   *
+   * 归档集合的移除没有官方 API（官方只有 archiveSession 方向），这里复用
+   * registry 自身的串行化写入通道 enqueueOperation → requireState → setState
+   * （与官方 archiveSession 相同的路径）。三者在 0.1.5 官方 d.ts 上是 private
+   * ——宿主内部形状，这里以显式断言收窄并在运行时探测可用性：形状一旦
+   * 变化自动降级为"仅删文件"，归档列表按存在性过滤幽灵 id，功能仍正确。
+   *
    * confirm 在 registry 写锁临界区内逐个复核 id 是否仍可恢复（文件仍存在）:
    * 存在性检查放在锁外的话,并发 deleteArchived 可在检查与移除之间删掉文件,
-   * 结果"文件没了、归档标记也没了",内存中的会话立刻重回侧边栏。 */
+   * 结果"文件没了、归档标记也没了",内存中的会话立刻重回侧边栏。
+   */
   async function removeFromArchiveSet(ids: string[], confirm?: (sessionId: string) => Promise<boolean>): Promise<string[]> {
     const set = new Set(ids);
+    // 显式断言：私有写入通道的形状（官方 d.ts 未承诺），运行时探测兜底。
+    // 用索引签名绕开 private 成员的交叉归约——这是对宿主内部形状的受控依赖。
+    const writable = registry as unknown as Record<string, unknown> & {
+      enqueueOperation?: (operation: () => void | Promise<void>) => Promise<void>;
+      requireState?: () => { archivedSessionIds: readonly SessionId[] };
+      setState?: (next: Record<string, unknown>) => Promise<void> | void;
+    };
     const canWrite =
-      registry !== undefined &&
-      typeof registry.enqueueOperation === 'function' &&
-      typeof registry.requireState === 'function' &&
-      typeof registry.setState === 'function';
+      typeof writable.enqueueOperation === 'function' &&
+      typeof writable.requireState === 'function' &&
+      typeof writable.setState === 'function';
     if (!canWrite) return []; // 降级：仅删文件，列表按存在性过滤幽灵 id
     let removedIds: string[] = [];
-    await registry.enqueueOperation(async () => {
-      const state = registry.requireState();
-      const current = Array.isArray(state.archivedSessionIds) ? state.archivedSessionIds : [];
+    await writable.enqueueOperation!(async () => {
+      const state = writable.requireState!();
+      const current = [...state.archivedSessionIds] as string[];
       let eligible = current.filter((id) => set.has(id));
       if (confirm !== undefined) {
-        const confirmed = [];
+        const confirmed: string[] = [];
         for (const id of eligible) {
           try { if (await confirm(id)) confirmed.push(id); } catch {}
         }
@@ -270,7 +267,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
       // 或正常归档),不能因为请求过就一并抹掉。
       const removedSet = new Set(removedIds);
       const remaining = current.filter((id) => !removedSet.has(id));
-      if (removedIds.length > 0) await registry.setState({ ...state, archivedSessionIds: remaining });
+      if (removedIds.length > 0) await writable.setState!({ ...state, archivedSessionIds: remaining });
     });
     return removedIds;
   }
@@ -314,11 +311,11 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
     return latest?.path ?? null;
   }
 
-  async function fileInfo(header: any): Promise<FileStatus> {
+  async function fileInfo(header: SessionHeader): Promise<FileStatus> {
     try {
       if (typeof persistence.locate !== 'function') return { state: 'unknown' };
       const location = persistence.locate(header);
-      if (location === undefined || location === null || typeof location.path !== 'string' || location.path.length === 0) {
+      if (location === undefined || typeof location.path !== 'string' || location.path.length === 0) {
         return { state: 'unknown' };
       }
       // 先试 locate 的当前代际路径，落空再扫会话目录里的实际代际文件。
@@ -337,16 +334,19 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
     }
   }
 
-  /** ghost 分支的孤儿探测:不经持久化枚举,直接 locate({id}) + stat 判断文件
+  /** ghost 分支的孤儿探测:不经持久化枚举,直接 locate(header) + stat 判断文件
    * 是否实际存在(persistence.list() 会静默跳过首行损坏的日志,"枚举不到"
    * 不等于"文件不存在")。cwd 未知的 ghost id 只能探到缺省位置(_no-cwd 一类),
    * 尽力而为;locate 指向的当前代际名落空时同样扫目录里的实际代际文件。
    * 返回存在的路径;'absent' 确认不存在;无法定位返回 'unknown'。 */
-  async function probeOrphanFile(sessionId: string): Promise<string | 'absent' | 'unknown'> {
+  async function probeOrphanFile(sessionId: SessionId, cwd?: string): Promise<string | 'absent' | 'unknown'> {
     try {
       if (typeof persistence.locate !== 'function') return 'unknown';
-      const location = persistence.locate({ id: sessionId });
-      if (location === undefined || location === null || typeof location.path !== 'string' || location.path.length === 0) {
+      // ghost 探测没有完整 header（cwd 未知时只能探到缺省位置一类）。
+      // 合成最小头：version 用官方 SESSION_FORMAT_VERSION 的当前字面（3），
+      // locate 只消费 id/cwd 两个字段。
+      const location = persistence.locate({ id: sessionId, cwd, createdAt: 0, version: 3, isSeeded: false } as SessionHeader);
+      if (location === undefined || typeof location.path !== 'string' || location.path.length === 0) {
         return 'unknown';
       }
       try {
@@ -376,25 +376,25 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
    * 标题按 mtime 缓存：readSession 会解析整条事件流，而面板关闭态的徽标
    * 轮询每 5 秒打一次 list——不缓存的话就是"读整本会话只为取一行标题"的
    * 持续开销。mtime 不变即命中缓存；文件不可定位（无 locate 的宿主后端）
-   * 时跳过缓存直接读，标题仍然可得。 */
+   * 时跳过缓存直接读，标题仍然可得。折叠用官方 foldSessionTitle。 */
   const titleCache = new Map<string, { mtimeMs: number; title: string | null }>();
-  async function rowFor(sessionId: string, header: any) {
+  async function rowFor(sessionId: SessionId, header: SessionHeader) {
     const file = await fileInfo(header);
     const located = file.state === 'located' ? file : null;
-    let title = null;
+    let title: string | null = null;
     if (located !== null) {
       const cached = titleCache.get(sessionId);
       if (cached !== undefined && cached.mtimeMs === located.mtimeMs) {
         title = cached.title;
       } else {
         try {
-          title = foldTitle((await readSession(persistence, sessionId)).events);
+          title = foldSessionTitle((await readSession(persistence, sessionId)).events)?.title ?? null;
         } catch {}
         titleCache.set(sessionId, { mtimeMs: located.mtimeMs, title });
       }
     } else {
       try {
-        title = foldTitle((await readSession(persistence, sessionId)).events);
+        title = foldSessionTitle((await readSession(persistence, sessionId)).events)?.title ?? null;
       } catch {}
     }
     return {
@@ -415,8 +415,8 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
     async count() {
       const archived = [...archivedSet()];
       if (archived.length === 0) return { count: 0 };
-      const snapshots = await persistence.list();
-      const persisted = new Set(snapshots.map((entry: any) => headerOf(entry)?.id));
+      const snapshots: readonly SessionPersistenceSnapshot[] = await persistence.list();
+      const persisted = new Set<string>(snapshots.map((snapshot) => snapshot.header.id));
       let count = 0;
       for (const sessionId of archived) if (persisted.has(sessionId)) count++;
       return { count };
@@ -426,15 +426,15 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
     async list() {
       const archived = [...archivedSet()];
       if (archived.length === 0) return { items: [] };
-      const snapshots = await persistence.list();
-      const byId = new Map<string, any>(snapshots.map((entry: any) => [headerOf(entry)?.id, headerOf(entry)] as [string, any]));
-      const rows: Array<{ sessionId: string; header: any }> = [];
+      const snapshots: readonly SessionPersistenceSnapshot[] = await persistence.list();
+      const byId = new Map<string, SessionHeader>(snapshots.map((snapshot) => [snapshot.header.id, snapshot.header]));
+      const rows: Array<{ sessionId: string; header: SessionHeader }> = [];
       for (const sessionId of archived) {
         const header = byId.get(sessionId);
         if (header === undefined) continue; // 幽灵 id：会话文件已不存在
         rows.push({ sessionId, header });
       }
-      const items = await limitedConcurrency(cfg.titleReadConcurrency, rows.map(({ sessionId, header }) => () => rowFor(sessionId, header)));
+      const items = await limitedConcurrency(cfg.titleReadConcurrency, rows.map(({ sessionId, header }) => () => rowFor(sessionId as SessionId, header)));
       return { items };
     },
 
@@ -444,8 +444,9 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
       if (!archivedSet().has(sessionId)) {
         throw Object.assign(new Error('session not archived: ' + sessionId), { code: 'NOT_ARCHIVED' });
       }
-      const { header: meta, events } = await readSession(persistence, sessionId);
-      const title = foldTitle(events);
+      const id = sessionId as SessionId;
+      const { header: meta, events } = await readSession(persistence, id);
+      const title = foldSessionTitle(events)?.title ?? null;
       const messages = [];
       let totalMessageCount = 0;
       for (const event of events) {
@@ -456,7 +457,12 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
           totalMessageCount++;
           continue;
         }
-        const text = messageText(event.data, cfg.messagePreviewChars);
+        // 官方事件 data:user/message 是 UserMessage 本体（content 在自身），
+        // assistant/message 是包装对象（content 在 .message.content）。
+        const text = messageText(
+          event.type === 'user/message' ? event.data.content : event.data.message.content,
+          cfg.messagePreviewChars,
+        );
         if (text.length === 0) continue;
         messages.push({
           role: event.type === 'user/message' ? 'user' : 'assistant',
@@ -478,7 +484,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
         totalMessageCount,
         truncated: totalMessageCount > messages.length,
         messages,
-        live: isLive(sessionId),
+        live: isLive(id),
       };
     },
 
@@ -503,14 +509,15 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
       // 会话,不校验的话任何"未归档、不在内存"的会话 id 都会绕过 live/busy
       // 两道保护被不可逆物理删除。
       const archived = archivedSet();
-      const snapshots = await persistence.list();
-      const headersById = new Map(snapshots.map((item: any) => [headerOf(item)?.id, headerOf(item)]));
+      const snapshots: readonly SessionPersistenceSnapshot[] = await persistence.list();
+      const headersById = new Map<string, SessionHeader>(snapshots.map((snapshot) => [snapshot.header.id, snapshot.header]));
       for (const sessionId of unique) {
+        const id = sessionId as SessionId;
         if (!archived.has(sessionId)) {
           failed.push({ sessionId, reason: 'not-archived' });
           continue;
         }
-        if (isLive(sessionId)) {
+        if (isLive(id)) {
           failed.push({ sessionId, reason: 'live' });
           continue;
         }
@@ -518,10 +525,10 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
         if (header === undefined) {
           // ghost id(枚举不到)。但"枚举不到 ≠ 文件不存在":首行损坏的日志
           // 会被 persistence.list() 静默跳过,直接当 ghost 报成功会把永远
-          // 删不掉的孤儿文件留在磁盘上。先 locate({id}) 探测,探到文件即
+          // 删不掉的孤儿文件留在磁盘上。先 locate(header) 探测,探到文件即
           // "有文件但不可枚举",计入 failed 而非谎报成功;定位钩子缺失
           // (unknown)同样不能确认缺失,按不可枚举兜底。
-          const orphan = await probeOrphanFile(sessionId);
+          const orphan = await probeOrphanFile(id, headerFromList(snapshots, sessionId)?.cwd);
           if (orphan !== 'absent') {
             failed.push({ sessionId, reason: 'unenumerable' });
             continue;
@@ -540,7 +547,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
           deleted.push(sessionId);
           continue;
         }
-        if (isBusy(sessionId, file)) {
+        if (isBusy(id, file)) {
           failed.push({ sessionId, reason: 'busy' });
           continue;
         }
@@ -553,7 +560,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
             deleted.push(sessionId);
             continue;
           }
-          const inMemory = ctx.sessions.get(sessionId) !== undefined;
+          const inMemory = ctx.sessions.get(sessionId as SessionId) !== undefined;
           if (inMemory && Date.now() - fresh.mtimeMs < BUSY_WRITE_WINDOW_MS) {
             failed.push({ sessionId, reason: 'busy' });
             continue;
@@ -595,8 +602,8 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
      */
     async unarchive(sessionIds: string[]) {
       const unique = [...new Set(sessionIds)];
-      const snapshots = await persistence.list();
-      const headersById = new Map(snapshots.map((item: any) => [headerOf(item)?.id, headerOf(item)]));
+      const snapshots: readonly SessionPersistenceSnapshot[] = await persistence.list();
+      const headersById = new Map<string, SessionHeader>(snapshots.map((snapshot) => [snapshot.header.id, snapshot.header]));
       // 锁外先做一遍廉价过滤(明显不可恢复的直接淘汰),锁内由 confirm 复核,
       // 消除与并发 deleteArchived 的检查-移除窗口。
       const candidates = [];

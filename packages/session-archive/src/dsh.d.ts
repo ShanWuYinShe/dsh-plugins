@@ -1,51 +1,39 @@
-import type { Context as CordisContext } from "@deepseek-ai/cordis";
+/**
+ * 宿主 service 面的类型接线。全部映射官方包发布的契约类型——官方包自带
+ * `declare module '@deepseek-ai/cordis'` 的 Context 增强（sessionPersistence /
+ * workspaceRegistry / sessions 三包均有），这里只需让插件编译期看到它们：
+ * 本文件 import 各官方包触发其模块增强，并把官方契约导出为插件内部别名。
+ *
+ * 不手写任何方法形状：宿主契约漂移（如 0.1.2→0.1.3 的 list() 快照化、
+ * readFrom 移除）由官方 d.ts 直接体现在 typecheck，而不是运行时才炸。
+ */
+import '@deepseek-ai/dsh-session-persistence';
+import '@deepseek-ai/dsh-workspace';
+import '@deepseek-ai/dsh-session';
+import type { SessionPersistenceSnapshot, SessionHandle, SessionLocation } from '@deepseek-ai/dsh-session-persistence';
+import type { Workspace, WorkspaceRegistry } from '@deepseek-ai/dsh-workspace';
+import type { Session, SessionEvent, SessionHeader, SessionId, SessionStore } from '@deepseek-ai/dsh-session';
+import type { SessionTitleEventData } from '@deepseek-ai/dsh-session-title';
+
+export type {
+  SessionPersistenceSnapshot,
+  SessionHandle,
+  SessionLocation,
+  Workspace,
+  WorkspaceRegistry,
+  Session,
+  SessionEvent,
+  SessionHeader,
+  SessionId,
+  SessionStore,
+  SessionTitleEventData,
+};
 
 /**
- * 插件触达的 DSH service 面。按 dsh 0.1.3+ 持久化契约声明（0.1.2 的
- * `readFrom`/`locate` 已从抽象契约移除），但对仍在的旧方法一律以可选
- * 成员表达——host 逻辑运行时探测两种形状，兼容两条宿主线。
+ * jsonl 后端的 `locate` 诊断钩子：按会话头返回当前代际工件路径。它不在
+ * `SessionPersistence` 抽象契约上（0.1.3 起从基类移除），删除/恢复的物理
+ * 定位运行时探测它，缺失时降级为「不可定位」而非失败。
  */
-declare module "@deepseek-ai/cordis" {
-  interface Context extends CordisContext {
-    workspaceRegistry: {
-      [key: string]: any;
-      [key: symbol]: any;
-      /** 0.1.2 为属性数组，0.1.3 起为 getter（同样返回数组）；类型层取并集。 */
-      archivedSessionIds: string[] | (() => string[]);
-      enqueueOperation(operation: () => void | Promise<void>): Promise<void>;
-      requireState(): { archivedSessionIds: string[]; [key: string]: any };
-      setState(next: Record<string, any>): Promise<void> | void;
-    };
-    sessionPersistence: {
-      [key: string]: any;
-      [key: symbol]: any;
-      /**
-       * dsh 0.1.3+：`SessionPersistenceSnapshot[]`（`{ header, revision,
-       * sizeBytes?, eventCount? }`）。0.1.2 及更早返回 `SessionHeader[]`。
-       * host 逻辑经 headerOf() 归一，不依赖具体形状。
-       */
-      list(): Promise<Array<{ header?: { id: string; [key: string]: any }; id?: string; [key: string]: any }>>;
-      /** 0.1.3+ 读事件流的契约路径：read 句柄。 */
-      open(
-        id: string,
-        access: "read" | "write",
-        options?: { signal?: AbortSignal },
-      ): Promise<{
-        readonly header: { id: string; cwd?: string; createdAt?: number; parentSession?: string; agentPreset?: string; [key: string]: any };
-        read(offset?: number): Promise<{ events: Array<any>; [key: string]: any }>;
-        close(): Promise<void>;
-      }>;
-      /** 0.1.3+：单会话观察（存在性/体积），不存在返回 undefined。 */
-      stat?(id: string): Promise<{ header: { id: string; [key: string]: any }; [key: string]: any } | undefined>;
-      /** 仅 0.1.2 及更早：按头定位物理路径。 */
-      locate?(meta: { id: string; cwd?: string; [key: string]: any }): { kind: string; path: string; [key: string]: any } | undefined;
-      /** 仅 0.1.2 及更早：读完整事件流。 */
-      readFrom?(id: string, offset: number): Promise<{ meta: Record<string, any>; events: Array<any> }>;
-    };
-    sessions: {
-      [key: string]: any;
-      [key: symbol]: any;
-      get(id: string): any;
-    };
-  }
+export interface LocatableSessionPersistence {
+  locate?(meta: SessionHeader): SessionLocation | undefined;
 }

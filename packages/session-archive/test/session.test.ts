@@ -47,17 +47,20 @@ function messageEvent(seq: number, time: number, text: string) {
   return { type: "user/message", seq, time, data: { id: "m" + seq, role: "user", content: [{ type: "text", text }] } };
 }
 
+function assistantEvent(seq: number, time: number, text: string) {
+  return { type: "assistant/message", seq, time, data: { turn: 1, step: seq, message: { id: "m" + seq, role: "assistant", content: [{ type: "text", text }] }, stream: [] } };
+}
+
 /**
- * 双线持久化夹具。v2（默认）模拟 dsh 0.1.3+ 契约：list() 返回
- * SessionPersistenceSnapshot 数组、open() read 句柄读事件流、无 readFrom；
- * v1 模拟 0.1.2 及更早：list() 返回 header 数组、readFrom 读事件流。
- * 两者默认都带 locate——jsonl 后端在 0.1.3 起仍提供该诊断钩子（只是从
- * 抽象契约移除），withLocate=false 覆盖无 locate 后端的降级路径。
+ * 官方契约夹具（dsh 0.1.5-alpha 形状，无旧版分支）：list() 返回
+ * SessionPersistenceSnapshot 数组、open() read 句柄读事件流、事件 data
+ * 为官方 SessionEventMap 形状（user/message 本体、assistant/message 包装）。
+ * 默认带 locate——jsonl 后端的诊断钩子（不在抽象契约上），
+ * withLocate=false 覆盖无 locate 后端的降级路径。
  */
 function makeFixture(options: {
   archived?: string[];
   headers?: Array<Record<string, any>>;
-  contract?: "v1" | "v2";
   withLocate?: boolean;
 } = {}) {
   const registryState = {
@@ -71,7 +74,6 @@ function makeFixture(options: {
     requireState: () => registryState,
     setState: (next: Record<string, unknown>) => { Object.assign(registryState, next); },
   };
-  const contract = options.contract ?? "v2";
   const withLocate = options.withLocate ?? true;
   const headers = options.headers ?? [];
   const sessions = new Map<string, unknown>();
@@ -87,34 +89,26 @@ function makeFixture(options: {
   const persistenceMock: Record<string, any> = withLocate
     ? { locate: (meta: { id: string }) => ({ kind: "jsonl", path: sessionPath(meta.id) }) }
     : {};
-  if (contract === "v1") {
-    persistenceMock.list = async () => listed();
-    persistenceMock.readFrom = async (id: string) => {
-      eventReads++;
-      return { meta: headerOf(id), events: eventsOf(id) };
+  persistenceMock.list = async () => listed().map((h) => ({
+    header: h,
+    revision: h.id + ":rev",
+    sizeBytes: fs.statSync(sessionPath(h.id)).size,
+  }));
+  persistenceMock.open = async (id: string, access: string) => {
+    if (access !== "read") throw new Error("fixture supports read handles only");
+    const header = headerOf(id);
+    return {
+      header,
+      read: async () => { eventReads++; return { eventState: "owned", events: eventsOf(id) }; },
+      close: async () => {},
     };
-  } else {
-    persistenceMock.list = async () => listed().map((h) => ({
-      header: h,
-      revision: h.id + ":rev",
-      sizeBytes: fs.statSync(sessionPath(h.id)).size,
-    }));
-    persistenceMock.open = async (id: string, access: string) => {
-      if (access !== "read") throw new Error("fixture supports read handles only");
-      const header = headerOf(id);
-      return {
-        header,
-        read: async () => { eventReads++; return { eventState: "owned", events: eventsOf(id) }; },
-        close: async () => {},
-      };
-    };
-  }
+  };
   const ctx = {
     workspaceRegistry: archiveRegistry,
     sessionPersistence: persistenceMock,
     sessions: { get: (id: string) => sessions.get(id) },
   };
-  return { ctx, registryState, headers, sessions, eventReads: () => eventReads, contract };
+  return { ctx, registryState, headers, sessions, eventReads: () => eventReads };
 }
 
 const baseCfg = { detailMaxMessages: 50, messagePreviewChars: 500, titleReadConcurrency: 2 };
@@ -133,9 +127,9 @@ describe("session-archive host", () => {
       ],
     });
     writeSession("s1", [
-      { type: "session/title", seq: 1, time: 1000, data: { title: "第一个归档会话", messageSeqs: [2] } },
+      { type: "session/title", seq: 1, time: 1000, data: { title: "第一个归档会话", messageSeqs: [2], source: { kind: "user" } } },
       { type: "user/message", seq: 2, time: 1000, data: { id: "m1", role: "user", content: [{ type: "text", text: "你好" }] } },
-      { type: "assistant/message", seq: 3, time: 2000, data: { id: "m2", role: "assistant", content: [{ type: "text", text: "你好！有什么可以帮你？" }] } },
+      { type: "assistant/message", seq: 3, time: 2000, data: { turn: 1, step: 1, message: { id: "m2", role: "assistant", content: [{ type: "text", text: "你好！有什么可以帮你？" }] }, stream: [] } },
     ]);
     writeSession("s2", [
       { type: "user/message", seq: 1, time: 3000, data: { id: "m3", role: "user", content: [{ type: "text", text: "没有标题的会话" }] } },
@@ -191,7 +185,7 @@ describe("session-archive host", () => {
       ],
     });
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
-    writeSession("a1", [{ type: "session/title", seq: 1, time: 1, data: { title: "T-a1" } }]);
+    writeSession("a1", [{ type: "session/title", seq: 1, time: 1, data: { title: "T-a1", messageSeqs: [], source: { kind: "fallback" } } }]);
     writeSession("live-unarchived", []);
 
     // count():存在性过滤后的真实数量(a-ghost 文件已删),且不触发任何事件流读取。
@@ -378,18 +372,19 @@ describe("session-archive host", () => {
       && repeated.failed[0].reason === "reappeared").toBe(true);
   });
 
-  it("0.1.3+ 契约回归:list() 快照形状下归档列表不再恒空(bug 复现用例)", async () => {
-    // 线上故障的直接形状:dsh 0.1.3 起 list() 返回 {header,...} 快照数组,
+  it("官方契约回归:list() 快照形状 + open 句柄下归档列表与详情完整语义(bug 复现用例)", async () => {
+    // 线上故障的直接形状:0.1.3+ list() 返回 {header,...} 快照数组,
     // 旧代码读 item.id 全为 undefined,归档 id 一个也匹配不上 → 面板恒空。
-    // 夹具默认即 v2 契约,这里锁 list/count/detail 在该形状下的完整语义。
+    // 夹具即官方契约形状,这里锁 list/count/detail 的完整语义。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-v2-"));
     const f = makeFixture({
       archived: ["v1", "v-ghost"],
       headers: [{ id: "v1", cwd: "/proj/a", createdAt: 1000 }],
     });
     writeSession("v1", [
-      { type: "session/title", seq: 1, time: 1, data: { title: "快照形状" } },
-      { type: "user/message", seq: 2, time: 2, data: { id: "m1", role: "user", content: [{ type: "text", text: "内容" }] } },
+      { type: "session/title", seq: 1, time: 1, data: { title: "快照形状", messageSeqs: [2], source: { kind: "user" } } },
+      messageEvent(2, 2, "内容"),
+      assistantEvent(3, 3, "回复"),
     ]);
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const listResult = await archiveHost.list();
@@ -399,28 +394,11 @@ describe("session-archive host", () => {
       && listResult.items[0].createdAt === 1000
       && listResult.items[0].size > 0).toBe(true);
     expect((await archiveHost.count()).count === 1).toBe(true);
+    // 官方事件 data 形状:user/message 本体、assistant/message 包装(message.content)。
     const detail = await archiveHost.detail("v1");
-    expect(detail.title === "快照形状" && detail.messages.length === 1
-      && detail.messages[0].text === "内容").toBe(true);
-  });
-
-  it("0.1.2 契约(v1:header 数组 + readFrom)下全量语义保持", async () => {
-    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-v1-"));
-    const f = makeFixture({
-      contract: "v1",
-      archived: ["o1", "o-ghost"],
-      headers: [{ id: "o1", cwd: "/proj/a", createdAt: 1000 }],
-    });
-    writeSession("o1", [
-      { type: "session/title", seq: 1, time: 1, data: { title: "旧契约" } },
-      { type: "user/message", seq: 2, time: 2, data: { id: "m1", role: "user", content: [{ type: "text", text: "旧内容" }] } },
-    ]);
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
-    const listResult = await archiveHost.list();
-    expect(listResult.items.length === 1 && listResult.items[0].sessionId === "o1"
-      && listResult.items[0].title === "旧契约").toBe(true);
-    expect((await archiveHost.count()).count === 1).toBe(true);
-    expect((await archiveHost.detail("o1")).messages[0].text === "旧内容").toBe(true);
+    expect(detail.title === "快照形状" && detail.messages.length === 2
+      && detail.messages[0].role === "user" && detail.messages[0].text === "内容"
+      && detail.messages[1].role === "assistant" && detail.messages[1].text === "回复").toBe(true);
   });
 
   it("无 locate 的宿主后端:列表/详情可用(文件信息降级),删除按不可定位处理", async () => {
@@ -431,7 +409,7 @@ describe("session-archive host", () => {
       headers: [{ id: "n1", cwd: "/proj/a", createdAt: 1000 }],
     });
     writeSession("n1", [
-      { type: "session/title", seq: 1, time: 1, data: { title: "无定位" } },
+      { type: "session/title", seq: 1, time: 1, data: { title: "无定位", messageSeqs: [], source: { kind: "fallback" } } },
     ]);
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const listResult = await archiveHost.list();
@@ -463,7 +441,7 @@ describe("session-archive host", () => {
     fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
     fs.writeFileSync(
       path.join(path.dirname(legacyPath), "session.v1.jsonl"),
-      JSON.stringify([{ type: "session/title", seq: 1, time: 1, data: { title: "旧代际" } }]),
+      JSON.stringify([{ type: "session/title", seq: 1, time: 1, data: { title: "旧代际", messageSeqs: [], source: { kind: "fallback" } } }]),
     );
     // 夹具 list() 的存在性过滤固定盯 session.jsonl:补一个空文件让它枚举得到
     // g1(模拟宿主 list 能枚举历史代际),真实内容在 session.v1.jsonl 上。
