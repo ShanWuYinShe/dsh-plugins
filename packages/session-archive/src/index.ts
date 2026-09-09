@@ -11,8 +11,12 @@
  *                     每条附带标题（从事件流折叠 session/title）、目录、
  *                     创建时间、最后修改时间（文件 mtime）、体积与
  *                     live 状态（会话仍在内存中运行时禁止删除）。
- *   2. detail(id)   — readFrom(id, 0) 只读取会话事件：标题 + 文本消息
- *                     （user/assistant），供面板"查看"展开。
+ *                     兼容两条宿主线的持久化枚举形状：0.1.2 返回
+ *                     SessionHeader[]，0.1.3+ 返回
+ *                     SessionPersistenceSnapshot[]（header 在 .header 上）。
+ *   2. detail(id)   — 只读会话事件流（标题 + 文本消息 user/assistant），
+ *                     供面板"查看"展开；0.1.2 走 readFrom，0.1.3+ 走
+ *                     open(id,'read') 句柄（readFrom 已从契约移除）。
  *   3. delete(ids)  — 批量彻底删除：live 会话拒绝；逐个删除持久化文件
  *                     （locate() 定位）+ 会话目录。删除后**保留**该会话在
  *                     归档集合中的 ghost id（不调用移除）：宿主的
@@ -35,7 +39,7 @@
  */
 
 import { readdir, stat, rm } from 'node:fs/promises';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
 import { createConfigStore } from './config-store.js';
 
@@ -88,6 +92,10 @@ async function removeSessionDirIfOwned(sessionId: string, filePath: string, warn
   const ownFile = basename(filePath);
   for (const entry of entries) {
     if (entry === ownFile) continue;
+    // session*.jsonl(.zstd) 是本会话自己的历史代际(官方代际命名 session[.vN]
+    // .jsonl[.zstd],目录归属校验已确认整个目录属于该会话),不算他者日志;
+    // 其余 .jsonl 一律视为他者。
+    if (entry.startsWith('session.') && (entry.endsWith('.jsonl') || entry.endsWith('.jsonl.zstd'))) continue;
     if (entry.endsWith('.jsonl') || entry.endsWith('.jsonl.zstd')) {
       warn(`session-archive: session directory "${base}" holds other session logs; keeping it`);
       return;
@@ -130,6 +138,38 @@ function normalizeConfig(source: any, defaults: any = DEFAULT_CONFIG): Record<st
     messagePreviewChars: positiveInt(merged.messagePreviewChars, defaults.messagePreviewChars),
     titleReadConcurrency: positiveInt(merged.titleReadConcurrency, defaults.titleReadConcurrency),
   };
+}
+
+/**
+ * 从持久化枚举项取会话头。dsh 0.1.3 起 `sessionPersistence.list()` 返回
+ * `SessionPersistenceSnapshot[]`（`{ header, revision, sizeBytes }`），
+ * 0.1.2 及更早返回 `SessionHeader[]`。旧代码直接读 `item.id`，在新宿主上
+ * 全是 undefined —— 归档 id 一个也匹配不上，面板恒空（这正是"归档列表
+ * 显示不出来"的直接成因）。这里归一成 header，两线都正确。
+ */
+function headerOf(entry: any): any {
+  if (entry === null || entry === undefined || typeof entry !== 'object') return entry;
+  return entry.header !== undefined && entry.header !== null ? entry.header : entry;
+}
+
+/**
+ * 读取一个会话的完整事件流，附带头信息。dsh 0.1.3 的持久化契约移除了
+ * `readFrom`（连带抽象类上的 `locate`），读事件流必须 open 一个 read 句柄
+ * 再 read(0)，用完 close（不 close 会漏句柄）；头从句柄上取。旧 `readFrom`
+ * 仍在时优先用旧的；两条宿主线都覆盖。
+ */
+async function readSession(persistence: any, sessionId: string): Promise<{ header: any; events: any[] }> {
+  if (typeof persistence.readFrom === 'function') {
+    const { meta, events } = await persistence.readFrom(sessionId, 0);
+    return { header: meta, events };
+  }
+  const handle = await persistence.open(sessionId, 'read');
+  try {
+    const { events } = await handle.read(0);
+    return { header: handle.header, events };
+  } finally {
+    await handle.close();
+  }
 }
 
 /** 并发限制器：最多 N 个任务并行，其余排队。 */
@@ -198,8 +238,8 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
 
   /** 归档瞬间的生成流兜底：会话仍在内存且文件最近有写入（60s 内）时
    * 视为忙碌——删除文件后进行中的请求会把半截日志 append 回来。 */
-  const isBusy = (sessionId: string, file: { path: string; size: number; mtimeMs: number } | null) =>
-    file !== null && ctx.sessions.get(sessionId) !== undefined && Date.now() - file.mtimeMs < BUSY_WRITE_WINDOW_MS;
+  const isBusy = (sessionId: string, file: { mtimeMs: number }) =>
+    ctx.sessions.get(sessionId) !== undefined && Date.now() - file.mtimeMs < BUSY_WRITE_WINDOW_MS;
 
   /** 从归档集合移除若干 id（恢复用；删除不调用——见 deleteArchived），返回实际移除的 id。
    * confirm 在 registry 写锁临界区内逐个复核 id 是否仍可恢复（文件仍存在）:
@@ -235,30 +275,87 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
     return removedIds;
   }
 
-  /** 归档会话的文件信息（路径 + stat），会话文件缺失时返回 null。 */
-  async function fileInfo(header: any): Promise<{ path: string; size: number; mtimeMs: number } | null> {
+  /** 归档会话的文件定位结果。
+   * located：拿到物理路径（path + stat）；absent：定位成功且文件确认不存在
+   * （ghost，幂等删除）；unknown：后端没有定位钩子（locate 是 jsonl 后端的
+   * 诊断钩子，0.1.3 起不在抽象契约上），既不能确认存在也不能确认缺失。
+   * unknown 与 absent 必须区分：删除语义里 absent 是幂等成功、unknown 是
+   * "不能谎报成功也不能删错东西"的失败兜底。 */
+  type FileStatus =
+    | { state: 'located'; path: string; size: number; mtimeMs: number }
+    | { state: 'absent' }
+    | { state: 'unknown' };
+
+  /**
+   * 解析会话目录里的实际日志文件。locate() 只按当前格式版本拼文件名
+   * （如 session.v2.jsonl.zstd），而历史上落盘的可能是旧代际名
+   * （session.jsonl / session.v1.jsonl…，0.1.5 的代际解析把 v0 起全部
+   * 视为合法代际）——stat 落空不等于会话不存在。官方布局是"一会话一
+   * 目录"，目录路径不随代际变化，因此在 locate 给出的目录里扫描
+   * session*.jsonl(.zstd) 取实际文件（多个代际并存时取最新 mtime）。
+   * 扫描结果为空才认定文件不存在。
+   */
+  async function resolveGenerationFile(dir: string): Promise<string | null> {
+    let entries: string[];
     try {
-      const location = persistence.locate(header);
-      if (location === undefined || typeof location.path !== 'string' || location.path.length === 0) return null;
-      const info = await stat(location.path);
-      return { path: location.path, size: info.size, mtimeMs: info.mtimeMs };
+      entries = await readdir(dir);
     } catch {
-      return null;
+      return null; // 目录不存在：无任何代际文件
+    }
+    let latest: { path: string; mtimeMs: number } | null = null;
+    for (const entry of entries) {
+      if (!entry.startsWith('session.') || !(entry.endsWith('.jsonl') || entry.endsWith('.jsonl.zstd'))) continue;
+      const candidate = join(dir, entry);
+      try {
+        const info = await stat(candidate);
+        if (latest === null || info.mtimeMs > latest.mtimeMs) latest = { path: candidate, mtimeMs: info.mtimeMs };
+      } catch {} // 竞态消失的条目跳过
+    }
+    return latest?.path ?? null;
+  }
+
+  async function fileInfo(header: any): Promise<FileStatus> {
+    try {
+      if (typeof persistence.locate !== 'function') return { state: 'unknown' };
+      const location = persistence.locate(header);
+      if (location === undefined || location === null || typeof location.path !== 'string' || location.path.length === 0) {
+        return { state: 'unknown' };
+      }
+      // 先试 locate 的当前代际路径，落空再扫会话目录里的实际代际文件。
+      const candidatePaths = [location.path];
+      const generation = await resolveGenerationFile(dirname(location.path));
+      if (generation !== null) candidatePaths.unshift(generation);
+      for (const candidate of candidatePaths) {
+        try {
+          const info = await stat(candidate);
+          return { state: 'located', path: candidate, size: info.size, mtimeMs: info.mtimeMs };
+        } catch {} // ENOENT 或竞态：试下一个候选
+      }
+      return { state: 'absent' };
+    } catch {
+      return { state: 'absent' };
     }
   }
 
   /** ghost 分支的孤儿探测:不经持久化枚举,直接 locate({id}) + stat 判断文件
    * 是否实际存在(persistence.list() 会静默跳过首行损坏的日志,"枚举不到"
    * 不等于"文件不存在")。cwd 未知的 ghost id 只能探到缺省位置(_no-cwd 一类),
-   * 尽力而为。返回存在的路径;无法定位或不存在返回 null。 */
-  async function probeOrphanFile(sessionId: string): Promise<string | null> {
+   * 尽力而为;locate 指向的当前代际名落空时同样扫目录里的实际代际文件。
+   * 返回存在的路径;'absent' 确认不存在;无法定位返回 'unknown'。 */
+  async function probeOrphanFile(sessionId: string): Promise<string | 'absent' | 'unknown'> {
     try {
+      if (typeof persistence.locate !== 'function') return 'unknown';
       const location = persistence.locate({ id: sessionId });
-      if (location === undefined || typeof location.path !== 'string' || location.path.length === 0) return null;
-      await stat(location.path);
-      return location.path;
+      if (location === undefined || location === null || typeof location.path !== 'string' || location.path.length === 0) {
+        return 'unknown';
+      }
+      try {
+        await stat(location.path);
+        return location.path;
+      } catch {}
+      return await resolveGenerationFile(dirname(location.path)) ?? 'absent';
     } catch {
-      return null;
+      return 'absent';
     }
   }
 
@@ -276,32 +373,37 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
   }
 
   /** 单个归档会话的展示行。标题读取失败回退 null（面板显示目录名）。
-   * 标题按 mtime 缓存：jsonl 后端没有后缀读取钩子，readFrom(id,0) 会解析
-   * 整条事件流，而面板关闭态的徽标轮询每 5 秒打一次 list——不缓存的话
-   * 就是"读整本会话只为取一行标题"的持续开销。mtime 不变即命中缓存。 */
+   * 标题按 mtime 缓存：readSession 会解析整条事件流，而面板关闭态的徽标
+   * 轮询每 5 秒打一次 list——不缓存的话就是"读整本会话只为取一行标题"的
+   * 持续开销。mtime 不变即命中缓存；文件不可定位（无 locate 的宿主后端）
+   * 时跳过缓存直接读，标题仍然可得。 */
   const titleCache = new Map<string, { mtimeMs: number; title: string | null }>();
   async function rowFor(sessionId: string, header: any) {
     const file = await fileInfo(header);
+    const located = file.state === 'located' ? file : null;
     let title = null;
-    if (file !== null) {
+    if (located !== null) {
       const cached = titleCache.get(sessionId);
-      if (cached !== undefined && cached.mtimeMs === file.mtimeMs) {
+      if (cached !== undefined && cached.mtimeMs === located.mtimeMs) {
         title = cached.title;
       } else {
         try {
-          const { events } = await persistence.readFrom(sessionId, 0);
-          title = foldTitle(events);
+          title = foldTitle((await readSession(persistence, sessionId)).events);
         } catch {}
-        titleCache.set(sessionId, { mtimeMs: file.mtimeMs, title });
+        titleCache.set(sessionId, { mtimeMs: located.mtimeMs, title });
       }
+    } else {
+      try {
+        title = foldTitle((await readSession(persistence, sessionId)).events);
+      } catch {}
     }
     return {
       sessionId,
       title,
       cwd: header.cwd ?? null,
       createdAt: header.createdAt,
-      updatedAt: file !== null ? file.mtimeMs : header.createdAt,
-      size: file !== null ? file.size : 0,
+      updatedAt: located !== null ? located.mtimeMs : header.createdAt,
+      size: located !== null ? located.size : 0,
       live: isLive(sessionId),
     };
   }
@@ -313,8 +415,8 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
     async count() {
       const archived = [...archivedSet()];
       if (archived.length === 0) return { count: 0 };
-      const headers = await persistence.list();
-      const persisted = new Set(headers.map((header: any) => header.id));
+      const snapshots = await persistence.list();
+      const persisted = new Set(snapshots.map((entry: any) => headerOf(entry)?.id));
       let count = 0;
       for (const sessionId of archived) if (persisted.has(sessionId)) count++;
       return { count };
@@ -324,8 +426,8 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
     async list() {
       const archived = [...archivedSet()];
       if (archived.length === 0) return { items: [] };
-      const headers = await persistence.list();
-      const byId = new Map<string, any>(headers.map((header) => [header.id, header] as [string, any]));
+      const snapshots = await persistence.list();
+      const byId = new Map<string, any>(snapshots.map((entry: any) => [headerOf(entry)?.id, headerOf(entry)] as [string, any]));
       const rows: Array<{ sessionId: string; header: any }> = [];
       for (const sessionId of archived) {
         const header = byId.get(sessionId);
@@ -342,7 +444,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
       if (!archivedSet().has(sessionId)) {
         throw Object.assign(new Error('session not archived: ' + sessionId), { code: 'NOT_ARCHIVED' });
       }
-      const { meta, events } = await persistence.readFrom(sessionId, 0);
+      const { header: meta, events } = await readSession(persistence, sessionId);
       const title = foldTitle(events);
       const messages = [];
       let totalMessageCount = 0;
@@ -401,8 +503,8 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
       // 会话,不校验的话任何"未归档、不在内存"的会话 id 都会绕过 live/busy
       // 两道保护被不可逆物理删除。
       const archived = archivedSet();
-      const headers = await persistence.list();
-      const headersById = new Map(headers.map((item) => [item.id, item]));
+      const snapshots = await persistence.list();
+      const headersById = new Map(snapshots.map((item: any) => [headerOf(item)?.id, headerOf(item)]));
       for (const sessionId of unique) {
         if (!archived.has(sessionId)) {
           failed.push({ sessionId, reason: 'not-archived' });
@@ -417,8 +519,10 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
           // ghost id(枚举不到)。但"枚举不到 ≠ 文件不存在":首行损坏的日志
           // 会被 persistence.list() 静默跳过,直接当 ghost 报成功会把永远
           // 删不掉的孤儿文件留在磁盘上。先 locate({id}) 探测,探到文件即
-          // "有文件但不可枚举",计入 failed 而非谎报成功。
-          if ((await probeOrphanFile(sessionId)) !== null) {
+          // "有文件但不可枚举",计入 failed 而非谎报成功;定位钩子缺失
+          // (unknown)同样不能确认缺失,按不可枚举兜底。
+          const orphan = await probeOrphanFile(sessionId);
+          if (orphan !== 'absent') {
             failed.push({ sessionId, reason: 'unenumerable' });
             continue;
           }
@@ -427,7 +531,12 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
           continue;
         }
         const file = await fileInfo(header);
-        if (file === null) {
+        if (file.state === 'unknown') {
+          // 文件存在(枚举得到)但无法定位路径:删不得也不该谎报成功。
+          failed.push({ sessionId, reason: 'unlocatable' });
+          continue;
+        }
+        if (file.state === 'absent') {
           deleted.push(sessionId);
           continue;
         }
@@ -486,8 +595,8 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
      */
     async unarchive(sessionIds: string[]) {
       const unique = [...new Set(sessionIds)];
-      const headers = await persistence.list();
-      const headersById = new Map(headers.map((item) => [item.id, item]));
+      const snapshots = await persistence.list();
+      const headersById = new Map(snapshots.map((item: any) => [headerOf(item)?.id, headerOf(item)]));
       // 锁外先做一遍廉价过滤(明显不可恢复的直接淘汰),锁内由 confirm 复核,
       // 消除与并发 deleteArchived 的检查-移除窗口。
       const candidates = [];
@@ -502,7 +611,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
           const header = headersById.get(sessionId);
           if (header === undefined) return false;
           const file = await fileInfo(header);
-          return file !== null; // 有记录无文件：拒绝恢复
+          return file.state === 'located'; // located 才确认文件在：absent 拒绝，unknown 谨慎拒绝
         },
       );
       return { restored, removedFromArchive: restored.length };

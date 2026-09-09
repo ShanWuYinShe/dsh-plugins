@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.13-alpha.1 (2026-09-09)
+
+### Changes
+
+* 适配 DSH 0.1.5-alpha.1：全部 `@deepseek-ai/dsh-*` 依赖升至 `^0.1.5-alpha.1`，`dsh.host` 更新为 `0.1.5-alpha.1`
+* 测试通过
+
 ## 0.3.13-alpha.0 (2026-09-08)
 
 ### Changes

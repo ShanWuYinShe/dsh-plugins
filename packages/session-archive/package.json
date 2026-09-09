@@ -1,6 +1,6 @@
 {
   "name": "@chaoset/session-archive",
-  "version": "0.3.9-alpha.0",
+  "version": "0.3.9-alpha.1",
   "description": "DSH plugin: browse archived sessions, inspect their content, batch-restore or permanently delete them with multi-select",
   "engines": {
     "node": ">=22.19.0"
@@ -23,7 +23,7 @@
     "./package.json": "./package.json"
   },
   "dsh": {
-    "host": "0.1.3-alpha.2",
+    "host": "0.1.5-alpha.1",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -37,7 +37,7 @@
     }
   },
   "optionalDependencies": {
-    "@deepseek-ai/dsh-typert-protocol": "^0.1.3-alpha.2"
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-alpha.1"
   },
   "scripts": {
     "build": "node ../../scripts/build.mjs",

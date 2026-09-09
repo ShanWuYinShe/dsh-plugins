@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.9-alpha.1 (2026-09-09)
+
+### Fixes
+
+* 修复归档面板恒空：DSH 0.1.3 起 `sessionPersistence.list()` 返回
+  `SessionPersistenceSnapshot[]`（header 在 `.header` 上），旧代码直接读
+  `item.id` 全为 undefined，归档 id 一个也匹配不上，列表永远为空。现按
+  快照形状取 header，同时兼容 0.1.2 的 header 数组形状
+* 修复详情/标题读取：`readFrom` 已从持久化契约移除，改为 `open(id,'read')`
+  句柄读事件流（用完 close），旧 `readFrom` 仍在时优先复用
+* 修复恢复/删除对历史会话失效：`locate()` 只按当前格式版本拼日志文件名，
+  历史代际文件（`session.jsonl[.zstd]`、`session.v1.jsonl` 等）stat 落空，
+  恢复被判「文件不存在」全部拒绝（「已恢复 0 个」）、删除谎报成功但文件
+  还在。现按会话目录扫描实际代际文件（一会话一目录，目录路径不随代际
+  变化）；同目录的 `session*` 同名族文件视为本会话历史代际而非他者日志
+* 新增失败语义 `unlocatable`：文件存在但宿主后端无 `locate` 定位钩子时，
+  删除不谎报成功也不误删，按失败上报并保留文件
+
+### Changes
+
+* 适配 DSH 0.1.5-alpha.1：`@deepseek-ai/dsh-typert-protocol` 依赖升至
+  `^0.1.5-alpha.1`，`dsh.host` 更新为 `0.1.5-alpha.1`
+* 测试夹具重写为双线形状（0.1.3+ 快照 + open 句柄为默认，0.1.2 header
+  数组 + readFrom 为兼容锁），新增快照形状、旧代际文件名、无 locate 降级
+  三组回归用例；测试与 DSH 0.1.5-alpha.1 真实测试实例验证通过
+
 ## 0.3.9-alpha.0 (2026-09-08)
 
 ### Changes

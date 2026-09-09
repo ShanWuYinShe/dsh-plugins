@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.7-alpha.1 (2026-09-09)
+
+### Changes
+
+* 适配 DSH 0.1.5-alpha.1：全部 `@deepseek-ai/dsh-*` optionalDependencies 升至 `^0.1.5-alpha.1`，`dsh.host` 更新为 `0.1.5-alpha.1`
+* 对照 0.1.5-alpha.1 复核契约：systemPrompt / tools / agentPresets 契约无变化，测试通过
+
 ## 0.10.7-alpha.0 (2026-09-08)
 
 ### Changes
