@@ -7,8 +7,8 @@
 // → 该基础号终结（出了稳定版就不会再有同基础号的 alpha）→ 下一条线从
 // 更高基础号的 `<新基础号>-alpha.0` 重新开始。因此归属判据是版本号语义：
 //   main  ↔ latest（稳定线本身）
-//   alpha ↔ 基础号高于 latest 的进行中 -alpha 线；不存在时休眠（基线
-//           维持上一条线的 alpha 锚点，semver 覆盖恰好含 latest）
+//   alpha ↔ 基础号高于 latest 的进行中 -alpha 线；无新线时与 main 同基线
+//           待命（分支由最新 main 重建，见「双线生命周期」第 5 步）
 // 判定不用 `alpha` dist-tag——它滞后（线进入 rc 后不再更新，而该线已归
 // 稳定线）。
 //
@@ -122,22 +122,18 @@ for (const branch of ["main", "alpha"]) {
     const cmp = mixed ? NaN : cmpVersion(baseline, devLine);
     state = mixed ? "漂移(基线不一致)" : cmp === 0 ? "就位" : cmp < 0 ? "落后" : "超前";
   } else {
-    // 休眠：没有进行中的预发布线。基线为上一条线的 alpha 锚点即就位——
-    // 同基础号的 prerelease range 向上覆盖该线全部形态（含 latest）。
-    target = `(休眠，等待 >${latestBase} 的新线)`;
-    const p = mixed ? null : parseVersion(baseline);
-    state = mixed
-      ? "漂移(基线不一致)"
-      : p !== null && p.n.join(".") === latestBase && cmpVersion(baseline, latest) <= 0
-        ? "就位(休眠)"
-        : "落后";
+    // 待命：没有进行中的预发布线。alpha 分支由最新 main 重建，基线等于
+    // latest 即就位——等 dsh 出更高基础号的新 alpha 线再 adapt 跟进。
+    target = `(待命，等待 >${latestBase} 的新线)`;
+    const cmp = mixed ? NaN : cmpVersion(baseline, latest);
+    state = mixed ? "漂移(基线不一致)" : cmp === 0 ? "就位(待命)" : cmp < 0 ? "落后" : "超前";
   }
   rows.push({ branch, baseline, host, target, state });
 }
 
 console.log(`dsh 稳定线(latest) = ${latest}`);
 console.log(devLine === null
-  ? `进行中预发布线: 无 —— alpha 分支休眠，等待 >${latestBase} 的新 alpha 线`
+  ? `进行中预发布线: 无 —— alpha 分支待命（与 main 同基线），等待 >${latestBase} 的新 alpha 线`
   : `进行中预发布线 = ${devLine}`);
 let problems = 0;
 for (const { branch, baseline, host, target, state } of rows) {
@@ -154,10 +150,13 @@ for (const { branch, baseline, host, target, state } of rows) {
 for (const { branch, baseline, target, state } of rows) {
   if (state.startsWith("就位")) continue;
   problems++;
-  const targetVersion = branch === "main" ? latest : devLine;
-  const advice = state === "落后" && targetVersion !== null
-    ? `请在该分支执行 pnpm run adapt ${targetVersion} 跟进`
-    : "核对 RELEASING.md「宿主跟随规则」";
+  let advice = "核对 RELEASING.md「宿主跟随规则」";
+  if (state === "落后") {
+    if (branch === "main") advice = `请在该分支执行 pnpm run adapt ${latest} 跟进`;
+    else if (devLine !== null) advice = `请在该分支执行 pnpm run adapt ${devLine} 跟进`;
+    // 待命期没有新线可跟：alpha 落后只可能是它没跟上 main，重建即可。
+    else advice = "待命期无新线，alpha 应由最新 main 重建：git branch -f alpha main";
+  }
   const message = `dsh 跟随: ${branch} 分支依赖基线 ${baseline} 与跟随目标不一致（${state}，目标 ${target}）。${advice}`;
   if (ci) console.log(`::warning::${message}`);
   console.log(`⚠ ${message}`);

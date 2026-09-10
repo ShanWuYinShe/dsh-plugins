@@ -8,9 +8,10 @@ README 面向用户，面向开发者的内容以 RELEASING.md 为准。
 
 - `main` = dsh 稳定线适配（发 `latest`），工作树必须始终处于可直接发布状态，
   随时可热修；`alpha` = dsh 进行中的 alpha 预发布线（`-alpha.N`，进入 rc 阶段
-  换 `-rc.N`，dist-tag 由版本后缀自动决定）。**dsh 一条线终结、下一条 alpha
-  开跑前，alpha 分支休眠**（依赖基线维持上一条线的 alpha 锚点，源码与 main
-  一致），详见 RELEASING.md「宿主跟随规则」。
+  换 `-rc.N`，dist-tag 由版本后缀自动决定）。**alpha 是用完即弃的适配线**：
+  dsh 一条线终结后，它的改动合回 main，旧 alpha 分支删除，再从最新 main 重
+  建待命——等 dsh 出下一条 alpha 线再 `adapt` 跟进。因此 alpha 与 main 同基线
+  （待命）是常态，不存在需要长期维护的分叉，详见 RELEASING.md「双线生命周期」。
 - **功能一致性原则**：功能集两分支一致，唯一允许的代码差异是 dsh 预发布线
   破坏性 API 迫使的适配（详见 RELEASING.md 同名小节）。
 - 依赖 range、`pnpm-lock.yaml`、`pnpm-workspace.yaml` 的排除清单**永不跨分支
@@ -19,7 +20,7 @@ README 面向用户，面向开发者的内容以 RELEASING.md 为准。
 
 ## 开发工作流：worktree，不要切分支
 
-活跃预发布线开发期，主检出目录固定停在 `alpha`；休眠期（两分支代码一致时）
+活跃预发布线开发期，主检出目录固定停在 `alpha`；待命期（两分支代码一致时）
 停在 `main` 即可。需要另一条分支时用 git worktree，**绝不在主检出目录里来回
 checkout**：`lib/` 与 `node_modules` 被 gitignore，切分支后残留的是上一条
 分支的构建产物和依赖解析（曾导致旧宿主线的 `installSettingsSection` lib 在

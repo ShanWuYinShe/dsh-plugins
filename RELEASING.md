@@ -8,7 +8,7 @@
 | 分支 | 适配的 DSH 线 | 跟随的宿主版本 | 版本号形态 | dist-tag |
 |---|---|---|---|---|
 | `main` | DSH 稳定线（当前 `0.1.2-rc.1`） | npm `latest` | 纯 semver（如 `0.10.3`） | `latest` |
-| `alpha` | DSH 进行中的 alpha 线 | 基础号高于 `latest` 的最新 `-alpha`（无则休眠） | `-alpha.N` 后缀（进入 rc 阶段换 `-rc.N`，如 `0.10.4-alpha.0`） | `alpha` / `rc` |
+| `alpha` | DSH 进行中的 alpha 线 | 基础号高于 `latest` 的最新 `-alpha`（无新线时与 `main` 同基线待命） | `-alpha.N` 后缀（进入 rc 阶段换 `-rc.N`，如 `0.10.4-alpha.0`） | `alpha` / `rc` |
 
 **双线并行是常态，不是过渡方案**：DSH 快速迭代期间，稳定线与 alpha 预发布
 线长期同时存在，两条分支各自跟随一条线持续维护。不变式只有一条：**main 的工作
@@ -28,17 +28,21 @@ DSH 的发布习惯：每条版本线都是 `<基础号>-alpha.N` 迭代若干�
 
 - **main 跟 `latest`（稳定线本身）**。
 - **alpha 跟「基础号高于 `latest` 的进行中 `-alpha` 线」**。这样的线存在
-  时，alpha 分支依赖基线锚定它的最新版；**不存在时 alpha 分支休眠**——
-  基线维持上一条线的 alpha 锚点（如 `^0.1.2-alpha.5`），同基础号的
-  prerelease range 向上覆盖该线全部形态（含 `latest`），无需任何改动。
+  时，alpha 分支依赖基线锚定它的最新版；**不存在时 alpha 与 main 同基线
+  待命**——分支由最新 main 重建（见「双线生命周期」第 4 步），依赖范围、
+  lockfile、exclude 清单全部等于 main，不发版，等 dsh 出更高基础号的新
+  alpha 线再 `adapt` 跟进。
 
 配套不变式：
 
-- **收敛期对齐的暂替语义**：「双线生命周期」第 3 步的对齐会把 main 的
-  range / lockfile / exclude 清单整体带进 alpha，alpha 分支暂时处于 main
-  形态。这是合法状态，但 alpha 在此状态下不得发版；恢复 alpha 形态用
-  `pnpm run adapt <上一条线的 alpha 锚点>` + `pnpm install`（adapt 不比较
-  新旧，重跑即重建基线与排除清单）。
+- **待命期的暂替语义**：alpha 与 main 同基线时处于 main 形态（这是新线到
+  来前的常态，不是待修正的漂移）。此状态下 alpha 不发版——它的版本号与
+  main 相同，push 会被发布门禁以「已有 git tag」静默跳过；真要发版必须先
+  `adapt` 到新线并把版本 bump 成 `-alpha.N`。
+- **不再维护「上一条线的 alpha 锚点」**：旧流程会让 alpha 维持
+  `^0.1.2-alpha.5` 这类锚点，靠同基础号的 prerelease range 向上覆盖
+  `latest`。现改为分支直接由 main 重建，基线天然等于 latest，无需靠
+  semver 技巧覆盖，也不会出现两分支基线不同的中间态。
 
 核对手段：`pnpm run dsh-status`（本地随时跑，输出稳定线、进行中线与两分支
 基线的对照）；CI 的 `dsh-follow.yml` 每日定时核对（push 仅在核对脚本自身
@@ -197,31 +201,57 @@ pnpm run test:ci && git push
 （`npm view <包名> dsh.host` 可查），跟随宿主版本自动维护，无需手工改。
 `dsh-follow-status.mjs` 会核对它与依赖基线的一致性，漂移即 warning。
 
-同一命令也用于把 alpha 分支重建回休眠基线：adapt 不比较新旧、按指定版本
-整块覆写，收敛期对齐后恢复 alpha 形态（见「宿主跟随规则」）就是
-`node scripts/adapt-dsh.mjs <上一条线的 alpha 锚点>` + `pnpm install`。
+同一命令也用于让重建后的 alpha 分支跟进新预发布线：adapt 不比较新旧、按
+指定版本整块覆写，因此「待命的 alpha 分支等到 dsh 新 alpha 线后开始适配」
+就是 `node scripts/adapt-dsh.mjs <新线版本>` + `pnpm install`。
 
 ## 双线生命周期（常态循环）
 
-1. **dsh 出新高基础号的 alpha 线**（如 `0.1.3-alpha.0`）：alpha 分支执行
-   「DSH 宿主升级适配」流程，以 `-alpha.N` 版本发布到 `alpha` dist-tag。
-   main 不动，继续服务稳定线。
-2. **alpha 线进入 rc**：同基础号的 rc（如 `0.1.3-rc.1`）是稳定候选，dsh
-   直接发成 `latest`，**该线就此归 main 线**——main 执行「DSH 宿主升级
-   适配」跟进；alpha 分支的 range 基线不动（prerelease range 向上覆盖同
-   基础号的 rc），通常随即进入下面的转正/休眠流程。
-3. **插件双线收敛**：在 alpha 分支把各包版本号去掉预发布后缀
-   （`0.3.2-alpha.0` → `0.3.2`；若稳定线热修已占用该基础号，先跳到下一个
-   基础号），然后合并回稳定线：在 `.worktrees/main` 工作树里
-   `git merge alpha`——此刻两线目标宿主相同，可以合并；`pnpm-lock.yaml`
-   冲突任取一边后 `pnpm install` 重新生成。在 main 上推送发布 `latest`，再
-   回到 alpha 分支 `git merge main`（可 ff 时快进）对齐两分支。
-4. **休眠与循环**：对齐后 alpha 暂时处于 main 形态，用
-   `node scripts/adapt-dsh.mjs <已终结线的 alpha 锚点>` + `pnpm install`
-   恢复休眠基线（如 `0.1.2-alpha.5`），等待 dsh 的下一条 alpha 线（基础号
-   必然高于刚终结的线），回到第 1 步。若某个时期同时活跃的宿主线超过两条，
-   照同样模型再拉一条分支即可——分支数跟随活跃宿主线数，dist-tag 始终由
-   版本后缀决定、与分支名无关。
+alpha 分支是**一条用完即弃的适配线**：dsh 每出一条新 alpha 线，就从最新的
+main 重新拉一条 alpha 分支来适配它；该线终结（出正式版）后，适配成果合回
+main，旧 alpha 分支删除，等下一条线再从 main 重建。alpha 分支**不需要长期
+存活**，因此不存在「把旧分支对齐回最新」这类历史搬运。
+
+1. **待命**：alpha 分支由最新 main 创建（`git branch alpha main`），代码与
+   依赖基线等于 main，不发版。此时 dsh 无进行中的预发布线（上一条已终结）。
+2. **dsh 出新高基础号的 alpha 线**（如 `0.1.3-alpha.0`）：alpha 分支执行
+   「DSH 宿主升级适配」流程（`adapt` 到该线 + `pnpm install`），把包版本
+   bump 成 `-alpha.N` 发布到 `alpha` dist-tag。main 不动，继续服务稳定线。
+3. **alpha 线进入 rc**：同基础号的 rc（如 `0.1.3-rc.1`）是稳定候选，dsh
+   直接发成 `latest`，**该线就此归 main 线**——进入下面的收敛。
+4. **插件收敛进稳定线并跟进正式版**：把 alpha 上的改动合回 main，同时
+   main 跟进新的 dsh 正式版（`latest`）。三件事一次做完：
+   - 在 alpha 的工作树里把「alpha 的改动」整理成基于 main 的提交（两分支
+     历史本就平行，`merge --ff-only` 直接合不了；用 `git reset --soft main`
+     保留工作区内容再提交，或 `git cherry-pick` 逐个搬源码，二者皆可得一个
+     main 的后代提交——**不要用会产生 merge commit 的 `git merge`**）；
+   - `node scripts/adapt-dsh.mjs <新的 dsh latest>` + `pnpm install`，
+     让 main 的依赖基线与 `dsh.host` 对齐新正式版；
+   - 去掉预发布后缀（`0.3.2-alpha.0` → `0.3.2`；若稳定线热修已占用该基础
+     号，先跳到下一个基础号），写 CHANGELOG，`pnpm run test:ci` 全绿 + 隔离
+     实例真实验证，然后在主工作树 `git merge --ff-only <分支>` 并推送发布
+     `latest`。
+5. **删旧分支、从 main 重建 alpha**：发布完成后删除已合并的 alpha 分支，
+   再从最新的 main 重新创建，回到第 1 步：
+
+   ```bash
+   git branch -d alpha              # 已合入 main，可安全删除
+   git push origin --delete alpha   # 远程一并删除（远程只留主干 + CI 分支）
+   git branch alpha main            # 由最新 main 重建，代码与基线等于 main
+   git push origin alpha            # 全新分支，普通 push 即可（不需要 force）
+   ```
+
+   重建后的 alpha 与 main 同提交，因此永远不存在 diverged 需要 force push
+   的状态。等 dsh 出下一条更高基础号的 alpha 线，回到第 2 步。
+
+若某个时期同时活跃的宿主线超过两条，照同样模型再拉一条分支即可——分支数
+跟随活跃宿主线数，dist-tag 始终由版本后缀决定、与分支名无关。
+
+> 历史说明：旧流程让 alpha 分支长期存活并「休眠」（维持上一条线的 alpha
+> 锚点），收敛后还要反向 `git merge main` 对齐、再 `adapt` 回锚点。这既需要
+> 额外发一轮 alpha 版本（否则门禁因 npm 已有更高版本变红），又会累积两分支
+> 的平行历史。现改为「删旧建新」，alpha 分支的历史长度永远等于「本轮适配的
+> 提交数」，起点永远是当时的 main。
 
 ## 手动兜底
 
