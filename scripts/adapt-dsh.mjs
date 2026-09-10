@@ -37,7 +37,7 @@ function adaptPackageJson(path) {
     if (!deps) continue;
     for (const name of Object.keys(deps)) {
       if (name.startsWith(DEP_PREFIX) && deps[name] !== `^${version}`) {
-        changes.push([section, name, deps[name]]);
+        changes.push([section, name, deps[name], `^${version}`]);
         deps[name] = `^${version}`;
       }
     }

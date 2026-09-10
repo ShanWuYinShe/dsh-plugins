@@ -210,6 +210,9 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
     streamIdleTimeoutMs: WORKBUDDY_STREAM_IDLE_TIMEOUT_MS,
     retryPolicy: resolveRetryPolicy(undefined, 'dsh-any-connect retryPolicy'),
     configuredMaxTokens: new Map(),
+    // 解析失败模型的诊断（0.1.5 起必填）：本插件的 catalog 只含已成功解析
+    // 的模型，无可保留的诊断，与宿主自身缺省一致传空 Map。
+    modelErrors: new Map(),
     ...REQUEST_IMAGE_BUDGETS,
     piProvider: provider,
   }

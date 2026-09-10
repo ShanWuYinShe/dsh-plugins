@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.13 (2026-09-10)
+
+### Changes
+
+* 跟进 DSH 稳定版 0.1.5-rc.1（合并 alpha 线 0.3.13-alpha.0 ~ alpha.1 的适配
+  内容）：全部 `@deepseek-ai/dsh-*` 依赖由 `^0.1.2-rc.1` 升至 `^0.1.5-rc.1`，
+  `dsh.host` 更新为 `0.1.5-rc.1`
+* 适配 0.1.5 起的 provider 契约：`ResolvedPiAiProviderProfile` 新增必填的
+  `modelErrors`（解析失败模型的诊断），本插件补传空 Map（catalog 只含已成功
+  解析的模型，与宿主自身缺省一致），否则 typecheck 不过
+* 对齐上游 `@deepseek-ai/dsh-llm-pi-ai` 依赖更新：`@earendil-works/pi-ai`
+  由 `^0.84.2` 升级为 `^0.85.1`，消除类型冲突
+* build + typecheck + 全量测试通过，并在隔离测试实例真实验证
+
 ## 0.3.12 (2026-09-05)
 
 ### Refactoring

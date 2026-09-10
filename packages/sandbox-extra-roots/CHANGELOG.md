@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.9 (2026-09-10)
+
+### Changes
+
+* 跟进 DSH 稳定版 0.1.5-rc.1（合并 alpha 线 0.4.9-alpha.0 ~ alpha.1 的适配
+  内容）：`@deepseek-ai/dsh-sandbox` 与 `@deepseek-ai/dsh-typert-protocol`
+  依赖由 `^0.1.2-rc.1` 升至 `^0.1.5-rc.1`，`dsh.host` 更新为 `0.1.5-rc.1`
+* build + typecheck + 全量测试通过，并在隔离测试实例真实验证
+
 ## 0.4.8 (2026-09-05)
 
 ### Refactoring

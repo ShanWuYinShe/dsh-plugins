@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.3.9 (2026-09-10)
+
+### Fixes
+
+* 修复归档面板恒空：DSH 0.1.3 起 `sessionPersistence.list()` 返回
+  `SessionPersistenceSnapshot[]`（header 在 `.header` 上），旧代码直接读
+  `item.id` 全为 undefined，归档 id 一个也匹配不上，列表永远为空。现按
+  快照形状取 header
+* 修复详情/标题读取：持久化契约已移除 `readFrom`，改为 `open(id,'read')`
+  句柄读事件流（用完 close）
+* 修复恢复/删除对历史会话失效：`locate()` 只按当前格式版本拼日志文件名，
+  历史代际文件（`session.jsonl[.zstd]`、`session.v1.jsonl` 等）stat 落空，
+  恢复被判「文件不存在」全部拒绝（「已恢复 0 个」）、删除谎报成功但文件
+  还在。现按会话目录扫描实际代际文件（一会话一目录，目录路径不随代际
+  变化）；同目录的 `session*` 同名族文件视为本会话历史代际而非他者日志
+* 新增失败语义 `unlocatable`：文件存在但宿主后端无 `locate` 定位钩子时，
+  删除不谎报成功也不误删，按失败上报并保留文件
+
+### Changes
+
+* 全面接入官方契约类型：`dsh.d.ts` 不再手写任何宿主方法形状，改为映射
+  `@deepseek-ai/dsh-workspace` / `dsh-session` / `dsh-session-persistence` /
+  `dsh-session-title` 官方 d.ts（新增 devDependencies，自带 cordis Context
+  增强）——宿主契约漂移从此在 typecheck 期暴露，而非运行时
+* host 逻辑仅走官方契约路径：标题折叠改用官方 `foldSessionTitle`
+  （`dsh-session-title` 纯函数，行为与宿主逐字一致，含 `ignorable`/来源
+  语义），替代手写折叠；assistant 消息文本按官方 `SessionEventMap` 从
+  `data.message.content` 提取
+* 归档集合移除通道（官方无 unarchive API）显式标注为宿主内部形状依赖
+  （官方 d.ts 上 `enqueueOperation`/`requireState`/`setState` 为 private），
+  运行时探测可用性，形状变化自动降级
+* 跟进 DSH 稳定版 0.1.5-rc.1（合并 alpha 线 0.3.9-alpha.0 ~ alpha.2 的适配
+  内容）：`@deepseek-ai/dsh-typert-protocol` 依赖由 `^0.1.2-rc.1` 升至
+  `^0.1.5-rc.1`，`dsh.host` 更新为 `0.1.5-rc.1`
+* 测试夹具重写为官方契约形状（快照 + 句柄 + 官方事件 data），新增快照形状、
+  旧代际文件名、无 locate 降级三组回归用例；build + typecheck + 全量测试
+  在 0.1.5-rc.1 依赖闭包上通过，并在隔离测试实例真实验证
+
 ## 0.3.8 (2026-09-05)
 
 ### Refactoring
