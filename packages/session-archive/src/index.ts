@@ -67,8 +67,9 @@ export const name = 'session-archive';
 /** sessions 参与 inject：删除前必须能查询 live 会话（存在即拒绝删除）。 */
 export const inject = ['workspaceRegistry', 'sessionPersistence', 'sessions'];
 
-/** 「最近有写入」的判定窗口：内存中的会话 60s 内写过文件即视为忙碌
- * （生成流可能把半截日志 append 回刚删的路径）。 */
+/** 「可能活跃」的 mtime 窗口：内存中的会话 60s 内写过文件才值得做增长
+ * 观察（生成流可能把半截日志 append 回刚删的路径；窗口外的静默文件无
+ * 疑似写入方，直接删）。是否真的忙碌由沉降观察的体积增长判定。 */
 const BUSY_WRITE_WINDOW_MS = 60_000;
 /** 复验前的沉降等待：活跃写入方重建路径的典型间隔。 */
 const REAPPEAR_SETTLE_MS = 300;
@@ -164,9 +165,9 @@ async function readSession(persistence: SessionPersistence, sessionId: SessionId
   }
 }
 
-/** 从快照列表里取某会话的头（ghost 分支拿 cwd 供 locate 兜底用）。 */
-function headerFromList(snapshots: readonly SessionPersistenceSnapshot[], sessionId: string): SessionHeader | undefined {
-  return snapshots.find((snapshot) => snapshot.header.id === sessionId)?.header;
+/** 等待 ms 毫秒（沉降观察、删除窗口用）。 */
+function delay(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 /** 并发限制器：最多 N 个任务并行，其余排队。 */
@@ -218,10 +219,18 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
   const isLive = (sessionId: SessionId) =>
     ctx.sessions.get(sessionId) !== undefined && !archivedSet().has(sessionId);
 
-  /** 归档瞬间的生成流兜底：会话仍在内存且文件最近有写入（60s 内）时
-   * 视为忙碌——删除文件后进行中的请求会把半截日志 append 回来。 */
-  const isBusy = (sessionId: SessionId, file: { mtimeMs: number }) =>
-    ctx.sessions.get(sessionId) !== undefined && Date.now() - file.mtimeMs < BUSY_WRITE_WINDOW_MS;
+  /**
+   * 沉降观察：等一个写入沉降窗口后重取文件 stat（null = 文件已消失）。
+   * 归档瞬间的生成流兜底用：归档会话会因 web 客户端重连恢复 tab 而长期
+   * 挂在宿主内存（SessionStore.get 恒命中），而宿主的批量落盘 timer、
+   * write-open 格式迁移、flush 检查点都会在**没有生成**的情况下刷新
+   * mtime——只看"内存存在 + mtime 新鲜"会把早已停止的会话永远判成 busy
+   * （面板报"请先停止"，用户无流可停）。活跃生成流是持续 append，一个
+   * 沉降窗口内体积必然增长；一次性落盘不会。增长与否由调用点对比前后
+   * 两次 stat 的 size 判定。
+   */
+  const settleStat = (path: string): Promise<{ size: number; mtimeMs: number } | null> =>
+    delay(REAPPEAR_SETTLE_MS).then(() => stat(path).catch(() => null));
 
   /**
    * 从归档集合移除若干 id（恢复用；删除不调用——见 deleteArchived），返回实际移除的 id。
@@ -334,36 +343,11 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
     }
   }
 
-  /** ghost 分支的孤儿探测:不经持久化枚举,直接 locate(header) + stat 判断文件
-   * 是否实际存在(persistence.list() 会静默跳过首行损坏的日志,"枚举不到"
-   * 不等于"文件不存在")。cwd 未知的 ghost id 只能探到缺省位置(_no-cwd 一类),
-   * 尽力而为;locate 指向的当前代际名落空时同样扫目录里的实际代际文件。
-   * 返回存在的路径;'absent' 确认不存在;无法定位返回 'unknown'。 */
-  async function probeOrphanFile(sessionId: SessionId, cwd?: string): Promise<string | 'absent' | 'unknown'> {
-    try {
-      if (typeof persistence.locate !== 'function') return 'unknown';
-      // ghost 探测没有完整 header（cwd 未知时只能探到缺省位置一类）。
-      // 合成最小头：version 用官方 SESSION_FORMAT_VERSION 的当前字面（3），
-      // locate 只消费 id/cwd 两个字段。
-      const location = persistence.locate({ id: sessionId, cwd, createdAt: 0, version: 3, isSeeded: false } as SessionHeader);
-      if (location === undefined || typeof location.path !== 'string' || location.path.length === 0) {
-        return 'unknown';
-      }
-      try {
-        await stat(location.path);
-        return location.path;
-      } catch {}
-      return await resolveGenerationFile(dirname(location.path)) ?? 'absent';
-    } catch {
-      return 'absent';
-    }
-  }
-
   /** 删除后的复验:先等 settleMs 给进行中的写入留出落盘时间,再确认文件没有
    * 被宿主 materialize 的 mkdir -p 整体重建(stat 任意失败——含 ENOENT——都
    * 视为已消失)。返回 true 表示文件仍在(重现)。 */
   async function filePresentAfterSettle(path: string, settleMs: number): Promise<boolean> {
-    if (settleMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, settleMs));
+    if (settleMs > 0) await delay(settleMs);
     try {
       await stat(path);
       return true;
@@ -497,9 +481,10 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
      * 显示该会话；`removedFromArchive` 因此恒为 0。
      *
      * 失败语义（failed[].reason）：'not-archived' 非归档成员；'live' 内存
-     * 未归档会话；'busy' 归档会话 60s 内仍有写入；'unenumerable' 文件存在
-     * 但持久化枚举不到（首行损坏的孤儿）；'reappeared' 删除后被生成流重建、
-     * 二次删除仍压不掉；其余为底层删除错误消息。
+     * 未归档会话；'busy' 内存中的会话日志仍在增长（活跃生成流）；
+     * 'unenumerable' 文件存在但持久化枚举不到（首行损坏的孤儿），或无法
+     * 确认文件已消失的 ghost id；'reappeared' 删除后被生成流重建、二次
+     * 删除仍压不掉；其余为底层删除错误消息。
      */
     async deleteArchived(sessionIds: string[]) {
       const unique = [...new Set(sessionIds)];
@@ -521,22 +506,17 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
           failed.push({ sessionId, reason: 'live' });
           continue;
         }
-        const header = headersById.get(sessionId);
-        if (header === undefined) {
-          // ghost id(枚举不到)。但"枚举不到 ≠ 文件不存在":首行损坏的日志
-          // 会被 persistence.list() 静默跳过,直接当 ghost 报成功会把永远
-          // 删不掉的孤儿文件留在磁盘上。先 locate(header) 探测,探到文件即
-          // "有文件但不可枚举",计入 failed 而非谎报成功;定位钩子缺失
-          // (unknown)同样不能确认缺失,按不可枚举兜底。
-          const orphan = await probeOrphanFile(id, headerFromList(snapshots, sessionId)?.cwd);
-          if (orphan !== 'absent') {
-            failed.push({ sessionId, reason: 'unenumerable' });
-            continue;
-          }
-          // 真不存在:幂等删除(ghost id 保留在归档集合中)。
-          deleted.push(sessionId);
+        if (headersById.get(sessionId) === undefined) {
+          // ghost id(枚举不到)。"枚举不到 ≠ 文件不存在":首行损坏的日志会被
+          // persistence.list() 静默跳过;而 jsonl 后端按 cwd 分目录,ghost
+          // 探测没有 header、拿不到 cwd,locate 只能探缺省目录(_no-cwd 一类)
+          // ——既探不到真实文件,也确认不了缺失。因此 ghost 一律不能当
+          // "已删"报成功(0.3.9 谎报成功的同源变体),计入 failed;ghost id
+          // 留在归档集合,由 list() 的存在性过滤隐藏,面板与侧边栏均不可见。
+          failed.push({ sessionId, reason: 'unenumerable' });
           continue;
         }
+        const header = headersById.get(sessionId)!;
         const file = await fileInfo(header);
         if (file.state === 'unknown') {
           // 文件存在(枚举得到)但无法定位路径:删不得也不该谎报成功。
@@ -547,23 +527,29 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
           deleted.push(sessionId);
           continue;
         }
-        if (isBusy(id, file)) {
-          failed.push({ sessionId, reason: 'busy' });
-          continue;
-        }
         try {
-          // TOCTOU 复核:isBusy 读的是 stat 快照,检查与 rm 之间生成流可能
-          // 恰好落盘;删前重取一次 mtime 再判一次 busy。
-          let fresh: { mtimeMs: number } | null = null;
-          try { fresh = await stat(file.path); } catch {}
+          // TOCTOU 复核:fileInfo 的 stat 是快照,检查与 rm 之间文件可能
+          // 恰好变化;rm 前重取一次。
+          let fresh: { size: number; mtimeMs: number } | null = await stat(file.path).catch(() => null);
           if (fresh === null) {
             deleted.push(sessionId);
             continue;
           }
+          // 生成流兜底:内存中的会话且 mtime 在窗口内,沉降观察一次,文件
+          // 仍在增长说明活跃写入方在 append(删除后会把半截日志写回来),
+          // 拒绝;体积静止则只是一次性落盘/迁移/flush 刷新过 mtime,照删。
           const inMemory = ctx.sessions.get(sessionId as SessionId) !== undefined;
           if (inMemory && Date.now() - fresh.mtimeMs < BUSY_WRITE_WINDOW_MS) {
-            failed.push({ sessionId, reason: 'busy' });
-            continue;
+            const second = await settleStat(file.path);
+            if (second === null) {
+              deleted.push(sessionId);
+              continue;
+            }
+            if (second.size > fresh.size) {
+              failed.push({ sessionId, reason: 'busy' });
+              continue;
+            }
+            fresh = second;
           }
           await rm(file.path, { force: true });
           await removeSessionDirIfOwned(sessionId, file.path, (message) => ctx.logger?.warn?.(message));

@@ -659,7 +659,16 @@ const REMOTE_CONTRIBUTION: TypertRemoteContribution = {
 };
 async function apply(ctx: any) {
   const t = ctx.locale.bind(NS);
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), "session-archive: dictionaries");
+  ctx.effect(() => {
+    try {
+      ctx.locale.register(NS, { zh, en });
+    } catch (error) {
+      // 重复注册(HMR/热切换下宿主已持有同 ns 字典)静默忽略,其余失败只
+      // 告警——面板文案回退到宿主默认,异常不得穿透 effect 阻断插件激活。
+      const message = String((error as any)?.message ?? error);
+      if (!message.includes("already")) console.warn("session-archive: locale dictionary registration failed: " + message);
+    }
+  }, "session-archive: dictionaries");
   await ctx.remote.$mount(REMOTE_CONTRIBUTION);
   const archiveService = ctx.get("remote.sessionArchive");
   if (archiveService === void 0) throw new Error("session-archive: remote.sessionArchive did not materialize after mount");

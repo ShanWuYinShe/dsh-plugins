@@ -213,22 +213,31 @@ describe("session-archive host", () => {
     expect((await archiveHost.detail("a1")).title === "T-a1").toBe(true);
   });
 
-  it("删除语义:busy/live/ghost 幂等/not-archived/unenumerable 孤儿/批量部分失败聚合", async () => {
+  it("删除语义:busy 增长判定/静默会话可删/ghost 不可确认即拒绝/not-archived/unenumerable 孤儿/批量部分失败聚合", async () => {
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-del-"));
     const f = makeFixture({
-      archived: ["s-busy", "s-del", "s-ghost", "orphan"],
+      archived: ["s-busy", "s-quiet", "s-del", "s-ghost", "orphan"],
       headers: [
         { id: "s-busy", cwd: "/proj/a", createdAt: 1000 },
+        { id: "s-quiet", cwd: "/proj/d", createdAt: 1500 },
         { id: "s-del", cwd: "/proj/b", createdAt: 2000 },
         { id: "foreign", cwd: "/proj/c", createdAt: 3000 }, // 未归档
       ],
     });
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     writeSession("s-busy", []);
+    writeSession("s-quiet", []);
     writeSession("s-del", []);
     writeSession("foreign", []);
     writeCorruptSession("orphan"); // 有文件但首行损坏:persistence.list() 枚举不到
     f.sessions.set("s-busy", {});
+    f.sessions.set("s-quiet", {});
+
+    // 模拟活跃生成流:每 50ms 往 s-busy 日志 append(比沉降观察窗口 300ms
+    // 密),窗口内体积必然增长。
+    const appender = setInterval(() => {
+      try { fs.appendFileSync(sessionPath("s-busy"), "x"); } catch {}
+    }, 50);
 
     // 批量部分失败聚合:deleted 与 failed 同时出现,各自归类正确、文件状态正确。
     const mixed = await archiveHost.deleteArchived(["s-busy", "s-del", "foreign"]);
@@ -239,21 +248,35 @@ describe("session-archive host", () => {
     expect(!fs.existsSync(sessionPath("s-del"))).toBe(true);
     expect(fs.existsSync(sessionPath("s-busy")) && fs.existsSync(sessionPath("foreign"))).toBe(true);
     expect(mixed.removedFromArchive === 0).toBe(true);
+    clearInterval(appender);
 
-    // 损坏首行的孤儿文件:枚举不到但 locate 探测得到 → 拒绝并保留文件,不谎报成功。
+    // 静默会话回归(线上误报用例):在内存(tab 恢复)、mtime 被宿主批量落盘/
+    // 迁移/flush 刷新过(60s 内),但沉降观察窗口内体积静止——不是活跃生成流,
+    // 必须可删,不得报"请先停止"。
+    const quiet = await archiveHost.deleteArchived(["s-quiet"]);
+    expect(quiet.deleted.includes("s-quiet")
+      && quiet.failed.length === 0
+      && !fs.existsSync(sessionPath("s-quiet"))).toBe(true);
+
+    // 损坏首行的孤儿文件:枚举不到但文件确实存在 → 拒绝并保留文件,不谎报成功。
     const orphanResult = await archiveHost.deleteArchived(["orphan"]);
     expect(orphanResult.deleted.length === 0
       && orphanResult.failed.length === 1
       && orphanResult.failed[0].reason === "unenumerable"
       && fs.existsSync(sessionPath("orphan"))).toBe(true);
 
-    // 真 ghost(从未有文件):幂等删除成功,ghost id 保留在归档集合。
+    // 真 ghost(从未有文件):cwd 未知时 locate 只能探缺省目录,既探不到真实
+    // 文件也确认不了缺失——不再谎报成功,按不可枚举拒绝;ghost id 留在归档
+    // 集合由存在性过滤隐藏,面板与侧边栏均不可见。
     const ghostResult = await archiveHost.deleteArchived(["s-ghost"]);
-    expect(ghostResult.deleted.includes("s-ghost")
-      && ghostResult.failed.length === 0
+    expect(ghostResult.deleted.length === 0
+      && ghostResult.failed.length === 1
+      && ghostResult.failed[0].sessionId === "s-ghost"
+      && ghostResult.failed[0].reason === "unenumerable"
       && f.registryState.archivedSessionIds.includes("s-ghost")).toBe(true);
 
-    // busy 解除后可删:文件与会话目录一并消失,归档集合仍保留 ghost id。
+    // 不在内存即冷文件:即使 mtime 新鲜(写入方已随会话停止消失)也直接删,
+    // 不做增长观察。文件与会话目录一并消失,归档集合仍保留 ghost id。
     f.sessions.delete("s-busy");
     const delBusy = await archiveHost.deleteArchived(["s-busy"]);
     expect(delBusy.deleted.includes("s-busy")

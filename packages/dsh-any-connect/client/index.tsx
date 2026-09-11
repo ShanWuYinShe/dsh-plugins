@@ -43,7 +43,18 @@ export const inject = ['slots', 'locale']
 export function apply(ctx: ClientContext): void {
   try {
     const namespace = 'settings.anyconnect'
-    ctx.effect(() => ctx.locale.register(namespace, { zh, en }), 'dsh-any-connect: settings copy')
+    ctx.effect((): (() => void) => {
+      try {
+        return ctx.locale.register(namespace, { zh, en })
+      } catch (error: unknown) {
+        // 重复注册（HMR/热切换下宿主已持有同 ns 字典）静默忽略，其余失败
+        // 只告警——异常若穿透 effect 会跳过下面的 slots.inject，插件卡片
+        // 整体消失；吞掉后文案回退到宿主默认，卡片照常渲染。
+        const message = String((error as any)?.message ?? error)
+        if (!message.includes('already')) console.warn('dsh-any-connect: locale dictionary registration failed: ' + message)
+        return () => {}
+      }
+    }, 'dsh-any-connect: settings copy')
     const t = ctx.locale.bind(namespace) as WorkBuddyPluginCardInjected['t']
     ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
       name: 'settings.plugin.item',

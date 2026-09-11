@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.15 (2026-09-12)
+
+### Fixes
+
+* 修复 dispose 路径的 unhandled rejection：`shim.close()` 内部以
+  `server.once('error', reject)` 收尾，close 期间任何 server error 都会
+  reject 该 promise，`void` 不捕获时按 Node 默认策略会终止宿主进程，且恰
+  发生在插件卸载路径。现降级为告警日志（与同函数 `shim.ready` 的容错对齐）
+* 客户端补 `ctx.locale.register` 重复注册防护（HMR/热切换下重复 apply 时
+  异常会穿透 effect 跳过 `slots.inject`，插件卡片整体消失），与
+  sandbox-extra-roots 对齐；镜像测试同步更新并新增 HMR/非 HMR 两条用例
+* build + typecheck + 全量测试通过，并在隔离测试实例真实验证
+
 ## 0.3.14 (2026-09-11)
 
 ### Changes

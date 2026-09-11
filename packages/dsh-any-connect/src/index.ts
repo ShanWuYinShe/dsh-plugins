@@ -133,7 +133,10 @@ export function apply(ctx: Context, config: Config): void {
   let stopped = false
   ctx.effect(() => () => {
     stopped = true
-    void shim.close()
+    // close 期间 server 的 error 事件会 reject 该 promise,不捕获就是
+    // unhandled rejection——Node 默认策略下会终止宿主进程,且恰发生在
+    // dispose 路径。降级为告警日志。
+    shim.close().catch(error => ctx.logger?.warn?.(`dsh-any-connect: shim close failed: ${error}`))
     void clearHostHeartbeat()
   })
 
