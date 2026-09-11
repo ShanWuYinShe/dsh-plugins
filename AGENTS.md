@@ -86,21 +86,16 @@ pnpm run adapt 0.1.2-alpha.5   # dsh 宿主升级适配（--dry-run 预览），
 按 2026-09-05 可维护性审查登记，均为「有测试兜底前的已知债务」，不阻塞
 日常开发，但改动相邻代码时应优先考虑顺手消化：
 
-- `packages/adaptive-perf/src/index.ts` 约 1700 行，`apply()` 一个闭包约
-  740 行、19 个内嵌函数，`cfg`/`agents`/`bootstrapState` 等闭包状态被网状
-  共享——拆分需按审查结论选「闭包工厂分组」或「Runtime 类」方案，单独
-  规划、纯搬移分提交。前置：已提取 `quietDispose`/`disposeAll` 助手。
-- 客户端三包的 REMOTE_CONTRIBUTION + 设置卡挂载样板近乎逐字重复
-  （`adaptive-perf/client/index.tsx` 与 `sandbox-extra-roots/client/index.tsx`），
-  可仿 config-store 模式提取 `client/contribution.ts` 并用 bundle.test 锁
-  一致性；typert descriptor 配错会静默失效，需测试实例手验。
 - scripts 的 semver 比较、CHANGELOG 小节判定、包目录枚举仍各有两份实现
   （`scripts/lib/dsh-deps.mjs` 已建立并承载 dsh 基线提取；剩余重复在
   publish-gate / release-notes / dsh-follow-status 之间）；脚本无自动化
   测试，发布时才暴露回归。
 - 客户端 `ctx.locale.register` 重复注册防护仅 sandbox-extra-roots 有，
-  adaptive-perf / session-archive / dsh-any-connect 待对齐（HMR 场景防御，
+  session-archive / dsh-any-connect 待对齐（HMR 场景防御，
   需实例手验）。
+
+（2026-09-11 adaptive-perf 废弃移除后，原登记的两条 adaptive-perf 相关
+债务——index.ts 巨型闭包拆分、REMOTE_CONTRIBUTION 样板双包重复——随之消失。）
 
 ## 约定
 

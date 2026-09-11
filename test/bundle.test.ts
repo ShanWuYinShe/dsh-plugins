@@ -77,18 +77,12 @@ describe("npm bundle metadata", () => {
 });
 
 describe("共享实现一致性", () => {
-  it("config-store 三包 src 一致", () => {
+  it("config-store 两包 src 一致", () => {
     const read = (pkg: string, file: string) =>
       readFileSync(join(ROOT, "packages", pkg, "src", file), "utf8");
     for (const file of ["config-store.ts"]) {
-      expect(read("sandbox-extra-roots", file)).toBe(read("adaptive-perf", file));
       expect(read("sandbox-extra-roots", file)).toBe(read("session-archive", file));
     }
-  });
-  it("remote.ts 两配置类包 src 一致(session-archive 为业务分叉,不参与)", () => {
-    const read = (pkg: string, file: string) =>
-      readFileSync(join(ROOT, "packages", pkg, "src", file), "utf8");
-    expect(read("sandbox-extra-roots", "remote.ts")).toBe(read("adaptive-perf", "remote.ts"));
   });
 });
 
@@ -101,7 +95,6 @@ describe("client bundles", () => {
   it("配置类包 settings.plugin.item 注册带 key", async () => {
     const cases: Array<[string, string]> = [
       ["sandbox-extra-roots", "sandbox-extra-roots-config"],
-      ["adaptive-perf", "adaptive-perf-config"],
     ];
     for (const [pkg, key] of cases) {
       // 宿主 settings 只接受 ^[a-z][a-z0-9-]*$，驼峰 key 会在注册时抛
@@ -193,11 +186,9 @@ describe("client bundles", () => {
 });
 
 describe("settings namespace 注册（宿主 rc.7+ 设置页可见性）", () => {
-  it("两包均导出注册函数", async () => {
+  it("sandbox-extra-roots 导出注册函数", async () => {
     const sbNS = await import("../packages/sandbox-extra-roots/src/index.js");
-    const apNS = await import("../packages/adaptive-perf/src/index.js");
     expect(typeof sbNS.registerSettingsNamespace).toBe("function");
-    expect(typeof apNS.registerSettingsNamespace).toBe("function");
   });
 });
 

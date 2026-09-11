@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugins",
   "private": true,
-  "description": "DSH host 层插件集：sandbox-extra-roots（沙盒额外目录）/ adaptive-perf（极简性能自适应）/ session-archive（归档会话管理）",
+  "description": "DSH host 层插件集：sandbox-extra-roots（沙盒额外目录）/ session-archive（归档会话管理）",
   "type": "module",
   "license": "MIT",
   "repository": {
