@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.10 (2026-09-11)
+
+### Changes
+
+* 跟进 DSH 稳定版 0.1.5-rc.2：`@deepseek-ai/dsh-sandbox` 与
+  `@deepseek-ai/dsh-typert-protocol` 依赖由 `^0.1.5-rc.1` 升至
+  `^0.1.5-rc.2`，`dsh.host` 更新为 `0.1.5-rc.2`（rc.2 与 rc.1 逐包对比
+  源码零差异，纯依赖 range 重发，无适配代码改动）
+
+### Fixes
+
+* 修复设置页「沙盒额外允许目录」卡片不渲染：本插件注册的 settings
+  namespace `sandboxExtraRootsConfig` 含大写字母，不满足宿主 dsh-settings
+  的 `^[a-z][a-z0-9-]*$` 校验，`settings.register()` 抛 TypeError 且在
+  inject 回调里被静默吞掉；设置页 describe 镜像因此不含本插件 namespace，
+  卡片（按 namespace 配对）从不出现。现改为 `sandbox-extra-roots-config`，
+  宿主侧注册与客户端卡片 key 同步改名；typert 远程通道与 config.json
+  存储不受影响。已在隔离实例实测卡片渲染与保存落盘恢复正常
+
 ## 0.4.9 (2026-09-10)
 
 ### Changes

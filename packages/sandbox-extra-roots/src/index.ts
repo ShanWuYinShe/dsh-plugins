@@ -517,7 +517,9 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
       // 注册进宿主 settings 体系(可见性)：设置页用 settings.describe() 枚举
       // registrations，未注册的 namespace 即使卡片带正确的 key 也不渲染。
       // 卡片的实际读写仍走 config gateway(config.json 权威、热更新)。
-      registerSettingsNamespace(ctx, "sandboxExtraRootsConfig", Schema, (z) => z.object({
+      // namespace 必须匹配宿主 ^[a-z][a-z0-9-]*$——驼峰会被 register() 抛
+      // TypeError、inject 回调失败被静默吞掉，设置页遂不渲染卡片。
+      registerSettingsNamespace(ctx, "sandbox-extra-roots-config", Schema, (z) => z.object({
         extraWritableRoots: z.array(z.string()).default([]),
       }), { base: cfg });
     } catch (error) {

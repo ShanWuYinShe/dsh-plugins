@@ -545,9 +545,10 @@ import type { TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol"
       });
       ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
         name: "settings.plugin.item",
-        // keyed slot：key 为卡片编辑的设置 namespace（与 host 侧 serviceKey 一致），
-        // 设置页按 key 与宿主服务的 namespace 配对 dispatch。
-        key: "adaptivePerfConfig",
+        // keyed slot：key 为卡片编辑的设置 namespace（与 host 侧
+        // registerSettingsNamespace 的 ns 一致，须匹配宿主 ^[a-z][a-z0-9-]*$），
+        // 设置页按 key 与宿主 describe 的 namespace 配对渲染。
+        key: "adaptive-perf-config",
         id: "adaptive-perf",
         order: 40,
         locale: NS,

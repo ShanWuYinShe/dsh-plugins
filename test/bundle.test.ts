@@ -100,10 +100,13 @@ describe("client bundles", () => {
 
   it("配置类包 settings.plugin.item 注册带 key", async () => {
     const cases: Array<[string, string]> = [
-      ["sandbox-extra-roots", "sandboxExtraRootsConfig"],
-      ["adaptive-perf", "adaptivePerfConfig"],
+      ["sandbox-extra-roots", "sandbox-extra-roots-config"],
+      ["adaptive-perf", "adaptive-perf-config"],
     ];
     for (const [pkg, key] of cases) {
+      // 宿主 settings 只接受 ^[a-z][a-z0-9-]*$，驼峰 key 会在注册时抛
+      // TypeError 且被静默吞掉（卡片从此不可见）——在此锁死合法性。
+      expect(key).toMatch(/^[a-z][a-z0-9-]*$/);
       const mod = await import(`../packages/${pkg}/client/index.tsx`);
       const registrations: Array<{ options: any }> = [];
       const ctx = {

@@ -1679,7 +1679,9 @@ export async function apply(ctx: any, config: any, options: any = {}): Promise<v
     // 透传——describe 元数据只服务于可见性，卡片不读取它。any() 无默认值，
     // 必须传 base（当前生效配置快照），否则 describe() 的 value 为 undefined，
     // 设置页 wire 校验（nonoptional）会整体失败。
-    registerSettingsNamespace(ctx, 'adaptivePerfConfig', Schema, (z: any) => z.any(), { base: cfg });
+    // namespace 必须匹配宿主 settings 的 ^[a-z][a-z0-9-]*$——驼峰会被
+    // register() 抛 TypeError、inject 回调失败被静默吞掉，设置页遂不渲染卡片。
+    registerSettingsNamespace(ctx, 'adaptive-perf-config', Schema, (z: any) => z.any(), { base: cfg });
 
     // 卸载清理：释放全部会话副作用与监听。
     ctx.effect(() => () => {

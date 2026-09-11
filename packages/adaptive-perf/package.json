@@ -1,6 +1,6 @@
 {
   "name": "@chaoset/adaptive-perf",
-  "version": "0.10.7",
+  "version": "0.10.8",
   "description": "DSH host plugin: bring standard / PTC presets to minimal-mode-level performance — real Minimal tool pair, permanent injected-context suppression with on-demand discovery, runtime-context suppression, and adaptive tool-catalog trimming with demand-driven escalation",
   "engines": {
     "node": ">=22.19.0"
@@ -23,7 +23,7 @@
     "./package.json": "./package.json"
   },
   "dsh": {
-    "host": "0.1.5-rc.1",
+    "host": "0.1.5-rc.2",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -37,12 +37,12 @@
     }
   },
   "optionalDependencies": {
-    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-terminal": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-terminal-bash": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-tool-bash-persistent": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-fs-local": "^0.1.5-rc.1",
-    "@deepseek-ai/dsh-tool-str-replace-editor": "^0.1.5-rc.1"
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-terminal": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-terminal-bash": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-bash-persistent": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-fs-local": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-str-replace-editor": "^0.1.5-rc.2"
   },
   "scripts": {
     "build": "node ../../scripts/build.mjs",
