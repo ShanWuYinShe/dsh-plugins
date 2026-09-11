@@ -1,0 +1,5 @@
+# 行尾以 Linux 为准：文本文件一律 LF（仓库与检出工作树都是 LF）。
+# text=auto 由 git 探测二进制文件并跳过转换；本仓无 .bat/.cmd 等需要
+# CRLF 的文件。此前部分文件在历史提交中带入了 CRLF（2026-09-11 经
+# renormalize 统一为 LF），此文件防止任何平台的 git 再写入 CRLF。
+* text=auto eol=lf
