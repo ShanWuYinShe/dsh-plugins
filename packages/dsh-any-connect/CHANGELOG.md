@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.3.16 (2026-09-12)
+
+### Fixes
+
+* `chatStream` 补「响应头到达前」30 秒超时（fetch 返回即撤销，SSE 流式阶段
+  的长寿命不受影响，错误体读取同窗口兜底）：上游接受连接却不返回响应头时，
+  此前要等 pi-ai 侧 300s idle 超时才释放连接。客户端主动断开（取消生成）
+  同步归类为 client 而非 server——shim 对已断开的请求静默收尾，不再向已
+  销毁的 socket 回写 502
+* SSE `[DONE]` 探测保留上一块的尾部字节：标记恰好跨 chunk 分割时单块扫描
+  会漏检，流中途出错就会再补发一个 `[DONE]`（客户端看到重复标记、截断被
+  伪装成干净收尾）。中断收尾统一终结连接：已见过 `[DONE]` 的直接终结，
+  不再悬挂连接
+* token 刷新失败同样计入 30 秒节流窗口：刷新端点持续故障且 access token
+  还在刷新 margin 内时，此前每条请求都会打一次刷新端点（与「极短有效期
+  打爆端点」同构，只是发生在失败侧）
+* heartbeat 存活判定：`process.kill(pid, 0)` 的 `EPERM`（PID 存在但属其他
+  用户）视为存活，此前被误读成宿主已停；Windows 进程启动时刻在 `wmic`
+  失败（Windows 11 24H2 起已移除）后回退 PowerShell `Get-CimInstance` 的
+  `FileTimeUtc`（无区域格式）
+* `authFile` 设置变更后重拉模型目录：启动时未登录、之后才登录（或改指另
+  一账号）的用户不再停留在静态 fallback 列表直到插件重载
+* 移除 no-op 的 `invalidate()`（provider 的 `getModels` 本就活读 catalog）
+  与无调用的死导出 `defaultDesktopAuthPath`；devDependencies 与
+  optionalDependencies 的重复声明去重、vitest 对齐根版本
+* 新增 7 用例（chatStream 分类/断开/头超时/错误体兜底、`[DONE]` 跨块、
+  断开静默收尾、刷新失败节流、EPERM 存活）；build + typecheck + 全量测试
+  通过，并在隔离测试实例真实验证（主界面/归档面板/设置卡片/模型提供方
+  渲染正常、控制台零报错、doctor 读取 heartbeat 正常）
+
 ## 0.3.15 (2026-09-12)
 
 ### Fixes

@@ -42,9 +42,10 @@ cd .worktrees/main && pnpm install && pnpm run build   # 每个工作树独立�
 
 ## 发布纪律（重要）
 
-**在功能完全实现、本地测试通过、并在 dsh 测试实例中真实验证可用之前，不
-bump 版本、不提交推送。** 版本号是发布动作的一部分，不是开发动作——功能
-有问题就修功能，绝不靠"再发一版"解决。一次功能开发的完整顺序：
+**任何插件更新（功能、修复、依赖调整一律适用）：必须先在本地的隔离测试
+环境中全部测试通过，才能更新版本号、提交、推送——顺序不可颠倒，无例外。**
+版本号是发布动作的一部分，不是开发动作——功能有问题就修功能，绝不靠
+"再发一版"解决。一次功能开发的完整顺序：
 
 1. 开发 + `pnpm run test:ci`（build + typecheck + test）全绿；
 2. 启动隔离测试实例真实验证（不占用用户的 `~/.dsh`）：
@@ -57,7 +58,11 @@ bump 版本、不提交推送。** 版本号是发布动作的一部分，不是
 
    插件用本地路径安装（`dsh plugin add /abs/path/to/packages/<pkg>`，符号
    链接即装），**验证的是工作树产物，与 npm 发布产物同源**；
-3. 验证通过后才：bump `package.json` 版本 + 写 CHANGELOG → 提交。
+3. 验证通过后才：bump `package.json` 版本 + 写 CHANGELOG → 提交。验证之后
+   若有任何影响包产物的改动（src / client / 依赖 / 构建），必须用最终代码
+   重新 build 并重走第 2 步——**送验产物必须与待发布产物一致**（版本号
+   bump 本身不算产物改动，bump 后的产物 version 可用 heartbeat/
+   `doctor` 核对）；
 4. **推送前逐提交复核**：`git log --oneline origin/<分支>..HEAD` 与
    `git diff origin/<分支>..HEAD` 对照——提交信息声称的每项变更都要在
    diff 里找到，diff 里每处行为变更都要有 CHANGELOG 与版本号对应；
@@ -86,13 +91,17 @@ pnpm run adapt 0.1.2-alpha.5   # dsh 宿主升级适配（--dry-run 预览），
 按 2026-09-05 可维护性审查登记，均为「有测试兜底前的已知债务」，不阻塞
 日常开发，但改动相邻代码时应优先考虑顺手消化：
 
-- scripts 的 semver 比较、CHANGELOG 小节判定、包目录枚举仍各有两份实现
-  （`scripts/lib/dsh-deps.mjs` 已建立并承载 dsh 基线提取；剩余重复在
-  publish-gate / release-notes / dsh-follow-status 之间）；脚本无自动化
-  测试，发布时才暴露回归。
-- 客户端 `ctx.locale.register` 重复注册防护仅 sandbox-extra-roots 有，
-  session-archive / dsh-any-connect 待对齐（HMR 场景防御，
-  需实例手验）。
+- scripts 的 semver 比较、CHANGELOG 小节判定仍各有两份实现
+  （`scripts/lib/dsh-deps.mjs` 已承载 dsh 基线提取与包枚举，adapt-dsh 已
+  接入；剩余重复在 publish-gate / release-notes 之间）；脚本无自动化测试，
+  发布时才暴露回归。
+- 客户端 `ctx.locale.register` 重复注册防护三包源码已对齐（2026-09-12），
+  待一次 dsh 实例 HMR 手验后销项。
+- config-store.ts / remote.ts 在 sandbox-extra-roots 与 session-archive
+  两包各持一份近乎逐字重复（两包刻意零运行时依赖、可独立安装，不宜提为
+  共享 npm 包）；config-store 有 test/bundle.test.ts 的源码一致锁兜底，
+  remote.ts 的加载器/标记机制（loadTypert、markRemoteMethod）无锁，改动
+  一侧时记得同步另一侧。
 
 （2026-09-11 adaptive-perf 废弃移除后，原登记的两条 adaptive-perf 相关
 债务——index.ts 巨型闭包拆分、REMOTE_CONTRIBUTION 样板双包重复——随之消失。）
@@ -108,3 +117,10 @@ pnpm run adapt 0.1.2-alpha.5   # dsh 宿主升级适配（--dry-run 预览），
   `重构:` / `文档:` / `测试:` / `ci:` 等，范围可选，如 `修复(认证): …`）。
 - 测试环境通过 vitest 配置里的 `DSH_HOME` 与真实用户目录隔离，不要在测试里
   读写真实的 `~/.dsh`。
+- 测试涉及平台差异时必须显式判定平台（如
+  `it.skipIf(process.platform !== "darwin")`），或改用运行时取值
+  （`canonicalPath`、`dirname(fakeHome)` 等）保持用例平台无关——禁止写死
+  单一平台的路径拼写，避免用例在其他平台永远跑不过。新增平台相关用例时
+  建议在 Linux 容器实测一遍（`node:24` 镜像 + tar 管道传入源码跑
+  `pnpm run test:ci`；macOS 打 tar 要带 `COPYFILE_DISABLE=1 --no-xattrs`，
+  否则 `._*` AppleDouble 文件会被 vitest 当测试文件收集）。

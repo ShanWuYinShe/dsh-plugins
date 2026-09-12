@@ -15,8 +15,9 @@ on:
       - '.npmrc'
       - 'scripts/**'
       - '.github/workflows/publish.yml'
-  release:
-    types: [published]
+  # 不监听 release.published：本 workflow 发布成功后自己会 gh release create，
+  # 那会再触发一次 release 事件造成空转循环（门禁幂等不会双发，但每次发布
+  # 都多跑一轮全量 build+test）。发布只由推送驱动。
   workflow_dispatch:
 
 # 仓库级并发组（不按分支区分）：main 与 alpha 的发布也必须排队——两个分支

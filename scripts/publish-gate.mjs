@@ -33,15 +33,17 @@ const PACKAGES = readdirSync(join(ROOT, "packages"), { withFileTypes: true })
   .map((entry) => entry.name)
   .sort();
 
-// semver 比较（不含 build metadata）：主/次/补丁按数值比；带 prerelease 的
-// 版本小于同号正式版；prerelease 标识符逐段比，数字段小于字母段，段数少的
-// 是前缀、更小。语义与 npm 一致。
+// semver 比较（不含 prerelease 与 build metadata 以外的差异）：主/次/补丁按
+// 数值比；带 prerelease 的版本小于同号正式版；prerelease 标识符逐段比，数字
+// 段小于字母段，段数少的是前缀、更小。语义与 npm 一致。
 function compareVersions(a, b) {
   function parse(v) {
-    const dash = v.indexOf("-");
-    const core = dash === -1 ? v : v.slice(0, dash);
+    const plus = v.indexOf("+");
+    const noBuild = plus === -1 ? v : v.slice(0, plus); // build metadata 不参与比较
+    const dash = noBuild.indexOf("-");
+    const core = dash === -1 ? noBuild : noBuild.slice(0, dash);
     const [maj, min, pat] = core.split(".").map(Number);
-    return { maj, min, pat, pre: dash === -1 ? null : v.slice(dash + 1).split(".") };
+    return { maj, min, pat, pre: dash === -1 ? null : noBuild.slice(dash + 1).split(".") };
   }
   const x = parse(a);
   const y = parse(b);
@@ -84,24 +86,44 @@ function gitTagExists(tag) {
 
 // 返回 npm 上已发布的全部版本；包不存在（E404）返回空数组。其他错误（网络
 // 等）直接抛出、中止整个 job——绝不吞成「未发布」，那会导致对已存在版本的
-// 重发被 npm 拒绝，且环境问题本就应当中止发布。
+// 重发被 npm 拒绝，且环境问题本就应当中止发布。E404 判定要求 stderr 同时
+// 呈现错误码与 404 字样，避免恰好含 "E404" 字样的其他输出（如镜像地址）
+// 被误判成「包不存在 → 可发布」。
 function npmVersions(name) {
   const r = spawnSync("npm", ["view", name, "versions", "--json", `--registry=${REGISTRY}`], {
     encoding: "utf8",
   });
-  if (r.status === 0) return JSON.parse(r.stdout);
-  if (/E404/.test(r.stderr)) return [];
+  if (r.status === 0) {
+    try {
+      return JSON.parse(r.stdout);
+    } catch {
+      throw new Error(`npm view ${name} 输出不是合法 JSON，无法判定发布状态:\n${String(r.stdout).slice(0, 200)}`);
+    }
+  }
+  if (/\bE404\b/.test(r.stderr) && /\b404\b/.test(r.stderr)) return [];
   throw new Error(`npm view ${name} 失败（非 404，疑似网络/registry 问题）:\n${r.stderr}`);
 }
 
 function distTag(version) {
+  if (!isPrerelease(version)) return "latest";
   const m = version.match(/^[^-]*-([A-Za-z][A-Za-z0-9]*)/);
-  return m ? m[1] : "latest";
+  // dist-tag 名取字母开头的首标识符（本仓的 -alpha.N / -rc.N）。其余
+  // prerelease 形状（如纯数字首标识符 1.2.3-1，本仓不会产生）退回第一段
+  // 原文——关键是「是否 prerelease」的判定永远与 distTag/isStable 同口径，
+  // 不让纯数字 prerelease 被误判成稳定版、发出去直接覆盖 latest。
+  return m ? m[1] : version.slice(version.indexOf("-") + 1);
+}
+
+// 版本是否带 prerelease 后缀。与 compareVersions 的判定同口径：出现第一个
+// `-` 即 prerelease，不看标识符内容（semver 对纯数字首标识符同样视为
+// prerelease）。
+function isPrerelease(version) {
+  return version.includes("-");
 }
 
 // 版本是否属于稳定线（无 prerelease 后缀）。
 function isStable(version) {
-  return distTag(version) === "latest";
+  return !isPrerelease(version);
 }
 
 // CHANGELOG 是否有该版本的小节（与 scripts/release-notes.mjs 同一判定）。
@@ -117,8 +139,18 @@ function changelogHasSection(dir, version) {
 const plan = [];
 let failed = false;
 
+// 合法 semver（含 prerelease / build metadata）。非法版本号若放行，
+// compareVersions 会产出 NaN 静默通过「落后于 npm」比较。
+const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
 for (const dir of PACKAGES) {
   const { name, version } = JSON.parse(readFileSync(join(ROOT, "packages", dir, "package.json"), "utf8"));
+
+  if (typeof version !== "string" || !VERSION_RE.test(version)) {
+    log(`✗ ${name} 的版本号 ${JSON.stringify(version)} 不是合法 semver，拒绝发布。请修正 package.json 的 version。`);
+    failed = true;
+    continue;
+  }
 
   if (gitTagExists(`${dir}-v${version}`)) {
     log(`= ${name}@${version} 已有 git tag ${dir}-v${version}，跳过（已发布并归档）`);

@@ -11,11 +11,12 @@
 //   - 升各包版本号、写 CHANGELOG（发布决策）
 //   - pnpm install 重新生成 lockfile（需要网络）
 
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+// dsh 依赖口径与包枚举统一取自 lib/dsh-deps.mjs（与 publish-gate /
+// dsh-follow-status / dsh-baseline 同源），避免四份实现各自漂移。
+import { DEP_PREFIX, DEP_SECTIONS, manifestPaths, ROOT } from "./lib/dsh-deps.mjs";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
@@ -25,14 +26,11 @@ if (!version || !/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(version)) {
   process.exit(2);
 }
 
-const DEP_PREFIX = "@deepseek-ai/dsh-";
-const SECTIONS = ["dependencies", "optionalDependencies", "devDependencies", "peerDependencies"];
-
 function adaptPackageJson(path) {
   const rel = relative(ROOT, path);
   const json = JSON.parse(readFileSync(path, "utf8"));
   const changes = [];
-  for (const section of SECTIONS) {
+  for (const section of DEP_SECTIONS) {
     const deps = json[section];
     if (!deps) continue;
     for (const name of Object.keys(deps)) {
@@ -71,7 +69,9 @@ function adaptWorkspaceYaml() {
   }
   const lock = readFileSync(join(ROOT, "pnpm-lock.yaml"), "utf8");
   const names = new Set();
-  for (const m of lock.matchAll(/@deepseek-ai\/(dsh-[a-z0-9-]+)/g)) names.add(m[1]);
+  // 包名口径与依赖扫描同源（DEP_PREFIX），不再维护第二份正则。
+  const lockNameRe = new RegExp(`${DEP_PREFIX}([a-z0-9-]+)`, "g");
+  for (const m of lock.matchAll(lockNameRe)) names.add(m[1]);
   const entries = [...names].sort().map((n) => `  - '@deepseek-ai/${n}@${version}'`);
   const rest = text.slice(listStart).split("\n");
   let end = 1;
@@ -82,9 +82,8 @@ function adaptWorkspaceYaml() {
 }
 
 console.log(`适配 DSH 宿主 ${version}${dryRun ? "（dry-run，不写入）" : ""}:`);
-adaptPackageJson(join(ROOT, "package.json"));
-for (const entry of readdirSync(join(ROOT, "packages"), { withFileTypes: true })) {
-  if (entry.isDirectory()) adaptPackageJson(join(ROOT, "packages", entry.name, "package.json"));
+for (const rel of manifestPaths()) {
+  adaptPackageJson(join(ROOT, rel));
 }
 adaptWorkspaceYaml();
 

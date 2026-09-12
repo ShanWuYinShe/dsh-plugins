@@ -24,6 +24,12 @@ import { join } from "node:path";
 import { aggregateBaseline, ROOT } from "./lib/dsh-deps.mjs";
 
 const ci = process.argv.includes("--ci");
+// 与 publish-gate 钉定同一 registry：本地 .npmrc 指向镜像时，两个脚本对
+// 同一 npm 状态必须得出同一结论。
+const REGISTRY = "https://registry.npmjs.org";
+
+/** 合法 semver 版本号；基线若不是版本号（哨兵/不一致标记），比较无意义。 */
+const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /** 解析 dsh 版本号为可比较结构（0.1.2-alpha.5 → {n:[0,1,2], pre:["alpha",5]}）。 */
 function parseVersion(v) {
@@ -72,16 +78,22 @@ function branchRef(branch) {
 }
 
 /** 读某分支的全部 package.json 基线并聚合成单一基线（应全仓一致）；
- *  同时收集 dsh.host 适配声明（npm 消费者的可见元数据），供一致性核对。 */
+ *  同时收集 dsh.host 适配声明（npm 消费者的可见元数据），供一致性核对。
+ *  分支不可读（CI checkout 只有当前分支、本地无该分支等）时返回 unmixed
+ *  的哨兵形态，由调用方按「无法读取」呈报而非裸栈崩溃。 */
 function branchBaseline(ref) {
-  const resolved = ref === null ? null : branchRef(ref);
-  const read = (path) => {
-    if (resolved === null) return JSON.parse(readFileSync(join(ROOT, path), "utf8"));
-    return JSON.parse(execFileSync("git", ["show", `${resolved}:${path}`], { cwd: ROOT, encoding: "utf8" }));
-  };
-  const { baseline, host } = aggregateBaseline(read, ROOT);
-  const mixed = baseline.startsWith("[不一致") || host === "[不一致]";
-  return { baseline, host, mixed };
+  try {
+    const resolved = ref === null ? null : branchRef(ref);
+    const read = (path) => {
+      if (resolved === null) return JSON.parse(readFileSync(join(ROOT, path), "utf8"));
+      return JSON.parse(execFileSync("git", ["show", `${resolved}:${path}`], { cwd: ROOT, encoding: "utf8" }));
+    };
+    const { baseline, host } = aggregateBaseline(read, ROOT);
+    const mixed = baseline.startsWith("[不一致") || host === "[不一致]";
+    return { baseline, host, mixed, unreadable: false };
+  } catch {
+    return { baseline: "(分支不可读)", host: undefined, mixed: false, unreadable: true };
+  }
 }
 
 function currentBranch() {
@@ -90,10 +102,20 @@ function currentBranch() {
 }
 
 const PKG = "@deepseek-ai/dsh";
-const distTags = JSON.parse(execFileSync("npm", ["view", PKG, "dist-tags", "--json"], { encoding: "utf8" }));
-const versions = JSON.parse(execFileSync("npm", ["view", PKG, "versions", "--json"], { encoding: "utf8" }));
+// 「永远 exit 0」承诺覆盖 npm 故障：registry 不可达时降级为 warning 跳过
+// 本次核对（每日 cron 不该因 npm 抖动而红），而不是让 execFileSync 的裸栈
+// 把进程打成 exit 1。
+let distTags;
+let versions;
+try {
+  distTags = JSON.parse(execFileSync("npm", ["view", PKG, "dist-tags", "--json", `--registry=${REGISTRY}`], { encoding: "utf8" }));
+  versions = JSON.parse(execFileSync("npm", ["view", PKG, "versions", "--json", `--registry=${REGISTRY}`], { encoding: "utf8" }));
+} catch (error) {
+  const message = `dsh 跟随: npm registry 查询失败，本次跳过核对（${String(error?.message ?? error).split("\n")[0]}）`;
+  console.log(ci ? `::warning::${message}` : message);
+  process.exit(0);
+}
 const head = currentBranch();
-const other = head === "main" ? "alpha" : "main";
 
 // ── 按 DSH 发布习惯判定跟随目标 ────────────────────────────────────
 // 稳定线 = latest；进行中预发布线 = 基础号高于 latest 的最高 -alpha 版本
@@ -110,23 +132,36 @@ const devLine = devVersions.length > 0
 
 const rows = [];
 for (const branch of ["main", "alpha"]) {
-  const { baseline, host, mixed } = branchBaseline(branch === head ? null : branch);
+  const { baseline, host, mixed, unreadable } = branchBaseline(branch === head ? null : branch);
+  // 基线不是合法版本号（无 dsh 依赖 / 包间不一致 / 分支不可读）时比较
+  // 无意义——NaN 会让 cmpVersion 的结果静默落进「超前」分支，报出荒谬
+  // 状态；这里显式归入漂移并说明原因。
+  const comparable = !mixed && !unreadable && VERSION_RE.test(baseline);
   let target;
   let state;
-  if (branch === "main") {
+  if (unreadable) {
+    target = "(无法读取)";
+    state = "漂移(分支不可读)";
+  } else if (mixed) {
+    target = "(基线不一致)";
+    state = "漂移(基线不一致)";
+  } else if (!comparable) {
     target = latest;
-    const cmp = mixed ? NaN : cmpVersion(baseline, latest);
-    state = mixed ? "漂移(基线不一致)" : cmp === 0 ? "就位" : cmp < 0 ? "落后" : "超前";
+    state = "漂移(基线非版本号)";
+  } else if (branch === "main") {
+    target = latest;
+    const cmp = cmpVersion(baseline, latest);
+    state = cmp === 0 ? "就位" : cmp < 0 ? "落后" : "超前";
   } else if (devLine !== null) {
     target = devLine;
-    const cmp = mixed ? NaN : cmpVersion(baseline, devLine);
-    state = mixed ? "漂移(基线不一致)" : cmp === 0 ? "就位" : cmp < 0 ? "落后" : "超前";
+    const cmp = cmpVersion(baseline, devLine);
+    state = cmp === 0 ? "就位" : cmp < 0 ? "落后" : "超前";
   } else {
     // 待命：没有进行中的预发布线。alpha 分支由最新 main 重建，基线等于
     // latest 即就位——等 dsh 出更高基础号的新 alpha 线再 adapt 跟进。
     target = `(待命，等待 >${latestBase} 的新线)`;
-    const cmp = mixed ? NaN : cmpVersion(baseline, latest);
-    state = mixed ? "漂移(基线不一致)" : cmp === 0 ? "就位(待命)" : cmp < 0 ? "落后" : "超前";
+    const cmp = cmpVersion(baseline, latest);
+    state = cmp === 0 ? "就位(待命)" : cmp < 0 ? "落后" : "超前";
   }
   rows.push({ branch, baseline, host, target, state });
 }

@@ -170,11 +170,14 @@ function delay(ms: number): Promise<void> {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-/** 并发限制器：最多 N 个任务并行，其余排队。 */
+/** 并发限制器：最多 N 个任务并行，其余排队。宽度下限 1——直调
+ * createArchiveHost 传 0/负数时若产出 0 个 worker，会静默返回全 undefined
+ * 的数组而非报错。 */
 function limitedConcurrency(limit: number, tasks: Array<() => Promise<any>>): Promise<any[]> {
   const results = new Array(tasks.length);
   let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+  const width = Math.max(1, Math.min(limit, tasks.length));
+  const workers = Array.from({ length: width }, async () => {
     while (cursor < tasks.length) {
       const at = cursor++;
       const task = tasks[at]!;
@@ -233,6 +236,24 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
     delay(REAPPEAR_SETTLE_MS).then(() => stat(path).catch(() => null));
 
   /**
+   * delete ↔ unarchive 临界区的互斥串行化（插件闭包内的 promise 链）。
+   * 两者的「检查 → 生效」窗口必须互斥，否则并发时会出现两种错位：
+   *   - unarchive 的 confirm 看到 located → deleteArchived 随后 rm →
+   *     setState 仍把 id 移出归档集合：文件没了、归档标记也没了，内存
+   *     会话重回侧边栏（等同误恢复）；
+   *   - 反向：恢复刚落地，先行发起的删除把新恢复会话的文件清掉。
+   * registry 的 enqueueOperation 只串行化归档集合写入，deleteArchived
+   * 不经过它，因此这里自行串行化。delete 的临界区不获取 registry 锁、
+   * 本临界区只在已持有 registry 写锁时进入，无循环等待。
+   */
+  let exclusiveTail: Promise<void> = Promise.resolve();
+  function exclusive<T>(section: () => Promise<T>): Promise<T> {
+    const run = exclusiveTail.then(section, section);
+    exclusiveTail = run.then(() => {}, () => {});
+    return run;
+  }
+
+  /**
    * 从归档集合移除若干 id（恢复用；删除不调用——见 deleteArchived），返回实际移除的 id。
    *
    * 归档集合的移除没有官方 API（官方只有 archiveSession 方向），这里复用
@@ -241,9 +262,9 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
    * ——宿主内部形状，这里以显式断言收窄并在运行时探测可用性：形状一旦
    * 变化自动降级为"仅删文件"，归档列表按存在性过滤幽灵 id，功能仍正确。
    *
-   * confirm 在 registry 写锁临界区内逐个复核 id 是否仍可恢复（文件仍存在）:
-   * 存在性检查放在锁外的话,并发 deleteArchived 可在检查与移除之间删掉文件,
-   * 结果"文件没了、归档标记也没了",内存中的会话立刻重回侧边栏。
+   * confirm 在 registry 写锁临界区内逐个复核 id 是否仍可恢复（文件仍存在）；
+   * confirm → setState 段再与 deleteArchived 的删除临界区经 exclusive 互斥
+   * ——registry 写锁只挡住其他归档集合写入者，挡不住不经过它的删除。
    */
   async function removeFromArchiveSet(ids: string[], confirm?: (sessionId: string) => Promise<boolean>): Promise<string[]> {
     const set = new Set(ids);
@@ -264,19 +285,22 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
       const state = writable.requireState!();
       const current = [...state.archivedSessionIds] as string[];
       let eligible = current.filter((id) => set.has(id));
-      if (confirm !== undefined) {
-        const confirmed: string[] = [];
-        for (const id of eligible) {
-          try { if (await confirm(id)) confirmed.push(id); } catch {}
+      // confirm → setState 与 deleteArchived 的删除临界区互斥（见 exclusive）。
+      await exclusive(async () => {
+        if (confirm !== undefined) {
+          const confirmed: string[] = [];
+          for (const id of eligible) {
+            try { if (await confirm(id)) confirmed.push(id); } catch {}
+          }
+          eligible = confirmed;
         }
-        eligible = confirmed;
-      }
-      removedIds = eligible;
-      // 只有真正移除的 id 才离开归档集合;未通过复核的保持原状(仍是 ghost
-      // 或正常归档),不能因为请求过就一并抹掉。
-      const removedSet = new Set(removedIds);
-      const remaining = current.filter((id) => !removedSet.has(id));
-      if (removedIds.length > 0) await writable.setState!({ ...state, archivedSessionIds: remaining });
+        removedIds = eligible;
+        // 只有真正移除的 id 才离开归档集合;未通过复核的保持原状(仍是 ghost
+        // 或正常归档),不能因为请求过就一并抹掉。
+        const removedSet = new Set(removedIds);
+        const remaining = current.filter((id) => !removedSet.has(id));
+        if (removedIds.length > 0) await writable.setState!({ ...state, archivedSessionIds: remaining });
+      });
     });
     return removedIds;
   }
@@ -339,7 +363,11 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
       }
       return { state: 'absent' };
     } catch {
-      return { state: 'absent' };
+      // 内层每个 stat 都各自兜底，这里只会接到 locate 抛错（后端异常/契约
+      // 漂移）——既不能确认存在也不能确认缺失，必须按 unknown 处理。返回
+      // absent 会让 deleteArchived 把它记成"幂等删除成功"（0.3.9 谎报成功
+      // 的同源变体）；unknown 对应删除路径的 unlocatable 拒绝。
+      return { state: 'unknown' };
     }
   }
 
@@ -360,7 +388,10 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
    * 标题按 mtime 缓存：readSession 会解析整条事件流，而面板关闭态的徽标
    * 轮询每 5 秒打一次 list——不缓存的话就是"读整本会话只为取一行标题"的
    * 持续开销。mtime 不变即命中缓存；文件不可定位（无 locate 的宿主后端）
-   * 时跳过缓存直接读，标题仍然可得。折叠用官方 foldSessionTitle。 */
+   * 时跳过缓存直接读，标题仍然可得。折叠用官方 foldSessionTitle。
+   * 缓存有上限（FIFO 淘汰最旧条目）：已删除会话的条目不再被 mtime 命中
+   * 更新，长驻 host 进程下无界累积。 */
+  const TITLE_CACHE_LIMIT = 500;
   const titleCache = new Map<string, { mtimeMs: number; title: string | null }>();
   async function rowFor(sessionId: SessionId, header: SessionHeader) {
     const file = await fileInfo(header);
@@ -374,6 +405,10 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
         try {
           title = foldSessionTitle((await readSession(persistence, sessionId)).events)?.title ?? null;
         } catch {}
+        if (titleCache.size >= TITLE_CACHE_LIMIT) {
+          const oldest = titleCache.keys().next().value;
+          if (oldest !== undefined) titleCache.delete(oldest);
+        }
         titleCache.set(sessionId, { mtimeMs: located.mtimeMs, title });
       }
     } else {
@@ -443,8 +478,10 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
         }
         // 官方事件 data:user/message 是 UserMessage 本体（content 在自身），
         // assistant/message 是包装对象（content 在 .message.content）。
+        // message 可缺（损坏/异构日志）——detail 是整会话只读端点，一条
+        // 畸形事件不应让整个请求 TypeError。
         const text = messageText(
-          event.type === 'user/message' ? event.data.content : event.data.message.content,
+          event.type === 'user/message' ? event.data.content : event.data.message?.content,
           cfg.messagePreviewChars,
         );
         if (text.length === 0) continue;
@@ -527,56 +564,68 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
           deleted.push(sessionId);
           continue;
         }
-        try {
-          // TOCTOU 复核:fileInfo 的 stat 是快照,检查与 rm 之间文件可能
-          // 恰好变化;rm 前重取一次。
-          let fresh: { size: number; mtimeMs: number } | null = await stat(file.path).catch(() => null);
-          if (fresh === null) {
-            deleted.push(sessionId);
-            continue;
+        // ── 与 unarchive 的 confirm → setState 互斥的删除临界区（exclusive）。
+        // rm 及其全部前置判定都在窗口内：unarchive 要么整体先落地（此处复验
+        // 归档成员资格失败、拒绝删除），要么整体等删除完成（confirm 探到
+        // absent、拒绝恢复）——"文件被删的同时归档标记被移除"的错位不存在。
+        await exclusive(async () => {
+          // 归档成员锁内复验:快照之后、删除之前,unarchive 可能已把 id 移出
+          // 集合——删除先行发起也不能清掉刚恢复的会话文件。
+          if (!archivedSet().has(sessionId)) {
+            failed.push({ sessionId, reason: 'not-archived' });
+            return;
           }
-          // 生成流兜底:内存中的会话且 mtime 在窗口内,沉降观察一次,文件
-          // 仍在增长说明活跃写入方在 append(删除后会把半截日志写回来),
-          // 拒绝;体积静止则只是一次性落盘/迁移/flush 刷新过 mtime,照删。
-          const inMemory = ctx.sessions.get(sessionId as SessionId) !== undefined;
-          if (inMemory && Date.now() - fresh.mtimeMs < BUSY_WRITE_WINDOW_MS) {
-            const second = await settleStat(file.path);
-            if (second === null) {
+          try {
+            // TOCTOU 复核:fileInfo 的 stat 是快照,检查与 rm 之间文件可能
+            // 恰好变化;rm 前重取一次。
+            let fresh: { size: number; mtimeMs: number } | null = await stat(file.path).catch(() => null);
+            if (fresh === null) {
               deleted.push(sessionId);
-              continue;
+              return;
             }
-            if (second.size > fresh.size) {
-              failed.push({ sessionId, reason: 'busy' });
-              continue;
+            // 生成流兜底:内存中的会话且 mtime 在窗口内,沉降观察一次,文件
+            // 仍在增长说明活跃写入方在 append(删除后会把半截日志写回来),
+            // 拒绝;体积静止则只是一次性落盘/迁移/flush 刷新过 mtime,照删。
+            const inMemory = ctx.sessions.get(sessionId as SessionId) !== undefined;
+            if (inMemory && Date.now() - fresh.mtimeMs < BUSY_WRITE_WINDOW_MS) {
+              const second = await settleStat(file.path);
+              if (second === null) {
+                deleted.push(sessionId);
+                return;
+              }
+              if (second.size > fresh.size) {
+                failed.push({ sessionId, reason: 'busy' });
+                return;
+              }
+              fresh = second;
             }
-            fresh = second;
-          }
-          await rm(file.path, { force: true });
-          await removeSessionDirIfOwned(sessionId, file.path, (message) => ctx.logger?.warn?.(message));
-          // rm 后复验：防宿主 materialize 的 mkdir -p 把路径在删除窗口内重建。
-          // 重现只可能来自活跃写入方（内存中的生成流，或刚写完不久、客户端
-          // 重连即恢复的 tab）。据此分两档：
-          //   - 可能活跃（内存存在 或 60s 内有写入）：维持原 300ms settle 两段
-          //     复验；重现则再删一次，仍未删掉计入 failed('reappeared')。
-          //   - 冷文件（不在内存且超过 60s 无写入）：未来写入需要用户主动继续
-          //     对话，不会落在删除窗口内——做零等待的即时复验即可。批量清理
-          //     陈旧归档不再为每个文件白付 2×300ms。
-          const plausiblyActive = inMemory || Date.now() - fresh.mtimeMs < BUSY_WRITE_WINDOW_MS;
-          const settleMs = plausiblyActive ? REAPPEAR_SETTLE_MS : 0;
-          if (await filePresentAfterSettle(file.path, settleMs)) {
-            try {
-              await rm(file.path, { force: true });
-              await removeSessionDirIfOwned(sessionId, file.path, (message) => ctx.logger?.warn?.(message));
-            } catch {}
+            await rm(file.path, { force: true });
+            await removeSessionDirIfOwned(sessionId, file.path, (message) => ctx.logger?.warn?.(message));
+            // rm 后复验：防宿主 materialize 的 mkdir -p 把路径在删除窗口内重建。
+            // 重现只可能来自活跃写入方（内存中的生成流，或刚写完不久、客户端
+            // 重连即恢复的 tab）。据此分两档：
+            //   - 可能活跃（内存存在 或 60s 内有写入）：维持原 300ms settle 两段
+            //     复验；重现则再删一次，仍未删掉计入 failed('reappeared')。
+            //   - 冷文件（不在内存且超过 60s 无写入）：未来写入需要用户主动继续
+            //     对话，不会落在删除窗口内——做零等待的即时复验即可。批量清理
+            //     陈旧归档不再为每个文件白付 2×300ms。
+            const plausiblyActive = inMemory || Date.now() - fresh.mtimeMs < BUSY_WRITE_WINDOW_MS;
+            const settleMs = plausiblyActive ? REAPPEAR_SETTLE_MS : 0;
             if (await filePresentAfterSettle(file.path, settleMs)) {
-              failed.push({ sessionId, reason: 'reappeared' });
-              continue;
+              try {
+                await rm(file.path, { force: true });
+                await removeSessionDirIfOwned(sessionId, file.path, (message) => ctx.logger?.warn?.(message));
+              } catch {}
+              if (await filePresentAfterSettle(file.path, settleMs)) {
+                failed.push({ sessionId, reason: 'reappeared' });
+                return;
+              }
             }
+            deleted.push(sessionId);
+          } catch (error) {
+            failed.push({ sessionId, reason: (error as Error)?.message ?? 'delete-failed' });
           }
-          deleted.push(sessionId);
-        } catch (error) {
-          failed.push({ sessionId, reason: (error as Error)?.message ?? 'delete-failed' });
-        }
+        });
       }
       return { deleted, failed, removedFromArchive: 0 };
     },

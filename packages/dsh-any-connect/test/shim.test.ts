@@ -310,4 +310,90 @@ describe('WorkBuddy shim', () => {
     expect(res.status).toBe(401)
     expect(harness.upstreamBodies).toHaveLength(0)
   })
+
+  it('detects [DONE] split across stream chunks (no duplicate marker on mid-flight error)', async () => {
+    // 标记恰好跨 chunk 分割时,单块扫描会漏检 sawDone,流中途出错就会再补
+    // 一个 [DONE](客户端看到重复标记,截断被伪装成干净收尾)。
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"你好"}}]}\n\n'))
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"!"}}]}\n\ndata: [DON'))
+        controller.enqueue(encoder.encode('E]\n\n'))
+        // 延迟 error:同步 error 会让尚未开始消费的排队块丢失。
+        setTimeout(() => controller.error(new Error('upstream reset mid-flight')), 20)
+      },
+    })
+    const harness = await startShim(() => ({
+      ok: true,
+      response: new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+    }))
+    const response = await fetch(`${harness.shim.baseUrl()}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${harness.shim.token()}` },
+      body: JSON.stringify({ model: 'auto', stream: true, messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    expect(response.status).toBe(200)
+    const text = await response.text()
+    expect(text).toContain('你好')
+    // 恰好一个 [DONE]:分割检测命中,错误收尾不再补发第二个。
+    expect(text.split('[DONE]').length - 1).toBe(1)
+  })
+
+  it('stays silent when the client disconnects (no error written into a dead socket)', async () => {
+    // chatStream 返回 client 类失败且调用方 signal 已 abort:shim 不得向
+    // 已销毁的 socket 回写错误(此前会留一行无意义的 502 噪音)。
+    const dir = await mkdtemp(join(tmpdir(), 'wb-shim-abort-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const desktop = join(dir, 'workbuddy-desktop.info')
+    await writeFile(desktop, JSON.stringify({
+      auth: { accessToken: 'at', refreshToken: 'rt', expiresAt: Date.now() + 3600_000, domain: 'www.codebuddy.cn' },
+      account: { uid: 'uid-1' },
+    }))
+    const store = new WorkBuddyCredentialStore({
+      desktopPath: desktop,
+      ownPath: join(dir, 'own.json'),
+      refresh: async () => ({ accessToken: 'unused' }),
+    })
+    let entered = false
+    const shim = createWorkBuddyShim({
+      store,
+      catalog: new WorkBuddyCatalog(),
+      client: {
+        async chatStream(_credential, _body, signal) {
+          entered = true
+          await new Promise<void>((resolve) => {
+            if (signal?.aborted) resolve()
+            else signal?.addEventListener('abort', () => resolve())
+          })
+          return { ok: false, status: 0, kind: 'client' as const, message: 'client disconnected before upstream response' }
+        },
+      },
+    })
+    await shim.ready
+    CLEANUP.push(() => shim.close())
+
+    await new Promise<void>((resolve) => {
+      const req = request({
+        host: '127.0.0.1',
+        port: Number(new URL(shim.baseUrl()).port),
+        method: 'POST',
+        path: '/v1/chat/completions',
+        headers: { 'Content-Type': 'application/json', authorization: `Bearer ${shim.token()}` },
+      }, () => {})
+      req.on('error', () => {}) // 客户端主动断开:服务端 reset 是预期
+      req.end(JSON.stringify({ model: 'auto', messages: [{ role: 'user', content: 'hi' }] }))
+      const abortOnceEntered = setInterval(() => {
+        if (entered) {
+          clearInterval(abortOnceEntered)
+          req.destroy()
+          // 断开后给服务端几个 tick 处理;若有未捕获异常或向死 socket 回写,
+          // vitest 会以 unhandled rejection / 崩溃形式失败。
+          setTimeout(resolve, 80)
+        }
+      }, 10)
+      CLEANUP.push(() => clearInterval(abortOnceEntered))
+    })
+    expect(entered).toBe(true)
+  })
 })

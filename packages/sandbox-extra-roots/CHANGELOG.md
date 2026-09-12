@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.11 (2026-09-12)
+
+### Fixes
+
+* 危险根校验升级词法祖先判定：授予危险根的任一祖先等价于授予该危险根本身。
+  此前只做精确相等匹配，授予 `/Users`（macOS）或 `/home`（Linux）等于放开
+  整个 home 区、授予 `/private` 等于放开其下 canonical 后的 `/private/etc`
+  等系统目录。现 home 的祖先按 reject 拒绝、系统目录的祖先按 filter 剔除；
+  危险根的后代比危险根更窄，照常放行
+* Seatbelt 的内部命令改从 `--` 分隔符之后定位（此前硬编码 `slice(3)`，官方
+  在 `-p` 前后追加参数会静默错位）；分隔符缺失（契约漂移）时保持官方 argv
+  原样并告警一次，与 bwrap/Landlock 同策略
+* 目录存在性缓存声明上移到配置存储创建之前：配置热更新回调引用它，构造期
+  同步触发回调会触发 TDZ ReferenceError
+* fs 侧放行路径的 `resolve` 显式绑定底层实例：宿主以解绑形式调用
+  `checkedTarget` 时不再以插件内部 TypeError 盖过官方的 `FS_SANDBOX_DENIED`
+  拒绝文本
+* 新增 2 用例（home 祖先拒绝/后代放行并断言授予生效、macOS `/private`
+  过滤）；build + typecheck + 全量测试通过，并在隔离测试实例真实验证
+
 ## 0.4.10 (2026-09-11)
 
 ### Changes

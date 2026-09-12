@@ -26,7 +26,6 @@ export {
 } from './catalog.js'
 export {
   defaultDesktopAuthCandidates,
-  defaultDesktopAuthPath,
   parseWorkBuddyAuth,
   WORKBUDDY_AUTH_FILE_ENV,
   WORKBUDDY_AUTH_FILENAME,
@@ -119,6 +118,7 @@ export function apply(ctx: Context, config: Config): void {
   // has to wait for a settings service to exist — exactly what the inject
   // below does. Without one the plugin still serves its models; it simply has
   // no user-editable section, as before.
+  let stopped = false
   let current = () => config
   ctx.inject(['settings'], (settingsCtx: Context) => {
     settingsCtx.settings.installSection(ctx, WORKBUDDY_SETTINGS_NS, Config, config, {
@@ -126,11 +126,33 @@ export function apply(ctx: Context, config: Config): void {
       onChange() {
         const next = current().authFile
         store.setDesktopPath(next)
+        // authFile 改指到另一份已登录凭据（或首次补上路径）时重拉模型目录：
+        // 目录只在启动时拉一次的话，晚登录/换账号的用户会一直停在 fallback
+        // 列表，直到插件重载。拉取失败仅告警，fallback 目录照常服务。
+        refreshCatalog('authFile changed')
       },
     })
   })
 
-  let stopped = false
+  /** 从上游拉一次模型目录并写入 catalog；启动与 authFile 变更共用。
+   * 函数声明（而非 const 箭头）：settings 服务已在场时 inject 回调同步
+   * 执行，onChange 必须引用得到提升后的绑定。 */
+  function refreshCatalog(reason: string): void {
+    void (async () => {
+      try {
+        const credential = await store.current()
+        if (credential === undefined || stopped) return
+        const models = await client.fetchModels(credential)
+        if (stopped) return
+        catalog.set([...models])
+      } catch (error: unknown) {
+        ctx.logger.warn(
+          `dsh-any-connect: dynamic model catalog unavailable (${reason}); serving the static fallback list`,
+          error,
+        )
+      }
+    })()
+  }
   ctx.effect(() => () => {
     stopped = true
     // close 期间 server 的 error 事件会 reject 该 promise,不捕获就是
@@ -144,7 +166,6 @@ export function apply(ctx: Context, config: Config): void {
     .then(() => {
       if (stopped) return
 
-      let invalidate: (() => void) | undefined
       try {
         // Constructed only once the listener holds a port: the provider's
         // models read the shim origin at construction time.
@@ -154,7 +175,6 @@ export function apply(ctx: Context, config: Config): void {
           catalog,
           resolveAttachments: () => ctx.get('attachments'),
         })
-        invalidate = workbuddy.invalidate
 
         let releaseAdapter: (() => void) | undefined
         let releaseDirectory: (() => void) | undefined
@@ -195,21 +215,7 @@ export function apply(ctx: Context, config: Config): void {
         return
       }
 
-      void (async () => {
-        try {
-          const credential = await store.current()
-          if (credential === undefined || stopped) return
-          const models = await client.fetchModels(credential)
-          if (stopped) return
-          catalog.set([...models])
-          invalidate?.()
-        } catch (error: unknown) {
-          ctx.logger.warn(
-            'dsh-any-connect: dynamic model catalog unavailable; serving the static fallback list',
-            error,
-          )
-        }
-      })()
+      refreshCatalog('startup')
     })
     .catch((error: unknown) => {
       ctx.logger.error('dsh-any-connect: loopback endpoint failed to start; provider not registered', error)

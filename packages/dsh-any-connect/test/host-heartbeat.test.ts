@@ -98,4 +98,26 @@ describe('host heartbeat', () => {
     )
     expect(await readHostHeartbeat()).toBeUndefined()
   })
+
+  it('reads EPERM from process.kill as alive and other errors as dead', () => {
+    // EPERM = PID 存在但属其他用户:进程活着,不能读成死亡。
+    const heartbeat = { version: 1 as const, package: 'dsh-any-connect' as const, pluginVersion: '0.0.0', registeredAt: Date.now(), pid: 1234 }
+    const kill = vi.spyOn(process, 'kill')
+    const failing = (code: string) => () => {
+      throw Object.assign(new Error(code), { code })
+    }
+    kill.mockImplementation(failing('EPERM'))
+    try {
+      expect(isHeartbeatProcessAlive(heartbeat)).toBe(true)
+    } finally {
+      kill.mockRestore()
+    }
+    // ESRCH = 无此进程:死亡。
+    kill.mockImplementation(failing('ESRCH'))
+    try {
+      expect(isHeartbeatProcessAlive(heartbeat)).toBe(false)
+    } finally {
+      kill.mockRestore()
+    }
+  })
 })

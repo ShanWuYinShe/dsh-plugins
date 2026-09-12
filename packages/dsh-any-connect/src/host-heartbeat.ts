@@ -114,16 +114,7 @@ export async function readHostHeartbeat(): Promise<WorkBuddyHostHeartbeat | unde
 export function processStartTimeMs(pid: number): number | undefined {
   try {
     if (process.platform === 'win32') {
-      const out = execFileSync(
-        'wmic',
-        ['process', 'where', `processid=${pid}`, 'get', 'CreationDate'],
-        { encoding: 'utf8', windowsHide: true },
-      )
-      const m = out.match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.\d+([+-]\d{4})/)
-      if (m === null) return undefined
-      const [, y, mo, d, h, mi, s] = m
-      const ms = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s))
-      return Number.isFinite(ms) ? ms : undefined
+      return windowsProcessStartTimeMs(pid)
     }
     const out = execFileSync(
       'ps',
@@ -133,6 +124,44 @@ export function processStartTimeMs(pid: number): number | undefined {
     if (out === '') return undefined
     const ms = Date.parse(out)
     return Number.isFinite(ms) ? ms : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Windows 进程启动时刻（epoch ms）。先试 WMI 的 `wmic`（旧版 Windows），
+ * 失败后回退 PowerShell `Get-CimInstance`——wmic 在 Windows 11 24H2 起
+ * 已被移除。回退路径取 `CreationDate.ToFileTimeUtc()`：1601 纪律的 100ns
+ * 计数，纯数字输出、无区域格式差异；换算为 Unix 毫秒要减去两个纪元之间
+ * 的 11644473600000 毫秒。
+ */
+function windowsProcessStartTimeMs(pid: number): number | undefined {
+  try {
+    const out = execFileSync(
+      'wmic',
+      ['process', 'where', `processid=${pid}`, 'get', 'CreationDate'],
+      { encoding: 'utf8', windowsHide: true },
+    )
+    const m = out.match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.\d+([+-]\d{4})/)
+    if (m !== null) {
+      const [, y, mo, d, h, mi, s] = m
+      const ms = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s))
+      if (Number.isFinite(ms)) return ms
+    }
+  } catch {
+    // wmic 缺失（Windows 11 24H2+）或执行失败：回退 PowerShell。
+  }
+  try {
+    const out = execFileSync(
+      'powershell',
+      ['-NoProfile', '-Command',
+        `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CreationDate.ToFileTimeUtc()`],
+      { encoding: 'utf8', windowsHide: true },
+    ).trim()
+    const fileTime = Number(out)
+    if (!Number.isFinite(fileTime) || fileTime <= 0) return undefined
+    return fileTime / 10_000 - 11644473600000
   } catch {
     return undefined
   }
@@ -157,7 +186,9 @@ export function processStartTimeMs(pid: number): number | undefined {
 export function isHeartbeatProcessAlive(heartbeat: WorkBuddyHostHeartbeat): boolean {
   try {
     process.kill(heartbeat.pid, 0)
-  } catch {
+  } catch (error: unknown) {
+    // EPERM = PID 存在但属其他用户：进程活着，不能读成死亡。
+    if ((error as NodeJS.ErrnoException | null)?.code === 'EPERM') return true
     return false
   }
   const startAtMs = processStartTimeMs(heartbeat.pid)

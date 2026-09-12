@@ -114,6 +114,13 @@ const GLOBAL_BASE = 'https://www.workbuddy.ai'
 const CLIENT_UA = 'CLI/2.63.2 CodeBuddy/2.63.2'
 const JSON_TIMEOUT_MS = 30_000
 const ERROR_BODY_LIMIT = 4096
+/**
+ * chat 请求「响应头到达前」的超时：只覆盖上游接受连接却不返回响应头的
+ * 挂死窗口。fetch 一返回（头已到）定时器即撤销——SSE 流式阶段的长寿命
+ * 不受它约束（流由调用方断开信号与 pi-ai 侧的 idle 超时兜底）；错误体
+ * 的读取也在这枚定时器的保护窗口内完成。与各 JSON 端点的超时同值。
+ */
+const CHAT_HEADER_TIMEOUT_MS = 30_000
 
 /** Insufficient-credit markers, ASCII lowercase plus the original Chinese. */
 const HARD_CREDIT_MARKERS: readonly string[] = [
@@ -226,7 +233,7 @@ export function classifyUpstreamError(status: number, body: string): UpstreamErr
   if (status === 402) return 'hard_credit'
   const lower = body.toLowerCase()
   for (const marker of HARD_CREDIT_MARKERS) {
-    if (lower.includes(marker.toLowerCase()) || body.includes(marker)) return 'hard_credit'
+    if (lower.includes(marker.toLowerCase())) return 'hard_credit'
   }
   for (const marker of SESSION_DEAD_MARKERS) {
     if (body.includes(marker)) return 'session_dead'
@@ -435,19 +442,42 @@ export class WorkBuddyUpstreamClient {
     bodyJson: string,
     signal?: AbortSignal,
   ): Promise<WorkBuddyChatResult> {
+    const headerTimer = new AbortController()
+    const timer = setTimeout(
+      () => headerTimer.abort(new Error(`no response headers within ${CHAT_HEADER_TIMEOUT_MS}ms`)),
+      CHAT_HEADER_TIMEOUT_MS,
+    )
     let response: Response
     try {
       response = await fetch(`${chatBase(credential)}/v2/chat/completions`, {
         method: 'POST',
         headers: { ...chatHeaders(credential), 'Authorization': `Bearer ${credential.accessToken}` },
         body: bodyJson,
-        ...signal === undefined ? {} : { signal },
+        // 调用方断开信号与头超时合并：任一触发都中止请求。
+        signal: signal === undefined ? headerTimer.signal : AbortSignal.any([headerTimer.signal, signal]),
       })
     } catch (error: unknown) {
+      // 客户端主动断开（pi-ai 取消生成）不是上游故障，按 client 分类回报；
+      // shim 对这类结果不向已销毁的 socket 回写错误。
+      if (signal?.aborted) {
+        return { ok: false, status: 0, kind: 'client', message: 'client disconnected before upstream response' }
+      }
       return { ok: false, status: 0, kind: 'server', message: `transport error: ${String(error)}` }
     }
-    if (response.ok) return { ok: true, response }
-    const text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
+    if (response.ok) {
+      clearTimeout(timer) // 头已到：流式阶段不受头超时约束
+      return { ok: true, response }
+    }
+    let text: string
+    try {
+      // 错误体读取仍在头超时的保护窗口内：上游发了头却卡住错误体时，
+      // 定时器中止请求，这里按 server 分类兜底而非无限挂起。
+      text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
+    } catch {
+      return { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)' }
+    } finally {
+      clearTimeout(timer)
+    }
     return {
       ok: false,
       status: response.status,
@@ -556,6 +586,7 @@ export class WorkBuddyUpstreamClient {
         ProductCode: 'p_tcaca',
         Status: [0, 3],
         PackageEndTimeRangeBegin: format(now),
+        // 窗口上界沿用上游 CLI 的拼写：约 101 年（365×101 天），毫秒数。
         PackageEndTimeRangeEnd: format(new Date(now.getTime() + 365 * 101 * 24 * 3600 * 1000)),
       }),
       signal: AbortSignal.timeout(JSON_TIMEOUT_MS),

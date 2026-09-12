@@ -88,7 +88,8 @@ function originIsLoopback(origin: string | undefined): boolean {
   if (origin === undefined || origin.trim() === '') return true
   try {
     const { hostname } = new URL(origin)
-    return LOOPBACK_HOSTS.has(hostname) || hostname === '::1'
+    // WHATWG URL 对 IPv6 主机名返回带方括号的拼写，LOOPBACK_HOSTS 已覆盖。
+    return LOOPBACK_HOSTS.has(hostname)
   } catch {
     return false
   }
@@ -256,6 +257,9 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     const result = await client.chatStream(credential, prepared, controller.signal)
 
     if (!result.ok) {
+      // 客户端已断开（pi-ai 取消生成 / 请求中止）：响应写进已销毁的 socket
+      // 只会留下无意义的 502 噪音，静默收尾。
+      if (controller.signal.aborted || res.destroyed) return
       writeOpenAIError(
         res,
         KIND_STATUS[result.kind],
@@ -271,14 +275,24 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no',
     })
+    // [DONE] 探测保留上一块的尾部字节：标记恰好跨 chunk 分割时单块扫描会
+    // 漏检，流中途出错就会再补发一个 [DONE]（或把截断伪装成干净收尾）。
+    const DONE_MARKER = Buffer.from('[DONE]')
+    let tail = Buffer.alloc(0)
     let sawDone = false
     const body = Readable.fromWeb(result.response.body as Parameters<typeof Readable.fromWeb>[0])
     body.on('data', (chunk: Buffer) => {
-      if (chunk.includes('[DONE]')) sawDone = true
+      const joined = Buffer.concat([tail, chunk])
+      if (joined.includes(DONE_MARKER)) sawDone = true
+      // 只留 marker 长度 -1 的尾部：足够拼出任何跨块分割的标记。
+      tail = joined.subarray(Math.max(0, joined.length - (DONE_MARKER.length - 1)))
     })
     body.on('error', (error: unknown) => {
       logger?.warn('dsh-any-connect: upstream stream failed mid-flight', error)
+      // 中断收尾:客户端已见过 [DONE] 的直接终结连接;没见过的补一个再终结
+      // ——既不把截断伪装成干净收尾,也不让连接悬挂。
       if (!sawDone && res.writable) res.end('data: [DONE]\n\n')
+      else if (!res.writableEnded) res.end()
     })
     body.pipe(res)
   }

@@ -230,6 +230,32 @@ describe('WorkBuddyCredentialStore', () => {
     expect(refreshes).toBe(1)
   })
 
+  it('throttles refresh attempts when the refresh endpoint keeps failing', async () => {
+    // 失败侧回归:token 在 margin 内(还剩 4 分钟)但刷新端点持续故障时,
+    // 失败也必须计入节流窗口——否则每条请求都会打一次刷新端点(与「极短
+    // 有效期打爆端点」同构,只是发生在失败侧)。
+    const dir = await mkdtemp(join(tmpdir(), 'wb-store-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const desktop = join(dir, 'workbuddy-desktop.info')
+    await writeFile(desktop, nestedDoc(Date.now() + 240_000))
+    let refreshes = 0
+    const store = new WorkBuddyCredentialStore({
+      desktopPath: desktop,
+      ownPath: join(dir, 'own.json'),
+      refresh: async () => {
+        refreshes += 1
+        throw new Error('refresh endpoint down')
+      },
+    })
+    // 首次:尝试刷新,失败但 token 仍可复用(>30s 寿命)。
+    await expect(store.resolve()).resolves.toMatchObject({ accessToken: 'at' })
+    expect(refreshes).toBe(1)
+    // 30s 节流窗口内:不再尝试,直接返回现值。
+    await expect(store.resolve()).resolves.toMatchObject({ accessToken: 'at' })
+    await expect(store.resolve()).resolves.toMatchObject({ accessToken: 'at' })
+    expect(refreshes).toBe(1)
+  })
+
   it('applies a desktop-path repoint on the next read', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'wb-store-'))
     CLEANUP.push(() => rm(dir, { recursive: true, force: true }))

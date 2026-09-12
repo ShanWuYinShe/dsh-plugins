@@ -304,3 +304,63 @@ describe('normalizeCredits', () => {
     expect(normalizeCredits('credits')).toBeUndefined()
   })
 })
+
+describe('WorkBuddyUpstreamClient.chatStream', () => {
+  it('returns the raw SSE response on ok and classifies non-ok bodies by content', async () => {
+    const sse = { ok: true, status: 200, body: 'stream' } as unknown as Response
+    vi.stubGlobal('fetch', vi.fn(async () => sse))
+    const ok = await new WorkBuddyUpstreamClient().chatStream(CREDENTIAL, '{}')
+    expect(ok.ok).toBe(true)
+    if (ok.ok) expect(ok.response).toBe(sse)
+
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse('insufficient credit balance', false, 402)))
+    const credit = await new WorkBuddyUpstreamClient().chatStream(CREDENTIAL, '{}')
+    expect(!credit.ok && credit.kind === 'hard_credit' && credit.status === 402).toBe(true)
+
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse('quota exceeded somewhere', false, 500)))
+    const server = await new WorkBuddyUpstreamClient().chatStream(CREDENTIAL, '{}')
+    expect(!server.ok && server.kind === 'hard_credit').toBe(true)
+  })
+
+  it('classifies a caller abort as a client disconnect, not an upstream failure', async () => {
+    // 模拟 undici 语义:signal 触发时 fetch 以 AbortError reject。
+    const controller = new AbortController()
+    vi.stubGlobal('fetch', vi.fn((_url: unknown, init: { signal: AbortSignal }) => new Promise<Response>((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(new Error('This operation was aborted')))
+    })))
+    const client = new WorkBuddyUpstreamClient()
+    const pending = client.chatStream(CREDENTIAL, '{}', controller.signal)
+    controller.abort()
+    const result = await pending
+    expect(!result.ok && result.kind === 'client' && result.status === 0).toBe(true)
+  })
+
+  it('aborts with a server classification when upstream never returns headers', async () => {
+    // 头超时兜底:上游接受连接但不返回响应头。定时器触发 → 合并 signal
+    // 中止 → fetch reject → 按 server 分类,消息带超时说明。
+    vi.useFakeTimers()
+    try {
+      vi.stubGlobal('fetch', vi.fn((_url: unknown, init: { signal: AbortSignal }) => new Promise<Response>((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(new Error(String(init.signal.reason))))
+      })))
+      const pending = new WorkBuddyUpstreamClient().chatStream(CREDENTIAL, '{}')
+      await vi.advanceTimersByTimeAsync(30_000)
+      const result = await pending
+      expect(!result.ok && result.kind === 'server').toBe(true)
+      if (!result.ok) expect(result.message).toContain('no response headers')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('falls back to a server classification when the error body read fails', async () => {
+    // 错误体读取失败/中止:按 server 兜底,不带上游体。
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      status: 502,
+      text: () => Promise.reject(new Error('body aborted')),
+    }) as unknown as Response))
+    const result = await new WorkBuddyUpstreamClient().chatStream(CREDENTIAL, '{}')
+    expect(!result.ok && result.kind === 'server' && result.message === '(error body unavailable)').toBe(true)
+  })
+})

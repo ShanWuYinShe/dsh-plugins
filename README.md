@@ -97,7 +97,7 @@ DSH 从源码仓库运行（不全局安装 `dsh` 与 `@deepseek-ai/*`）时，�
 pnpm install       # 安装依赖
 pnpm run build     # 全仓构建：每包 tsc 编译 src/ → lib/，esbuild 打包 client
 pnpm run typecheck # tsc --noEmit（host + client 两套 tsconfig）
-pnpm run test      # vitest 回归（host 插件 / config-store / 自适应引擎等）
+pnpm run test      # vitest 回归（host 插件 / config-store / 上游客户端等）
 pnpm run test:ci   # build + typecheck + test（发布前验证）
 ```
 

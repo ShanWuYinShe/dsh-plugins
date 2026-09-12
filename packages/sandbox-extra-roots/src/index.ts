@@ -32,7 +32,7 @@
 
 import { statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import { canonicalPath, isPathUnder, loadLandlock, sandboxAvailable, seatbeltProfileArgs, writableRoots } from "./common.js";
 import { createConfigStore } from "./config-store.js";
@@ -92,21 +92,35 @@ const SYSTEM_DIR_SPELLINGS = ["/etc", "/usr", "/bin", "/sbin"];
 
 /**
  * 额外根的风险分类(remote.set 校验与 normalizeRoots 两个入口共用):
- *   - "reject":canonical 后等于 "/"、Windows 盘根或 os.homedir() 本身——
- *     授予即等于放弃沙盒边界;
- *   - "filter":/etc /usr /bin /sbin 等系统目录,无写入必要且高危;
- *   - null:正常业务根。
+ *   - "reject":canonical 后等于 "/"、Windows 盘根或 os.homedir() 本身,
+ *     或是 homedir 的词法祖先(如 macOS 的 /Users、Linux 的 /home——授予
+ *     它等于放开整个 home 区),即等于放弃沙盒边界;
+ *   - "filter":/etc /usr /bin /sbin 等系统目录及其词法祖先(如 macOS 的
+ *     /private,其下有 realpath 后的 /private/etc 等),无写入必要且高危;
+ *   - null:正常业务根(含危险根的后代——比危险根更窄,授予是安全的)。
+ * 祖先判定用词法前缀:入参是各入口 canonical 化后的平台原生路径,
+ * 分隔符统一,无符号链接歧义。
  */
 function classifyRoot(canonical: string): "reject" | "filter" | null {
   if (canonical === "/" || DRIVE_ROOT_RE.test(canonical)) return "reject";
   try {
     const home = homedir();
     if (home && (canonical === home || canonical === canon(home))) return "reject";
+    if (home && (isLexicalAncestor(canonical, home) || isLexicalAncestor(canonical, canon(home)))) return "reject";
   } catch {}
   for (const spelling of SYSTEM_DIR_SPELLINGS) {
     if (canonical === spelling || canonical === canon(spelling)) return "filter";
+    if (isLexicalAncestor(canonical, spelling) || isLexicalAncestor(canonical, canon(spelling))) return "filter";
   }
   return null;
+}
+
+/** ancestor 是否是 path 的词法祖先(真前缀目录,不含相等;两侧同为
+ * canonical 平台原生路径)。 */
+function isLexicalAncestor(ancestor: string, path: string): boolean {
+  if (ancestor === "" || path === "" || ancestor === path) return false;
+  const prefix = ancestor.endsWith(sep) ? ancestor : ancestor + sep;
+  return path.startsWith(prefix);
 }
 
 /** 官方白名单(writableRoots 可能因 dsh-sandbox 加载失败为 undefined;
@@ -231,6 +245,44 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
 
     // 配置存储:patch config 低优先级,config.json(设置页 UI)权威。
     // 热更新:onUpdate 里同步刷新两个 state 的 extraRoots。
+    // （目录存在性缓存声明在 store 之前:onUpdate 回调引用它,不能让
+    // 回调看到 TDZ 中的绑定——将来 createConfigStore 若在构造期同步调
+    // onUpdate 会直接 ReferenceError。）
+    const dirExistCache = new Map<string, { ok: boolean; until: number }>();
+    const DIR_EXIST_TTL_MS = 5000;
+    function isExistingDirCached(root: string): boolean {
+      const now = Date.now();
+      const hit = dirExistCache.get(root);
+      if (hit !== undefined && hit.until > now) return hit.ok;
+      let ok = false;
+      try {
+        ok = statSync(root, { throwIfNoEntry: false })?.isDirectory() === true;
+      } catch {
+        ok = false;
+      }
+      dirExistCache.set(root, { ok, until: now + DIR_EXIST_TTL_MS });
+      return ok;
+    }
+
+    // bwrap/Landlock 的 --bind/--rw 与 fs fence 的包含判断都只对"当前真实
+    // 存在的目录"生效:不存在的 root 会让 bwrap/Landlock 启动失败(Landlock
+    // 契约里是 "unopenable grant root"),也会造成 bash 与 fs 两侧判定分叉,
+    // 因此两侧共用这一个目录过滤器;同一侧同一根只告警一次(warned 复用)。
+    function existingDirectoryRoots(roots: string[], warned: Set<string>, side: string) {
+      const existing = [];
+      for (const root of roots) {
+        if (isExistingDirCached(root)) {
+          existing.push(root);
+          continue;
+        }
+        const key = `missing-root:${side}:${root}`;
+        if (!warned.has(key)) {
+          warned.add(key);
+          ctx.logger?.warn?.(`sandbox-extra-roots: extra writable root does not exist or is not a directory; not granting it to ${side}: ${root}`);
+        }
+      }
+      return existing;
+    }
     const store = createConfigStore({
       name: "sandbox-extra-roots",
       defaults: DEFAULT_CONFIG,
@@ -324,41 +376,7 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
     // 创建/删除是低频事件，TTL 内沿用上次结果；代价是新建目录最多延迟 TTL
     // 才被授予（对"配置了还不存在的目录，稍后创建"的场景可接受）。
     // 配置热更新时整体失效（onUpdate），保证新配置立即按真实文件系统判定。
-    const dirExistCache = new Map<string, { ok: boolean; until: number }>();
-    const DIR_EXIST_TTL_MS = 5000;
-    function isExistingDirCached(root: string): boolean {
-      const now = Date.now();
-      const hit = dirExistCache.get(root);
-      if (hit !== undefined && hit.until > now) return hit.ok;
-      let ok = false;
-      try {
-        ok = statSync(root, { throwIfNoEntry: false })?.isDirectory() === true;
-      } catch {
-        ok = false;
-      }
-      dirExistCache.set(root, { ok, until: now + DIR_EXIST_TTL_MS });
-      return ok;
-    }
-
-    // bwrap/Landlock 的 --bind/--rw 与 fs fence 的包含判断都只对"当前真实
-    // 存在的目录"生效:不存在的 root 会让 bwrap/Landlock 启动失败(Landlock
-    // 契约里是 "unopenable grant root"),也会造成 bash 与 fs 两侧判定分叉,
-    // 因此两侧共用这一个目录过滤器;同一侧同一根只告警一次(warned 复用)。
-    function existingDirectoryRoots(roots: string[], warned: Set<string>, side: string) {
-      const existing = [];
-      for (const root of roots) {
-        if (isExistingDirCached(root)) {
-          existing.push(root);
-          continue;
-        }
-        const key = `missing-root:${side}:${root}`;
-        if (!warned.has(key)) {
-          warned.add(key);
-          ctx.logger?.warn?.(`sandbox-extra-roots: extra writable root does not exist or is not a directory; not granting it to ${side}: ${root}`);
-        }
-      }
-      return existing;
-    }
+    // （缓存本体声明在 apply 前段、store 创建之前——onUpdate 回调引用它。）
 
     // ── 前置:官方 dsh-sandbox 可用性检查 ──
     // 官方 dsh-sandbox 解析失败(包缺失/file:// 部署三个 profile anchor 都
@@ -404,7 +422,15 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
                 }
               } catch {}
             }
-            wrapped.argv = [a[0], ...seatbeltProfileArgs(policy, roots), ...a.slice(3)];
+            // inner 命令从 -- 分隔符之后取,不硬编码下标:官方若在 -p 之前
+            // 后追加参数,slice(3) 会静默错位。分隔符缺失(契约漂移)时不加
+            // 额外根、保持官方 argv 原样(fail-safe,与 bwrap/Landlock 同策略)。
+            const sbSep = a.indexOf("--");
+            if (sbSep === -1) {
+              warnOnce("seatbelt-separator", "seatbelt argv has no -- separator; cannot add extra writable roots");
+              return wrapped;
+            }
+            wrapped.argv = [a[0], ...seatbeltProfileArgs(policy, roots), ...a.slice(sbSep + 1)];
             return wrapped;
           }
           // bwrap:在 -- 前插入 --bind <root> <root>(后挂载覆盖 --ro-bind / /)。
@@ -474,7 +500,11 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
               throw error;
             }
             if (policy?.mode !== "workspace-write") throw error;
-            const fresh = await this.resolve(target.displayPath);
+            // 显式绑定到底层实例:宿主若以解绑形式调用 checkedTarget
+            // (const ct = fs.checkedTarget; ct(...)),this.resolve 会是
+            // undefined 并抛 TypeError,把官方的 FS_SANDBOX_DENIED 拒绝
+            // 文本替换成插件内部异常。
+            const fresh = await rawFs.resolve.call(rawFs, target.displayPath);
             // 与 bash 侧(bwrap/Landlock)对齐:只对当前真实存在的目录放行,
             // 消除"文件工具放行、bash 拒绝"或反向的分叉;每次调用重新
             // canonical 化,符号链接重定向后立即跟随(同 confine 路径)。

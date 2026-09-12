@@ -47,7 +47,8 @@ function loopbackOrigin(req: IncomingMessage): boolean {
   if (origin === undefined) return true
   try {
     const { hostname } = new URL(origin)
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1'
+    // WHATWG URL 对 IPv6 主机名返回带方括号的拼写。
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
   } catch {
     return false
   }

@@ -103,8 +103,6 @@ export interface WorkBuddyAdapterOptions {
 /** What {@link createWorkBuddyAdapter} hands back. */
 export interface WorkBuddyAdapter {
   adapter: PiAiAdapter
-  /** Rebuild the adapter's provider snapshot; call after a catalog update. */
-  invalidate: () => void
 }
 
 /**
@@ -217,7 +215,7 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
     piProvider: provider,
   }
 
-  let profiles = new Map<string, ResolvedPiAiProviderProfile>([[WORKBUDDY_PROVIDER, profile]])
+  const profiles = new Map<string, ResolvedPiAiProviderProfile>([[WORKBUDDY_PROVIDER, profile]])
 
   const adapter = new WorkBuddyPiAiAdapter(catalog, {
     profiles: () => profiles,
@@ -232,9 +230,6 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
 
   return {
     adapter,
-    invalidate: () => {
-      profiles = new Map<string, ResolvedPiAiProviderProfile>([[WORKBUDDY_PROVIDER, profile]])
-    },
   }
 }
 

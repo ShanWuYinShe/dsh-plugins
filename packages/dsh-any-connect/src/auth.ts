@@ -147,11 +147,6 @@ export function defaultDesktopAuthCandidates(): string[] {
   return []
 }
 
-/** First platform-default candidate; see {@link defaultDesktopAuthCandidates}. */
-export function defaultDesktopAuthPath(): string | undefined {
-  return defaultDesktopAuthCandidates()[0]
-}
-
 /** Normalize an expiry that may arrive in seconds or milliseconds. */
 function expiryToMs(value: number): number {
   if (value <= 0) return 0
@@ -263,8 +258,11 @@ export class WorkBuddyCredentialStore {
   /** 落盘失败时的内存兜底:承载着可能已被上游轮换的 refresh token,
    * 比磁盘副本新时 {@link current} 优先返回它,进程退出即失。 */
   private memoryCredential: WorkBuddyCredential | undefined
-  /** 上一次成功刷新的时刻;{@link MIN_REFRESH_INTERVAL_MS} 内不再刷新。 */
-  private lastRefreshAtMs = 0
+  /** 上一次刷新尝试（无论成败）的时刻；{@link MIN_REFRESH_INTERVAL_MS} 内
+   *  不再发起尝试。失败也计入——否则刷新端点持续故障且 token 还在 margin
+   *  内时，每条请求都会打一次刷新端点（与要防的「极短有效期打爆端点」
+   *  同构，只是发生在失败侧）。 */
+  private lastRefreshAttemptMs = 0
 
   constructor(options: WorkBuddyStoreOptions) {
     this.refresh = options.refresh
@@ -348,8 +346,10 @@ export class WorkBuddyCredentialStore {
     // 刷新节流:needsRefresh 只看过期时间,上游签发极短有效期(或刷新
     // 响应缺 expiresIn)会让每条请求都打一次刷新端点——单飞只合并并发、
     // 不节流。窗口内且 token 尚未真正过期时直接用现值;已过期则必须尝试。
+    // 窗口按「尝试时刻」计（成功与失败都算）：刷新端点持续故障时同样
+    // 退避到每 30s 至多一次，而不是每请求一次。
     if (credential.expiresAtMs > Date.now()
-      && Date.now() - this.lastRefreshAtMs < MIN_REFRESH_INTERVAL_MS) {
+      && Date.now() - this.lastRefreshAttemptMs < MIN_REFRESH_INTERVAL_MS) {
       return credential
     }
     this.inflight ??= this.refreshNow(credential)
@@ -380,6 +380,7 @@ export class WorkBuddyCredentialStore {
   /** Remove the plugin-owned copy; the desktop file is untouched. */
   async logout(): Promise<void> {
     this.memoryCredential = undefined
+    this.lastRefreshAttemptMs = 0
     await rm(this.ownPath, { force: true })
     await rm(`${this.ownPath}.lock`, { force: true })
   }
@@ -398,13 +399,15 @@ export class WorkBuddyCredentialStore {
     try {
       outcome = await this.refresh(credential)
     } catch (error: unknown) {
+      // 失败同样计入节流窗口（见 lastRefreshAttemptMs）。
+      this.lastRefreshAttemptMs = Date.now()
       if (credential.expiresAtMs > Date.now() + MIN_REUSABLE_LIFETIME_MS) return credential
       throw new Error(
         `workbuddy: token refresh failed and the access token is expired (${String(error)});`
         + ' open the WorkBuddy desktop app once to sign in again',
       )
     }
-    this.lastRefreshAtMs = Date.now()
+    this.lastRefreshAttemptMs = Date.now()
     const refreshed: WorkBuddyCredential = {
       ...credential,
       accessToken: outcome.accessToken,

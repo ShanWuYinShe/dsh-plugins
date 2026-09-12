@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { apply } from "../src/index.js";
 import { canonicalPath, writableRoots } from "../src/common.js";
 
@@ -232,6 +232,39 @@ describe("sandbox-extra-roots 危险根校验", () => {
     await apply(ctx, { extraWritableRoots: [] });
     expect(() => ctx.gateway.set({ extraWritableRoots: ["/"] })).toThrow(/dangerous/);
     expect(() => ctx.gateway.set({ extraWritableRoots: [fakeHome] })).toThrow(/dangerous/);
+  });
+
+  it("危险根的词法祖先被拒绝,后代仍允许(祖先判定回归)", async () => {
+    // home 的父目录(如 macOS /Users、Linux /home;测试环境为 tmpdir 下
+    // mkdtemp 的父目录)是 homedir 的祖先,授予它等于放开整个 home 区 →
+    // 拒绝。断言全部用运行时取值(dirname/canonicalPath),不写死任何
+    // 平台拼写,macOS(/var/... → /private/var/... canonical 化)与 Linux
+    // (/tmp 直拼)都成立。
+    const sandboxMock = makeSandboxMock();
+    const ctx = makeCtx(sandboxMock, makeFsMock());
+    await apply(ctx, { extraWritableRoots: [] });
+    const homeParent = dirname(fakeHome);
+    expect(() => ctx.gateway.set({ extraWritableRoots: [homeParent] })).toThrow(/dangerous/);
+    // 危险根的后代比危险根更窄,授予仍然安全:home 下的子目录照常接受。
+    const nested = join(fakeHome, "cache");
+    mkdirSync(nested, { recursive: true });
+    expect(() => ctx.gateway.set({ extraWritableRoots: [nested] })).not.toThrow();
+    // 授予确实生效(不是被静默丢弃):confine 里的拼写是 canonicalPath 的
+    // 产物,断言用同一函数取值,跨平台对齐。
+    const out = sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+    expect(out.argv[2]).toContain('(subpath "' + canonicalPath(nested) + '")');
+  });
+
+  // /private 是 macOS 的 canonical 前缀拼写;该平台差异用例显式 skipIf,
+  // 其他平台跳过而非空跑/失败。
+  it.skipIf(process.platform !== "darwin")("macOS:系统目录的 canonical 前缀(/private)被 normalize 过滤", async () => {
+    const sandboxMock = makeSandboxMock();
+    const ctx = makeCtx(sandboxMock, makeFsMock());
+    // /private 本身不在系统目录名单上,但它是 /private/etc 等 canonical
+    // 系统目录的词法祖先,授予它等价于授予系统目录 → filter 剔除。
+    await apply(ctx, { extraWritableRoots: ["/private"] });
+    const out = sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+    expect(out.argv[2]).not.toContain('(subpath "/private")');
   });
 
   it("patch/YAML 配置里的系统目录被 normalize 过滤(绕过 remote.set 也安全)", async () => {

@@ -69,7 +69,12 @@ function makeFixture(options: {
     archivedSessionIds: [...(options.archived ?? [])],
   };
   const archiveRegistry = {
-    archivedSessionIds: registryState.archivedSessionIds,
+    // 官方契约是 getter(读内部 state),setState 后必须读到新数组——
+    // 静态属性会在 setState 后与 state 脱钩,host 的 archivedSet() 快照
+    // 永远是旧集合(delete↔unarchive 互斥的锁内复验会因此失效)。
+    get archivedSessionIds() {
+      return registryState.archivedSessionIds;
+    },
     enqueueOperation: async (operation: () => unknown) => { await operation(); },
     requireState: () => registryState,
     setState: (next: Record<string, unknown>) => { Object.assign(registryState, next); },
@@ -112,6 +117,8 @@ function makeFixture(options: {
 }
 
 const baseCfg = { detailMaxMessages: 50, messagePreviewChars: 500, titleReadConcurrency: 2 };
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 // ── 用例 ─────────────────────────────────────────────────────────────
 
@@ -488,5 +495,90 @@ describe("session-archive host", () => {
       && !fs.existsSync(path.dirname(legacyPath))).toBe(true);
     // 兜底断言:夹具的 session.jsonl 存根也随目录清理消失。
     expect(fs.existsSync(legacyPath)).toBe(false);
+  });
+
+  it("locate 抛错:删除按 unlocatable 拒绝,不得谎报成功(0.3.9 同源回归)", async () => {
+    // fileInfo 的外层兜底若把 locate 抛错误判为 absent,删除路径会记成
+    // "幂等删除成功"——文件还在却进了 deleted。按语义表必须归 unknown,
+    // 对应删除路径的 unlocatable 拒绝。
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-loc-"));
+    const f = makeFixture({
+      archived: ["e1"],
+      headers: [{ id: "e1", cwd: "/proj/a", createdAt: 1000 }],
+    });
+    writeSession("e1", []);
+    f.ctx.sessionPersistence.locate = () => {
+      throw new Error("backend contract drift");
+    };
+    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const del = await archiveHost.deleteArchived(["e1"]);
+    expect(del.deleted.length === 0
+      && del.failed.length === 1
+      && del.failed[0].sessionId === "e1"
+      && del.failed[0].reason === "unlocatable"
+      && fs.existsSync(sessionPath("e1"))).toBe(true);
+    // 恢复同样谨慎拒绝(unknown ≠ located)。
+    const un = await archiveHost.unarchive(["e1"]);
+    expect(un.restored.length === 0 && f.registryState.archivedSessionIds.includes("e1")).toBe(true);
+  });
+
+  it("delete ↔ unarchive 互斥:并发时不出现「文件删除且归档标记移除」的错位", async () => {
+    // 变体 A:删除先进临界区(在内存 + mtime 新鲜 → 300ms 沉降窗口),恢复
+    // 排队等到删除完成后 confirm → absent → 拒绝恢复。没有互斥时 confirm
+    // 可在沉降窗口内探到 located,setState 会把 id 移出集合——文件没了、
+    // 归档标记也没了,内存会话重回侧边栏。
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-mx1-"));
+    const f = makeFixture({
+      archived: ["m1"],
+      headers: [{ id: "m1", cwd: "/proj/a", createdAt: 1000 }],
+    });
+    writeSession("m1", []);
+    f.sessions.set("m1", {});
+    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const delP = archiveHost.deleteArchived(["m1"]);
+    await delay(50);
+    const unP = archiveHost.unarchive(["m1"]);
+    const [del, un] = await Promise.all([delP, unP]);
+    expect(del.deleted.includes("m1")).toBe(true);
+    expect(un.restored.length === 0).toBe(true);
+    expect(!fs.existsSync(sessionPath("m1"))).toBe(true);
+    // ghost id 留在集合,由存在性过滤隐藏。
+    expect(f.registryState.archivedSessionIds.includes("m1")).toBe(true);
+
+    // 变体 B:恢复先落地,删除随后 → 锁内复验归档成员资格失败,拒绝删除,
+    // 文件保持原状。
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-mx2-"));
+    const f2 = makeFixture({
+      archived: ["m2"],
+      headers: [{ id: "m2", cwd: "/proj/b", createdAt: 2000 }],
+    });
+    writeSession("m2", []);
+    const archiveHost2 = createArchiveHost(f2.ctx, baseCfg);
+    const unP2 = archiveHost2.unarchive(["m2"]);
+    await delay(50);
+    const delP2 = archiveHost2.deleteArchived(["m2"]);
+    const [un2, del2] = await Promise.all([unP2, delP2]);
+    expect(un2.restored.includes("m2")).toBe(true);
+    expect(del2.deleted.length === 0
+      && del2.failed.length === 1
+      && del2.failed[0].reason === "not-archived"
+      && fs.existsSync(sessionPath("m2"))).toBe(true);
+  });
+
+  it("detail:畸形 assistant 事件(缺 message)不炸整个请求", async () => {
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-mal-"));
+    const f = makeFixture({
+      archived: ["d1"],
+      headers: [{ id: "d1", cwd: "/proj/a", createdAt: 1000 }],
+    });
+    writeSession("d1", [
+      messageEvent(1, 10, "正常消息"),
+      // 损坏/异构日志:assistant 事件的 data.message 缺失。
+      { type: "assistant/message", seq: 2, time: 20, data: { turn: 1, step: 2, stream: [] } },
+    ]);
+    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const detail = await archiveHost.detail("d1");
+    expect(detail.messages.length === 1
+      && detail.messages[0].text === "正常消息").toBe(true);
   });
 });

@@ -54,7 +54,8 @@ export class WorkBuddyCatalog {
     return this.models
   }
 
-  /** Replace the list; callers invalidate their adapter snapshot after this. */
+  /** Replace the list; the adapter's `getModels` reads the live catalog, so
+   * the new entries are visible to the next snapshot without further wiring. */
   set(models: readonly WorkBuddyModelInfo[]): void {
     this.models = [...models]
   }
