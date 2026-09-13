@@ -13,17 +13,40 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
     }
 
     const NS = "settings.plugins.sandboxExtraRoots";
+    // web profile 与 host 同机运行,用 UA 近似平台(拿不到 host 的 homedir)。
+    var ua = typeof navigator !== "undefined" ? String(navigator.userAgent || navigator.platform || "") : "";
+    var isDarwin = /Mac/i.test(ua);
+    var isWindows = /Win/i.test(ua);
     // 与 host classifyRoot 的过滤口径保持一致的客户端预览（词法级）：
     // 让"会被静默丢弃的行"在保存前就可见，而不是保存后只看到"已保存"。
     const SYSTEM_DIRS = ["/etc", "/usr", "/bin", "/sbin"];
+    // darwin 下系统目录的 realpath 拼写(/etc → /private/etc):/private 是
+    // 这些目录的词法祖先,host 判为 filter 级静默剔除——预览若只比字面
+    // 会漏掉用户最常见的 macOS 拼写。
+    const DARWIN_SYSTEM_REALPATHS = ["/private/etc", "/private/usr", "/private/bin", "/private/sbin"];
+    // 主目录的词法祖先是 reject 级(host 拒绝保存),典型拼写按平台近似:
+    // darwin 在 /Users/<name>,Linux 在 /home/<name>,Windows 在 C:\Users\<name>。
+    // host 按 homedir 精确判定;客户端只标这些常见祖先,宁可少标(交给 host
+    // 拒绝),不误标合法路径。
+    const HOME_ANCESTORS = isDarwin ? ["/users"] : isWindows ? ["c:/users"] : ["/home"];
+    function isDirPrefix(prefix: string, path: string): boolean {
+      if (prefix === "" || path === "") return false;
+      return (path + "/").startsWith(prefix.endsWith("/") ? prefix : prefix + "/");
+    }
     function analyzeRootsText(text: string) {
       const problems: Array<{ line: number; kind: string; value: string }> = [];
       const seen = new Set<string>();
       text.split("\n").forEach((rawLine, index) => {
         const line = rawLine.trim();
         if (line.length === 0) return;
-        // ~ / ~/x：host 保存时展开为用户主目录，客户端无法解析 home，视为合法。
-        if (line === "~" || line.startsWith("~/") || line.startsWith("~\\")) return;
+        // ~/x：host 保存时展开为用户主目录下的子路径，客户端无法解析 home，
+        // 视为合法。裸 ~ 是主目录本身——host 按 homedir 判 reject 拒绝保存，
+        // 预览同样标 danger。
+        if (line === "~") {
+          problems.push({ line: index + 1, kind: "danger", value: line });
+          return;
+        }
+        if (line.startsWith("~/") || line.startsWith("~\\")) return;
         const isAbsoluteLike = line.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(line);
         if (!isAbsoluteLike) {
           problems.push({ line: index + 1, kind: "invalid", value: line });
@@ -35,9 +58,15 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
           return;
         }
         seen.add(normalized);
+        const cmp = normalized.replace(/\\/g, "/").toLowerCase();
         if (normalized === "/" || /^[a-zA-Z]:[\\/]?$/.test(normalized)) {
           problems.push({ line: index + 1, kind: "danger", value: line });
-        } else if (SYSTEM_DIRS.includes(normalized.replace(/\\/g, "/").toLowerCase())) {
+        } else if (HOME_ANCESTORS.includes(cmp)) {
+          problems.push({ line: index + 1, kind: "homeAncestor", value: line });
+        } else if ([...SYSTEM_DIRS, ...(isDarwin ? DARWIN_SYSTEM_REALPATHS : [])].some((dir) => {
+          const d = dir.toLowerCase();
+          return cmp === d || isDirPrefix(cmp, d);
+        })) {
           problems.push({ line: index + 1, kind: "system", value: line });
         }
       });
@@ -59,6 +88,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       rootInvalid: "第 {n} 行「{v}」不是绝对路径，保存将被拒绝",
       rootDuplicate: "第 {n} 行「{v}」与前面的行重复（host 会去重）",
       rootDanger: "第 {n} 行「{v}」会被拒绝：授予它等于解除沙盒边界",
+      rootHomeAncestor: "第 {n} 行「{v}」会被拒绝：它是主目录的父目录",
       rootSystem: "第 {n} 行「{v}」会被忽略：系统目录"
     };
     const en = {
@@ -77,6 +107,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       rootInvalid: "Line {n} \"{v}\" is not an absolute path; saving will be rejected",
       rootDuplicate: "Line {n} \"{v}\" duplicates an earlier line (deduped by host)",
       rootDanger: "Line {n} \"{v}\" will be rejected: granting it disables the sandbox boundary",
+      rootHomeAncestor: "Line {n} \"{v}\" will be rejected: it is a parent of the home directory",
       rootSystem: "Line {n} \"{v}\" will be ignored: system directory"
     };
 
@@ -110,6 +141,9 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       const dirty = cfg !== null && parsedRoots.join("\n") !== cfgRoots.join("\n");
       // 保存前的即时反馈：哪些行会被 host 拒绝/忽略/去重，不再等保存后才发现。
       const rootProblems = draftText === null ? [] : analyzeRootsText(draftText);
+      // host 必然拒绝的行(invalid/danger/homeAncestor)存在时直接禁用保存:
+      // 与其让用户点了保存再读一段英文 TypeError,不如按钮禁用+行内原因。
+      const hasBlocking = rootProblems.some((p) => p.kind === "invalid" || p.kind === "danger" || p.kind === "homeAncestor");
       const discard = () => {
         setDraftText(cfgRoots.join("\n"));
         setStatus(null);
@@ -190,7 +224,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
             ),
             React.createElement(
               "button",
-              { className: "ser_save", type: "button", disabled: saving || cfg === null || !dirty, onClick: save },
+              { className: "ser_save", type: "button", disabled: saving || cfg === null || !dirty || hasBlocking, onClick: save },
               saving ? t("saving") : t("save")
             )
           )
@@ -273,4 +307,4 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       }, SandboxRootsCard));
     }
 
-    export { apply, inject };
+    export { apply, inject, analyzeRootsText };

@@ -457,6 +457,10 @@ export class WorkBuddyUpstreamClient {
         signal: signal === undefined ? headerTimer.signal : AbortSignal.any([headerTimer.signal, signal]),
       })
     } catch (error: unknown) {
+      // fetch 本身抛错（取消/传输错误/头超时）同样要拆掉定时器：超时回调对
+      // 已 settled 的 controller 是无害 no-op，但定时器会继续挂住事件循环
+      // 30s，连续失败的请求会积攒一堆待触发回调。
+      clearTimeout(timer)
       // 客户端主动断开（pi-ai 取消生成）不是上游故障，按 client 分类回报；
       // shim 对这类结果不向已销毁的 socket 回写错误。
       if (signal?.aborted) {

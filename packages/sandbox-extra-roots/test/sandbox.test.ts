@@ -333,3 +333,55 @@ describe("sandbox-extra-roots 卸载/重装回路", () => {
     }
   });
 });
+
+describe("sandbox-extra-roots 漂移自检 fail-closed", () => {
+  it("官方 profile 形状漂移时放弃重建,保持官方 argv(bash 侧额外根失效,fs 侧不受影响)", async () => {
+    // 回归:漂移自检曾是 warn-only——检出官方 profile 形状变化后仍用本
+    // 插件可能过时的模板整体替换官方 profile,官方新增的限制项会被静默
+    // 丢掉(fail-open)。现在必须保持官方 argv 原样,告警注明 bash 侧失效。
+    mkdirSync(EXTRA, { recursive: true });
+    const driftedMock = {
+      confine(argv: string[], policy: any) {
+        const roots = writableRoots(policy);
+        // 模拟宿主升级后官方模板新增了限制项。
+        return { argv: ["sandbox-exec", "-p", sbpl(roots) + " (deny network*)", "--", ...argv], enforcement: "full", denialSignatures: [], runnerFailureRules: [] };
+      },
+    };
+    const fsMock = makeFsMock();
+    const warnings: string[] = [];
+    const ctx = makeCtx(driftedMock, fsMock);
+    ctx.logger.warn = (message: string) => warnings.push(message);
+    try {
+      await apply(ctx, { extraWritableRoots: [EXTRA] });
+      const out = driftedMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+      // 官方 argv 原样保留:官方新增的限制项还在,额外根没有被注入。
+      expect(out.argv[2]).toContain("(deny network*)");
+      expect(out.argv[2]).not.toContain('(subpath "' + canonicalPath(EXTRA) + '")');
+      expect(warnings.some((w) => w.includes("refusing to rebuild"))).toBe(true);
+      // fs 侧放行不受漂移影响。
+      const granted = await fsMock.checkedTarget({ displayPath: EXTRA + "/foo" });
+      expect(granted.targetKey).toBe(EXTRA + "/foo");
+    } finally {
+      rmSync(EXTRA, { recursive: true, force: true });
+    }
+  });
+
+  it("fs 侧内部异常不外泄:resolve 抛错回落官方 FS_SANDBOX_DENIED", async () => {
+    // 回归:0.4.11 修过解绑调用 TypeError 盖过官方拒绝文本,resolve 本身
+    // 的异常(契约漂移、祖先链 EACCES)是同源残留,现在同样兜底 rethrow
+    // 官方拒绝。
+    mkdirSync(EXTRA, { recursive: true });
+    const sandboxMock = makeSandboxMock();
+    const fsMock = makeFsMock();
+    fsMock.resolve = async () => {
+      throw new Error("EACCES: ancestor unreachable");
+    };
+    const ctx = makeCtx(sandboxMock, fsMock);
+    try {
+      await apply(ctx, { extraWritableRoots: [EXTRA] });
+      await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/foo" })).rejects.toThrow("FS_SANDBOX_DENIED");
+    } finally {
+      rmSync(EXTRA, { recursive: true, force: true });
+    }
+  });
+});

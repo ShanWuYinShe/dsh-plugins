@@ -94,17 +94,37 @@ function makeFixture(options: {
   const persistenceMock: Record<string, any> = withLocate
     ? { locate: (meta: { id: string }) => ({ kind: "jsonl", path: sessionPath(meta.id) }) }
     : {};
-  persistenceMock.list = async () => listed().map((h) => ({
-    header: h,
-    revision: h.id + ":rev",
-    sizeBytes: fs.statSync(sessionPath(h.id)).size,
-  }));
+  let statCalls = 0;
+  let listCalls = 0;
+  // 官方契约 stat(id):只读该会话元数据;枚举不到(无 header 或文件已删)
+  // 返回 undefined。宿主 0.1.5 起四端点都走它,不再全量 list()。
+  persistenceMock.stat = async (id: string) => {
+    statCalls++;
+    if (!headers.some((h) => h.id === id) || !fs.existsSync(sessionPath(id))) return void 0;
+    const header = headerOf(id);
+    return { header, revision: id + ":rev", sizeBytes: fs.statSync(sessionPath(id)).size };
+  };
+  persistenceMock.list = async () => {
+    listCalls++;
+    return listed().map((h) => ({
+      header: h,
+      revision: h.id + ":rev",
+      sizeBytes: fs.statSync(sessionPath(h.id)).size,
+    }));
+  };
   persistenceMock.open = async (id: string, access: string) => {
     if (access !== "read") throw new Error("fixture supports read handles only");
     const header = headerOf(id);
     return {
       header,
-      read: async () => { eventReads++; return { eventState: "owned", events: eventsOf(id) }; },
+      // 官方契约 read(offset,length):offset 起、至多 length 条,超界返回空数组。
+      read: async (offset: number = 0, length?: number) => {
+        eventReads++;
+        const all = eventsOf(id);
+        const start = Math.max(0, offset ?? 0);
+        const end = typeof length === "number" ? start + length : all.length;
+        return { eventState: "owned", events: all.slice(start, end) };
+      },
       close: async () => {},
     };
   };
@@ -113,7 +133,7 @@ function makeFixture(options: {
     sessionPersistence: persistenceMock,
     sessions: { get: (id: string) => sessions.get(id) },
   };
-  return { ctx, registryState, headers, sessions, eventReads: () => eventReads };
+  return { ctx, registryState, headers, sessions, eventReads: () => eventReads, statCalls: () => statCalls, listCalls: () => listCalls };
 }
 
 const baseCfg = { detailMaxMessages: 50, messagePreviewChars: 500, titleReadConcurrency: 2 };
@@ -580,5 +600,89 @@ describe("session-archive host", () => {
     const detail = await archiveHost.detail("d1");
     expect(detail.messages.length === 1
       && detail.messages[0].text === "正常消息").toBe(true);
+  });
+
+  it("标题/详情分块读取:>块长的事件流不重不漏,标题(块首)与尾部消息都可达", async () => {
+    // 回归:此前 read(0) 全量物化,大日志峰值内存 O(整条日志)。分块后必须
+    // 仍然跨块取到全部数据——夹具 read 现在按官方契约 honor offset/length。
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-chunk-"));
+    const f = makeFixture({
+      archived: ["c1"],
+      headers: [{ id: "c1", cwd: "/proj/a", createdAt: 1000 }],
+    });
+    const many: unknown[] = [
+      { type: "session/title", seq: 1, time: 10, data: { title: "长会话", messageSeqs: [2], source: { kind: "user" } } },
+      messageEvent(2, 20, "第一条"),
+    ];
+    // 追加到远超 200(块长)条:纯工具型 assistant 事件(无文本,只占用块空间)。
+    for (let seq = 3; seq <= 450; seq++) {
+      many.push({ type: "assistant/message", seq, time: seq * 10, data: { turn: 1, step: seq, message: { id: "m" + seq, role: "assistant", content: [] }, stream: [] } });
+    }
+    many.push(messageEvent(451, 4510, "最后一条"));
+    writeSession("c1", many);
+    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const readsBefore = f.eventReads();
+
+    const items = await archiveHost.list();
+    expect(items.items.length === 1 && items.items[0].title === "长会话").toBe(true);
+    // 451 条事件跨 3 块(200+200+51),标题读取必须真的分块而不是一次性读。
+    expect(f.eventReads() - readsBefore).toBe(3);
+
+    const detail = await archiveHost.detail("c1");
+    expect(detail.title === "长会话").toBe(true);
+    // 空文本 assistant 消息不计入总数;文本消息 2 条都取到。
+    expect(detail.totalMessageCount === 2).toBe(true);
+    expect(detail.messages.map((m: any) => m.text)).toEqual(["第一条", "最后一条"]);
+  });
+
+  it("unarchive 失败语义:failed 覆盖全部未恢复 id;delete 的英文 reason 有本地化映射", async () => {
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-unf-"));
+    const f = makeFixture({
+      archived: ["u-ok", "u-ghost", "u-gone"],
+      headers: [
+        { id: "u-ok", cwd: "/proj/a", createdAt: 1000 },
+        { id: "u-gone", cwd: "/proj/b", createdAt: 2000 },
+      ],
+    });
+    writeSession("u-ok", []);
+    // u-gone:有 header 但文件已删 → stat 枚举不到。
+    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+
+    const result = await archiveHost.unarchive(["u-ok", "u-ghost", "u-gone", "u-foreign"]);
+    expect(result.restored).toEqual(["u-ok"]);
+    expect(result.removedFromArchive).toBe(1);
+    const reasonOf = (id: string) => result.failed.find((x: any) => x.sessionId === id)?.reason;
+    expect(reasonOf("u-ghost")).toBe("unenumerable"); // 从未有文件
+    expect(reasonOf("u-gone")).toBe("unenumerable"); // 文件已删
+    expect(reasonOf("u-foreign")).toBe("not-archived"); // 请求了但不在归档集合
+    expect(result.failed).toHaveLength(3);
+    expect(f.registryState.archivedSessionIds.includes("u-ok")).toBe(false);
+    expect(f.registryState.archivedSessionIds.includes("u-ghost")).toBe(true);
+
+    // 空 unarchive:无 failed 无 restored,不崩溃。
+    const empty = await archiveHost.unarchive([]);
+    expect(empty.restored.length === 0 && empty.failed.length === 0).toBe(true);
+  });
+
+  it("count/list 走逐 id stat,不再全量 list()", async () => {
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-stat-"));
+    const f = makeFixture({
+      archived: ["s1", "s2", "s-ghost"],
+      headers: [
+        { id: "s1", cwd: "/proj/a", createdAt: 1000 },
+        { id: "s2", cwd: "/proj/b", createdAt: 3000 },
+      ],
+    });
+    writeSession("s1", []);
+    writeSession("s2", []);
+    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+
+    const count = await archiveHost.count();
+    expect(count.count).toBe(2); // 幽灵 id 不计
+    const items = await archiveHost.list();
+    expect(items.items.length).toBe(2);
+    // 徽标轮询端点不该打全量枚举:stat 缺失才回退 list()。
+    expect(f.listCalls()).toBe(0);
+    expect(f.statCalls()).toBeGreaterThanOrEqual(6); // count 3 + list 3
   });
 });

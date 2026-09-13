@@ -2,12 +2,13 @@
 
 补上 DSH 缺失的「归档后半程」：web 侧边栏底部新增**归档**面板。
 
-- **查看归档**：列出全部归档会话（标题、目录、时间、体积、运行状态）；点击
+- **查看归档**：列出全部归档会话（标题、目录、时间、体积）；点击
   会话可展开**只读浏览**其聊天内容（用户/助手文本消息）。
-- **批量恢复**：勾选多个会话一键移回会话树，恢复其在原工作区的位置。
+- **批量恢复**：勾选多个会话一键移回会话树，恢复其在原工作区的位置；无法
+  恢复的会话（文件已删等）逐条给出原因。
 - **彻底删除**：删除勾选会话的持久化文件与会话目录；两段式确认（第一次点击
-  进入确认态，4 秒内再次点击执行）避免误删。有近期写入的会话（生成流可能
-  还在落盘）拒绝删除；若宿主允许归档运行中会话，插件同样拒绝。
+  进入确认态，4 秒内再次点击执行）避免误删。正在生成落盘的会话（沉降观察窗
+  内体积仍在增长）拒绝删除；若宿主允许归档运行中会话，插件同样拒绝。
 - 工具条提供全选与已选计数；侧边栏徽标实时显示归档数量（订阅宿主归档集合，
   轻量轮询兜底）。
 
@@ -27,12 +28,13 @@ dsh plugin --profile web remove @chaoset/session-archive
 
 ## 工作原理
 
-- **列表**：宿主归档集合 ∩ 持久化会话列表；标题折叠自会话事件流的最后一个
-  `session/title` 事件，体积来自文件 stat。
+- **列表**：宿主归档集合 ∩ 逐 id 持久化快照（官方 `stat(id)`，不枚举实例上
+  的全部历史会话）；标题折叠自会话事件流的最后一个 `session/title` 事件
+  （事件流分块读取，峰值内存有界），体积来自文件 stat。
 - **查看**：只读解析会话事件流，提取用户/助手文本消息；超过 `detailMaxMessages`
   条时截断并如实标注。
 - **恢复**：仅从归档集合移除仍存在持久化文件的会话 id，会话数据不动；文件已删
-  的会话拒绝恢复。
+  的会话拒绝恢复，并在 `failed` 里逐条给出原因。
 - **删除**：live 会话拒绝；每个会话删除持久化文件与会话目录。删除后**保留**
   该会话在归档集合中的占位 id——否则仍挂在内存中的会话会因「不再归档」立刻
   重新出现在侧边栏（效果等同恢复）；列表按文件存在性过滤，面板与侧边栏都不再
@@ -46,14 +48,18 @@ dsh plugin --profile web remove @chaoset/session-archive
 | `count()` | — | `{ count }`（存在性过滤后的归档数量，徽标轮询轻端点） |
 | `detail(sessionId)` | 会话 id | `{ sessionId, header, title, messageCount, totalMessageCount, truncated, messages, live }` |
 | `delete(sessionIds[])` | id 数组 | `{ deleted, failed, removedFromArchive }` |
-| `unarchive(sessionIds[])` | id 数组 | `{ restored, removedFromArchive }` |
+| `unarchive(sessionIds[])` | id 数组 | `{ restored, failed, removedFromArchive }` |
 
-> `delete` 的 `failed[].reason`：`not-archived`（非归档成员）、`live`（内存中
-> 未归档会话）、`busy`（归档会话 60s 内仍有写入）、`unenumerable`（文件存在但
-> 持久化枚举不到）、`reappeared`（删除后被生成流重建）；其余为底层删除错误消息。
+> `delete` 与 `unarchive` 共用 `failed[].reason` 词表：`not-archived`（非归档
+> 成员）、`live`（内存中未归档会话）、`busy`（内存存在且沉降观察窗内体积仍在
+> 增长——活跃生成流）、`unenumerable`（文件存在但持久化枚举不到，或文件已删）、
+> `unlocatable`（枚举得到但无法定位路径）、`reappeared`（删除后被生成流重建，
+> 二次删除仍压不掉）、`not-restorable`（仅 unarchive：confirm 复核时文件已不在）；
+> 其余为底层删除错误消息。
 
 > `delete` 的 `removedFromArchive` 恒为 0（删除保留归档占位 id，见上）；
-> `unarchive` 的为实际从归档集合移除的 id 数。
+> `unarchive` 的为实际从归档集合移除的 id 数。`restored` 之外的每个请求 id
+> 都会在 `failed` 里给出原因。
 
 `ArchiveRow`：`{ sessionId, title, cwd, createdAt, updatedAt, size, live }`。
 
@@ -67,6 +73,9 @@ config 字段（`cordis.patch.yml` 或 `~/.dsh/plugins/session-archive/config.js
 
 ## 限制
 
-- 有近期写入或运行中的会话拒绝删除——先停止会话、等写入完成再删除。
+- 正在生成落盘的会话拒绝删除——归档会话不在会话列表、无流可停，请稍后重试
+  （沉降观察窗内体积不再增长即可删）。
+- 首行损坏的孤儿日志被宿主枚举静默跳过：面板既看不到也无法经面板删除（删除
+  会因 `unenumerable` 被拒绝），只能手动清理文件。
 - 无官方 unarchive API，恢复归档通过 registry 写入通道实现；若未来 DSH 提供
   官方 API，插件会切换过去（行为不变）。

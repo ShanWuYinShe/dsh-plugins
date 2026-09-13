@@ -201,7 +201,8 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
       origConfine: null,
       wrapped: false,
       warned: new Set<string>(),
-      checkedProfile: false
+      checkedProfile: false,
+      profileDrifted: false
     });
     sandboxState.mounts += 1;
 
@@ -412,16 +413,22 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
           const a = wrapped.argv;
           // Seatbelt:官方 argv 为 [sandbox-exec, -p, <profile>, --, ...inner]。
           if (a[1] === "-p" && typeof a[2] === "string" && a[2].includes("(version 1)")) {
-            // 漂移自检:官方 profile(空额外目录)应与本实现重建结果一致。
+            // 漂移自检:官方 profile(空额外目录)应与本实现重建结果一致。检出
+            // 漂移后**放弃重建**、保持官方 argv 原样(fail-closed)——用本插件
+            // 可能过时的模板整体替换官方 profile,若官方新增了限制项会被静默
+            // 丢掉,沙盒比官方更宽,这对安全敏感组件不可接受。bash 侧额外根
+            // 随之失效(告警注明),fs 侧放行不受影响。
             if (!sandboxState.checkedProfile) {
               sandboxState.checkedProfile = true;
               try {
                 const official = seatbeltProfileArgs(policy, []);
                 if (official[1] !== a[2]) {
-                  ctx.logger?.warn?.("sandbox-extra-roots: official seatbelt profile shape changed; plugin may be stale (check common.ts seatbeltProfileArgs against dsh-sandbox-local)");
+                  sandboxState.profileDrifted = true;
+                  ctx.logger?.warn?.("sandbox-extra-roots: official seatbelt profile shape changed; refusing to rebuild it — bash-side extra roots stay OFF (the fs fence still grants them). Check common.ts seatbeltProfileArgs against dsh-sandbox-local.");
                 }
               } catch {}
             }
+            if (sandboxState.profileDrifted) return wrapped;
             // inner 命令从 -- 分隔符之后取,不硬编码下标:官方若在 -p 之前
             // 后追加参数,slice(3) 会静默错位。分隔符缺失(契约漂移)时不加
             // 额外根、保持官方 argv 原样(fail-safe,与 bwrap/Landlock 同策略)。
@@ -504,23 +511,33 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
             // (const ct = fs.checkedTarget; ct(...)),this.resolve 会是
             // undefined 并抛 TypeError,把官方的 FS_SANDBOX_DENIED 拒绝
             // 文本替换成插件内部异常。
-            const fresh = await rawFs.resolve.call(rawFs, target.displayPath);
-            // 与 bash 侧(bwrap/Landlock)对齐:只对当前真实存在的目录放行,
-            // 消除"文件工具放行、bash 拒绝"或反向的分叉;每次调用重新
-            // canonical 化,符号链接重定向后立即跟随(同 confine 路径)。
-            // 跟随之后同样复查危险根(bash 侧 safeRuntimeRoots 的镜像,
-            // 沙盒内符号链接交换不能让 fs 侧单侧放行全盘)。
-            const roots = existingDirectoryRoots(
-              safeRuntimeRoots(
-                [...new Set<string>(fsState.extraRoots.map(canon))],
+            // resolve 与后续匹配自身的异常(契约漂移如 displayPath 缺失、
+            // canonical 化/祖先链 stat 遇 EACCES 等)同样不能外泄盖过官方
+            // 拒绝——整体兜底 rethrow 原始 FS_SANDBOX_DENIED,失败姿态
+            // 保持 fail-closed(方向与 0.4.11 的解绑调用防护一致)。
+            try {
+              const fresh = await rawFs.resolve.call(rawFs, target.displayPath);
+              // 与 bash 侧(bwrap/Landlock)对齐:只对当前真实存在的目录放行,
+              // 消除"文件工具放行、bash 拒绝"或反向的分叉;每次调用重新
+              // canonical 化,符号链接重定向后立即跟随(同 confine 路径)。
+              // 跟随之后同样复查危险根(bash 侧 safeRuntimeRoots 的镜像,
+              // 沙盒内符号链接交换不能让 fs 侧单侧放行全盘)。
+              const roots = existingDirectoryRoots(
+                safeRuntimeRoots(
+                  [...new Set<string>(fsState.extraRoots.map(canon))],
+                  fsState.warned,
+                  "the fs fence",
+                ),
                 fsState.warned,
-                "the fs fence",
-              ),
-              fsState.warned,
-              "the fs fence"
-            );
-            for (const root of roots) {
-              if (await isPathUnder(fresh.targetKey, root)) return fresh;
+                "the fs fence"
+              );
+              for (const root of roots) {
+                if (await isPathUnder(fresh.targetKey, root)) return fresh;
+              }
+            } catch (innerError) {
+              if (innerError === error) throw error;
+              ctx.logger?.warn?.(`sandbox-extra-roots: fs-fence extra-root check failed (${(innerError as Error)?.message ?? String(innerError)}); keeping the official denial`);
+              throw error;
             }
             throw error;
           }

@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.3.13 (2026-09-14)
+
+### Fixes
+
+* 面板性能：`list`/`count`/`delete`/`unarchive` 四端点不再全量枚举实例上
+  的所有持久化会话，改走官方契约的逐 id `stat(id)`（只读目标会话的元数据
+  头，宿主缺 `stat` 时回退全量 `list`）。`count` 是每 5 秒每标签页的徽标
+  轮询端点，实例积累数千历史会话时此前等于持续全树扫
+* 标题与详情读取分块化（`read(offset, length)` 官方契约，块长 200 事件）：
+  此前 `read(0)` 一次性物化整条事件流，大日志下峰值内存 O(整条日志) 且同步
+  JSON.parse 集中在宿主事件循环上；分块后峰值 O(块)，语义不变（标题仍取
+  最后一个 `session/title` 事件，经官方 `foldSessionTitle` 折叠）
+* 恢复（unarchive）补齐与删除对称的 `failed` 语义：ghost（文件已删/枚举
+  不到）、非归档成员、confirm 复核淘汰（`not-restorable`）的 id 不再静默
+  丢弃——客户端此前把「已恢复 0 个」当成功样式展示，选 5 个只恢复 3 个
+  也没有任何失败说明
+* 删除的 absent 快速路径纳入 exclusive 临界区：宿主「写临时文件 + rename」
+  格式迁移的瞬间目录扫描可能扫空，此前直接报幂等删除成功而文件实际可能
+  随迁移回来；现在锁内重扫，发现文件在则转常规删除流
+* 删除复验的第二次 rm 失败不再吞异常误标为 `reappeared`（EPERM/EBUSY 的
+  真实原因现在原样上报）；`settleStat`/复验只把 ENOENT 视为「文件已消失」，
+  EACCES 等错误按仍在处理并以真实错误计入 failed，不再谎报 deleted
+* `detail` 的 `totalMessageCount` 计数口径在截断线两侧统一：空文本消息
+  （纯工具调用）此前在截断线前不计、超线后计入
+* 客户端失败原因本地化：`unenumerable`/`unlocatable`/`reappeared`/
+  `not-archived`/`not-restorable` 此前以英文原样上屏；部分成功时同时如实
+  显示成功计数（warn 样式），整单失败才用 error 样式；busy 提示从「请先
+  停止会话」（归档会话无流可停）改为「仍在生成落盘，请稍后重试」
+* README 三处与实现对齐：列表不再声称恒为 false 的「运行状态」；`busy`
+  语义更新为「内存存在且沉降观察窗内体积仍在增长」；限制一节补充首行损坏
+  孤儿日志面板不可见也不可删的说明
+
+### Tests
+
+* 新增 3 用例（分块读取跨块完整性、unarchive failed 覆盖全部未恢复 id、
+  count/list 走逐 id stat 不打全量 list）；夹具 `read` 按官方契约支持
+  `offset/length`、补 `stat`
+* build + typecheck + 全量测试通过，并在隔离测试实例真实验证
+
 ## 0.3.12 (2026-09-12)
 
 ### Fixes
