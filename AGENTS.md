@@ -15,9 +15,9 @@ README 面向用户，面向开发者的内容以 RELEASING.md 为准。
   RELEASING.md「双线生命周期」。
 - **功能收敛原则（alpha 只进不出）**：活跃 alpha 线期间，功能开发与修复一律
   落在 alpha，**不往 main 搬**——两分支此时有功能差异是预期的，不是漂移。只有
-  dsh 结束该 alpha 线、发布同基础号的**正式版之后**，才把 alpha 的改动一次性
-  合回 main；main 期间只接稳定线独有的热修（详见 RELEASING.md「功能收敛原则」
-  与「双线生命周期」）。
+  dsh 该线发完最新 rc（**rc 即 dsh 的正式版**，dsh 从不发无后缀纯 X.Y.Z）之后，
+  才把 alpha 的改动一次性合回 main；main 期间只接稳定线独有的热修（详见
+  RELEASING.md「功能收敛原则」与「双线生命周期」）。
 - 依赖 range、`pnpm-lock.yaml`、`pnpm-workspace.yaml` 的排除清单**永不跨分支
   搬运**；基础设施文件（workflows / scripts / 根配置 / 文档）两分支保持一致，
   直接 cherry-pick。
@@ -86,7 +86,7 @@ pnpm run typecheck      # host + client 两套 tsconfig --noEmit
 pnpm run test           # vitest 回归
 pnpm run test:ci        # build + typecheck + test（提交/发布前必跑）
 pnpm run gate           # 发布门禁干跑：只读，看哪些包会被发布/为何被跳过
-pnpm run dsh-status     # 两分支 dsh 依赖基线 vs npm dist-tags 对照（详见 RELEASING.md）
+pnpm run dsh-status     # 两分支 dsh 依赖基线 vs dsh 最新 rc（正式版）对照（详见 RELEASING.md）
 pnpm run adapt <dsh 新线版本>   # dsh 宿主升级适配（--dry-run 预览），详见 RELEASING.md
 ```
 

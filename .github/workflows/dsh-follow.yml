@@ -1,12 +1,15 @@
 name: DSH follow status
 
-# 宿主跟随核对（RELEASING.md「宿主跟随规则」）：main ↔ dsh 的 latest，
-# alpha ↔ dsh 的 alpha dist-tag。落后或形态漂移时发 GitHub Actions
-# warning annotation。刻意非阻塞（永远 exit 0）：这是提醒，不是门禁——
-# 发布门禁仍由 publish.yml 全权负责。
+# 宿主跟随核对（RELEASING.md「宿主跟随规则」）：main ↔ dsh 最新 rc（本仓
+# 把 dsh 的最新 rc 视为其正式版），alpha ↔ 高于它的进行中 -alpha 线。
+# 判定读 npm 的**版本列表**而非 dist-tag：同一条 rc 迭代多版时只有首版
+# 可能拿到 latest（实测 latest 指 0.1.5-rc.1 而更新的 0.1.5-rc.2 在 next），
+# 拿 dist-tag 当目标会把已跟到最新 rc 的 main 误报成超前。
+# 落后或形态漂移时发 GitHub Actions warning annotation。刻意非阻塞
+# （永远 exit 0）：这是提醒，不是门禁——发布门禁仍由 publish.yml 全权负责。
 on:
-  # dsh 宿主随时可能发新预发布版，dist-tags 变化不会触发 push 事件——
-  # 每日定时核对是主要手段。schedule 只在默认分支的 workflow 上生效。
+  # dsh 宿主随时可能发新版，发布事件不会触发 push——每日定时核对是主要
+  # 手段。schedule 只在默认分支的 workflow 上生效。
   schedule:
     - cron: '17 3 * * *'
   push:
