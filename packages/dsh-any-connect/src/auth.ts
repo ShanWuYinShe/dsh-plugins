@@ -263,6 +263,10 @@ export class WorkBuddyCredentialStore {
    *  内时，每条请求都会打一次刷新端点（与要防的「极短有效期打爆端点」
    *  同构，只是发生在失败侧）。 */
   private lastRefreshAttemptMs = 0
+  /** 上一次刷新**失败**的时刻。token 已过期时 {@link resolve} 无法像未过期
+   *  那样直接复用现值，必须另用本字段保住失败退避：否则刷新端点故障 + 过期
+   *  的最坏组合下，节流被完全绕过，每条请求都串行等一次刷新超时才失败。 */
+  private lastRefreshFailureMs = 0
 
   constructor(options: WorkBuddyStoreOptions) {
     this.refresh = options.refresh
@@ -345,12 +349,19 @@ export class WorkBuddyCredentialStore {
     if (!this.needsRefresh(credential)) return credential
     // 刷新节流:needsRefresh 只看过期时间,上游签发极短有效期(或刷新
     // 响应缺 expiresIn)会让每条请求都打一次刷新端点——单飞只合并并发、
-    // 不节流。窗口内且 token 尚未真正过期时直接用现值;已过期则必须尝试。
-    // 窗口按「尝试时刻」计（成功与失败都算）：刷新端点持续故障时同样
-    // 退避到每 30s 至多一次，而不是每请求一次。
-    if (credential.expiresAtMs > Date.now()
-      && Date.now() - this.lastRefreshAttemptMs < MIN_REFRESH_INTERVAL_MS) {
-      return credential
+    // 不节流。窗口内且 token 尚未真正过期时直接用现值;已过期则必须尝试,
+    // 但若窗口内的上一次尝试就是失败,同样退避(快速失败)——刷新成果会让
+    // needsRefresh 变假,走不到这里,因此窗口内「已过期」基本只剩失败一种
+    // 来源;成功刷新出的极短有效期 token 由 lastRefreshFailureMs 已过期
+    // (陈旧)放行,下一条请求即重试刷新。
+    if (Date.now() - this.lastRefreshAttemptMs < MIN_REFRESH_INTERVAL_MS) {
+      if (credential.expiresAtMs > Date.now()) return credential
+      if (Date.now() - this.lastRefreshFailureMs < MIN_REFRESH_INTERVAL_MS) {
+        throw new Error(
+          'workbuddy: token refresh failed recently and the access token is expired;'
+          + ' retry in a moment, or open the WorkBuddy desktop app once to sign in again',
+        )
+      }
     }
     this.inflight ??= this.refreshNow(credential)
       .finally(() => {
@@ -381,6 +392,7 @@ export class WorkBuddyCredentialStore {
   async logout(): Promise<void> {
     this.memoryCredential = undefined
     this.lastRefreshAttemptMs = 0
+    this.lastRefreshFailureMs = 0
     await rm(this.ownPath, { force: true })
     await rm(`${this.ownPath}.lock`, { force: true })
   }
@@ -399,8 +411,9 @@ export class WorkBuddyCredentialStore {
     try {
       outcome = await this.refresh(credential)
     } catch (error: unknown) {
-      // 失败同样计入节流窗口（见 lastRefreshAttemptMs）。
+      // 失败同样计入节流窗口（见 lastRefreshAttemptMs / lastRefreshFailureMs）。
       this.lastRefreshAttemptMs = Date.now()
+      this.lastRefreshFailureMs = this.lastRefreshAttemptMs
       if (credential.expiresAtMs > Date.now() + MIN_REUSABLE_LIFETIME_MS) return credential
       throw new Error(
         `workbuddy: token refresh failed and the access token is expired (${String(error)});`

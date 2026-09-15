@@ -103,11 +103,11 @@ const zh = {
   selected: "已选 {n} 项",
   restore: "恢复所选",
   restoreDone: "已恢复 {n} 个归档会话",
-  restoreFailed: "恢复失败",
+  restoreFailed: "恢复失败：{n} 个",
   delete: "删除所选",
   deleteConfirm: "再次点击确认删除",
   deleteDone: "已删除 {n} 个归档会话",
-  deleteFailed: "部分删除失败：{n} 个",
+  deleteFailed: "删除失败：{n} 个",
   confirmAll: "确认删除全部 {n} 个？",
   noSelection: "请先勾选会话",
   view: "查看",
@@ -123,7 +123,13 @@ const zh = {
   sizeBytes: "{n} B",
   sizeKB: "{n} KB",
   sizeMB: "{n} MB",
-  runningHint: "运行中的会话不能删除，请先停止"
+  runningHint: "该会话仍在生成落盘，请稍后重试",
+  batchError: "批量操作失败（{n} 项）",
+  reasonUnenumerable: "会话文件枚举不到",
+  reasonUnlocatable: "无法定位会话文件",
+  reasonReappeared: "删除后被重建",
+  reasonNotArchived: "不是归档会话",
+  reasonNotRestorable: "文件已不在，无法恢复"
 };
 const en = {
   badge: "Archive",
@@ -137,11 +143,11 @@ const en = {
   selected: "{n} selected",
   restore: "Restore",
   restoreDone: "Restored {n} archived sessions",
-  restoreFailed: "Restore failed",
+  restoreFailed: "Restore failed: {n}",
   delete: "Delete",
   deleteConfirm: "Click again to confirm delete",
   deleteDone: "Deleted {n} archived sessions",
-  deleteFailed: "Some deletions failed: {n}",
+  deleteFailed: "Deletion failed: {n}",
   confirmAll: "Delete all {n}?",
   noSelection: "Select sessions first",
   view: "View",
@@ -157,7 +163,13 @@ const en = {
   sizeBytes: "{n} B",
   sizeKB: "{n} KB",
   sizeMB: "{n} MB",
-  runningHint: "Running sessions cannot be deleted; stop them first"
+  runningHint: "Session still writing; retry shortly",
+  batchError: "Batch operation failed ({n})",
+  reasonUnenumerable: "session log not enumerable",
+  reasonUnlocatable: "session file cannot be located",
+  reasonReappeared: "recreated after delete",
+  reasonNotArchived: "not an archived session",
+  reasonNotRestorable: "file no longer present"
 };
 
 // ── 工具函数 ─────────────────────────────────────────────────────────
@@ -432,18 +444,34 @@ function ArchivePanel(props: any) {
       const result = await call(action, ids);
       const doneIds = result.deleted || result.restored || [];
       const n = doneIds.length;
-      if (result.failed && result.failed.length > 0) {
-        // host 对每个失败项都给了 reason(live/busy/not-archived/具体错误),
-        // 只报数量会让用户不知道为什么失败、该等多久重试。
-        const reasonText = (reason: any) =>
-          reason === "live" ? t("live") : reason === "busy" ? t("runningHint") : String(reason ?? "error");
+      const doneText = t(doneKey).replace("{n}", String(n));
+      if (Array.isArray(result.failed) && result.failed.length > 0) {
+        // host 对每个失败项都给了 reason( live/busy/unenumerable/not-archived
+        // /not-restorable/具体错误),只报数量会让用户不知道为什么失败、该等
+        // 多久重试。全部本地化,未知 reason 原样透出兜底。
+        const reasonText = (reason: any) => {
+          const map: Record<string, any> = {
+            live: t("live"),
+            busy: t("runningHint"),
+            unenumerable: t("reasonUnenumerable"),
+            unlocatable: t("reasonUnlocatable"),
+            reappeared: t("reasonReappeared"),
+            "not-archived": t("reasonNotArchived"),
+            "not-restorable": t("reasonNotRestorable"),
+          };
+          return map[String(reason)] ?? String(reason ?? "error");
+        };
         const detail = result.failed.slice(0, 3)
           .map((item: any) => shortId(item.sessionId) + ": " + reasonText(item.reason))
           .join("; ");
         const more = result.failed.length > 3 ? " (+" + (result.failed.length - 3) + ")" : "";
-        setNotice({ kind: "error", text: t(failKey).replace("{n}", String(result.failed.length)) + " — " + detail + more });
+        const failText = t(failKey).replace("{n}", String(result.failed.length)) + " — " + detail + more;
+        // 全失败才用 error 样式;部分成功是 warn,成功计数也要如实带上,
+        // 不能只报失败让用户以为一个都没成。
+        if (n > 0) setNotice({ kind: "warn", text: doneText + "；" + failText });
+        else setNotice({ kind: "error", text: failText });
       } else {
-        setNotice({ kind: "ok", text: t(doneKey).replace("{n}", String(n)) });
+        setNotice({ kind: "ok", text: doneText });
       }
       if (doneIds.length > 0) {
         const done = new Set(doneIds);
@@ -461,8 +489,8 @@ function ArchivePanel(props: any) {
       setConfirmingDelete(false);
       await load();
     } catch (actionError: any) {
-      // 异常分支同样带数量:用请求发出时的 ids.length,不用无意义的 "?"。
-      setNotice({ kind: "error", text: t(failKey).replace("{n}", String(ids.length)) + ": " + (actionError && actionError.message || actionError) });
+      // 异常分支(整单失败,不是部分失败):带请求发出时的数量,与部分失败分支措辞区分。
+      setNotice({ kind: "error", text: t("batchError").replace("{n}", String(ids.length)) + ": " + (actionError && actionError.message || actionError) });
     } finally {
       setBusy(false);
     }

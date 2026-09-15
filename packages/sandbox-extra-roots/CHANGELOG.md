@@ -1,6 +1,19 @@
 # Changelog
 
-## 0.4.11 (2026-09-12)
+## 0.4.13-alpha.0 (2026-09-15)
+
+### Fixes
+
+* 同步稳定线 0.4.12 的全仓审查修复：Seatbelt 漂移自检改 fail-closed
+  （检出漂移放弃重建、保持官方 argv，bash 侧额外根随之失效并告警）、
+  fs 侧包装内部异常兜底 rethrow 官方 `FS_SANDBOX_DENIED`、客户端预览补
+  `/private`、主目录祖先与裸 `~` 的 danger 判定（阻塞级行禁用保存）
+* 跟进 DSH 宿主 0.1.6-alpha.1：`SandboxProvider.confine` 同步改异步
+  （宿主 terminal-bash 以 `await` + `signal` 调用）。`confine` 包装改
+  `async`，`await` 原实现并把第三参数 `signal` 透传，否则 `wrapped.argv`
+  为 `undefined`、每次 bash 执行都抛 `TypeError`；`dsh.d.ts` 宿主契约同步
+  更新。测试 mock 镜像新宿主（async + signal 捕获），新增 signal 透传
+  用例；在真实 0.1.6 `dsh-sandbox-local`（bwrap）上端到端验证额外根注入
 
 ### Fixes
 

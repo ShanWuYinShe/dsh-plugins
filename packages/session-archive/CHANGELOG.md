@@ -1,6 +1,20 @@
 # Changelog
 
-## 0.3.12 (2026-09-12)
+## 0.3.14-alpha.0 (2026-09-15)
+
+### Fixes
+
+* 同步稳定线 0.3.13 的全仓审查修复：count/list/delete/unarchive 改逐 id
+  `stat()`（不再全量枚举）、标题/详情事件流分块读取（块长 200，峰值内存
+  有界）、unarchive 补 `failed` 语义（unenumerable/not-archived/
+  not-restorable）、absent 快速路径纳入 exclusive 临界区、二次 rm 异常
+  真实上报、失败原因本地化与部分成功如实提示
+* 跟进 DSH 宿主 0.1.6-alpha.1：归档集合移除改调官方新增的
+  `WorkspaceRegistry.unarchiveSession()`，删除此前复用私有写入通道
+  （`enqueueOperation` → `requireState` → `setState`）的 hack。新方法不做
+  存在性检查、内部串行化写入，因此「文件仍存在」的 confirm 复核仍由本插件
+  在调用前完成，并与 `deleteArchived` 经 exclusive 互斥；registry 缺失该
+  方法时恢复返回空（列表仍按存在性过滤幽灵 id）
 
 ### Fixes
 

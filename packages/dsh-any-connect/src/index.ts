@@ -89,6 +89,10 @@ export const Config: z<Config> = z.object({
   authFile: z.string().description('WorkBuddy desktop auth file (defaults to the app\'s own location)'),
 })
 
+/** 目录拉取失败后的延迟重试：最多再试 2 次、间隔 60s（暂态故障自愈，耗尽即停）。 */
+const CATALOG_REFRESH_RETRIES = 2
+const CATALOG_REFRESH_RETRY_MS = 60_000
+
 /**
  * Start the loopback endpoint, register the `workbuddy` provider, and
  * refresh the model catalog from the upstream once credentials allow it.
@@ -137,19 +141,31 @@ export function apply(ctx: Context, config: Config): void {
   /** 从上游拉一次模型目录并写入 catalog；启动与 authFile 变更共用。
    * 函数声明（而非 const 箭头）：settings 服务已在场时 inject 回调同步
    * 执行，onChange 必须引用得到提升后的绑定。 */
-  function refreshCatalog(reason: string): void {
+  function refreshCatalog(reason: string, retriesLeft = CATALOG_REFRESH_RETRIES): void {
     void (async () => {
       try {
-        const credential = await store.current()
-        if (credential === undefined || stopped) return
+        // current() 只探是否已登录（未登录静默保留 fallback，不告警不重试）；
+        // 真正取凭据用 resolve()：桌面文件里的 access token 过期是常态
+        // （离屏很久后启动），current() 的旧 token 会让 fetchModels 必 401、
+        // 目录永远停在 fallback 快照——resolve() 会按需刷新并落盘。
+        const signedIn = await store.current()
+        if (signedIn === undefined || stopped) return
+        const credential = await store.resolve()
+        if (stopped) return
         const models = await client.fetchModels(credential)
         if (stopped) return
         catalog.set([...models])
       } catch (error: unknown) {
-        ctx.logger.warn(
+        ctx.logger?.warn?.(
           `dsh-any-connect: dynamic model catalog unavailable (${reason}); serving the static fallback list`,
           error,
         )
+        // 有限次延迟重试：刚启动时上游/网络暂不可达是暂态，自动恢复实时
+        // 目录；重试耗尽则停在 fallback，不再打扰。重试全程 stopped 已挡，
+        // 插件卸载后的残留定时器最多空转一次。
+        if (retriesLeft > 0 && !stopped) {
+          setTimeout(() => { if (!stopped) refreshCatalog(`${reason}; retry`, retriesLeft - 1) }, CATALOG_REFRESH_RETRY_MS).unref()
+        }
       }
     })()
   }

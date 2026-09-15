@@ -1,6 +1,7 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { setTimeout as realSleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
@@ -26,6 +27,7 @@ let context: Context | undefined
 let root: string | undefined
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await context?.fiber.dispose()
   context = undefined
   if (root !== undefined) await rm(root, { recursive: true, force: true })
@@ -89,5 +91,58 @@ describe('WorkBuddy Host settings integration', () => {
     await ctx.settings.update(WorkBuddy.WORKBUDDY_SETTINGS_NS, { authFile: '/tmp/other-workbuddy.info' })
     const updated = ctx.settings.describe().find(entry => entry.ns === WorkBuddy.WORKBUDDY_SETTINGS_NS)
     expect((updated?.value as Record<string, unknown>)['authFile']).toBe('/tmp/other-workbuddy.info')
+  })
+
+  it('retries the model catalog refresh after failures, then stops', async () => {
+    // 目录重试回归:启动拉取失败后曾永不重试,目录(费率/徽章)会一直停在
+    // fallback 快照。失败后应按 60s 间隔有限次重试,耗尽即停,不再打扰。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-catalog-'))
+    vi.stubEnv('DSH_HOME', root)
+    // 已登录且 token 未过期:resolve() 不触网,fetchModels 是唯一上游触点。
+    const desktop = join(root, 'workbuddy-desktop.info')
+    await writeFile(desktop, JSON.stringify({
+      auth: { accessToken: 'at', refreshToken: 'rt', expiresAt: Date.now() + 3600_000, domain: 'www.codebuddy.cn' },
+      account: { uid: 'uid-1', nickname: '昵称' },
+    }))
+    let calls = 0
+    const spy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+      .mockImplementation(async () => {
+        calls += 1
+        throw new Error('upstream down')
+      })
+
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(MemorySettings)
+
+    // 假时钟从插件安装前开启:installSection 安装即触发一次 onChange 拉取,
+    // shim 就绪后再来一次启动拉取——两条失败链各自带重试。
+    vi.useFakeTimers()
+    try {
+      await ctx.plugin(WorkBuddy, { authFile: desktop })
+      // waitFor 在假时钟下自动按 50ms 推进(上限 1s,远够不到 60s 重试点),
+      // 等两条链的首次失败都落地。
+      await vi.waitFor(() => { expect(calls).toBe(2) })
+      // 假时钟推进只负责触发重试定时器;重试回调里的 fs 读取走真实 I/O,
+      // 用真实时钟小步等待其收敛(Date 已被假时钟接管,不读钟)。
+      const waitForReal = async (expected: number): Promise<void> => {
+        for (let i = 0; i < 200 && calls < expected; i += 1) await realSleep(10)
+        expect(calls).toBe(expected)
+      }
+      // 第一次重试:两条链各 +1。
+      await vi.advanceTimersByTimeAsync(60_000)
+      await waitForReal(4)
+      // 第二次重试(每链最后一次)。
+      await vi.advanceTimersByTimeAsync(60_000)
+      await waitForReal(6)
+      // 重试耗尽(每链初始 1 次 + 最多 2 次),不再发起。
+      await vi.advanceTimersByTimeAsync(180_000)
+      for (let i = 0; i < 20; i += 1) await realSleep(10)
+      expect(calls).toBe(6)
+    } finally {
+      vi.useRealTimers()
+      spy.mockRestore()
+    }
   })
 })

@@ -13,6 +13,15 @@ export interface WorkBuddyPluginCardInjected {
   t: (key: WorkBuddySettingsKey, params?: Record<string, unknown>) => string
 }
 
+/**
+ * Card status = the host document plus a client-side `loading` phase. The
+ * host never emits `loading`: the status route serializes two file reads and
+ * one upstream billing call, so the first answer takes a visible round trip —
+ * long enough that falling back to `signed-out` during it tells signed-in
+ * users to "sign in" while their account is actually being fetched.
+ */
+type CardStatus = WorkBuddyWebStatus | { status: 'loading' }
+
 /** Props delivered by the Plugin configuration item slot. */
 export type WorkBuddyPluginCardProps =
   PropsRuntime<'settings.plugin.item'>
@@ -82,7 +91,7 @@ function progressFillStyle(percent: number): CSSProperties {
   }
 }
 
-function dotStyle(status: WorkBuddyWebStatus['status']): CSSProperties {
+function dotStyle(status: CardStatus['status']): CSSProperties {
   const color = status === 'signed-in'
     ? 'var(--dsw-alias-state-success-primary, #22a06b)'
     : status === 'error'
@@ -108,7 +117,10 @@ function CreditBar({ label, remain, size, t }: {
 }): React.ReactNode {
   const detail = size > 0 ? t('exactRemaining', { remain: formatNumber(remain), size: formatNumber(size) }) : t('creditPackageUnknownSize', { remain: formatNumber(remain) })
   const percent = size > 0 ? (remain / size) * 100 : 100
-  const display = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(percent)
+  // remain 理论上可超过 size（上游记账口径不保证一致）：进度条宽度与
+  // aria-valuenow 夹到 [0,100]，避免出现 ">100%" 的剩余读数。
+  const clamped = Math.max(0, Math.min(100, percent))
+  const display = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(clamped)
   return (
     <div style={quotaGroupStyle}>
       <div style={quotaLabelStyle}>
@@ -121,9 +133,9 @@ function CreditBar({ label, remain, size, t }: {
         aria-label={label}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={percent}
+        aria-valuenow={clamped}
       >
-        <div style={progressFillStyle(percent)} />
+        <div style={progressFillStyle(clamped)} />
       </div>
       <p style={bodyStyle}>{detail}</p>
     </div>
@@ -161,7 +173,10 @@ function ModelOfferRow({ model, t }: {
 export function WorkBuddyPluginCard({ t }: WorkBuddyPluginCardProps) {
   if (t === undefined) throw new Error('WorkBuddy plugin card requires its translation function')
   const [open, setOpen] = useState(false)
-  const [status, setStatus] = useState<WorkBuddyWebStatus>({ status: 'signed-out' })
+  const [status, setStatus] = useState<CardStatus>({ status: 'loading' })
+  /** 最近一次刷新失败的提示；成功刷新即清除。已有可展示数据时错误不清空
+   *  状态、轮询不中断——瞬态失败不该把积分/登录态整个抹掉。 */
+  const [notice, setNotice] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const mounted = useRef(true)
 
@@ -178,11 +193,29 @@ export function WorkBuddyPluginCard({ t }: WorkBuddyPluginCardProps) {
         ...signal === undefined ? {} : { signal },
       })
       const value: unknown = await response.json().catch(() => undefined)
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      if (mounted.current && signal?.aborted !== true) setStatus(value as WorkBuddyWebStatus)
+      if (!response.ok) {
+        // 500 会随体带一份脱敏诊断（host 的 safeMessage），拼进原因便于排障。
+        const detail = typeof (value as { error?: unknown } | null)?.error === 'string'
+          ? `: ${(value as { error: string }).error}`
+          : ''
+        throw new Error(`HTTP ${response.status}${detail}`)
+      }
+      // 非 JSON 的 200（中间代理、204）不能进 setStatus：render 要读
+      // status.status，undefined 会直接把渲染树打崩。形状不对按失败处理。
+      if (value === null || typeof value !== 'object' || typeof (value as { status?: unknown }).status !== 'string') {
+        throw new Error('unexpected status payload')
+      }
+      if (mounted.current && signal?.aborted !== true) {
+        setStatus(value as WorkBuddyWebStatus)
+        setNotice(undefined)
+      }
     } catch (error: unknown) {
       if (mounted.current && signal?.aborted !== true) {
-        setStatus({ status: 'error', message: error instanceof Error ? error.message : t('requestFailed') })
+        const message = error instanceof Error ? error.message : t('requestFailed')
+        // 尚无任何可展示数据（首拉失败）才整体转入 error 态；否则保留
+        // last-good 数据，错误降级为一条提示。
+        setStatus(prev => prev.status === 'loading' ? { status: 'error', message } : prev)
+        setNotice(message)
       }
     }
   }, [t])
@@ -194,15 +227,18 @@ export function WorkBuddyPluginCard({ t }: WorkBuddyPluginCardProps) {
     return () => { controller.abort() }
   }, [open, refresh])
 
+  // 展开期间无条件轮询：按状态门控会让两类用户卡死——「后来才登录」的
+  // （signed-out 不轮询就永远看不到登录态）和「遇错后永不恢复」的。
+  // signed-out 的状态路由只做两次文件读，轮询成本可忽略。
   useEffect(() => {
-    if (!open || status.status !== 'signed-in') return
+    if (!open) return
     const controller = new AbortController()
     const timer = window.setInterval(() => { void refresh(controller.signal) }, POLL_INTERVAL_MS)
     return () => {
       window.clearInterval(timer)
       controller.abort()
     }
-  }, [open, refresh, status.status])
+  }, [open, refresh])
 
   const manualRefresh = async (): Promise<void> => {
     setBusy(true)
@@ -218,7 +254,9 @@ export function WorkBuddyPluginCard({ t }: WorkBuddyPluginCardProps) {
     ? status.nickname === undefined ? t('signedInAs', { nickname: '' }).replace(/[:：]\s*$/, '') : t('signedInAs', { nickname: status.nickname })
     : status.status === 'error'
       ? t('requestFailed')
-      : t('signedOut')
+      : status.status === 'loading'
+        ? t('loading')
+        : t('signedOut')
 
   return (
     <li style={cardStyle}>
@@ -282,6 +320,7 @@ export function WorkBuddyPluginCard({ t }: WorkBuddyPluginCardProps) {
               : null}
             {status.status === 'signed-out' ? <p style={bodyStyle}>{t('signedOutHint')}</p> : null}
             {status.status === 'error' ? <p style={errorStyle}>{status.message}</p> : null}
+            {status.status !== 'error' && notice !== undefined ? <p style={errorStyle}>{t('refreshFailed', { message: notice })}</p> : null}
           </div>
         : null}
     </li>

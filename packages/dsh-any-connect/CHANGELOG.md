@@ -1,6 +1,22 @@
 # Changelog
 
-## 0.3.16 (2026-09-12)
+## 0.3.18-alpha.0 (2026-09-15)
+
+### Fixes
+
+* 同步稳定线 0.3.17 的全仓审查修复：设置卡片加载态（首拉期间不再误报
+  未登录）、非 JSON 200 不打崩渲染树、刷新失败保留 last-good 并继续轮询、
+  目录启动拉取改 `resolve()`（过期 token 自动刷新）+ 失败延迟重试、刷新
+  退避不再被绕过、chatStream 抛错路径补 `clearTimeout`、进度条无障碍与
+  500 诊断拼入失败原因
+* 跟进 DSH 宿主 0.1.6-alpha.1：仅依赖基线（`dsh.host` → `0.1.6-alpha.1`），
+  本包无代码改动——逐符号核对未命中任何宿主破坏性变更（`AssistantProvenance`
+  改名、`RequestImageOffloadPolicy` 及 `offloadedImagePrefixCount` /
+  `offloadRequestImagesWithPolicy` 删除、`ImageRequestPolicy` →
+  `ImageRequestTarget`、`priceImages` 参数收窄），新基线 typecheck 通过。
+  行为注意：宿主图片管线改为超预算抛 `IMAGE_OFFLOAD_REQUIRED`（不再静默
+  裁剪）；本包图片预算走 `PiAiAdapter` profile 默认路径，超大图片请求的
+  失败/重试语义跟随宿主
 
 ### Fixes
 

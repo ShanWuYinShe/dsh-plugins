@@ -145,6 +145,40 @@ describe('WorkBuddyCredentialStore', () => {
     await expect(store.resolve()).resolves.toMatchObject({ accessToken: 'at' })
   })
 
+  it('fast-fails an expired token inside the refresh-failure backoff window, then retries after it', async () => {
+    // 过期侧退避回归:节流窗口此前只对未过期 token 生效,刷新端点故障 +
+    // token 已过期的组合下,每条请求都会串行等一次刷新失败。失败后的窗口内
+    // 必须快速失败,窗口过后才允许再次尝试。
+    const dir = await mkdtemp(join(tmpdir(), 'wb-store-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const desktop = join(dir, 'workbuddy-desktop.info')
+    await writeFile(desktop, nestedDoc(Date.now() - 1000))
+    let refreshes = 0
+    const store = new WorkBuddyCredentialStore({
+      desktopPath: desktop,
+      ownPath: join(dir, 'own.json'),
+      refresh: async () => {
+        refreshes += 1
+        throw new Error('refresh endpoint down')
+      },
+    })
+    // 第一次:token 已过期,尝试刷新并失败(异常上抛)。
+    await expect(store.resolve()).rejects.toThrow(/token refresh failed and the access token is expired/)
+    expect(refreshes).toBe(1)
+    // 退避窗口内:快速失败,不再打刷新端点。
+    await expect(store.resolve()).rejects.toThrow(/refresh failed recently/)
+    expect(refreshes).toBe(1)
+    // 窗口过后:允许再试(再次失败同样上抛)。
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(Date.now() + 31_000)
+      await expect(store.resolve()).rejects.toThrow(/token refresh failed and the access token is expired/)
+      expect(refreshes).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('fails loudly when nothing is signed in', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'wb-store-'))
     CLEANUP.push(() => rm(dir, { recursive: true, force: true }))

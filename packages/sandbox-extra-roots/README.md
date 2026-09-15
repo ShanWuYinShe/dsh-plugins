@@ -39,9 +39,11 @@ dsh plugin --profile web remove @chaoset/sandbox-extra-roots
    `~/.dsh/plugins/sandbox-extra-roots/config.json`，立即热生效）
 
 `extraWritableRoots`：绝对路径数组（设置页里每行一个，支持 `~` 表示用户主目录）。
-相对路径/空值会被拒绝并告警；危险根（`/`、盘根、主目录本身）保存时直接拒绝，
-系统目录（`/etc` `/usr` `/bin` `/sbin`，仅 POSIX——Windows 暂无对应条目）被
-过滤，重复行自动去重。运行期每次
+相对路径/空值会被拒绝并告警；危险根（`/`、盘根、主目录本身及其父目录，如
+macOS 的 `/Users`）保存时直接拒绝，系统目录（`/etc` `/usr` `/bin` `/sbin` 及
+macOS 的 `/private`，仅 POSIX——Windows 暂无对应条目）被过滤，重复行自动去重。
+设置页卡片在保存前就地预览这些问题行（危险/无效行会禁用保存按钮；系统目录
+行保存成功但不生效）。运行期每次
 沙盒判定都会对目录的最新真实指向（跟随符号链接后）重新做危险根复查——目录
 被替换成指向 `/` 等危险根的符号链接时立即剔除，不授予。
 
