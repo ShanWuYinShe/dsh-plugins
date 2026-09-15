@@ -252,7 +252,10 @@ export function regionOf(domain: string): WorkBuddyRegion {
   return 'cn'
 }
 
-function chatBase(credential: WorkBuddyCredential): string {
+/** Chat endpoint base for one credential's region; also identifies which
+ * document answered a catalog fetch (the saved-catalog record keeps it so a
+ * roster from one endpoint is never served as another's). */
+export function chatBase(credential: WorkBuddyCredential): string {
   return regionOf(credential.domain) === 'global' ? GLOBAL_BASE : CN_CHAT_BASE
 }
 

@@ -10,10 +10,12 @@ import z from '@deepseek-ai/schemastery'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-attachment'
 import { WorkBuddyCredentialStore } from './auth.js'
-import { WorkBuddyCatalog } from './catalog.js'
+import { FALLBACK_WORKBUDDY_MODELS, WorkBuddyCatalog } from './catalog.js'
+import { WorkBuddyCatalogStore, credentialIdentity } from './catalog-store.js'
 import { createWorkBuddyAdapter, WORKBUDDY_PROVIDER } from './adapter.js'
 import { createWorkBuddyShim } from './shim.js'
-import { WorkBuddyUpstreamClient } from './upstream.js'
+import { WorkBuddyUpstreamClient, chatBase } from './upstream.js'
+import type { WorkBuddyWebCatalog } from './status-paths.js'
 import { registerWorkBuddyStatusRoute } from './web-status.js'
 import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
 
@@ -24,6 +26,13 @@ export {
   WorkBuddyCatalog,
   type WorkBuddyModelInfo,
 } from './catalog.js'
+export {
+  WorkBuddyCatalogStore,
+  WORKBUDDY_CATALOG_FILENAME,
+  credentialIdentity,
+  workbuddyCatalogPath,
+  type SavedWorkBuddyCatalog,
+} from './catalog-store.js'
 export {
   defaultDesktopAuthCandidates,
   parseWorkBuddyAuth,
@@ -94,6 +103,14 @@ const CATALOG_REFRESH_RETRIES = 2
 const CATALOG_REFRESH_RETRY_MS = 60_000
 
 /**
+ * 身份核对节拍：启动/authFile 变更只覆盖"当时"的登录态，之后用户在桌面
+ * 端登录/登出不会自动触达这里。每 60s（与卡片轮询同频）用一次廉价的
+ * `store.current()` 文件读取核对身份，变了才走完整拉取——稳态零上游请求，
+ * 登录态翻转最多延迟一拍即现形。unref，不拖住进程退出。
+ */
+const IDENTITY_SWEEP_MS = 60_000
+
+/**
  * Start the loopback endpoint, register the `workbuddy` provider, and
  * refresh the model catalog from the upstream once credentials allow it.
  * The static fallback catalog serves from the first moment, so an offline
@@ -107,11 +124,45 @@ export function apply(ctx: Context, config: Config): void {
     onWarning: message => ctx.logger?.warn?.(message),
   })
   const catalog = new WorkBuddyCatalog()
+  const catalogStore = new WorkBuddyCatalogStore()
   const shim = createWorkBuddyShim({ store, client, catalog, logger: ctx.logger })
+
+  // 目录来源三态（卡片"模型列表来源"行的唯一事实源）：
+  // live（刚拉到）→ saved（本账号上次成功，本次拉取失败或重启后恢复）→
+  // fallback（编译进插件的名单）。stopped 挡住卸载后的迟到写入。
+  let catalogSource: WorkBuddyWebCatalog['source'] = 'fallback'
+  let catalogFetchedAtMs: number | undefined
+  let catalogError: string | undefined
+  /** 上次发布过目录的账号（`uid:enterpriseId`），或从未发布时的 undefined。 */
+  let lastIdentity: string | undefined
+
+  function catalogSection(): WorkBuddyWebCatalog {
+    return {
+      source: catalogSource,
+      ...catalogFetchedAtMs === undefined ? {} : { fetchedAt: catalogFetchedAtMs },
+      ...catalogError === undefined ? {} : { error: catalogError },
+    }
+  }
+
+  /** 无可用凭据：分组隐藏（空目录），而不是展示点选必错的兜底名单。
+   * 行保留 fallback 内容——切回可见时无需重拉。 */
+  function adoptSignedOut(): void {
+    lastIdentity = undefined
+    catalog.set(FALLBACK_WORKBUDDY_MODELS)
+    catalog.setVisible(false)
+    catalogSource = 'fallback'
+    catalogFetchedAtMs = undefined
+    catalogError = undefined
+  }
 
   // Same-origin status route backing the Plugin-configuration card; the
   // webServer service is optional (a headless profile serves no browser).
-  ctx.inject(['webServer'], webCtx => registerWorkBuddyStatusRoute(webCtx, { store, client, models: () => catalog.current() }))
+  ctx.inject(['webServer'], webCtx => registerWorkBuddyStatusRoute(webCtx, {
+    store,
+    client,
+    models: () => catalog.current(),
+    catalog: catalogSection,
+  }))
 
   // The settings section is what makes the provider visible on the Models
   // settings page (settings.describe joins the provider directory), and it
@@ -138,31 +189,76 @@ export function apply(ctx: Context, config: Config): void {
     })
   })
 
-  /** 从上游拉一次模型目录并写入 catalog；启动与 authFile 变更共用。
+  /** 从上游拉一次模型目录并写入 catalog；启动、authFile 变更、身份核对共用。
    * 函数声明（而非 const 箭头）：settings 服务已在场时 inject 回调同步
-   * 执行，onChange 必须引用得到提升后的绑定。 */
+   * 执行，onChange 必须引用得到提升后的绑定。
+   *
+   * 身份语义（与上游 dsh-workbuddy-connect 的 adoptIdentity 同构）：
+   * - 未登录 → 隐藏分组（adoptSignedOut），不展示兜底名单；
+   * - 账号切换 → 先上该账号最好的已知目录（saved 优先于 fallback）并立即可见，
+   *   再拉取 live；拉取中的旧身份迟到响应由 lastIdentity 挡掉，不覆盖新身份；
+   * - 拉取失败 → 保留已发布的内容（saved/fallback），只记录 error 并按既有
+   *   策略重试，重试耗尽即停。 */
   function refreshCatalog(reason: string, retriesLeft = CATALOG_REFRESH_RETRIES): void {
     void (async () => {
       try {
-        // current() 只探是否已登录（未登录静默保留 fallback，不告警不重试）；
+        // current() 只探是否已登录（未登录静默隐藏分组，不告警不重试）；
         // 真正取凭据用 resolve()：桌面文件里的 access token 过期是常态
         // （离屏很久后启动），current() 的旧 token 会让 fetchModels 必 401、
-        // 目录永远停在 fallback 快照——resolve() 会按需刷新并落盘。
+        // 目录永远停在旧快照——resolve() 会按需刷新并落盘。
         const signedIn = await store.current()
-        if (signedIn === undefined || stopped) return
+        if (signedIn === undefined || stopped) {
+          if (signedIn === undefined && !stopped) adoptSignedOut()
+          return
+        }
         const credential = await store.resolve()
         if (stopped) return
+        const identity = credentialIdentity(credential)
+        if (identity !== lastIdentity) {
+          lastIdentity = identity
+          // 该账号最好的已知目录：上次成功拉取的 saved 优先于编译期 fallback。
+          // saved 是"这个账号实际被服务过"的名单，比一次性快照更可信；这同时
+          // 覆盖重启场景——重启后 hadCredential 为假，saved 正是阻止分组落回
+          // 内置名单的东西。
+          const saved = catalogStore.saved(identity)
+          if (saved !== undefined) {
+            catalog.set([...saved.models])
+            catalogSource = 'saved'
+            catalogFetchedAtMs = saved.fetchedAtMs
+          } else {
+            catalog.set(FALLBACK_WORKBUDDY_MODELS)
+            catalogSource = 'fallback'
+            catalogFetchedAtMs = undefined
+          }
+          catalogError = undefined
+          catalog.setVisible(true)
+        }
+        const generation = lastIdentity
         const models = await client.fetchModels(credential)
         if (stopped) return
+        // 拉取中账号又变了（切换/登出）：迟到响应直接丢弃，不覆盖新身份。
+        if (generation !== lastIdentity) return
         catalog.set([...models])
+        catalog.setVisible(true)
+        catalogSource = 'live'
+        catalogFetchedAtMs = Date.now()
+        catalogError = undefined
+        await catalogStore.save({
+          account: identity,
+          source: chatBase(credential),
+          fetchedAtMs: catalogFetchedAtMs,
+          models: [...models],
+        })
       } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error)
+        catalogError = message.slice(0, 300)
         ctx.logger?.warn?.(
-          `dsh-any-connect: dynamic model catalog unavailable (${reason}); serving the static fallback list`,
+          `dsh-any-connect: dynamic model catalog unavailable (${reason}); serving the last-known list`,
           error,
         )
         // 有限次延迟重试：刚启动时上游/网络暂不可达是暂态，自动恢复实时
-        // 目录；重试耗尽则停在 fallback，不再打扰。重试全程 stopped 已挡，
-        // 插件卸载后的残留定时器最多空转一次。
+        // 目录；重试耗尽则停在已发布的内容（saved/fallback），不再打扰。
+        // 重试全程 stopped 已挡，插件卸载后的残留定时器最多空转一次。
         if (retriesLeft > 0 && !stopped) {
           setTimeout(() => { if (!stopped) refreshCatalog(`${reason}; retry`, retriesLeft - 1) }, CATALOG_REFRESH_RETRY_MS).unref()
         }
@@ -171,12 +267,30 @@ export function apply(ctx: Context, config: Config): void {
   }
   ctx.effect(() => () => {
     stopped = true
+    clearInterval(sweep)
     // close 期间 server 的 error 事件会 reject 该 promise,不捕获就是
     // unhandled rejection——Node 默认策略下会终止宿主进程,且恰发生在
     // dispose 路径。降级为告警日志。
     shim.close().catch(error => ctx.logger?.warn?.(`dsh-any-connect: shim close failed: ${error}`))
     void clearHostHeartbeat()
   })
+
+  // 身份核对：只读 current()，身份没变就什么都不做（零上游请求）。
+  // 用 unref 的 interval，vitest 假时钟下 advanceTimers 会触发它——回调内
+  // 无身份变化时不触网，现有重试计数测试不受影响。
+  const sweep = setInterval(() => {
+    if (stopped) return
+    void (async () => {
+      try {
+        const signedIn = await store.current()
+        const identity = signedIn === undefined ? undefined : credentialIdentity(signedIn)
+        if (identity !== lastIdentity && !stopped) refreshCatalog('identity sweep')
+      } catch {
+        // 核对读失败（文件瞬态不可读）不惊动：下次节拍再看。
+      }
+    })()
+  }, IDENTITY_SWEEP_MS)
+  sweep.unref()
 
   void shim.ready
     .then(() => {

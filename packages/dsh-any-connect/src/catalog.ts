@@ -47,12 +47,22 @@ export const FALLBACK_WORKBUDDY_MODELS: readonly WorkBuddyModelInfo[] = [
   { id: 'deepseek-v4-pro', name: 'Deepseek-V4-Pro', contextWindow: 1000000, maxTokens: 128000, supportsImages: true, reasoning: { supports: true, onlyReasoning: true, defaultEffort: 'high', canDisableThinking: false }, billing: { credits: 'x0.51', free: false } },
 ]
 
-/** Mutable catalog shared by the shim's `/v1/models` and the adapter. */
+/** Mutable catalog shared by the shim's `/v1/models` and the adapter.
+ *
+ * Visibility gates the whole roster: a signed-out variant is *empty* rather
+ * than showing the fallback list — an empty catalog is how DSH hides a model
+ * group (the host filters out groups with no models), which keeps a sign-in
+ * that happens after startup working without re-registering the provider.
+ * Models the user picked while visible stay registered-but-invisible; the
+ * rows are kept so flipping back needs no re-fetch.
+ */
 export class WorkBuddyCatalog {
   private models: readonly WorkBuddyModelInfo[] = FALLBACK_WORKBUDDY_MODELS
+  private visible = true
 
-  /** Current entries; the fallback list until the upstream answer lands. */
+  /** Current entries; empty while the variant has no usable credential. */
   current(): readonly WorkBuddyModelInfo[] {
+    if (!this.visible) return []
     return this.models
   }
 
@@ -60,5 +70,20 @@ export class WorkBuddyCatalog {
    * the new entries are visible to the next snapshot without further wiring. */
   set(models: readonly WorkBuddyModelInfo[]): void {
     this.models = [...models]
+  }
+
+  /** Whether this variant's models are exposed at all. */
+  isVisible(): boolean {
+    return this.visible
+  }
+
+  /**
+   * Show or hide the whole catalog. Returns whether the value changed, so the
+   * caller can skip work that would re-render an identical list.
+   */
+  setVisible(visible: boolean): boolean {
+    if (this.visible === visible) return false
+    this.visible = visible
+    return true
   }
 }

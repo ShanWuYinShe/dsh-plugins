@@ -36,14 +36,21 @@ afterEach(async () => {
 })
 
 describe('WorkBuddy Host settings integration', () => {
-  it('exposes the provider directory entry, the settings section, and the fallback model list', async () => {
+  it('registers the provider and settings section, but hides the model group while signed out', async () => {
+    // 无凭据行为（与上游 dsh-workbuddy-connect 一致）：从未登录、也没有插件
+    // 自留副本时，模型分组不再显示——此前会展示一份内置兜底名单，但那些模型
+    // 选了必然报错。provider 注册与设置区不受影响，登录后无需重新注册。
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-settings-'))
     vi.stubEnv('DSH_HOME', root)
     const ctx = new Context()
     context = ctx
     await ctx.plugin(LlmRuntime)
     await ctx.plugin(MemorySettings)
-    await ctx.plugin(WorkBuddy, {})
+    // Point the desktop probe at a path that cannot exist: the test must be
+    // hermetic (CI runners may carry a real signed-in desktop file, which
+    // would flip this case to signed-in). An explicit authFile overrides the
+    // platform defaults to this single path.
+    await ctx.plugin(WorkBuddy, { authFile: join(root, 'no-such-file.info') })
 
     // Registration rides on the loopback shim's listening event.
     await vi.waitFor(() => {
@@ -61,7 +68,45 @@ describe('WorkBuddy Host settings integration', () => {
     const descriptor = ctx.settings.describe().find(entry => entry.ns === WorkBuddy.WORKBUDDY_SETTINGS_NS)
     expect(descriptor).toBeDefined()
 
-    const models = await ctx.llm.listModels('workbuddy')
+    // No credential anywhere: the group is hidden (empty), not fallback-filled.
+    await vi.waitFor(async () => {
+      expect(await ctx.llm.listModels('workbuddy')).toEqual([])
+    })
+
+    // A settings write validates against the schema and persists.
+    await ctx.settings.update(WorkBuddy.WORKBUDDY_SETTINGS_NS, { authFile: '/tmp/other-workbuddy.info' })
+    const updated = ctx.settings.describe().find(entry => entry.ns === WorkBuddy.WORKBUDDY_SETTINGS_NS)
+    expect((updated?.value as Record<string, unknown>)['authFile']).toBe('/tmp/other-workbuddy.info')
+  })
+
+  it('serves the fallback model list once signed in (fetch failing)', async () => {
+    // 已登录但上游拉取失败：分组可见，服务内置兜底名单（上一个用例的反面）。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-fallback-'))
+    vi.stubEnv('DSH_HOME', root)
+    const desktop = join(root, 'workbuddy-desktop.info')
+    await writeFile(desktop, JSON.stringify({
+      auth: { accessToken: 'at', refreshToken: 'rt', expiresAt: Date.now() + 3600_000, domain: 'www.codebuddy.cn' },
+      account: { uid: 'uid-1', nickname: '昵称' },
+    }))
+    const spy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+      .mockImplementation(async () => { throw new Error('upstream down') })
+    try {
+      const ctx = new Context()
+      context = ctx
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(MemorySettings)
+      await ctx.plugin(WorkBuddy, { authFile: desktop })
+      await vi.waitFor(() => {
+        expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
+      })
+      let models = await ctx.llm.listModels('workbuddy')
+      if (models.length === 0) {
+        // 启动拉取是异步的：等 fallback 落定（身份已确认、fetch 已失败）。
+        await vi.waitFor(async () => {
+          models = await ctx.llm.listModels('workbuddy')
+          expect(models.length).toBeGreaterThan(0)
+        })
+      }
     expect(models.map(model => model.id)).toContain('auto')
     expect(models.map(model => model.id)).toContain('deepseek-v4-pro')
     // The fallback catalog tracks the live `cli` roster, including the newer
@@ -91,6 +136,57 @@ describe('WorkBuddy Host settings integration', () => {
     await ctx.settings.update(WorkBuddy.WORKBUDDY_SETTINGS_NS, { authFile: '/tmp/other-workbuddy.info' })
     const updated = ctx.settings.describe().find(entry => entry.ns === WorkBuddy.WORKBUDDY_SETTINGS_NS)
     expect((updated?.value as Record<string, unknown>)['authFile']).toBe('/tmp/other-workbuddy.info')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('serves the saved catalog after a restart when the fetch keeps failing', async () => {
+    // saved 优先于 fallback：一次成功拉取落盘后，即使重启且上游持续失败，
+    // 该账号看到的仍是"自己实际被服务过"的名单，而非编译期快照。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-saved-'))
+    vi.stubEnv('DSH_HOME', root)
+    const desktop = join(root, 'workbuddy-desktop.info')
+    await writeFile(desktop, JSON.stringify({
+      auth: { accessToken: 'at', refreshToken: 'rt', expiresAt: Date.now() + 3600_000, domain: 'www.codebuddy.cn' },
+      account: { uid: 'uid-1', nickname: '昵称' },
+    }))
+    const savedRow = { id: 'saved-only', name: 'Saved Only', contextWindow: 100, maxTokens: 10, supportsImages: false }
+    // 第一程：拉取成功 → 落盘。
+    const okSpy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+      .mockImplementation(async () => [savedRow])
+    const ctx1 = new Context()
+    try {
+      await ctx1.plugin(LlmRuntime)
+      await ctx1.plugin(MemorySettings)
+      await ctx1.plugin(WorkBuddy, { authFile: desktop })
+      await vi.waitFor(async () => {
+        expect((await ctx1.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
+      })
+      // set 先于 save 落盘：等文件出现再"重启"，否则第二程读不到 saved。
+      const { existsSync } = await import('node:fs')
+      await vi.waitFor(() => {
+        expect(existsSync(join(root as string, '.workbuddy-catalog.json'))).toBe(true)
+      })
+    } finally {
+      okSpy.mockRestore()
+      await ctx1.fiber.dispose()
+    }
+    // 第二程（重启）：拉取持续失败 → 服务 saved，不回落 fallback。
+    const failSpy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+      .mockImplementation(async () => { throw new Error('upstream down') })
+    try {
+      const ctx = new Context()
+      context = ctx
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(MemorySettings)
+      await ctx.plugin(WorkBuddy, { authFile: desktop })
+      await vi.waitFor(async () => {
+        expect((await ctx.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
+      })
+    } finally {
+      failSpy.mockRestore()
+    }
   })
 
   it('retries the model catalog refresh after failures, then stops', async () => {

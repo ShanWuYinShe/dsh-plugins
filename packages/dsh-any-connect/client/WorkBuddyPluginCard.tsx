@@ -5,7 +5,7 @@ import type { CSSProperties } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import { WORKBUDDY_STATUS_PATH } from '../src/status-paths.js'
-import type { WorkBuddyWebModelBadge, WorkBuddyWebStatus } from '../src/status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebStatus } from '../src/status-paths.js'
 import type { WorkBuddySettingsKey } from './locales.js'
 
 /** Localized copy injected by the browser-plugin registration. */
@@ -106,6 +106,20 @@ function formatNumber(value: number): string {
 
 function formatTime(ms: number): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ms))
+}
+
+/**
+ * One-line catalog provenance under the model offers: live (just fetched) →
+ * saved (this account's last good list, restored after restart/failure) →
+ * fallback (compiled in). A stale list must not look like a live one.
+ */
+function catalogLine(catalog: WorkBuddyWebCatalog, t: WorkBuddyPluginCardInjected['t']): string {
+  const base = catalog.source === 'live'
+    ? t('catalogLive')
+    : catalog.source === 'saved'
+      ? t('catalogSaved', { time: catalog.fetchedAt === undefined ? '?' : formatTime(catalog.fetchedAt) })
+      : t('catalogFallback')
+  return catalog.error === undefined ? base : `${base} — ${t('catalogError', { message: catalog.error })}`
 }
 
 /** One billing package as a labeled progress bar. */
@@ -316,6 +330,8 @@ export function WorkBuddyPluginCard({ t }: WorkBuddyPluginCardProps) {
                       {status.models.map(model => <ModelOfferRow key={model.id} model={model} t={t} />)}
                     </div>
                   )}
+                  {status.catalog === undefined ? null
+                    : <p style={modelRateStyle}>{catalogLine(status.catalog, t)}</p>}
                 </>
               : null}
             {status.status === 'signed-out' ? <p style={bodyStyle}>{t('signedOutHint')}</p> : null}

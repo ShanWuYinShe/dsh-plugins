@@ -14,10 +14,10 @@ import type { WorkBuddyUpstreamClient } from './upstream.js'
 import { normalizeCredits } from './upstream.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import { WORKBUDDY_STATUS_PATH } from './status-paths.js'
-import type { WorkBuddyWebModelBadge, WorkBuddyWebStatus } from './status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebStatus } from './status-paths.js'
 
 export { WORKBUDDY_STATUS_PATH } from './status-paths.js'
-export type { WorkBuddyWebStatus } from './status-paths.js'
+export type { WorkBuddyWebCatalog, WorkBuddyWebStatus } from './status-paths.js'
 
 /** Constructor dependencies. */
 export interface WorkBuddyStatusRouteOptions {
@@ -25,6 +25,8 @@ export interface WorkBuddyStatusRouteOptions {
   client: Pick<WorkBuddyUpstreamClient, 'fetchCredits'>
   /** Resolve the current model catalog for free/badge display. */
   models: () => readonly WorkBuddyModelInfo[]
+  /** Resolve where the served models came from, for the card's catalog line. */
+  catalog: () => WorkBuddyWebCatalog
 }
 
 /** Redact token-like content before it crosses to the browser. */
@@ -70,6 +72,7 @@ export async function workBuddyWebStatus(
     ...authStatus.domain === undefined || authStatus.domain === '' ? {} : { domain: authStatus.domain },
     ...authStatus.source === undefined ? {} : { source: authStatus.source },
     ...authStatus.expiresAtMs === undefined ? {} : { expiresAt: authStatus.expiresAtMs },
+    catalog: deps.catalog(),
   }
   // Model billing facts ride the signed-in document so the card can show which
   // models are free or on a promo, without touching the Models picker. The

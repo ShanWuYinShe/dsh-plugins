@@ -32,6 +32,29 @@ export interface WorkBuddyWebModelBadge {
   credits?: string
 }
 
+/**
+ * Where the models a card is currently showing came from.
+ *
+ * The card must distinguish a live catalog from the built-in fallback, and
+ * say when the last attempt failed — otherwise a stale list is
+ * indistinguishable from an offline one, and a user cannot tell whether the
+ * models they see still match the upstream.
+ */
+export interface WorkBuddyWebCatalog {
+  /**
+   * Where the models on screen came from, in degradation order:
+   * `live` (fetched now) → `saved` (this account's last successful fetch,
+   * restored after a restart or a failed fetch) → `fallback` (the roster
+   * compiled into the plugin). The card distinguishes them because "stale"
+   * and "offline with a saved list" are different situations for the user.
+   */
+  source: 'live' | 'saved' | 'fallback'
+  /** When the live catalog last succeeded, epoch milliseconds. */
+  fetchedAt?: number
+  /** Why the most recent fetch failed, when it did, redacted for display. */
+  error?: string
+}
+
 /** The JSON document the plugin card renders. */
 export type WorkBuddyWebStatus =
   | { status: 'signed-out' }
@@ -45,5 +68,7 @@ export type WorkBuddyWebStatus =
     creditsError?: string
     /** Billing convenience facts for the models the plugin serves. */
     models?: readonly WorkBuddyWebModelBadge[]
+    /** Where those models came from, and whether the last fetch failed. */
+    catalog?: WorkBuddyWebCatalog
   }
   | { status: 'error'; message: string }
