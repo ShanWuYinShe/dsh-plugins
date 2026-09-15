@@ -50,7 +50,7 @@ describe('WorkBuddy Host settings integration', () => {
     // hermetic (CI runners may carry a real signed-in desktop file, which
     // would flip this case to signed-in). An explicit authFile overrides the
     // platform defaults to this single path.
-    await ctx.plugin(WorkBuddy, { authFile: join(root, 'no-such-file.info') })
+    await ctx.plugin(WorkBuddy, { authFile: join(root, 'no-such-file.info'), authFileAI: join(root, 'no-such-ai-file.info') })
 
     // Registration rides on the loopback shim's listening event.
     await vi.waitFor(() => {
@@ -95,7 +95,7 @@ describe('WorkBuddy Host settings integration', () => {
       context = ctx
       await ctx.plugin(LlmRuntime)
       await ctx.plugin(MemorySettings)
-      await ctx.plugin(WorkBuddy, { authFile: desktop })
+      await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(() => {
         expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
       })
@@ -159,7 +159,7 @@ describe('WorkBuddy Host settings integration', () => {
     try {
       await ctx1.plugin(LlmRuntime)
       await ctx1.plugin(MemorySettings)
-      await ctx1.plugin(WorkBuddy, { authFile: desktop })
+      await ctx1.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(async () => {
         expect((await ctx1.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
       })
@@ -180,7 +180,7 @@ describe('WorkBuddy Host settings integration', () => {
       context = ctx
       await ctx.plugin(LlmRuntime)
       await ctx.plugin(MemorySettings)
-      await ctx.plugin(WorkBuddy, { authFile: desktop })
+      await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(async () => {
         expect((await ctx.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
       })
@@ -216,7 +216,7 @@ describe('WorkBuddy Host settings integration', () => {
     // shim 就绪后再来一次启动拉取——两条失败链各自带重试。
     vi.useFakeTimers()
     try {
-      await ctx.plugin(WorkBuddy, { authFile: desktop })
+      await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       // waitFor 在假时钟下自动按 50ms 推进(上限 1s,远够不到 60s 重试点),
       // 等两条链的首次失败都落地。
       await vi.waitFor(() => { expect(calls).toBe(2) })
@@ -238,6 +238,68 @@ describe('WorkBuddy Host settings integration', () => {
       expect(calls).toBe(6)
     } finally {
       vi.useRealTimers()
+      spy.mockRestore()
+    }
+  })
+})
+
+describe('WorkBuddy international variant', () => {
+  it('registers both providers but hides each group independently', async () => {
+    // 双分组独立显隐：都不登录时两个分组都隐藏，但 provider 注册与设置区
+    // 都在——登录任一一侧都无需重新注册。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-dual-'))
+    vi.stubEnv('DSH_HOME', root)
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(MemorySettings)
+    await ctx.plugin(WorkBuddy, {
+      authFile: join(root, 'no-such-file.info'),
+      authFileAI: join(root, 'no-such-ai-file.info'),
+    })
+    await vi.waitFor(() => {
+      const ids = ctx.llm.listProviders().map(provider => provider.id)
+      expect(ids).toContain('workbuddy')
+      expect(ids).toContain('workbuddy-ai')
+    })
+    await vi.waitFor(async () => {
+      expect(await ctx.llm.listModels('workbuddy')).toEqual([])
+      expect(await ctx.llm.listModels('workbuddy-ai')).toEqual([])
+    })
+    const namespaces = ctx.settings.describe().map(entry => entry.ns)
+    expect(namespaces).toContain(WorkBuddy.WORKBUDDY_SETTINGS_NS)
+    expect(namespaces).toContain(WorkBuddy.WORKBUDDY_AI_SETTINGS_NS)
+  })
+
+  it('serves the AI fallback roster when only the AI side is signed in', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-ai-'))
+    vi.stubEnv('DSH_HOME', root)
+    const desktopAI = join(root, 'workbuddy-desktop-ai.info')
+    await writeFile(desktopAI, JSON.stringify({
+      auth: { accessToken: 'ai-at', refreshToken: 'ai-rt', expiresAt: Date.now() + 3600_000, domain: 'www.workbuddy.ai' },
+      account: { uid: 'ai-uid', nickname: 'AI 用户' },
+    }))
+    const spy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+      .mockImplementation(async () => { throw new Error('upstream down') })
+    try {
+      const ctx = new Context()
+      context = ctx
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(MemorySettings)
+      await ctx.plugin(WorkBuddy, {
+        authFile: join(root, 'no-such-file.info'),
+        authFileAI: desktopAI,
+      })
+      await vi.waitFor(async () => {
+        const ids = (await ctx.llm.listModels('workbuddy-ai')).map(m => m.id)
+        expect(ids).toContain('default-model')
+        expect(ids).toContain('gpt-5.6-luna')
+      })
+      // CN 侧无凭据：保持隐藏；AI 名单里没有 CN 专属 id。
+      expect(await ctx.llm.listModels('workbuddy')).toEqual([])
+      const aiIds = (await ctx.llm.listModels('workbuddy-ai')).map(m => m.id)
+      expect(aiIds).not.toContain('auto')
+    } finally {
       spy.mockRestore()
     }
   })

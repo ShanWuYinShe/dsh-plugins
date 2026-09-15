@@ -27,6 +27,8 @@ export interface WorkBuddyStatusRouteOptions {
   models: () => readonly WorkBuddyModelInfo[]
   /** Resolve where the served models came from, for the card's catalog line. */
   catalog: () => WorkBuddyWebCatalog
+  /** Route path; one per variant. */
+  path: string
 }
 
 /** Redact token-like content before it crosses to the browser. */
@@ -65,7 +67,9 @@ export async function workBuddyWebStatus(
   deps: WorkBuddyStatusRouteOptions,
 ): Promise<WorkBuddyWebStatus> {
   const authStatus = await deps.store.status()
-  if (authStatus.state !== 'signed-in') return { status: 'signed-out' }
+  if (authStatus.state !== 'signed-in') {
+    return authStatus.reason === undefined ? { status: 'signed-out' } : { status: 'signed-out', reason: authStatus.reason }
+  }
   const status: WorkBuddyWebStatus = {
     status: 'signed-in',
     ...authStatus.nickname === undefined ? {} : { nickname: authStatus.nickname },
@@ -80,7 +84,7 @@ export async function workBuddyWebStatus(
   // display form; the card additionally localizes it.
   const models = deps.models()
   const modelsField: readonly WorkBuddyWebModelBadge[] = models
-    .filter(model => model.billing?.free === true || (model.billing?.badges?.length ?? 0) > 0)
+    .filter(model => model.billing?.free === true || (model.billing?.badges?.length ?? 0) > 0 || model.billing?.rateUnknown === true)
     .map(model => {
       // A free model's card row already carries the 免费 chip; the
       // "x0.00 credits per message" line under it would be pure noise.
@@ -91,6 +95,7 @@ export async function workBuddyWebStatus(
         ...model.billing?.free === true ? { free: true as const } : {},
         ...model.billing?.badges !== undefined && model.billing.badges.length > 0 ? { badges: model.billing.badges } : {},
         ...rate === undefined ? {} : { credits: rate },
+        ...model.billing?.rateUnknown === true ? { rateUnknown: true as const } : {},
       }
     })
   const statusWithModels: WorkBuddyWebStatus = modelsField.length > 0
@@ -113,7 +118,7 @@ export function registerWorkBuddyStatusRoute(ctx: Context, deps: WorkBuddyStatus
   ctx.effect(() => {
     const dispose = ctx.webServer.register({
       kind: 'exact',
-      path: WORKBUDDY_STATUS_PATH,
+      path: deps.path,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'GET') {
           json(res, 405, { error: 'method not allowed' })

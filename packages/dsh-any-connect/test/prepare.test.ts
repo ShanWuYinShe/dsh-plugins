@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyUpstreamError, prepareChatBody, regionOf } from '../src/upstream.js'
+import { classifyUpstreamError, prepareChatBody, prepareInternationalChatBody, regionOf } from '../src/upstream.js'
 
 describe('prepareChatBody', () => {
   it('forces stream true', () => {
@@ -94,5 +94,30 @@ describe('regionOf', () => {
     expect(regionOf('workbuddy.ai')).toBe('global')
     expect(regionOf('US.WorkBuddy.AI')).toBe('global')
     expect(regionOf('')).toBe('cn')
+  })
+})
+
+describe('prepareInternationalChatBody', () => {
+  const body = (messages: unknown) => JSON.stringify({ model: 'm', stream: true, messages })
+
+  it('prepends the gateway-required system prompt when none leads', () => {
+    const out = JSON.parse(prepareInternationalChatBody(body([{ role: 'user', content: 'hi' }]))) as {
+      messages: { role: string; content: string }[]
+    }
+    expect(out.messages[0]).toEqual({ role: 'system', content: 'You are a helpful assistant.' })
+    expect(out.messages[1]).toEqual({ role: 'user', content: 'hi' })
+    expect(out.stream).toBe(true)
+  })
+
+  it('leaves a leading system prompt untouched', () => {
+    const source = body([{ role: 'system', content: 'mine' }, { role: 'user', content: 'hi' }])
+    expect(prepareInternationalChatBody(source)).toBe(JSON.stringify({ ...JSON.parse(source), stream: true }))
+  })
+
+  it('passes non-JSON and message-less bodies through for the upstream to reject', () => {
+    expect(prepareInternationalChatBody('not json')).toBe('not json')
+    expect(prepareInternationalChatBody(JSON.stringify({ model: 'm' }))).toBe(
+      JSON.stringify({ model: 'm', stream: true }),
+    )
   })
 })

@@ -3,6 +3,16 @@
 /** Plugin-owned status endpoint consumed by its browser half. */
 export const WORKBUDDY_STATUS_PATH = '/plugins/dsh-any-connect/status'
 
+/**
+ * The international (WorkBuddy AI) variant's own status route.
+ *
+ * A separate constant rather than a computed suffix so both halves reference
+ * literal strings: the browser bundle and the host bundle are built
+ * independently, and a shared expression is one build-config drift away from
+ * the card asking a route the host never mounted.
+ */
+export const WORKBUDDY_AI_STATUS_PATH = '/plugins/dsh-any-connect/ai/status'
+
 /** One billing package and its remaining credit. */
 export interface WorkBuddyWebCreditAccount {
   packageName: string
@@ -30,6 +40,15 @@ export interface WorkBuddyWebModelBadge {
    * may be interpolated into a localized sentence rather than shown bare.
    */
   credits?: string
+  /**
+   * The rate cannot be stated right now, and the card must say so.
+   *
+   * Set for a row whose price came from a promotion that has since ended: the
+   * upstream bakes the discounted value into the cached row, and the original
+   * price is not recoverable from it, so neither the old figure nor `free` may
+   * be repeated. The card renders "refresh to see the price" instead.
+   */
+  rateUnknown?: true
 }
 
 /**
@@ -57,7 +76,15 @@ export interface WorkBuddyWebCatalog {
 
 /** The JSON document the plugin card renders. */
 export type WorkBuddyWebStatus =
-  | { status: 'signed-out' }
+  | {
+    status: 'signed-out'
+    /**
+     * Why no credential is usable, when that is diagnosable rather than simply
+     * "nobody signed in" — today a credential belonging to the other product.
+     * The card renders it in place of the generic sign-in hint.
+     */
+    reason?: string
+  }
   | {
     status: 'signed-in'
     nickname?: string

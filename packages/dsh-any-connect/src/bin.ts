@@ -5,7 +5,9 @@ import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { WorkBuddyCredentialStore, workbuddyOwnAuthPath } from './auth.js'
 import { WorkBuddyUpstreamClient } from './upstream.js'
-import { FALLBACK_WORKBUDDY_MODELS } from './catalog.js'
+import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS } from './catalog.js'
+import { CN_VARIANT, variantFor, WORKBUDDY_VARIANTS } from './variants.js'
+import type { WorkBuddyVariant } from './variants.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { isHeartbeatProcessAlive, readHostHeartbeat, workbuddyHostHeartbeatPath } from './host-heartbeat.js'
 
@@ -23,11 +25,12 @@ function safeMessage(error: unknown): string {
 
 function printHelp(): void {
   process.stdout.write([
-    'Usage: dsh-any-connect <doctor|status|logout> [--json]',
+    'Usage: dsh-any-connect <doctor|status|logout> [--provider <id>] [--json]',
     '',
     '  doctor   secret-free sign-in and environment diagnostics',
     '  status   sign-in state, remaining WorkBuddy credit, and host-bundle health',
     '  logout   remove the plugin-owned credential copy (the desktop app keeps its sign-in)',
+    '  --provider  which product to inspect; defaults to workbuddy',
     '  --json   emit one secret-free JSON document (doctor/status only)',
     '',
   ].join('\n'))
@@ -37,13 +40,17 @@ function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`)
 }
 
-function makeStore(): WorkBuddyCredentialStore {
+function makeStore(variant: WorkBuddyVariant): WorkBuddyCredentialStore {
   const client = new WorkBuddyUpstreamClient()
-  return new WorkBuddyCredentialStore({ refresh: credential => client.refreshToken(credential) })
+  return new WorkBuddyCredentialStore({ variant, refresh: credential => client.refreshToken(credential) })
 }
 
-async function doctor(jsonOutput: boolean): Promise<number> {
-  const store = makeStore()
+function fallbackFor(variant: WorkBuddyVariant): number {
+  return variant.id === CN_VARIANT.id ? FALLBACK_WORKBUDDY_MODELS.length : FALLBACK_WORKBUDDY_AI_MODELS.length
+}
+
+async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
+  const store = makeStore(variant)
   const status = await store.status()
   const desktopPresent = await store.desktopFilePresent()
   const heartbeat = await readHostHeartbeat()
@@ -52,12 +59,13 @@ async function doctor(jsonOutput: boolean): Promise<number> {
     schemaVersion: JSON_SCHEMA_VERSION,
     package: 'dsh-any-connect',
     version: ANYCONNECT_VERSION,
+    provider: variant.id,
     node: process.version,
     desktopAuthFile: {
-      path: store.desktopAuthPath() ?? '(no platform default; set WORKBUDDY_AUTH_FILE)',
+      path: store.desktopAuthPath() ?? `(no platform default; set ${variant.env})`,
       present: desktopPresent,
     },
-    ownAuthFile: workbuddyOwnAuthPath(),
+    ownAuthFile: workbuddyOwnAuthPath(variant.ownFilename),
     hostHeartbeat: {
       path: workbuddyHostHeartbeatPath(),
       present: heartbeat !== undefined,
@@ -65,10 +73,11 @@ async function doctor(jsonOutput: boolean): Promise<number> {
       processAlive: hostAlive,
     },
     signIn: status.state,
-    fallbackModels: FALLBACK_WORKBUDDY_MODELS.length,
+    ...status.reason === undefined ? {} : { signInReason: status.reason },
+    fallbackModels: fallbackFor(variant),
     hints: [
-      ...status.state === 'signed-in' ? [] : ['Sign in once in the WorkBuddy desktop app, then run status again.'],
-      ...desktopPresent ? [] : [`No WorkBuddy desktop auth file at the expected path; set WORKBUDDY_AUTH_FILE if it lives elsewhere.`],
+      ...status.state === 'signed-in' ? [] : [`Sign in once in the ${variant.appName} desktop app, then run status again.`],
+      ...desktopPresent ? [] : [`No ${variant.appName} desktop auth file at the expected path; set ${variant.env} if it lives elsewhere.`],
       ...hostAlive ? [] : ['Host bundle not running in this DSH profile (or the process exited). The browser card and provider are unavailable until DSH starts the plugin.'],
     ],
   }
@@ -76,7 +85,7 @@ async function doctor(jsonOutput: boolean): Promise<number> {
     printJson(report)
   } else {
     process.stdout.write([
-      `WorkBuddy Connect ${ANYCONNECT_VERSION} on ${process.version}`,
+      `${variant.displayName} Connect ${ANYCONNECT_VERSION} on ${process.version}`,
       `Desktop auth file: ${report.desktopAuthFile.present ? 'present' : 'missing'} (${report.desktopAuthFile.path})`,
       `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : heartbeat !== undefined ? 'stale heartbeat (process exited)' : 'not started'}`,
       `Sign-in state: ${report.signIn}`,
@@ -88,8 +97,8 @@ async function doctor(jsonOutput: boolean): Promise<number> {
   return status.state === 'signed-in' && desktopPresent ? 0 : 1
 }
 
-async function status(jsonOutput: boolean): Promise<number> {
-  const store = makeStore()
+async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
+  const store = makeStore(variant)
   const client = new WorkBuddyUpstreamClient()
   const authStatus = await store.status()
   const heartbeat = await readHostHeartbeat()
@@ -97,9 +106,9 @@ async function status(jsonOutput: boolean): Promise<number> {
   const hostState = hostAlive ? 'running' : heartbeat !== undefined ? 'stale' : 'not-started'
   if (authStatus.state !== 'signed-in') {
     if (jsonOutput) {
-      printJson({ schemaVersion: JSON_SCHEMA_VERSION, package: 'dsh-any-connect', version: ANYCONNECT_VERSION, status: 'signed-out', hostBundle: hostState })
+      printJson({ schemaVersion: JSON_SCHEMA_VERSION, package: 'dsh-any-connect', version: ANYCONNECT_VERSION, provider: variant.id, status: 'signed-out', hostBundle: hostState })
     } else {
-      process.stdout.write(`WorkBuddy Connect: signed out\nHost bundle: ${hostState}\n`)
+      process.stdout.write(`${variant.displayName} Connect: signed out\nHost bundle: ${hostState}\n`)
     }
     return 1
   }
@@ -116,6 +125,7 @@ async function status(jsonOutput: boolean): Promise<number> {
       schemaVersion: JSON_SCHEMA_VERSION,
       package: 'dsh-any-connect',
       version: ANYCONNECT_VERSION,
+      provider: variant.id,
       status: 'signed-in',
       ...expiresAt === undefined ? {} : { accessTokenExpires: expiresAt },
       ...authStatus.nickname === undefined ? {} : { nickname: authStatus.nickname },
@@ -128,7 +138,7 @@ async function status(jsonOutput: boolean): Promise<number> {
     return 0
   }
   process.stdout.write([
-    `WorkBuddy Connect: signed in${authStatus.nickname === undefined ? '' : ` as ${authStatus.nickname}`}`,
+    `${variant.displayName} Connect: signed in${authStatus.nickname === undefined ? '' : ` as ${authStatus.nickname}`}`,
     ...expiresAt === undefined ? [] : [`Access token expires ${expiresAt} (refresh is automatic)`],
     credits?.error === undefined
       ? `Remaining credit: ${credits?.total ?? 'unknown'}`
@@ -154,7 +164,32 @@ export async function run(argv: readonly string[]): Promise<number> {
   }
   const action = rawAction as Action
   const jsonOutput = flags.includes('--json')
-  const unknown = flags.filter(flag => flag !== '--json')
+
+  // `--provider <id>` (or `--provider=<id>`); absent means the CN provider, so
+  // every existing invocation keeps its behaviour.
+  let providerId: string | undefined
+  const rest: string[] = []
+  for (let index = 0; index < flags.length; index += 1) {
+    const flag = flags[index]!
+    if (flag === '--provider') {
+      providerId = flags[index + 1]
+      index += 1
+      continue
+    }
+    if (flag.startsWith('--provider=')) {
+      providerId = flag.slice('--provider='.length)
+      continue
+    }
+    rest.push(flag)
+  }
+  const variant = providerId === undefined ? CN_VARIANT : variantFor(providerId)
+  if (variant === undefined) {
+    process.stderr.write(
+      `dsh-any-connect: unknown provider ${JSON.stringify(providerId)}; expected one of ${WORKBUDDY_VARIANTS.map(v => v.id).join(', ')}\n`,
+    )
+    return 1
+  }
+  const unknown = rest.filter(flag => flag !== '--json')
   if (unknown.length > 0 || (jsonOutput && action === 'logout')) {
     process.stderr.write(`dsh-any-connect: invalid options for ${action}: ${flags.join(' ')}\n`)
     return 1
@@ -162,13 +197,13 @@ export async function run(argv: readonly string[]): Promise<number> {
   try {
     switch (action) {
       case 'doctor':
-        return await doctor(jsonOutput)
+        return await doctor(jsonOutput, variant)
       case 'status':
-        return await status(jsonOutput)
+        return await status(jsonOutput, variant)
       case 'logout': {
-        const store = makeStore()
+        const store = makeStore(variant)
         await store.logout()
-        process.stdout.write(`WorkBuddy Connect: removed ${workbuddyOwnAuthPath()}; the desktop app's sign-in is untouched\n`)
+        process.stdout.write(`${variant.displayName} Connect: removed ${workbuddyOwnAuthPath(variant.ownFilename)}; the desktop app's sign-in is untouched\n`)
         return 0
       }
     }

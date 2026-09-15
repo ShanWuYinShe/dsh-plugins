@@ -8,6 +8,7 @@
  */
 
 import type { WorkBuddyCredential } from './auth.js'
+import { appUserAgent, resolveAppVersion, type AppVersionInfo } from './app-version.js'
 
 /** WorkBuddy region selected by the credential's login domain. */
 export type WorkBuddyRegion = 'cn' | 'global'
@@ -27,6 +28,19 @@ export interface WorkBuddyUpstreamModel {
   name: string
   contextWindow: number
   maxTokens: number
+  /**
+   * The international document's larger selectable window, when it declares
+   * one, and the model's maximum input ceiling.
+   *
+   * Kept apart from {@link WorkBuddyUpstreamModel.contextWindow} because they
+   * answer different questions: `contextWindow` is the budget the plugin
+   * actually requests under, while these are facts about what the upstream
+   * will accept.
+   */
+  maxInputTokens?: number
+  supportedContextWindows?: readonly number[]
+  /** Verified promotions covering this model (international document only). */
+  promotions?: readonly WorkBuddyPromotion[]
   /**
    * Upstream-declared image input capability. Missing or false upstream data
    * resolves to false, so an unknown model stays text-only: over-claiming
@@ -79,6 +93,30 @@ export interface WorkBuddyModelBilling {
   badges?: readonly string[]
   /** Whether the model is currently free (`x0.00` credits). */
   free: boolean
+  /**
+   * The rate cannot be stated right now, and the card must say so.
+   *
+   * Set for a row whose price came from a promotion that has since ended: the
+   * upstream bakes the discounted value into the cached row, and the original
+   * price is not recoverable from it, so neither the old figure nor `free` may
+   * be repeated. The card renders "refresh to see the price" instead.
+   */
+  rateUnknown?: true
+}
+
+/** One verified promotion entry, from the international App document's
+ * `modelPromotions` array. Only the shape actually observed is modelled. */
+export interface WorkBuddyPromotion {
+  /** Window start, epoch ms, parsed from the document's offset timestamp. */
+  start: number
+  /** Window end, epoch ms. */
+  end: number
+  /** Badge text as the upstream wrote it, e.g. `Free now`. */
+  label: string
+  /** Multiplier applied to the model's rate; `0` replaces it outright. */
+  factor: number
+  /** Higher wins when several promotions cover one model. */
+  priority: number
 }
 
 /** One billing package and its remaining credit. */
@@ -227,6 +265,142 @@ function resolveUpstreamBilling(wrapped: Record<string, unknown>): { billing: Wo
 
 /** Session-invalidation markers that mean "sign in again in the WorkBuddy app". */
 const SESSION_DEAD_MARKERS: readonly string[] = ['Offline user session not found', '12153']
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function positive(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
+
+/**
+ * Parse one catalog row. The international App document carries three extras
+ * the CN document lacks: `contextWindow` as an object (`defaultLength` is the
+ * working budget the plugin requests under), the input ceiling plus the
+ * selectable lengths, and per-model promotions (parsed from the document-level
+ * `modelPromotions` array passed in).
+ */
+function parseModelRow(
+  wrapped: Record<string, unknown>,
+  international: boolean,
+  promotions: unknown,
+): WorkBuddyUpstreamModel | undefined {
+  const id = typeof wrapped['id'] === 'string' ? wrapped['id'] : ''
+  if (id === '' || wrapped['disabled'] === true) return undefined
+  const input = typeof wrapped['maxInputTokens'] === 'number' ? wrapped['maxInputTokens'] : 0
+  const output = typeof wrapped['maxOutputTokens'] === 'number' ? wrapped['maxOutputTokens'] : 0
+  if (input <= 0 || output <= 0) return undefined
+  const context = wrapped['contextWindow']
+  const defaultLength = isObject(context) && positive(context['defaultLength'])
+    ? context['defaultLength'] as number
+    : undefined
+  const supportedLengths = isObject(context) && Array.isArray(context['supportedLengths'])
+    ? (context['supportedLengths'] as unknown[]).filter(positive)
+    : []
+  return {
+    id,
+    name: typeof wrapped['name'] === 'string' && wrapped['name'] !== '' ? wrapped['name'] : id,
+    contextWindow: international && defaultLength !== undefined ? defaultLength : input,
+    maxTokens: output,
+    ...international ? {
+      maxInputTokens: input,
+      supportedContextWindows: supportedLengths,
+      promotions: parsePromotions(promotions, id),
+    } : {},
+    supportsImages: wrapped['supportsImages'] === true && wrapped['disabledMultimodal'] !== true,
+    ...resolveUpstreamReasoning(wrapped),
+    ...resolveUpstreamBilling(wrapped),
+  }
+}
+
+/**
+ * Extract the promotions covering `model` from the international document's
+ * `modelPromotions` array.
+ *
+ * Ported from corrinehu/dsh-workbuddy-connect (MIT): only an enabled,
+ * time-boxed, `displayMode: "replace"` discount is modelled — an entry that
+ * does not match is dropped rather than guessed at, since rendering a
+ * discount the plugin does not understand could understate what the user pays.
+ */
+function parsePromotions(value: unknown, model: string): WorkBuddyPromotion[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap(item => {
+    if (!isObject(item) || item['enabled'] !== true) return []
+    const modelIds = item['modelIds']
+    if (!Array.isArray(modelIds) || !modelIds.includes(model)) return []
+    const schedule = item['schedule']
+    const discount = item['discount']
+    const badge = item['badge']
+    if (!isObject(schedule) || !isObject(discount) || !isObject(badge)) return []
+    // Only a replacement discount has an unambiguous display rule; any other
+    // display mode is left to the upstream's own client.
+    if (discount['displayMode'] !== 'replace') return []
+    const start = typeof schedule['validFrom'] === 'string' ? Date.parse(schedule['validFrom']) : Number.NaN
+    const end = typeof schedule['validUntil'] === 'string' ? Date.parse(schedule['validUntil']) : Number.NaN
+    const factor = discount['factor']
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return []
+    if (typeof factor !== 'number' || !Number.isFinite(factor) || factor < 0) return []
+    const label = typeof badge['label'] === 'string' ? badge['label'] : ''
+    const priority = typeof item['priority'] === 'number' && Number.isFinite(item['priority'])
+      ? item['priority'] as number
+      : 0
+    return [{ start, end, label, factor, priority }]
+  })
+}
+
+/**
+ * Layer the currently-effective promotion onto a copy of one model row.
+ *
+ * Ported from corrinehu/dsh-workbuddy-connect (MIT). Non-destructive: the
+ * model's own `credits` and `badges` are the base, and the promotion is
+ * layered onto a copy. A model with no live promotion is returned as-is, so
+ * the common case allocates nothing.
+ *
+ * The expired case is the load-bearing one: the upstream bakes the discounted
+ * value into `credits` itself (free rows ship `credits: "x0.00"`), so keeping
+ * that value after the window would advertise an ended discount — `free: true`
+ * being the worst case. The original price is not recoverable from the row,
+ * so the honest answer is to stop asserting one (`rateUnknown`).
+ */
+export function modelWithCurrentPromotion(model: WorkBuddyUpstreamModel, now = Date.now()): WorkBuddyUpstreamModel {
+  if (model.promotions === undefined || model.promotions.length === 0) return model
+  const promotion = [...model.promotions]
+    .sort((a, b) => b.priority - a.priority)
+    .find(candidate => now >= candidate.start && now < candidate.end)
+  if (promotion === undefined) {
+    const derivedFromPromotion = model.billing?.free === true
+      || (model.billing?.badges?.length ?? 0) > 0
+      || model.promotions.some(candidate => candidate.factor !== 1)
+    if (!derivedFromPromotion) return model
+    return {
+      ...model,
+      billing: {
+        free: false,
+        rateUnknown: true,
+      },
+    }
+  }
+  const rate = normalizeCredits(model.billing?.credits)
+  const original = rate !== undefined && rate.startsWith('x') ? Number(rate.slice(1)) : Number.NaN
+  // A replacement to zero is meaningful even when the base rate is unknown (the
+  // App document's Auto row carries an empty rate string); any other multiplier
+  // needs a number to scale, so it is skipped rather than invented.
+  if (promotion.factor !== 0 && !Number.isFinite(original)) return model
+  const value = promotion.factor === 0 ? 0 : original * promotion.factor
+  return {
+    ...model,
+    billing: {
+      ...model.billing,
+      credits: `x${value.toFixed(2)}`,
+      free: value === 0,
+      badges: [
+        ...(model.billing?.badges ?? []),
+        ...promotion.label === '' ? [] : [promotion.label],
+      ],
+    },
+  }
+}
 
 /** Classify an upstream failure from its HTTP status and body excerpt. */
 export function classifyUpstreamError(status: number, body: string): UpstreamErrorKind {
@@ -401,6 +575,45 @@ function normalizeToolChoice(obj: Record<string, unknown>): void {
   delete obj['tool_choice']
 }
 
+/**
+ * The system prompt injected when the international endpoint receives a body
+ * with none.
+ *
+ * Measured requirement, not a guess: the international gateway rejects a body
+ * whose first message is not `system` with HTTP 400 code 11128. Minimal on
+ * purpose — it exists to satisfy a gateway precondition, not to steer the
+ * model — and the normal path never reaches this, since pi-ai already sends
+ * the harness's system prompt.
+ */
+const INTERNATIONAL_SYSTEM_PROMPT = 'You are a helpful assistant.'
+
+/**
+ * Apply the international endpoint's extra chat requirement: the first message
+ * must be a system prompt.
+ *
+ * The added prompt is deliberately empty of user content and prepended, never
+ * merged: existing messages keep their order and wording. A body that is not a
+ * message list passes through for the upstream to reject.
+ */
+export function prepareInternationalChatBody(source: string): string {
+  const prepared = prepareChatBody(source)
+  let body: unknown
+  try {
+    body = JSON.parse(prepared)
+  } catch {
+    // Not JSON: nothing to prepend to, and the upstream will reject it anyway.
+    return prepared
+  }
+  if (!isObject(body)) return prepared
+  const messages = body['messages']
+  if (!Array.isArray(messages)) return prepared
+  const first = messages[0]
+  if (isObject(first) && first['role'] === 'system') return prepared
+  // Unshift, so every caller-supplied message keeps its position and content.
+  messages.unshift({ role: 'system', content: INTERNATIONAL_SYSTEM_PROMPT })
+  return JSON.stringify(body)
+}
+
 /** One JSON-envelope response from the upstream, already unwrapped. */
 interface Envelope {
   code: number
@@ -438,7 +651,19 @@ function envelopeError(status: number, envelope: Envelope): Error {
  * Upstream HTTP client. One instance serves the whole plugin; requests take
  * the credential explicitly so token refreshes apply on the next call.
  */
+export interface WorkBuddyUpstreamClientOptions {
+  /** Resolves the App-shaped UA version for international catalog requests;
+   * injectable so tests never touch the real FS. */
+  resolveAppVersion?: () => Promise<AppVersionInfo>
+}
+
 export class WorkBuddyUpstreamClient {
+  private readonly resolveAppVersion: () => Promise<AppVersionInfo>
+
+  constructor(options: WorkBuddyUpstreamClientOptions = {}) {
+    this.resolveAppVersion = options.resolveAppVersion ?? (() => resolveAppVersion())
+  }
+
   /** POST the chat endpoint; a successful answer is the raw SSE response. */
   async chatStream(
     credential: WorkBuddyCredential,
@@ -450,12 +675,14 @@ export class WorkBuddyUpstreamClient {
       () => headerTimer.abort(new Error(`no response headers within ${CHAT_HEADER_TIMEOUT_MS}ms`)),
       CHAT_HEADER_TIMEOUT_MS,
     )
+    const international = regionOf(credential.domain) === 'global'
     let response: Response
     try {
       response = await fetch(`${chatBase(credential)}/v2/chat/completions`, {
         method: 'POST',
         headers: { ...chatHeaders(credential), 'Authorization': `Bearer ${credential.accessToken}` },
-        body: bodyJson,
+        // 国际网关硬性要求首条 system 消息（缺失即 400/11128），国内线不加。
+        body: international ? prepareInternationalChatBody(bodyJson) : bodyJson,
         // 调用方断开信号与头超时合并：任一触发都中止请求。
         signal: signal === undefined ? headerTimer.signal : AbortSignal.any([headerTimer.signal, signal]),
       })
@@ -514,18 +741,40 @@ export class WorkBuddyUpstreamClient {
     return outcome
   }
 
-  /** GET the personal model catalog and keep the `cli` agent's models only. */
+  /** GET the personal model catalog and keep the `cli` agent's models only.
+   *
+   * International (`workbuddy-ai`) reads a different document: `/v3/config`,
+   * the product document the gateway splits out by User-Agent, so this request
+   * carries the App-shaped UA (`WorkBuddyAI/<v>`, no space — the space form is
+   * rejected with 400, the CLI form gets a smaller document without
+   * `modelPromotions`). All three shapes measured live on 2026-09-15.
+   */
   async fetchModels(credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
-    const response = await fetch(`${chatBase(credential)}/console/enterprises/personal/models`, {
-      headers: {
-        'Authorization': `Bearer ${credential.accessToken}`,
-        'Accept': 'application/json',
-        'Origin': originReferer(credential),
-        'Referer': `${originReferer(credential)}/`,
-        'User-Agent': CLIENT_UA,
+    const international = regionOf(credential.domain) === 'global'
+    let userAgent = CLIENT_UA
+    if (international) {
+      // Resolution never throws, but an injected test double might: degrade to
+      // the CLI form (smaller document, still usable) rather than no catalog.
+      try {
+        userAgent = appUserAgent((await this.resolveAppVersion()).version)
+      } catch {
+        userAgent = CLIENT_UA
+      }
+    }
+    const response = await fetch(
+      `${chatBase(credential)}${international ? '/v3/config' : '/console/enterprises/personal/models'}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${credential.accessToken}`,
+          'Accept': 'application/json',
+          'Origin': originReferer(credential),
+          'Referer': `${originReferer(credential)}/`,
+          'User-Agent': userAgent,
+          ...international ? { 'X-Requested-With': 'XMLHttpRequest', 'X-Product': 'SaaS' } : {},
+        },
+        signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
       },
-      signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
-    })
+    )
     const envelope = await readEnvelope(response)
     if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope)
     const data = typeof envelope.data === 'object' && envelope.data !== null
@@ -546,24 +795,12 @@ export class WorkBuddyUpstreamClient {
     if (cliIds === undefined || cliIds.length === 0) {
       throw new Error('workbuddy model catalog lists no cli agent models')
     }
+    const promotions = international ? data['modelPromotions'] : undefined
     const byId = new Map<string, WorkBuddyUpstreamModel>()
     for (const model of rawModels) {
       if (typeof model !== 'object' || model === null) continue
-      const wrapped = model as Record<string, unknown>
-      const id = typeof wrapped['id'] === 'string' ? wrapped['id'] : ''
-      if (id === '' || wrapped['disabled'] === true) continue
-      const input = typeof wrapped['maxInputTokens'] === 'number' ? wrapped['maxInputTokens'] : 0
-      const output = typeof wrapped['maxOutputTokens'] === 'number' ? wrapped['maxOutputTokens'] : 0
-      if (input <= 0 || output <= 0) continue
-      byId.set(id, {
-        id,
-        name: typeof wrapped['name'] === 'string' && wrapped['name'] !== '' ? wrapped['name'] : id,
-        contextWindow: input,
-        maxTokens: output,
-        supportsImages: wrapped['supportsImages'] === true && wrapped['disabledMultimodal'] !== true,
-        ...resolveUpstreamReasoning(wrapped),
-        ...resolveUpstreamBilling(wrapped),
-      })
+      const parsed = parseModelRow(model as Record<string, unknown>, international, promotions)
+      if (parsed !== undefined) byId.set(parsed.id, parsed)
     }
     const models = cliIds
       .map(id => byId.get(id))

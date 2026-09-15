@@ -4,14 +4,48 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
-import { WORKBUDDY_STATUS_PATH } from '../src/status-paths.js'
+import { WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_STATUS_PATH } from '../src/status-paths.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebStatus } from '../src/status-paths.js'
 import type { WorkBuddySettingsKey } from './locales.js'
 
 /** Localized copy injected by the browser-plugin registration. */
 export interface WorkBuddyPluginCardInjected {
   t: (key: WorkBuddySettingsKey, params?: Record<string, unknown>) => string
+  variant: WorkBuddyCardVariant
 }
+
+/**
+ * One card per product variant. They show different accounts, balances, and
+ * model sets, so a single merged card could not say which account a number
+ * belongs to. The slot is key-dispatched: two keys, one component.
+ */
+export interface WorkBuddyCardVariant {
+  /** Slot key; `anyconnect` (CN) first so it keeps its historical position. */
+  id: string
+  /** Status route this card polls. */
+  statusPath: string
+  /** Locale keys for this variant's heading and sign-in hint. */
+  titleKey: WorkBuddySettingsKey
+  introKey: WorkBuddySettingsKey
+  signedOutHintKey: WorkBuddySettingsKey
+}
+
+export const CARD_VARIANTS: readonly WorkBuddyCardVariant[] = [
+  {
+    id: 'anyconnect',
+    statusPath: WORKBUDDY_STATUS_PATH,
+    titleKey: 'title',
+    introKey: 'intro',
+    signedOutHintKey: 'signedOutHint',
+  },
+  {
+    id: 'anyconnect-ai',
+    statusPath: WORKBUDDY_AI_STATUS_PATH,
+    titleKey: 'titleAI',
+    introKey: 'introAI',
+    signedOutHintKey: 'signedOutHintAI',
+  },
+]
 
 /**
  * Card status = the host document plus a client-side `loading` phase. The
@@ -179,13 +213,15 @@ function ModelOfferRow({ model, t }: {
         </span>
       </div>
       {model.credits === undefined ? null : <span style={modelRateStyle}>{t('rate', { rate: model.credits })}</span>}
+      {model.rateUnknown === true ? <span style={modelRateStyle}>{t('rateUnknown')}</span> : null}
     </div>
   )
 }
 
 /** Render WorkBuddy sign-in state and credit as one expandable card. */
-export function WorkBuddyPluginCard({ t }: WorkBuddyPluginCardProps) {
+export function WorkBuddyPluginCard({ t, variant }: WorkBuddyPluginCardProps) {
   if (t === undefined) throw new Error('WorkBuddy plugin card requires its translation function')
+  if (variant === undefined) throw new Error('WorkBuddy plugin card requires its variant descriptor')
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<CardStatus>({ status: 'loading' })
   /** 最近一次刷新失败的提示；成功刷新即清除。已有可展示数据时错误不清空
@@ -201,7 +237,7 @@ export function WorkBuddyPluginCard({ t }: WorkBuddyPluginCardProps) {
 
   const refresh = useCallback(async (signal?: AbortSignal): Promise<void> => {
     try {
-      const response = await fetch(WORKBUDDY_STATUS_PATH, {
+      const response = await fetch(variant.statusPath, {
         headers: { accept: 'application/json' },
         credentials: 'same-origin',
         ...signal === undefined ? {} : { signal },
@@ -232,7 +268,7 @@ export function WorkBuddyPluginCard({ t }: WorkBuddyPluginCardProps) {
         setNotice(message)
       }
     }
-  }, [t])
+  }, [t, variant.statusPath])
 
   useEffect(() => {
     if (!open) return
@@ -263,7 +299,7 @@ export function WorkBuddyPluginCard({ t }: WorkBuddyPluginCardProps) {
     }
   }
 
-  const title = t('title')
+  const title = t(variant.titleKey)
   const label = status.status === 'signed-in'
     ? status.nickname === undefined ? t('signedInAs', { nickname: '' }).replace(/[:：]\s*$/, '') : t('signedInAs', { nickname: status.nickname })
     : status.status === 'error'
@@ -283,7 +319,7 @@ export function WorkBuddyPluginCard({ t }: WorkBuddyPluginCardProps) {
       >
         <span style={headTextStyle}>
           <span style={nameStyle}>{title}</span>
-          <span style={descriptionStyle}>{t('intro')}</span>
+          <span style={descriptionStyle}>{t(variant.introKey)}</span>
         </span>
         <span aria-hidden="true" style={{ ...chevronStyle, transform: open ? 'rotate(180deg)' : 'none' }}>⌄</span>
       </button>
@@ -334,7 +370,8 @@ export function WorkBuddyPluginCard({ t }: WorkBuddyPluginCardProps) {
                     : <p style={modelRateStyle}>{catalogLine(status.catalog, t)}</p>}
                 </>
               : null}
-            {status.status === 'signed-out' ? <p style={bodyStyle}>{t('signedOutHint')}</p> : null}
+            {status.status === 'signed-out'
+              ? <p style={bodyStyle}>{status.reason ?? t(variant.signedOutHintKey)}</p> : null}
             {status.status === 'error' ? <p style={errorStyle}>{status.message}</p> : null}
             {status.status !== 'error' && notice !== undefined ? <p style={errorStyle}>{t('refreshFailed', { message: notice })}</p> : null}
           </div>

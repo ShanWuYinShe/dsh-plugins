@@ -525,3 +525,61 @@ describe('WSL default desktop path probing', () => {
     })
   })
 })
+
+describe('WorkBuddyCredentialStore variants', () => {
+  function aiDoc(expiresAt: number): string {
+    return JSON.stringify({
+      auth: { accessToken: 'ai-at', refreshToken: 'ai-rt', expiresAt, domain: 'www.workbuddy.ai' },
+      account: { uid: 'ai-uid', nickname: 'AI 用户' },
+    })
+  }
+
+  it('serves the AI desktop file from a variant store', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'wb-store-ai-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const desktop = join(dir, 'workbuddy-desktop-ai.info')
+    await writeFile(desktop, aiDoc(Date.now() + 3600_000))
+    const { AI_VARIANT } = await import('../src/variants.js')
+    const store = new WorkBuddyCredentialStore({
+      variant: AI_VARIANT,
+      desktopPath: desktop,
+      ownPath: join(dir, 'own-ai.json'),
+      refresh: async () => ({ accessToken: 'new' }),
+    })
+    await expect(store.resolve()).resolves.toMatchObject({ accessToken: 'ai-at', source: 'desktop' })
+  })
+
+  it('refuses a CN credential in the AI variant with a fixable error', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'wb-store-region-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const desktop = join(dir, 'workbuddy-desktop-ai.info')
+    await writeFile(desktop, nestedDoc(Date.now() + 3600_000))
+    const { AI_VARIANT } = await import('../src/variants.js')
+    const { RegionMismatchError } = await import('../src/auth.js')
+    const store = new WorkBuddyCredentialStore({
+      variant: AI_VARIANT,
+      desktopPath: desktop,
+      ownPath: join(dir, 'own-ai.json'),
+      refresh: async () => ({ accessToken: 'new' }),
+    })
+    await expect(store.current()).rejects.toBeInstanceOf(RegionMismatchError)
+    await expect(store.current()).rejects.toThrow('WORKBUDDY_AI_AUTH_FILE')
+    // status() reports signed-out with the reason rather than throwing.
+    const status = await store.status()
+    expect(status.state).toBe('signed-out')
+    expect(status.reason).toContain('WORKBUDDY_AI_AUTH_FILE')
+  })
+
+  it('leaves variant-less stores unguarded for backward compatibility', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'wb-store-legacy-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const desktop = join(dir, 'workbuddy-desktop-ai.info')
+    await writeFile(desktop, aiDoc(Date.now() + 3600_000))
+    const store = new WorkBuddyCredentialStore({
+      desktopPath: desktop,
+      ownPath: join(dir, 'own.json'),
+      refresh: async () => ({ accessToken: 'new' }),
+    })
+    await expect(store.resolve()).resolves.toMatchObject({ accessToken: 'ai-at' })
+  })
+})

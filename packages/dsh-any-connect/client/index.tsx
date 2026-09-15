@@ -5,7 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { WorkBuddyPluginCard } from './WorkBuddyPluginCard.js'
+import { WorkBuddyPluginCard, CARD_VARIANTS } from './WorkBuddyPluginCard.js'
 import type { WorkBuddyPluginCardInjected } from './WorkBuddyPluginCard.js'
 import { en, zh } from './locales.js'
 import type { WorkBuddySettingsKey } from './locales.js'
@@ -56,12 +56,17 @@ export function apply(ctx: ClientContext): void {
       }
     }, 'dsh-any-connect: settings copy')
     const t = ctx.locale.bind(namespace) as WorkBuddyPluginCardInjected['t']
-    ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
-      name: 'settings.plugin.item',
-      key: 'anyconnect',
-      priority: 30,
-      inject: (): WorkBuddyPluginCardInjected => ({ t }),
-    }, WorkBuddyPluginCard))
+    // One card per variant. They show different accounts, balances, and model
+    // sets, so a single merged card could not say which account a number
+    // belongs to. The slot is key-dispatched: two keys, one component.
+    for (const [index, variant] of CARD_VARIANTS.entries()) {
+      ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
+        name: 'settings.plugin.item',
+        key: variant.id,
+        priority: 30 - index,
+        inject: (): WorkBuddyPluginCardInjected => ({ t, variant }),
+      }, WorkBuddyPluginCard))
+    }
   } catch (error: unknown) {
     // Degrade silently on the page: the host provider still serves models.
     // Developers see the full cause in the browser console; users see no banner.

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.18-alpha.3 (2026-09-15)
+
+### Features
+
+* 国际版（WorkBuddy AI）第二个 provider `workbuddy-ai`：独立模型分组、
+  独立账号/积分/卡片，与国内版互不混用；装哪个 App 出哪个分组。两版同属
+  同一客户端框架、共用凭据目录，仅文件名/端点/展示不同，故实现为数据驱动
+  的 variant 描述符而非分支逻辑
+* 国际版目录走 App 文档 `/v3/config`（`WorkBuddyAI/<版本>` UA，无空格；
+  版本按 已装 App → 已保存 → 内置常量 逐级降级）：含 `modelPromotions`
+  与对象式 `contextWindow`，工作窗口取 `defaultLength`
+* 促销按读取时生效：生效中 factor-0 显示免费 + 徽章；过期后原价不可恢复，
+  显示"价格未知 — 刷新后更新"而非继续免费。兜底名单中促销依赖的两行
+  （hy3、deepseek-v4.1-flash）直接标未知
+* 国际版 chat 自动前置空 system 消息（网关硬性要求，缺失即 400/11128）；
+  CLI UA 经实测可直达模型路由，chat 暂不换 UA 以缩小影响面
+* 跨产品凭据拒绝：AI 侧读到 CN 凭据（配错文件）即抛可操作的
+  RegionMismatchError，按 signed-out 隐藏分组，原因直达卡片与 doctor
+* CLI 增加 `--provider workbuddy-ai`（默认仍是国内版）；AI 兜底名单 20 个
+  （含 Auto/Fast 等虚拟别名与 GPT/Gemini 行，均为 2026-09-15 实测值）
+
 ## 0.3.18-alpha.2 (2026-09-15)
 
 ### Fixes

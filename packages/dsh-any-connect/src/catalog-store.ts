@@ -29,8 +29,11 @@ import type { WorkBuddyUpstreamModel } from './upstream.js'
 /** On-disk format this reader accepts; other versions are discarded. */
 const CATALOG_FORMAT_VERSION = 1
 
-/** Basename of the saved catalog inside the Harness home. */
+/** Basename of the CN saved catalog inside the Harness home. */
 export const WORKBUDDY_CATALOG_FILENAME = '.workbuddy-catalog.json'
+
+/** Basename of the international saved catalog inside the Harness home. */
+export const WORKBUDDY_AI_CATALOG_FILENAME = '.workbuddy-ai-catalog.json'
 
 /** One saved catalog: the account it belonged to, and the models it listed. */
 export interface SavedWorkBuddyCatalog {
@@ -50,8 +53,8 @@ interface CatalogDocument {
 }
 
 /** Plugin-owned saved-catalog path inside the Harness home. */
-export function workbuddyCatalogPath(): string {
-  return join(resolveDshHome(), WORKBUDDY_CATALOG_FILENAME)
+export function workbuddyCatalogPath(filename: string = WORKBUDDY_CATALOG_FILENAME): string {
+  return join(resolveDshHome(), filename)
 }
 
 /** Account identity keying one saved catalog. */

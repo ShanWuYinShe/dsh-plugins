@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkBuddyCredential } from '../src/auth.js'
-import { normalizeCredits, WorkBuddyUpstreamClient } from '../src/upstream.js'
+import { modelWithCurrentPromotion, normalizeCredits, WorkBuddyUpstreamClient } from '../src/upstream.js'
 
 /**
  * Offline unit tests for WorkBuddyUpstreamClient, mocking the global `fetch`
@@ -362,5 +362,122 @@ describe('WorkBuddyUpstreamClient.chatStream', () => {
     }) as unknown as Response))
     const result = await new WorkBuddyUpstreamClient().chatStream(CREDENTIAL, '{}')
     expect(!result.ok && result.kind === 'server' && result.message === '(error body unavailable)').toBe(true)
+  })
+})
+
+describe('international catalog and promotions', () => {
+  const AI_CREDENTIAL = { ...CREDENTIAL, domain: 'www.workbuddy.ai' }
+
+  function appEnvelope(extra: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      code: 0,
+      msg: 'ok',
+      data: {
+        models: [
+          {
+            id: 'hy3', name: 'Hy3', maxInputTokens: 192_000, maxOutputTokens: 64_000,
+            supportsImages: true,
+            reasoning: { defaultEffort: 'high', supportedEfforts: ['low', 'high'] },
+          },
+          {
+            id: 'ctx-model', name: 'Ctx', maxInputTokens: 1_000_000, maxOutputTokens: 64_000,
+            supportsImages: false,
+            contextWindow: { defaultLength: 200_000, supportedLengths: [200_000, 1_000_000] },
+            reasoning: { defaultEffort: 'high' },
+          },
+        ],
+        agents: [{ name: 'cli', models: ['hy3', 'ctx-model'] }],
+        ...extra,
+      },
+    })
+  }
+
+  it('fetches /v3/config with the App-shaped UA and parses object context windows', async () => {
+    const seen: { url: string; headers: Record<string, string> }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init: { headers: Record<string, string> }) => {
+      seen.push({ url: String(url), headers: init.headers })
+      return fakeResponse(appEnvelope())
+    }))
+    const client = new WorkBuddyUpstreamClient({
+      resolveAppVersion: async () => ({ version: '5.5.6', source: 'installed' }),
+    })
+    const models = await client.fetchModels(AI_CREDENTIAL)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!.url).toBe('https://www.workbuddy.ai/v3/config')
+    expect(seen[0]!.headers['User-Agent']).toBe('WorkBuddyAI/5.5.6')
+    expect(seen[0]!.headers['X-Product']).toBe('SaaS')
+    const byId = new Map(models.map(model => [model.id, model]))
+    expect(byId.get('ctx-model')?.contextWindow).toBe(200_000)
+    expect(byId.get('ctx-model')?.maxInputTokens).toBe(1_000_000)
+    expect(byId.get('ctx-model')?.supportedContextWindows).toEqual([200_000, 1_000_000])
+    // No promotions in the document: rows pass through untouched.
+    expect(byId.get('hy3')?.promotions).toEqual([])
+    expect(byId.get('hy3')?.billing).toEqual({ free: false })
+  })
+
+  it('degrades to the CLI UA when version resolution fails', async () => {
+    const seen: { headers: Record<string, string> }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init: { headers: Record<string, string> }) => {
+      seen.push({ headers: init.headers })
+      return fakeResponse(appEnvelope())
+    }))
+    const client = new WorkBuddyUpstreamClient({
+      resolveAppVersion: async () => { throw new Error('no home') },
+    })
+    const models = await client.fetchModels(AI_CREDENTIAL)
+    expect(seen[0]!.headers['User-Agent']).toBe('CLI/2.63.2 CodeBuddy/2.63.2')
+    expect(models).toHaveLength(2)
+  })
+
+  it('applies an active factor-0 promotion as free with its badge', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(appEnvelope({
+      modelPromotions: [{
+        id: 'trial', enabled: true, modelIds: ['hy3'], priority: 200,
+        schedule: { validFrom: '2026-01-01T00:00:00+08:00', validUntil: '2026-12-31T00:00:00+08:00' },
+        discount: { displayMode: 'replace', factor: 0 },
+        badge: { label: 'Free now' },
+      }],
+    }))))
+    const models = await new WorkBuddyUpstreamClient().fetchModels(AI_CREDENTIAL)
+    const raw = models.find(model => model.id === 'hy3')!
+    // fetchModels returns the row as reported; the effective billing resolves
+    // at catalog read time (the same layering the adapter serves).
+    const hy3 = modelWithCurrentPromotion(raw)
+    expect(hy3?.billing?.free).toBe(true)
+    expect(hy3?.billing?.credits).toBe('x0.00')
+    expect(hy3?.billing?.badges).toContain('Free now')
+  })
+
+  it('marks rateUnknown when every promotion on the row has expired', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(appEnvelope({
+      modelPromotions: [{
+        id: 'trial', enabled: true, modelIds: ['hy3'], priority: 200,
+        schedule: { validFrom: '2026-01-01T00:00:00+08:00', validUntil: '2026-02-01T00:00:00+08:00' },
+        discount: { displayMode: 'replace', factor: 0 },
+        badge: { label: 'Free now' },
+      }],
+    }))))
+    const models = await new WorkBuddyUpstreamClient().fetchModels(AI_CREDENTIAL)
+    const hy3 = models.find(model => model.id === 'hy3')!
+    // Baked-in x0.00 is not trusted here (the test fabricates no credits), so
+    // assert through the resolver: expired promo + factor-0 history ⇒ unknown.
+    const withPromo = { ...hy3, billing: { ...hy3.billing, credits: 'x0.00', free: true } }
+    const resolved = modelWithCurrentPromotion(withPromo, Date.parse('2026-09-15T00:00:00Z'))
+    expect(resolved.billing).toEqual({ free: false, rateUnknown: true })
+  })
+
+  it('sends the international chat body with a leading system prompt', async () => {
+    const seen: { body: string }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init: { body: string }) => {
+      seen.push({ body: init.body })
+      return { ok: false, status: 400, text: () => Promise.resolve('{"code":11102}') } as unknown as Response
+    }))
+    const result = await new WorkBuddyUpstreamClient().chatStream(
+      AI_CREDENTIAL,
+      JSON.stringify({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+    )
+    expect(!result.ok && result.status).toBe(400)
+    const sent = JSON.parse(seen[0]!.body) as { messages: { role: string }[] }
+    expect(sent.messages[0]).toEqual({ role: 'system', content: 'You are a helpful assistant.' })
   })
 })

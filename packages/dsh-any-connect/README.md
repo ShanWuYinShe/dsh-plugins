@@ -1,13 +1,15 @@
 # @chaoset/dsh-any-connect — DSH 模型接入插件（WorkBuddy 桌面 Agent）
 
 将 WorkBuddy 桌面 App 中包含的各种模型（GLM-5.3、GLM-5.2、DeepSeek-V4-Pro、
-DeepSeek-V4-Flash、Kimi-K3、MiniMax-M3、Hy3 等）自动接入 DeepSeek Harness，
+DeepSeek-V4.1-Flash、Kimi-K3、MiniMax-M3、Hy3 等，国际版另有 GPT/Gemini
+系列）自动接入 DeepSeek Harness，
 实现在 DSH 对话窗口里零配置使用。
 
 > **来源说明**：本包是 [corrinehu/dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)
-> （MIT）的独立分支。原仓库维护已趋停滞，本包在 @chaoset 组织下独立演进，命名
-> 取 `any-connect`（anyconnect）是因为后续可能接入其他类似 WorkBuddy 的桌面
-> Agent（它们提供的模型都能经此接入 DSH）。原作者的实现是本包的基础，致以谢意。
+> （MIT）的独立分支，在 @chaoset 组织下独立演进，命名取 `any-connect`
+> （anyconnect）是因为后续可能接入其他类似 WorkBuddy 的桌面 Agent（它们
+> 提供的模型都能经此接入 DSH）。上游实现的方法论（variant 数据驱动、
+> App 文档 UA 形态、促销生效规则等）经实测验证后移植于此，致以谢意。
 
 ## 功能
 
@@ -30,6 +32,10 @@ DeepSeek-V4-Flash、Kimi-K3、MiniMax-M3、Hy3 等）自动接入 DeepSeek Harne
 
 - **信息查看**：设置 → 插件 → 配置卡片，展开后可查看账号信息、令牌有效期、
   剩余积分与模型优惠。
+
+- **国际版（WorkBuddy AI）**：装了国际版 App 会多出独立的「WorkBuddy AI」
+  模型分组、账号、积分与配置卡片，与国内版互不混用；只装一版就只出现
+  一版。从未登录的一版不显示分组（而不是展示点选必错的名单）。
 
 ## 安装
 
@@ -67,6 +73,13 @@ dsh plugin --profile web remove @chaoset/dsh-any-connect
 dsh-any-connect doctor     # 全面体检（凭据、令牌、宿主心跳、模型目录）
 dsh-any-connect status     # 当前登录态与积分
 dsh-any-connect logout     # 移除本插件的凭据副本（不动桌面 App 的登录）
+```
+
+默认操作国内版；加 `--provider workbuddy-ai` 操作国际版：
+
+```bash
+dsh-any-connect status --provider workbuddy-ai
+dsh-any-connect doctor --provider workbuddy-ai
 ```
 
 ## 配置
