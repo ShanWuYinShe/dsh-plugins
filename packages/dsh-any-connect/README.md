@@ -21,7 +21,9 @@ DeepSeek-V4.1-Flash、Kimi-K3、MiniMax-M3、Hy3 等，国际版另有 GPT/Gemin
 
 - **思考强度**：按上游每个模型声明的 `supportedEfforts` 提供思考等级选项
   （如 GLM-5.3 支持 low / high / xhigh，GLM-5.3-Flash 支持 low / high / max），
-  在 DSH 模型选择器里即可切换，请求以 `reasoning_effort` 转发。
+  在 DSH 模型选择器里即可切换，请求以 `reasoning_effort` 转发。未声明档位
+  的模型可在配置卡片里手动检测（逐行确认，会发少量真实请求）：测出上游真
+  校验的档位即进入选择器，测出"不校验"的模型不再误给档位。
 
 - **限时免费一目了然**：状态卡片会标注当前免费 / 限时免费 / 夜间折扣的模型
   （跟随上游 `credits` 与 `tags` 实时更新）。

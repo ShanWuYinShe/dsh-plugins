@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
-import { WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_STATUS_PATH } from '../src/status-paths.js'
-import type { WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebStatus } from '../src/status-paths.js'
+import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from '../src/status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
 import type { WorkBuddySettingsKey } from './locales.js'
 
 /** Localized copy injected by the browser-plugin registration. */
@@ -24,6 +24,8 @@ export interface WorkBuddyCardVariant {
   id: string
   /** Status route this card polls. */
   statusPath: string
+  /** Probe-control route for detection and catalog refresh. */
+  probePath: string
   /** Locale keys for this variant's heading and sign-in hint. */
   titleKey: WorkBuddySettingsKey
   introKey: WorkBuddySettingsKey
@@ -34,6 +36,7 @@ export const CARD_VARIANTS: readonly WorkBuddyCardVariant[] = [
   {
     id: 'anyconnect',
     statusPath: WORKBUDDY_STATUS_PATH,
+    probePath: WORKBUDDY_PROBE_PATH,
     titleKey: 'title',
     introKey: 'intro',
     signedOutHintKey: 'signedOutHint',
@@ -41,6 +44,7 @@ export const CARD_VARIANTS: readonly WorkBuddyCardVariant[] = [
   {
     id: 'anyconnect-ai',
     statusPath: WORKBUDDY_AI_STATUS_PATH,
+    probePath: WORKBUDDY_AI_PROBE_PATH,
     titleKey: 'titleAI',
     introKey: 'introAI',
     signedOutHintKey: 'signedOutHintAI',
@@ -106,6 +110,109 @@ const modelBadgeChipStyle: CSSProperties = {
   padding: '1px 8px', borderRadius: 999, fontSize: 11, lineHeight: '18px',
   background: 'var(--dsw-alias-state-success-subtle, rgba(34, 160, 107, 0.12))',
   color: 'var(--dsw-alias-state-success-primary, #22a06b)',
+}
+const confirmBoxStyle: CSSProperties = {
+  marginTop: 8, padding: '10px 12px', borderRadius: 8,
+  background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.04))',
+}
+const confirmRowStyle: CSSProperties = { display: 'flex', gap: 8, marginTop: 8, justifyContent: 'flex-end' }
+const primaryButtonStyle: CSSProperties = {
+  ...buttonStyle,
+  background: 'var(--dsw-alias-brand-primary, #1677ff)',
+  borderColor: 'transparent',
+  color: '#fff',
+}
+const probeRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }
+const probeRowEndStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }
+
+/**
+ * Reasoning-effort detection controls: one row per probeable model with its
+ * own detect button, inline cost confirmation, and recorded result.
+ *
+ * A detection sends a few real requests that may consume credit, so the button
+ * never fires directly — it opens an inline confirmation naming the model.
+ * Rows keep each model and its action together in catalog order, so nothing
+ * moves when a detection lands.
+ */
+function ProbeSection({ probe, t, busy, runningModel, pending, setPending, onDetect, onClear }: {
+  probe: WorkBuddyWebProbeSection
+  t: WorkBuddyPluginCardInjected['t']
+  busy: boolean
+  runningModel: string | undefined
+  pending: string | undefined
+  setPending: (model: string | undefined) => void
+  onDetect: (modelId: string) => void
+  onClear: () => void
+}): React.ReactNode {
+  return (
+    <div style={quotaListStyle}>
+      <h3 style={quotaTitleStyle}>{t('probeHeading')}</h3>
+      <p style={bodyStyle}>{t('probeIntro')}</p>
+      <p style={bodyStyle}>{t('probeConsentHint')}</p>
+      {probe.running ? <p style={bodyStyle}>{t('probeRunningGeneric')}</p> : null}
+      {probe.candidates.length === 0
+        ? <p style={bodyStyle}>{t('probeResultEmpty')}</p>
+        : (
+          <div style={quotaGroupStyle}>
+            {probe.candidates.map(id => {
+              const result = probe.results.find(entry => entry.id === id)
+              const name = result?.name ?? id
+              return (
+                <div key={id} style={modelOfferStyle}>
+                  <div style={probeRowStyle}>
+                    <span>{name}</span>
+                    <span style={probeRowEndStyle}>
+                      {result === undefined ? null : (
+                        <span style={modelBadgeChipStyle}>
+                          {result.validation === 'validating' && result.efforts.length > 0
+                            ? result.efforts.join(' / ')
+                            : t(result.validation === 'non-validating' ? 'probeResultNotValidating' : 'probeResultUnknown')}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        style={buttonStyle}
+                        disabled={probe.running || busy}
+                        onClick={() => { setPending(id) }}
+                      >
+                        {runningModel === id
+                          ? t('probeRunning', { model: id })
+                          : t(result === undefined ? 'probeStart' : 'probeRedetect')}
+                      </button>
+                    </span>
+                  </div>
+                  {result === undefined ? null
+                    : <span style={modelRateStyle}>{t('probeResultAt', { time: formatTime(result.probedAt) })}</span>}
+                  {pending === id ? (
+                    <div style={confirmBoxStyle}>
+                      <p style={bodyStyle}>{t('probeConfirmBody', { model: name })}</p>
+                      <div style={confirmRowStyle}>
+                        <button type="button" style={buttonStyle} onClick={() => { setPending(undefined) }}>
+                          {t('cancel')}
+                        </button>
+                        <button
+                          type="button"
+                          style={primaryButtonStyle}
+                          disabled={probe.running || busy}
+                          onClick={() => { onDetect(id) }}
+                        >
+                          {t('probeConfirmAction')}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      {probe.results.length === 0 ? null : (
+        <button type="button" style={buttonStyle} disabled={busy} onClick={() => { onClear() }}>
+          {t('probeClear')}
+        </button>
+      )}
+    </div>
+  )
 }
 
 /** Localize an upstream promotional badge label, with an unknown-badge fallback. */
@@ -299,6 +406,63 @@ export function WorkBuddyPluginCard({ t, variant }: WorkBuddyPluginCardProps) {
     }
   }
 
+  /** POST one control action (probe/clear/refresh) to this variant's route.
+   * The in-process key travels in a header, never in the URL. */
+  const control = useCallback(async (action: { action: 'probe'; model: string } | { action: 'clear' } | { action: 'refresh' }): Promise<void> => {
+    if (status.status !== 'signed-in' || status.probeKey === undefined) {
+      throw new Error(t('requestFailed'))
+    }
+    const response = await fetch(variant.probePath, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-workbuddy-probe-key': status.probeKey },
+      credentials: 'same-origin',
+      body: JSON.stringify(action),
+    })
+    const value: unknown = await response.json().catch(() => undefined)
+    if (!response.ok) {
+      const detail = typeof (value as { error?: unknown } | null)?.error === 'string'
+        ? `: ${(value as { error: string }).error}`
+        : ''
+      throw new Error(`HTTP ${response.status}${detail}`)
+    }
+  }, [status, t, variant.probePath])
+
+  const [pending, setPending] = useState<string | undefined>(undefined)
+  const [runningModel, setRunningModel] = useState<string | undefined>(undefined)
+
+  // A sweep that finishes (or a catalogue change that removes the candidate)
+  // must not leave a stale confirmation behind.
+  const probeCandidates = status.status === 'signed-in' ? status.probe?.candidates : undefined
+  useEffect(() => {
+    if (pending !== undefined && (probeCandidates === undefined || !probeCandidates.includes(pending))) {
+      setPending(undefined)
+    }
+  }, [pending, probeCandidates, status])
+
+  /** Run one control action, then re-read status so results land on screen. */
+  const runControl = async (action: { action: 'probe'; model: string } | { action: 'clear' } | { action: 'refresh' }): Promise<void> => {
+    setBusy(true)
+    try {
+      await control(action)
+      await refresh()
+    } catch (error: unknown) {
+      if (mounted.current) {
+        setNotice(error instanceof Error ? error.message : t('requestFailed'))
+      }
+    } finally {
+      if (mounted.current) {
+        setBusy(false)
+        setRunningModel(undefined)
+      }
+    }
+  }
+
+  const onDetect = (modelId: string): void => {
+    setRunningModel(modelId)
+    setPending(undefined)
+    void runControl({ action: 'probe', model: modelId })
+  }
+
   const title = t(variant.titleKey)
   const label = status.status === 'signed-in'
     ? status.nickname === undefined ? t('signedInAs', { nickname: '' }).replace(/[:：]\s*$/, '') : t('signedInAs', { nickname: status.nickname })
@@ -334,6 +498,17 @@ export function WorkBuddyPluginCard({ t, variant }: WorkBuddyPluginCardProps) {
               <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void manualRefresh() }}>
                 {busy ? t('refreshing') : t('refresh')}
               </button>
+              {status.status === 'signed-in' ? (
+                <button
+                  type="button"
+                  style={buttonStyle}
+                  disabled={busy}
+                  title={t('refreshModelsHint')}
+                  onClick={() => { void runControl({ action: 'refresh' }) }}
+                >
+                  {t('refreshModels')}
+                </button>
+              ) : null}
             </div>
             {status.status === 'signed-in'
               ? <>
@@ -368,6 +543,18 @@ export function WorkBuddyPluginCard({ t, variant }: WorkBuddyPluginCardProps) {
                   )}
                   {status.catalog === undefined ? null
                     : <p style={modelRateStyle}>{catalogLine(status.catalog, t)}</p>}
+                  {status.probe === undefined ? null : (
+                    <ProbeSection
+                      probe={status.probe}
+                      t={t}
+                      busy={busy}
+                      runningModel={runningModel}
+                      pending={pending}
+                      setPending={setPending}
+                      onDetect={onDetect}
+                      onClear={() => { void runControl({ action: 'clear' }) }}
+                    />
+                  )}
                 </>
               : null}
             {status.status === 'signed-out'

@@ -16,6 +16,7 @@ import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { WorkBuddyCredentialStore } from './auth.js'
 import type { WorkBuddyCatalog, WorkBuddyModelInfo } from './catalog.js'
+import type { WorkBuddyProbeRecord } from './probe-store.js'
 import type { WorkBuddyShim } from './shim.js'
 import { normalizeCredits } from './upstream.js'
 
@@ -99,6 +100,8 @@ export interface WorkBuddyAdapterOptions {
   /** Provider id and display name; default to the CN `workbuddy` route. */
   providerId?: string
   displayName?: string
+  /** Probe observation consulted for undeclared models; a declared set always wins. */
+  recordFor?: (modelId: string) => Pick<WorkBuddyProbeRecord, 'validation' | 'efforts'> | undefined
   /** Resolve the durable attachment service at request time, when present. */
   resolveAttachments?: () => AttachmentStore | undefined
 }
@@ -113,23 +116,26 @@ export interface WorkBuddyAdapter {
  * `thinkingLevelMap` (every level pinned to its wire spelling or `null` for
  * unsupported), mirroring `dsh-llm-pi-ai`'s own `resolveModelReasoning`.
  *
- * Per-model handling:
+ * Three sources, strictly ordered:
  * - A model that declares explicit `supportedEfforts` offers exactly those —
  *   the declaration is authoritative and per-model (e.g. `glm-5.3` is
- *   low/high/xhigh while `glm-5.3-flash` is low/high/max).
+ *   low/high/xhigh while `glm-5.3-flash` is low/high/max). An observation
+ *   never widens or narrows a declared set.
  * - A model that declares none (the older `{effort, summary}` shape) offers
- *   only its `defaultEffort`. The upstream accepts any effort string on the
- *   wire without validating it (an invalid `"banana"` returns 200 just like
- *   everything else), and for these rows the value demonstrably does not
- *   change behavior — a `minimal` and a `max` probe on `glm-5.2` produced
- *   statistically indistinguishable reasoning volume. Offering a selectable
- *   ladder there would advertise control the upstream ignores; the single
- *   default level reflects what the model actually runs at.
+ *   its default effort — unless a probe observation verified which spellings
+ *   the upstream actually accepts, in which case exactly those are offered.
+ *   The upstream accepts any effort string on the wire without validating it
+ *   (an invalid `"banana"` returns 200 just like everything else on several
+ *   rows), and for these rows an unverified value demonstrably does not change
+ *   behavior — offering a selectable ladder there would advertise control the
+ *   upstream ignores.
  * - `off` is offered only when the model explicitly reports thinking can be
- *   disabled (`canDisableThinking === true`); older rows leave it unsupported,
- *   since the upstream rejects `off` on several of them.
+ *   disabled (`canDisableThinking === true`); probing never grants `off`.
  */
-export function reasoningFields(info: WorkBuddyModelInfo): { reasoning: boolean; thinkingLevelMap?: ThinkingLevelMap } {
+export function reasoningFields(
+  info: WorkBuddyModelInfo,
+  observed?: Pick<WorkBuddyProbeRecord, 'validation' | 'efforts'>,
+): { reasoning: boolean; thinkingLevelMap?: ThinkingLevelMap } {
   const reasoning = info.reasoning
   if (reasoning === undefined || reasoning.supports !== true) {
     // Not a reasoning model: pi-ai reads a falsy `reasoning` as "off only".
@@ -138,9 +144,19 @@ export function reasoningFields(info: WorkBuddyModelInfo): { reasoning: boolean;
   const declared = reasoning.supportedEfforts !== undefined && reasoning.supportedEfforts.length > 0
     ? reasoning.supportedEfforts
     : undefined
-  const efforts: readonly string[] = declared ?? [reasoning.defaultEffort ?? 'high']
+  // Only a validating observation may supply a set, and only for rows the
+  // upstream left undeclared. A `non-validating` observation deliberately
+  // yields nothing: the upstream accepts values that cannot exist, so every
+  // per-level acceptance it produced would be a false positive.
+  const observedSet = observed?.validation === 'validating' && observed.efforts.length > 0
+    ? observed.efforts
+    : undefined
+  const efforts: readonly string[] = declared ?? observedSet ?? [reasoning.defaultEffort ?? 'high']
   const map: Record<ModelThinkingLevel, string | null> = {
-    off: reasoning.canDisableThinking === true ? 'off' : null,
+    // Probing never grants `off`; only an explicit declaration on a declared
+    // set does — disabling thinking is a separate capability, and the
+    // per-model acceptance of `off` cannot be inferred from the row's shape.
+    off: reasoning.canDisableThinking === true && declared !== undefined && declared.length > 0 ? 'off' : null,
     minimal: efforts.includes('minimal') ? 'minimal' : null,
     low: efforts.includes('low') ? 'low' : null,
     medium: efforts.includes('medium') ? 'medium' : null,
@@ -152,7 +168,12 @@ export function reasoningFields(info: WorkBuddyModelInfo): { reasoning: boolean;
 }
 
 /** Build one pi-ai model descriptor pointing at the loopback shim. */
-function toPiModel(info: WorkBuddyModelInfo, baseUrl: string, providerId: string): Model<Api> {
+function toPiModel(
+  info: WorkBuddyModelInfo,
+  baseUrl: string,
+  providerId: string,
+  observe?: (modelId: string) => Pick<WorkBuddyProbeRecord, 'validation' | 'efforts'> | undefined,
+): Model<Api> {
   return {
     id: info.id,
     name: info.name,
@@ -160,7 +181,7 @@ function toPiModel(info: WorkBuddyModelInfo, baseUrl: string, providerId: string
     provider: providerId,
     baseUrl,
     input: info.supportsImages === true ? ['text', 'image'] : ['text'],
-    ...reasoningFields(info),
+    ...reasoningFields(info, observe?.(info.id)),
     cost: NO_COST,
     contextWindow: info.contextWindow,
     maxTokens: info.maxTokens,
@@ -181,7 +202,7 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
     // The OpenAI SDK pi-ai drives appends `/chat/completions` to baseURL,
     // so the shim's routes line up with the `/v1` prefix in place.
     const baseUrl = `${shim.baseUrl()}/v1`
-    return catalog.current().map(info => toPiModel(info, baseUrl, providerId))
+    return catalog.current().map(info => toPiModel(info, baseUrl, providerId, options.recordFor))
   }
 
   const base = createProvider({

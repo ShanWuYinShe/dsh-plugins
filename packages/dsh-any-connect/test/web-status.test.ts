@@ -53,6 +53,8 @@ describe('workBuddyWebStatus', () => {
       client: { fetchCredits } as unknown as Pick<WorkBuddyUpstreamClient, 'fetchCredits'>,
       models: () => [],
       catalog: () => ({ source: 'fallback' }),
+      probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
+      probeKey: 'test-key',
     })
     expect(status).toEqual({ status: 'signed-out' })
     expect(fetchCredits).not.toHaveBeenCalled()
@@ -67,6 +69,8 @@ describe('workBuddyWebStatus', () => {
         model({ id: 'free', name: 'Free', billing: { credits: 'x0.00', badges: ['限时免费'], free: true } }),
       ],
       catalog: () => ({ source: 'live', fetchedAt: 1700000000000 }),
+      probe: () => ({ consent: true, running: false, candidates: ['m'], results: [] }),
+      probeKey: 'test-key',
     })
     expect(status.status).toBe('signed-in')
     expect(status.models).toEqual([
@@ -81,6 +85,8 @@ describe('workBuddyWebStatus', () => {
       client: clientWith(Promise.resolve({ total: 1, accounts: [] })),
       models: () => [model({ id: 'plain', name: 'Plain', billing: { credits: 'x1.62', free: false } })],
       catalog: () => ({ source: 'saved', fetchedAt: 1700000000000 }),
+      probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
+      probeKey: 'test-key',
     })
     expect(status.models).toBeUndefined()
     expect(status.credits).toEqual({ total: 1, accounts: [] })
@@ -92,13 +98,19 @@ describe('workBuddyWebStatus', () => {
       client: clientWith(Promise.resolve({ total: 1, accounts: [] })),
       models: () => [],
       catalog: () => ({ source: 'live', fetchedAt: 1700000000000 }),
+      probe: () => ({ consent: true, running: true, candidates: ['m'], results: [] }),
+      probeKey: 'test-key',
     })
     expect(live.catalog).toEqual({ source: 'live', fetchedAt: 1700000000000 })
+    expect(live.probe).toEqual({ consent: true, running: true, candidates: ['m'], results: [] })
+    expect(live.probeKey).toBe('test-key')
     const failed = await workBuddyWebStatus({
       store: storeWith(CREDENTIAL),
       client: clientWith(Promise.resolve({ total: 1, accounts: [] })),
       models: () => [],
       catalog: () => ({ source: 'saved', fetchedAt: 1699999999999, error: 'upstream down' }),
+      probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
+      probeKey: 'test-key',
     })
     expect(failed.catalog).toEqual({ source: 'saved', fetchedAt: 1699999999999, error: 'upstream down' })
   })
@@ -109,6 +121,8 @@ describe('workBuddyWebStatus', () => {
       client: clientWith(Promise.reject(new Error('boom'))),
       models: () => [model({ id: 'free', name: 'Free', billing: { credits: 'x0.00', free: true } })],
       catalog: () => ({ source: 'fallback', error: 'boom' }),
+      probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
+      probeKey: 'test-key',
     })
     expect(status.creditsError).toBe('boom')
     expect(status.models).toEqual([{ id: 'free', name: 'Free', free: true }])

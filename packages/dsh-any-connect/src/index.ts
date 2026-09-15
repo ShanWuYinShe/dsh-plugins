@@ -17,7 +17,11 @@ import { createWorkBuddyAdapter, WORKBUDDY_PROVIDER } from './adapter.js'
 import { createWorkBuddyShim } from './shim.js'
 import type { WorkBuddyShim } from './shim.js'
 import { WorkBuddyUpstreamClient, chatBase } from './upstream.js'
-import type { WorkBuddyWebCatalog } from './status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebProbeSection } from './status-paths.js'
+import { WorkBuddyProbeService } from './probe-service.js'
+import { newestFirst, workbuddyProbePath, WorkBuddyProbeStore } from './probe-store.js'
+import { createProbeKey, registerWorkBuddyProbeRoute } from './probe-route.js'
+import { ANYCONNECT_VERSION } from './version.js'
 import { AI_VARIANT, WORKBUDDY_VARIANTS } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { registerWorkBuddyStatusRoute } from './web-status.js'
@@ -59,9 +63,54 @@ export {
   type WorkBuddyVariant,
 } from './variants.js'
 export {
+  FALLBACK_APP_VERSION,
+  WORKBUDDY_APP_VERSION_FILENAME,
+  appUserAgent,
+  appVersionPath,
+  installedAppVersion,
+  readBundleVersion,
+  resolveAppVersion,
+  validAppVersion,
+  type AppVersionInfo,
+  type WorkBuddyAppVersionSource,
+} from './app-version.js'
+export {
+  PROBE_EFFORT_CANDIDATES,
+  PROBE_MAX_TOKENS,
+  PROBE_PROMPT,
+  PROBE_REQUEST_TIMEOUT_MS,
+  probeModel,
+  randomSentinel,
+  type ProbeAttempt,
+  type ProbeOutcome,
+  type ProbeSender,
+  type SentinelFactory,
+} from './probe.js'
+export {
+  newestFirst,
+  fingerprintModel,
+  workbuddyProbePath,
+  WORKBUDDY_AI_PROBE_FILENAME,
+  WORKBUDDY_PROBE_FILENAME,
+  WorkBuddyProbeStore,
+  type WorkBuddyProbeRecord,
+  type WorkBuddyProbeValidation,
+} from './probe-store.js'
+export { WorkBuddyProbeService, type WorkBuddyProbeStatus } from './probe-service.js'
+export {
+  createProbeKey,
+  registerWorkBuddyProbeRoute,
+  workBuddyProbeHandler,
+  WORKBUDDY_AI_PROBE_PATH,
+  WORKBUDDY_PROBE_PATH,
+} from './probe-route.js'
+export {
+  chatBase,
   classifyUpstreamError,
+  modelWithCurrentPromotion,
   normalizeCredits,
   prepareChatBody,
+  prepareInternationalChatBody,
   regionOf,
   WorkBuddyUpstreamClient,
   type UpstreamErrorKind,
@@ -70,6 +119,7 @@ export {
   type WorkBuddyEffort,
   type WorkBuddyModelBilling,
   type WorkBuddyModelReasoning,
+  type WorkBuddyPromotion,
   type WorkBuddyRefreshOutcome,
   type WorkBuddyUpstreamModel,
 } from './upstream.js'
@@ -112,16 +162,28 @@ export interface Config {
   authFile?: string
   /** Explicit WorkBuddy AI desktop auth-file path, overriding env and platform defaults. */
   authFileAI?: string
+  /**
+   * Whether the user has authorized sending probe requests about reasoning
+   * efforts. Off by default: a probe spends real credit, so nothing is sent
+   * until the user explicitly agrees. (Only manual, per-click-confirmed
+   * probes run; this gates any future automatic trigger.)
+   */
+  probeConsent?: boolean
 }
+
+const PROBE_CONSENT_FIELD = z.boolean().default(false)
+  .description('Authorize reasoning-effort probes (each probe sends real requests that may consume credit)')
 
 export const Config: z<Config> = z.object({
   authFile: z.string().description('WorkBuddy desktop auth file (defaults to the app\'s own location)'),
   authFileAI: z.string().description('WorkBuddy AI desktop auth file (defaults to the app\'s own location)'),
+  probeConsent: PROBE_CONSENT_FIELD,
 })
 
 /** One variant's settings section: only the fields that card edits. */
 const CN_SECTION: z<Config> = z.object({
   authFile: z.string().description('WorkBuddy desktop auth file (defaults to the app\'s own location)'),
+  probeConsent: PROBE_CONSENT_FIELD,
 })
 
 /** The international card's settings section: only its own auth-file path. */
@@ -147,6 +209,8 @@ interface VariantRuntime {
   store: WorkBuddyCredentialStore
   catalog: WorkBuddyCatalog
   catalogStore: WorkBuddyCatalogStore
+  probeStore: WorkBuddyProbeStore
+  probeService: WorkBuddyProbeService
   shim: WorkBuddyShim
   catalogSource: WorkBuddyWebCatalog['source']
   catalogFetchedAtMs: number | undefined
@@ -194,17 +258,69 @@ export function apply(ctx: Context, config: Config): void {
     // whose models could only fail.
     catalog.setVisible(false)
     const catalogStore = new WorkBuddyCatalogStore({ path: workbuddyCatalogPath(variant.catalogFilename) })
+    const probeStore = new WorkBuddyProbeStore({
+      pluginVersion: ANYCONNECT_VERSION,
+      path: workbuddyProbePath(variant.probeFilename),
+    })
     const shim = createWorkBuddyShim({ store, client, catalog, logger: ctx.logger })
-    return {
-      variant, store, catalog, catalogStore, shim,
+    const runtime: VariantRuntime = {
+      variant, store, catalog, catalogStore, probeStore,
+      probeService: undefined as unknown as WorkBuddyProbeService,
+      shim,
       catalogSource: 'fallback',
       catalogFetchedAtMs: undefined,
       catalogError: undefined,
       lastIdentity: undefined,
     }
+    runtime.probeService = new WorkBuddyProbeService({
+      store: probeStore,
+      catalog,
+      credentials: store,
+      client,
+      consent: () => current().probeConsent === true,
+      // Observations are per account: the service reads and writes its records
+      // against this identity, so one account's detected levels never answer
+      // for another's.
+      account: () => runtime.lastIdentity,
+    })
+    return runtime
   }
 
   const runtimes = WORKBUDDY_VARIANTS.map(createRuntime)
+
+  /** Per-process key authorizing probe control writes; handed to the cards. */
+  const probeKey = createProbeKey()
+
+  /**
+   * Compact probe state for one card: consent, candidates, observations.
+   *
+   * Results read through the *same* judgement the adapter uses, rather than
+   * straight from the store: a raw record can be stale in ways the adapter
+   * already discounts (row changed, TTL passed, upstream since declared a set
+   * that always wins) — showing one would have the card promise levels the
+   * model picker does not offer.
+   */
+  function probeSection(runtime: VariantRuntime, consent: boolean): WorkBuddyWebProbeSection {
+    const results = runtime.catalog.current().flatMap(info => {
+      const record = runtime.probeService.recordFor(info.id)
+      if (record === undefined) return []
+      return [{
+        id: info.id,
+        name: info.name,
+        validation: record.validation,
+        efforts: record.efforts,
+        probedAt: record.probedAtMs,
+      }]
+    })
+    return {
+      consent,
+      running: runtime.probeService.isRunning(),
+      candidates: runtime.catalog.current()
+        .filter(info => info.reasoning?.supports === true && (info.reasoning.supportedEfforts?.length ?? 0) === 0)
+        .map(info => info.id),
+      results: newestFirst(results),
+    }
+  }
 
   function catalogSection(runtime: VariantRuntime): WorkBuddyWebCatalog {
     return {
@@ -215,8 +331,10 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   /** 无可用凭据：分组隐藏（空目录），而不是展示点选必错的兜底名单。
-   * 行保留 fallback 内容——切回可见时无需重拉。 */
+   * 行保留 fallback 内容——切回可见时无需重拉。曾登录过的账号离开时，其
+   * 探针记录一并清除（与上游一致：不能让新账号继承旧账号的检测档位）。 */
   function adoptSignedOut(runtime: VariantRuntime): void {
+    if (runtime.lastIdentity !== undefined) runtime.probeStore.clear()
     runtime.lastIdentity = undefined
     runtime.catalog.set(fallbackFor(runtime.variant))
     runtime.catalog.setVisible(false)
@@ -235,7 +353,40 @@ export function apply(ctx: Context, config: Config): void {
         client,
         models: () => runtime.catalog.current(),
         catalog: () => catalogSection(runtime),
+        probe: () => probeSection(runtime, current().probeConsent === true),
+        probeKey,
       })
+      registerWorkBuddyProbeRoute(webCtx, {
+        path: runtime.variant.probePath,
+        probe: async modelId => {
+          const result = await runtime.probeService.probe(modelId, true)
+          return result.state === 'ok'
+            ? { state: 'ok' as const }
+            : { state: 'unavailable' as const, reason: result.reason }
+        },
+        clear: () => { runtime.probeStore.clear() },
+        refresh: async () => {
+          if (stopped) return { state: 'failed' as const, reason: 'plugin is stopping' }
+          // 先重读凭据：用户按刷新多半因为名单看起来不对，而最常见的
+          // 原因是上次拉取后才发生的登录。重注册不需要——变的是可见性，
+          // 而那归核对管。
+          let credential
+          try {
+            credential = await runtime.store.current()
+          } catch (error: unknown) {
+            return {
+              state: 'failed' as const,
+              reason: error instanceof Error ? error.message.slice(0, 300) : String(error),
+            }
+          }
+          if (credential === undefined) {
+            adoptSignedOut(runtime)
+            return { state: 'signed-out' as const }
+          }
+          refreshCatalog(runtime, 'manual refresh')
+          return { state: 'ok' as const }
+        },
+      }, probeKey)
     }
   })
 
@@ -303,6 +454,9 @@ export function apply(ctx: Context, config: Config): void {
         if (stopped) return
         const identity = credentialIdentity(credential)
         if (identity !== runtime.lastIdentity) {
+          // 账号真的换了（不是首次采用）：旧账号的探针记录不能留给新账号。
+          // 首次登录不清除——那会删掉该账号自己在重启前写入的记录。
+          if (runtime.lastIdentity !== undefined) runtime.probeStore.clear()
           runtime.lastIdentity = identity
           // 该账号最好的已知目录：上次成功拉取的 saved 优先于编译期 fallback。
           // saved 是"这个账号实际被服务过"的名单，比一次性快照更可信；这同时
@@ -410,6 +564,7 @@ export function apply(ctx: Context, config: Config): void {
             catalog,
             providerId: variant.id,
             displayName: variant.displayName,
+            recordFor: modelId => runtime.probeService.recordFor(modelId),
             resolveAttachments: () => ctx.get('attachments'),
           })
 

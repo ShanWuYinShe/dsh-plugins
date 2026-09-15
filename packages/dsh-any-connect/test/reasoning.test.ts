@@ -80,3 +80,46 @@ describe('reasoningFields', () => {
     expect(reasoningFields(model(undefined))).toEqual({ reasoning: false })
   })
 })
+
+describe('reasoningFields with probe observations', () => {
+  it('offers verified levels for undeclared rows with a validating observation', async () => {
+    const { reasoningFields } = await import('../src/adapter.js')
+    const info = {
+      id: 'm', name: 'M', contextWindow: 1, maxTokens: 1, supportsImages: false,
+      reasoning: { supports: true, onlyReasoning: true, defaultEffort: 'high' as const, canDisableThinking: false },
+    }
+    const fields = reasoningFields(info, { validation: 'validating', efforts: ['low', 'max'] })
+    expect(fields.reasoning).toBe(true)
+    expect(fields.thinkingLevelMap).toMatchObject({ low: 'low', max: 'max', medium: null, high: null })
+  })
+
+  it('keeps the default single level on non-validating observations', async () => {
+    const { reasoningFields } = await import('../src/adapter.js')
+    const info = {
+      id: 'm', name: 'M', contextWindow: 1, maxTokens: 1, supportsImages: false,
+      reasoning: { supports: true, onlyReasoning: true, defaultEffort: 'high' as const, canDisableThinking: false },
+    }
+    const fields = reasoningFields(info, { validation: 'non-validating', efforts: [] })
+    expect(fields.thinkingLevelMap).toMatchObject({ high: 'high', low: null })
+  })
+
+  it('never lets an observation widen or narrow a declared set', async () => {
+    const { reasoningFields } = await import('../src/adapter.js')
+    const info = {
+      id: 'm', name: 'M', contextWindow: 1, maxTokens: 1, supportsImages: false,
+      reasoning: { supports: true, onlyReasoning: true, supportedEfforts: ['low'], defaultEffort: 'low' as const, canDisableThinking: false },
+    }
+    const fields = reasoningFields(info, { validation: 'validating', efforts: ['low', 'high', 'max'] })
+    expect(fields.thinkingLevelMap).toMatchObject({ low: 'low', high: null, max: null })
+  })
+
+  it('never grants off from probing', async () => {
+    const { reasoningFields } = await import('../src/adapter.js')
+    const info = {
+      id: 'm', name: 'M', contextWindow: 1, maxTokens: 1, supportsImages: false,
+      reasoning: { supports: true, onlyReasoning: true, defaultEffort: 'high' as const, canDisableThinking: true },
+    }
+    const fields = reasoningFields(info, { validation: 'validating', efforts: ['low'] })
+    expect(fields.thinkingLevelMap).toMatchObject({ off: null, low: 'low' })
+  })
+})

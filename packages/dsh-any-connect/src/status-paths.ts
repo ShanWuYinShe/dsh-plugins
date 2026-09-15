@@ -13,6 +13,48 @@ export const WORKBUDDY_STATUS_PATH = '/plugins/dsh-any-connect/status'
  */
 export const WORKBUDDY_AI_STATUS_PATH = '/plugins/dsh-any-connect/ai/status'
 
+/** Plugin-owned probe control endpoint (CN variant). */
+export const WORKBUDDY_PROBE_PATH = '/plugins/dsh-any-connect/probe'
+
+/** Plugin-owned probe control endpoint (international variant). */
+export const WORKBUDDY_AI_PROBE_PATH = '/plugins/dsh-any-connect/ai/probe'
+
+/** One model's recorded probe observation, as the card displays it. */
+export interface WorkBuddyWebProbeModel {
+  id: string
+  name: string
+  /** `validating` results carry efforts; the other states never do. */
+  validation: 'validating' | 'non-validating' | 'unknown'
+  efforts: readonly string[]
+  probedAt: number
+}
+
+/** Probe section of the status document. */
+export interface WorkBuddyWebProbeSection {
+  /** Whether the user has authorized probing. */
+  consent: boolean
+  /** Whether a sweep is in flight right now. */
+  running: boolean
+  /** Models the user could probe by hand (undeclared yet reasoning-capable). */
+  candidates: readonly string[]
+  /** Recorded observations. */
+  results: readonly WorkBuddyWebProbeModel[]
+}
+
+/** Action requested from the probe control route. */
+export interface WorkBuddyProbeAction {
+  /**
+   * `probe` spends credit on one model; `clear` drops recorded observations;
+   * `refresh` re-reads the credential and re-fetches the model catalog.
+   *
+   * All three are writes, which is why they share this route's in-process key
+   * and loopback guards rather than the read-only status GET.
+   */
+  action: 'probe' | 'clear' | 'refresh'
+  /** Target model id; required for `probe`. */
+  model?: string
+}
+
 /** One billing package and its remaining credit. */
 export interface WorkBuddyWebCreditAccount {
   packageName: string
@@ -97,5 +139,13 @@ export type WorkBuddyWebStatus =
     models?: readonly WorkBuddyWebModelBadge[]
     /** Where those models came from, and whether the last fetch failed. */
     catalog?: WorkBuddyWebCatalog
+    /** Reasoning-effort probe state, consent, and recorded observations. */
+    probe?: WorkBuddyWebProbeSection
+    /**
+     * In-process key authorizing probe control writes. Handed to the card with
+     * the status document (the card is same-origin and already had to pass the
+     * loopback guard); it is never persisted and rotates per process.
+     */
+    probeKey?: string
   }
   | { status: 'error'; message: string }

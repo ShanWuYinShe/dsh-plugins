@@ -481,3 +481,50 @@ describe('international catalog and promotions', () => {
     expect(sent.messages[0]).toEqual({ role: 'system', content: 'You are a helpful assistant.' })
   })
 })
+
+describe('WorkBuddyUpstreamClient.probeEffort', () => {
+  const ctrl = new AbortController()
+
+  it('reports streamed acceptance on the first SSE event and hangs up', async () => {
+    const seen: { url: string; body: string }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init: { body: string }) => {
+      seen.push({ url: String(url), body: init.body })
+      return new Response('data: {"id":"x"}\n\n', { status: 200 })
+    }))
+    const attempt = await new WorkBuddyUpstreamClient().probeEffort(CREDENTIAL, 'm', 'low', ctrl.signal)
+    expect(attempt).toEqual({ status: 200, streamed: true })
+    const sent = JSON.parse(seen[0]!.body) as Record<string, unknown>
+    expect(sent['reasoning_effort']).toBe('low')
+    expect(sent['max_tokens']).toBe(1)
+  })
+
+  it('omits the effort field for the baseline and parses extError codes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ code: 11150, extError: { code: 'invalid_reasoning_effort' } }),
+      { status: 400 },
+    )))
+    const attempt = await new WorkBuddyUpstreamClient().probeEffort(CREDENTIAL, 'm', undefined, ctrl.signal)
+    expect(attempt).toEqual({ status: 400, streamed: false, errorCode: 'invalid_reasoning_effort', detail: 'invalid_reasoning_effort' })
+  })
+
+  it('uses the international body shape and ceiling on the global region', async () => {
+    const seen: { body: string }[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init: { body: string }) => {
+      seen.push({ body: init.body })
+      return new Response('data: {"id":"x"}\n\n', { status: 200 })
+    }))
+    const ai = { ...CREDENTIAL, domain: 'www.workbuddy.ai' }
+    const attempt = await new WorkBuddyUpstreamClient().probeEffort(ai, 'm', 'low', ctrl.signal)
+    expect(attempt.status).toBe(200)
+    const sent = JSON.parse(seen[0]!.body) as { messages: { role: string }[]; max_tokens: number }
+    expect(sent.messages[0]).toEqual({ role: 'system', content: 'You are a helpful assistant.' })
+    expect(sent.max_tokens).toBe(16)
+  })
+
+  it('counts transport failures as status 0', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('down') }))
+    const attempt = await new WorkBuddyUpstreamClient().probeEffort(CREDENTIAL, 'm', 'low', ctrl.signal)
+    expect(attempt.status).toBe(0)
+    expect(attempt.streamed).toBe(false)
+  })
+})

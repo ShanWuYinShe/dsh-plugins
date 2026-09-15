@@ -9,6 +9,22 @@
 
 import type { WorkBuddyCredential } from './auth.js'
 import { appUserAgent, resolveAppVersion, type AppVersionInfo } from './app-version.js'
+import type { ProbeAttempt } from './probe.js'
+
+/** Prompt body used by every probe request; carries nothing user-specific. */
+const PROBE_PROMPT = 'ping'
+
+/** Output ceiling for a probe request; the answer itself is never read. */
+const PROBE_MAX_TOKENS = 1
+
+/**
+ * Output ceiling for an international probe request.
+ *
+ * Above the smallest value that the strictest observed model accepts (the
+ * GPT-5.6 family rejects `1`), while still being far too small to produce a
+ * real answer.
+ */
+const INTERNATIONAL_PROBE_MAX_TOKENS = 16
 
 /** WorkBuddy region selected by the credential's login domain. */
 export type WorkBuddyRegion = 'cn' | 'global'
@@ -641,6 +657,50 @@ async function readEnvelope(response: Response): Promise<Envelope> {
   return envelope
 }
 
+/** Pull `extError.code` out of an upstream error body, if it is shaped that way. */
+function errorCodeOf(text: string): { errorCode?: string; detail?: string } {
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      const wrapped = parsed as Record<string, unknown>
+      const extError = wrapped['extError']
+      if (typeof extError === 'object' && extError !== null && !Array.isArray(extError)) {
+        const code = (extError as Record<string, unknown>)['code']
+        if (typeof code === 'string') return { errorCode: code, detail: code }
+      }
+    }
+  } catch {
+    // Not JSON: fall through to a plain detail line.
+  }
+  return { detail: text.slice(0, 200) }
+}
+
+/**
+ * Consume just enough of a streaming response to know it really streams.
+ *
+ * Returns true on the first chunk containing a data line. Cancels the body
+ * afterwards; a stream that ends or errors before that counts as not streamed,
+ * because an empty 200 is not evidence the effort was accepted.
+ */
+async function readFirstEvent(response: Response): Promise<boolean> {
+  const body = response.body
+  if (body === null) return false
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) return false
+      const text = decoder.decode(value, { stream: true })
+      if (text.includes('data:')) return true
+    }
+  } catch {
+    return false
+  } finally {
+    await reader.cancel().catch(() => {})
+  }
+}
+
 /** Fail an envelope whose business code is non-zero, classified like HTTP errors. */
 function envelopeError(status: number, envelope: Envelope): Error {
   const kind = classifyUpstreamError(status, envelope.msg)
@@ -718,6 +778,55 @@ export class WorkBuddyUpstreamClient {
       kind: classifyUpstreamError(response.status, text),
       message: text,
     }
+  }
+
+  /** Send one reasoning-effort probe request and classify the answer.
+   *
+   * The payload is minimal by design (prompt `ping`, tiny output ceiling):
+   * the probe wants the accept/reject signal, never a completion. The
+   * international body carries the gateway-required leading system prompt,
+   * and the GPT-5.6 family's rejection of `max_tokens: 1` is why that region
+   * asks for more.
+   */
+  async probeEffort(
+    credential: WorkBuddyCredential,
+    model: string,
+    effort: string | undefined,
+    signal: AbortSignal,
+  ): Promise<ProbeAttempt> {
+    const international = regionOf(credential.domain) === 'global'
+    const payload: Record<string, unknown> = {
+      model,
+      stream: true,
+      messages: [
+        ...international ? [{ role: 'system', content: INTERNATIONAL_SYSTEM_PROMPT }] : [],
+        { role: 'user', content: PROBE_PROMPT },
+      ],
+      max_tokens: international ? INTERNATIONAL_PROBE_MAX_TOKENS : PROBE_MAX_TOKENS,
+    }
+    if (effort !== undefined) payload['reasoning_effort'] = effort
+
+    let response: Response
+    try {
+      response = await fetch(`${chatBase(credential)}/v2/chat/completions`, {
+        method: 'POST',
+        headers: { ...chatHeaders(credential), 'Authorization': `Bearer ${credential.accessToken}` },
+        body: JSON.stringify(payload),
+        signal,
+      })
+    } catch (error: unknown) {
+      return { status: 0, streamed: false, detail: `transport error: ${String(error)}` }
+    }
+
+    if (!response.ok) {
+      const text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
+      return { status: response.status, streamed: false, ...errorCodeOf(text) }
+    }
+
+    // Read until the first parseable event, then hang up: the probe wants the
+    // acceptance signal, not a completion.
+    const streamed = await readFirstEvent(response)
+    return { status: response.status, streamed }
   }
 
   /** POST the token-refresh endpoint; the caller merges the outcome. */

@@ -14,10 +14,10 @@ import type { WorkBuddyUpstreamClient } from './upstream.js'
 import { normalizeCredits } from './upstream.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import { WORKBUDDY_STATUS_PATH } from './status-paths.js'
-import type { WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebStatus } from './status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
-export { WORKBUDDY_STATUS_PATH } from './status-paths.js'
-export type { WorkBuddyWebCatalog, WorkBuddyWebStatus } from './status-paths.js'
+export { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from './status-paths.js'
+export type { WorkBuddyWebCatalog, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
 /** Constructor dependencies. */
 export interface WorkBuddyStatusRouteOptions {
@@ -27,6 +27,10 @@ export interface WorkBuddyStatusRouteOptions {
   models: () => readonly WorkBuddyModelInfo[]
   /** Resolve where the served models came from, for the card's catalog line. */
   catalog: () => WorkBuddyWebCatalog
+  /** Resolve the probe section, for the card's detection controls. */
+  probe: () => WorkBuddyWebProbeSection
+  /** In-process key authorizing probe control writes; handed to the card. */
+  probeKey: string
   /** Route path; one per variant. */
   path: string
 }
@@ -77,6 +81,8 @@ export async function workBuddyWebStatus(
     ...authStatus.source === undefined ? {} : { source: authStatus.source },
     ...authStatus.expiresAtMs === undefined ? {} : { expiresAt: authStatus.expiresAtMs },
     catalog: deps.catalog(),
+    probe: deps.probe(),
+    probeKey: deps.probeKey,
   }
   // Model billing facts ride the signed-in document so the card can show which
   // models are free or on a promo, without touching the Models picker. The

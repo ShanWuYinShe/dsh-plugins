@@ -16,7 +16,7 @@
  */
 
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
-import { WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_STATUS_PATH } from './status-paths.js'
+import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from './status-paths.js'
 import type { WorkBuddyRegion } from './upstream.js'
 
 /** One WorkBuddy product variant. */
@@ -35,6 +35,8 @@ export interface WorkBuddyVariant {
   desktopFilename: string
   /** Basename of the plugin-owned credential copy under `$DSH_HOME`. */
   ownFilename: string
+  /** Basename of the plugin-owned probe-record file under `$DSH_HOME`. */
+  probeFilename: string
   /**
    * Basename of the plugin-owned saved-catalog file under `$DSH_HOME`.
    *
@@ -47,6 +49,8 @@ export interface WorkBuddyVariant {
   settingsNs: SettingsNamespace
   /** Same-origin status route consumed by this variant's card. */
   statusPath: string
+  /** Same-origin probe-control route consumed by this variant's card. */
+  probePath: string
 }
 
 /** CN WorkBuddy first: the existing provider keeps its id, paths, and copy. */
@@ -59,9 +63,11 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
     env: 'WORKBUDDY_AUTH_FILE',
     desktopFilename: 'workbuddy-desktop.info',
     ownFilename: '.workbuddy-auth.json',
+    probeFilename: '.workbuddy-probe.json',
     catalogFilename: '.workbuddy-catalog.json',
     settingsNs: 'anyconnect' as SettingsNamespace,
     statusPath: WORKBUDDY_STATUS_PATH,
+    probePath: WORKBUDDY_PROBE_PATH,
   },
   {
     id: 'workbuddy-ai',
@@ -71,9 +77,11 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
     env: 'WORKBUDDY_AI_AUTH_FILE',
     desktopFilename: 'workbuddy-desktop-ai.info',
     ownFilename: '.workbuddy-ai-auth.json',
+    probeFilename: '.workbuddy-ai-probe.json',
     catalogFilename: '.workbuddy-ai-catalog.json',
     settingsNs: 'anyconnect-ai' as SettingsNamespace,
     statusPath: WORKBUDDY_AI_STATUS_PATH,
+    probePath: WORKBUDDY_AI_PROBE_PATH,
   },
 ]
 
