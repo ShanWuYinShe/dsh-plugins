@@ -128,3 +128,27 @@ describe('workBuddyWebStatus', () => {
     expect(status.models).toEqual([{ id: 'free', name: 'Free', free: true }])
   })
 })
+
+describe('workBuddyWebStatus context', () => {
+  it('lists working budgets and larger options for every served model', async () => {
+    const status = await workBuddyWebStatus({
+      store: storeWith(CREDENTIAL),
+      client: clientWith(Promise.resolve({ total: 1, accounts: [] })),
+      models: () => [
+        model({ id: 'plain', name: 'Plain', contextWindow: 200000 }),
+        {
+          ...model({ id: 'tiered', name: 'Tiered', contextWindow: 300000 }),
+          supportedContextWindows: [300000, 1000000],
+          maxInputTokens: 1000000,
+        },
+      ],
+      catalog: () => ({ source: 'live' }),
+      probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
+      probeKey: 'test-key',
+    })
+    expect(status.context).toEqual([
+      { id: 'plain', name: 'Plain', contextWindow: 200000, largerWindows: [] },
+      { id: 'tiered', name: 'Tiered', contextWindow: 300000, largerWindows: [1000000] },
+    ])
+  })
+})

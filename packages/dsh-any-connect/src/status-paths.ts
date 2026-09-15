@@ -55,6 +55,25 @@ export interface WorkBuddyProbeAction {
   model?: string
 }
 
+/** One model's context capacity facts, as the card displays them. */
+export interface WorkBuddyWebContextModel {
+  id: string
+  name: string
+  /**
+   * Working budget in tokens: the window the plugin actually requests under
+   * (the international document's `contextWindow.defaultLength` where
+   * declared, else the row's input ceiling).
+   */
+  contextWindow: number
+  /**
+   * Selectable larger windows the upstream declares, excluding the working
+   * budget itself. Reported, never chosen: offering the ceiling as though it
+   * were the working window would overstate the budget (the desktop app's
+   * window picker is client-side policy that appears nowhere in the catalog).
+   */
+  largerWindows: readonly number[]
+}
+
 /** One billing package and its remaining credit. */
 export interface WorkBuddyWebCreditAccount {
   packageName: string
@@ -139,6 +158,8 @@ export type WorkBuddyWebStatus =
     models?: readonly WorkBuddyWebModelBadge[]
     /** Where those models came from, and whether the last fetch failed. */
     catalog?: WorkBuddyWebCatalog
+    /** Context capacity facts for every served model. */
+    context?: readonly WorkBuddyWebContextModel[]
     /** Reasoning-effort probe state, consent, and recorded observations. */
     probe?: WorkBuddyWebProbeSection
     /**

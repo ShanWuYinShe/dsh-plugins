@@ -14,10 +14,10 @@ import type { WorkBuddyUpstreamClient } from './upstream.js'
 import { normalizeCredits } from './upstream.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import { WORKBUDDY_STATUS_PATH } from './status-paths.js'
-import type { WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebContextModel, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
 export { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from './status-paths.js'
-export type { WorkBuddyWebCatalog, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
+export type { WorkBuddyWebCatalog, WorkBuddyWebContextModel, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
 /** Constructor dependencies. */
 export interface WorkBuddyStatusRouteOptions {
@@ -104,9 +104,20 @@ export async function workBuddyWebStatus(
         ...model.billing?.rateUnknown === true ? { rateUnknown: true as const } : {},
       }
     })
+  // Context facts ride the signed-in document for every served model (not just
+  // the promo rows): the card's context section lists working budgets, and the
+  // larger selectable windows where the upstream declares them.
+  const context: readonly WorkBuddyWebContextModel[] = models.map(model => ({
+    id: model.id,
+    name: model.name,
+    contextWindow: model.contextWindow,
+    largerWindows: [...(model.supportedContextWindows ?? [])]
+      .filter(windows => windows > model.contextWindow)
+      .sort((a, b) => a - b),
+  }))
   const statusWithModels: WorkBuddyWebStatus = modelsField.length > 0
-    ? { ...status, models: modelsField }
-    : status
+    ? { ...status, models: modelsField, context }
+    : { ...status, context }
   try {
     const credential = await deps.store.current()
     if (credential !== undefined) {

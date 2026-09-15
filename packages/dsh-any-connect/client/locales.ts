@@ -51,6 +51,8 @@ export const en = {
   probeResultUnknown: 'Detection did not complete',
   probeResultAt: 'Detected {time}',
   probeResultEmpty: 'No detectable models right now.',
+  contextHeading: 'Context windows',
+  contextLarger: 'Larger options: {list}',
 } as const
 
 export type WorkBuddySettingsKey = keyof typeof en
@@ -106,4 +108,6 @@ export const zh: Record<WorkBuddySettingsKey, string> = {
   probeResultUnknown: '检测未完成',
   probeResultAt: '检测于 {time}',
   probeResultEmpty: '暂无可检测的模型。',
+  contextHeading: '上下文窗口',
+  contextLarger: '可选更大窗口：{list}',
 }

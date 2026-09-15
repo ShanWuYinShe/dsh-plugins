@@ -5,7 +5,7 @@ import type { CSSProperties } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from '../src/status-paths.js'
-import type { WorkBuddyWebCatalog, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebContextModel, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
 import type { WorkBuddySettingsKey } from './locales.js'
 
 /** Localized copy injected by the browser-plugin registration. */
@@ -243,6 +243,38 @@ function dotStyle(status: CardStatus['status']): CSSProperties {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat(undefined).format(value)
+}
+
+/** Compact token count: 1048576 → "1M", 204800 → "200K", else grouped digits. */
+function formatTokens(value: number): string {
+  if (Number.isFinite(value) && value >= 1048576 && value % 1048576 === 0) {
+    return `${value / 1048576}M`
+  }
+  if (Number.isFinite(value) && value >= 1024 && value % 1024 === 0) {
+    return `${value / 1024}K`
+  }
+  return new Intl.NumberFormat(undefined).format(value)
+}
+
+/**
+ * One model's context capacity: the working budget the plugin requests under,
+ * plus the larger selectable windows where the upstream declares them.
+ */
+function ContextRow({ model, t }: {
+  model: WorkBuddyWebContextModel
+  t: WorkBuddyPluginCardInjected['t']
+}): React.ReactNode {
+  return (
+    <div style={modelOfferStyle}>
+      <div style={quotaLabelStyle}>
+        <span>{model.name}</span>
+        <span>{formatTokens(model.contextWindow)}</span>
+      </div>
+      {model.largerWindows.length === 0 ? null : (
+        <span style={modelRateStyle}>{t('contextLarger', { list: model.largerWindows.map(formatTokens).join(' / ') })}</span>
+      )}
+    </div>
+  )
 }
 
 function formatTime(ms: number): string {
@@ -543,6 +575,12 @@ export function WorkBuddyPluginCard({ t, variant }: WorkBuddyPluginCardProps) {
                   )}
                   {status.catalog === undefined ? null
                     : <p style={modelRateStyle}>{catalogLine(status.catalog, t)}</p>}
+                  {status.context === undefined || status.context.length === 0 ? null : (
+                    <div style={quotaListStyle}>
+                      <h3 style={quotaTitleStyle}>{t('contextHeading')}</h3>
+                      {status.context.map(model => <ContextRow key={model.id} model={model} t={t} />)}
+                    </div>
+                  )}
                   {status.probe === undefined ? null : (
                     <ProbeSection
                       probe={status.probe}
