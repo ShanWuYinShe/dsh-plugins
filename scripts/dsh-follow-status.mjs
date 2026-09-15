@@ -3,14 +3,16 @@
 // 落后、谁漂移。
 //
 // DSH 的发布习惯（RELEASING.md「宿主跟随规则」）：每条版本线都是
-// `<基础号>-alpha.N` 迭代若干版 → 进入 rc（= 稳定候选，直接发成 latest）
-// → 该基础号终结（出了稳定版就不会再有同基础号的 alpha）→ 下一条线从
+// `<基础号>-alpha.N` 迭代若干版 → 进入 rc（= 稳定候选，即该线的正式版）
+// → 该基础号终结（出了正式版就不会再有同基础号的 alpha）→ 下一条线从
 // 更高基础号的 `<新基础号>-alpha.0` 重新开始。因此归属判据是版本号语义：
-//   main  ↔ latest（稳定线本身）
-//   alpha ↔ 基础号高于 latest 的进行中 -alpha 线；无新线时与 main 同基线
+//   main  ↔ 最新 rc（本项目把 dsh 的最新 rc 视为正式版；dsh 从不发布无
+//           后缀的纯 X.Y.Z）
+//   alpha ↔ 基础号高于该正式版的进行中 -alpha 线；无新线时与 main 同基线
 //           待命（分支由最新 main 重建，见「双线生命周期」第 5 步）
-// 判定不用 `alpha` dist-tag——它滞后（线进入 rc 后不再更新，而该线已归
-// 稳定线）。
+// 判定**不使用任何 dist-tag**：latest / next / alpha 都会滞后或错位——同
+// 一条 rc 迭代多版时，只有首版可能拿到 latest（如 0.1.5-rc.2 挂在 next 而
+// latest 仍指 0.1.5-rc.1），拿 dist-tag 当目标会把正确的基线误报成超前。
 //
 // 用法：node scripts/dsh-follow-status.mjs [--ci]
 //   --ci  落后/漂移时输出 GitHub Actions `::warning::` annotation
@@ -118,13 +120,25 @@ try {
 const head = currentBranch();
 
 // ── 按 DSH 发布习惯判定跟随目标 ────────────────────────────────────
-// 稳定线 = latest；进行中预发布线 = 基础号高于 latest 的最高 -alpha 版本
-// （-beta 同样算进行中；-rc 不算——rc 即稳定候选，一出现该线就归稳定线）。
-const latest = distTags.latest;
-const latestBase = parseVersion(latest).n.join(".");
+// 稳定线目标 = 已发布版本里「非进行中预发布」的最高版：rc 即该线正式版
+// （dsh 从不发无后缀纯 X.Y.Z；将来若发，它天然高于同基础号 rc、自动胜出）。
+// 越过了 dist-tag——同一条 rc 迭代多版时只有首版可能拿到 latest（实测
+// 0.1.5-rc.2 挂在 next、latest 仍指 0.1.5-rc.1），拿 latest 当目标会把
+// 已跟到最新 rc 的 main 误报成「超前」。
+// 进行中预发布线 = 高于该正式版的最高 -alpha/-beta 版本。
+const stableVersions = versions.filter((v) => {
+  const p = parseVersion(v);
+  return p.pre.length === 0 || p.pre[0] === "rc";
+});
+// 兜底：理论上 dsh 总有 rc，但绝不让空数组把诊断脚本打成崩溃（本脚本承诺
+// 永远 exit 0）；无 rc/正式版时退回 dist-tag 的 latest。
+const stable = stableVersions.length > 0
+  ? stableVersions.reduce((a, b) => (cmpVersion(a, b) > 0 ? a : b))
+  : distTags.latest;
+const stableBase = parseVersion(stable).n.join(".");
 const devVersions = versions.filter((v) => {
   const p = parseVersion(v);
-  return p.pre.length > 0 && p.pre[0] !== "rc" && cmpVersion(v, latest) > 0;
+  return p.pre.length > 0 && p.pre[0] !== "rc" && cmpVersion(v, stable) > 0;
 });
 const devLine = devVersions.length > 0
   ? devVersions.reduce((a, b) => (cmpVersion(a, b) > 0 ? a : b))
@@ -146,11 +160,11 @@ for (const branch of ["main", "alpha"]) {
     target = "(基线不一致)";
     state = "漂移(基线不一致)";
   } else if (!comparable) {
-    target = latest;
+    target = stable;
     state = "漂移(基线非版本号)";
   } else if (branch === "main") {
-    target = latest;
-    const cmp = cmpVersion(baseline, latest);
+    target = stable;
+    const cmp = cmpVersion(baseline, stable);
     state = cmp === 0 ? "就位" : cmp < 0 ? "落后" : "超前";
   } else if (devLine !== null) {
     target = devLine;
@@ -158,17 +172,17 @@ for (const branch of ["main", "alpha"]) {
     state = cmp === 0 ? "就位" : cmp < 0 ? "落后" : "超前";
   } else {
     // 待命：没有进行中的预发布线。alpha 分支由最新 main 重建，基线等于
-    // latest 即就位——等 dsh 出更高基础号的新 alpha 线再 adapt 跟进。
-    target = `(待命，等待 >${latestBase} 的新线)`;
-    const cmp = cmpVersion(baseline, latest);
+    // 稳定线目标即就位——等 dsh 出更高基础号的新 alpha 线再 adapt 跟进。
+    target = `(待命，等待 >${stableBase} 的新线)`;
+    const cmp = cmpVersion(baseline, stable);
     state = cmp === 0 ? "就位(待命)" : cmp < 0 ? "落后" : "超前";
   }
   rows.push({ branch, baseline, host, target, state });
 }
 
-console.log(`dsh 稳定线(latest) = ${latest}`);
+console.log(`dsh 稳定线(最新 rc) = ${stable}`);
 console.log(devLine === null
-  ? `进行中预发布线: 无 —— alpha 分支待命（与 main 同基线），等待 >${latestBase} 的新 alpha 线`
+  ? `进行中预发布线: 无 —— alpha 分支待命（与 main 同基线），等待 >${stableBase} 的新 alpha 线`
   : `进行中预发布线 = ${devLine}`);
 let problems = 0;
 for (const { branch, baseline, host, target, state } of rows) {
@@ -187,7 +201,7 @@ for (const { branch, baseline, target, state } of rows) {
   problems++;
   let advice = "核对 RELEASING.md「宿主跟随规则」";
   if (state === "落后") {
-    if (branch === "main") advice = `请在该分支执行 pnpm run adapt ${latest} 跟进`;
+    if (branch === "main") advice = `请在该分支执行 pnpm run adapt ${stable} 跟进`;
     else if (devLine !== null) advice = `请在该分支执行 pnpm run adapt ${devLine} 跟进`;
     // 待命期没有新线可跟：alpha 落后只可能是它没跟上 main，重建即可。
     else advice = "待命期无新线，alpha 应由最新 main 重建：git branch -f alpha main";
