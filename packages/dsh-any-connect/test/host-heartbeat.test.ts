@@ -100,21 +100,25 @@ describe('host heartbeat', () => {
   })
 
   it('reads EPERM from process.kill as alive and other errors as dead', () => {
-    // EPERM = PID 存在但属其他用户:进程活着,不能读成死亡。
+    // process.kill 被 mock，pid 取什么值都不影响结论——绝不能让它依赖
+    // 「某个真实 PID 不存在」这种环境巧合。
+    //
+    // **不要在两段断言之间 mockRestore**：vitest 下 restore 之后再
+    // mockImplementation 不会重新生效（spy 已被还原），第二次调用会落到真实
+    // process.kill 上。CI 的 runner 上 PID 1234 恰好存在，于是越过 catch 分支
+    // 走到启动时刻比对、返回 true，断言随机失败（2026-09-15 main 流水即因此
+    // 变红）。用一个 spy 连设两次实现，最后统一 restore。
     const heartbeat = { version: 1 as const, package: 'dsh-any-connect' as const, pluginVersion: '0.0.0', registeredAt: Date.now(), pid: 1234 }
     const kill = vi.spyOn(process, 'kill')
     const failing = (code: string) => () => {
       throw Object.assign(new Error(code), { code })
     }
-    kill.mockImplementation(failing('EPERM'))
     try {
+      // EPERM = PID 存在但属其他用户:进程活着,不能读成死亡。
+      kill.mockImplementation(failing('EPERM'))
       expect(isHeartbeatProcessAlive(heartbeat)).toBe(true)
-    } finally {
-      kill.mockRestore()
-    }
-    // ESRCH = 无此进程:死亡。
-    kill.mockImplementation(failing('ESRCH'))
-    try {
+      // ESRCH = 无此进程:死亡。
+      kill.mockImplementation(failing('ESRCH'))
       expect(isHeartbeatProcessAlive(heartbeat)).toBe(false)
     } finally {
       kill.mockRestore()

@@ -314,19 +314,25 @@ describe('WorkBuddy shim', () => {
   it('detects [DONE] split across stream chunks (no duplicate marker on mid-flight error)', async () => {
     // 标记恰好跨 chunk 分割时,单块扫描会漏检 sawDone,流中途出错就会再补
     // 一个 [DONE](客户端看到重复标记,截断被伪装成干净收尾)。
+    //
+    // 用 async generator 造流,**不要**用 `start` + `setTimeout(error)`:
+    // 后者与消费赛跑——慢机器上 error 先于排队块被消费,正文丢失,断言
+    // `toContain('你好')` 随机失败(2026-09-15 CI 抖动即此因)。生成器只在
+    // 消费方请求下一块时才推进,因此三块必然依次送达,`throw` 随后把流
+    // 置错——事件顺序确定为 data×N → error。
     const encoder = new TextEncoder()
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"你好"}}]}\n\n'))
-        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"!"}}]}\n\ndata: [DON'))
-        controller.enqueue(encoder.encode('E]\n\n'))
-        // 延迟 error:同步 error 会让尚未开始消费的排队块丢失。
-        setTimeout(() => controller.error(new Error('upstream reset mid-flight')), 20)
-      },
-    })
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"你好"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"!"}}]}\n\ndata: [DON',
+      'E]\n\n',
+    ]
+    async function* source() {
+      for (const chunk of chunks) yield encoder.encode(chunk)
+      throw new Error('upstream reset mid-flight')
+    }
     const harness = await startShim(() => ({
       ok: true,
-      response: new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+      response: new Response(ReadableStream.from(source()), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
     }))
     const response = await fetch(`${harness.shim.baseUrl()}/v1/chat/completions`, {
       method: 'POST',
