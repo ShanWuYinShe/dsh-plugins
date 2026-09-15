@@ -1,34 +1,19 @@
 # Changelog
 
-## 0.4.12 (2026-09-14)
+## 0.4.13-alpha.0 (2026-09-15)
 
 ### Fixes
 
-* Seatbelt profile 漂移自检改 fail-closed：此前检出官方 profile 形状变化后
-  仅告警，然后仍用本插件可能过时的模板整体替换官方 profile——官方升级新增
-  的限制项会被静默丢掉，沙盒比官方更宽（安全敏感组件不可接受的失败姿态）。
-  现在检出漂移即放弃重建、保持官方 argv 原样（bash 侧额外根失效，fs 侧
-  放行不受影响，告警注明）
-* fs 侧包装的 `resolve`/路径匹配异常不再外泄：契约漂移（`displayPath` 缺失）
-  或 canonical 化/祖先链 stat 遇 EACCES 等内部异常此前会替换掉官方
-  `FS_SANDBOX_DENIED` 拒绝语义（0.4.11 解绑调用防护的同源残留），现整体
-  兜底 rethrow 官方拒绝并告警，失败姿态保持 fail-closed
-* 设置卡片预览口径与 host `classifyRoot` 对齐：补 macOS 的 `/private`
-  （`/private/etc` 等系统目录的词法祖先，保存成功但静默不生效——用户此前
-  全程无感知）与主目录父目录（`/Users` 等 reject 级，此前保存失败才看到
-  一段英文 TypeError）；裸 `~` 即主目录本身，改标 danger
-* 存在 host 必然拒绝的行（invalid/danger/homeAncestor）时禁用保存按钮，
-  行内原因即时可见
-
-### Tests
-
-* 新增 8 用例：漂移 fail-closed（官方 argv 原样保留 + fs 侧不受影响）、
-  fs 内部异常回落官方拒绝、客户端预览 6 项（`/private`、home 祖先、裸 `~`、
-  阻塞级判定等）
-* build + typecheck + 全量测试通过，并在隔离测试实例真实验证（macOS 浏览器
-  下三类问题行预览、保存禁用/恢复、保存落盘 config.json 全链路核对）
-
-## 0.4.11 (2026-09-12)
+* 同步稳定线 0.4.12 的全仓审查修复：Seatbelt 漂移自检改 fail-closed
+  （检出漂移放弃重建、保持官方 argv，bash 侧额外根随之失效并告警）、
+  fs 侧包装内部异常兜底 rethrow 官方 `FS_SANDBOX_DENIED`、客户端预览补
+  `/private`、主目录祖先与裸 `~` 的 danger 判定（阻塞级行禁用保存）
+* 跟进 DSH 宿主 0.1.6-alpha.1：`SandboxProvider.confine` 同步改异步
+  （宿主 terminal-bash 以 `await` + `signal` 调用）。`confine` 包装改
+  `async`，`await` 原实现并把第三参数 `signal` 透传，否则 `wrapped.argv`
+  为 `undefined`、每次 bash 执行都抛 `TypeError`；`dsh.d.ts` 宿主契约同步
+  更新。测试 mock 镜像新宿主（async + signal 捕获），新增 signal 透传
+  用例；在真实 0.1.6 `dsh-sandbox-local`（bwrap）上端到端验证额外根注入
 
 ### Fixes
 

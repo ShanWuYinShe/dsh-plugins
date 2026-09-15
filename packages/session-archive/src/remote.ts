@@ -92,7 +92,9 @@ function runPendingMarks(instance: object) {
  * 归档管理远程服务：list 列出归档会话；count 归档计数（徽标轮询轻端点）；
  * detail 读取会话内容；
  * delete 批量删除归档会话（文件删除，归档集合保留 ghost id 防止内存会话
- * 重现侧边栏）；unarchive 批量恢复归档（仅限仍存在文件的会话）。
+ * 重现侧边栏；返回附带 needsRestart——文件已删但内存会话仍在的 id，原生
+ * "设置 → 已归档会话"页在宿主重启前仍会显示它们）；unarchive 批量恢复归档
+ * （仅限仍存在文件的会话）。
  * 所有逻辑委托给 host 模块（lib/index.ts 传入的 archiveHost）。
  * @param ctx - 插件上下文。
  * @param config - { host: archiveHost, serviceKey: 远程服务名 }。

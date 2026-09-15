@@ -397,8 +397,12 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
           sandboxState.warned.add(key);
           ctx.logger?.warn?.(`sandbox-extra-roots: ${message}`);
         };
-        const installedConfine = function confineWithExtraRoots(this: any, argv: any, policy: any) {
-          const wrapped = originalConfine.call(this, argv, policy);
+        // DSH 0.1.6 把 confine 异步化了（SandboxProvider.confine 返回
+        // Promise，terminal-bash 以 await + signal 调用）：包装必须同样是
+        // async 并把 signal 透传给原实现，否则 wrapped 是 Promise、
+        // wrapped.argv 为 undefined，每次 bash 执行都抛 TypeError。
+        const installedConfine = async function confineWithExtraRoots(this: any, argv: any, policy: any, signal?: any) {
+          const wrapped = await originalConfine.call(this, argv, policy, signal);
           if (policy?.mode !== "workspace-write") return wrapped;
           if (sandboxState.extraRoots.length === 0) return wrapped;
           // 每次调用重新 canonical 化(与官方 writableRoots 对 workspaceRoot

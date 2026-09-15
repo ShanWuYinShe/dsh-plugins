@@ -52,7 +52,7 @@ function assistantEvent(seq: number, time: number, text: string) {
 }
 
 /**
- * 官方契约夹具（dsh 0.1.5-alpha 形状，无旧版分支）：list() 返回
+ * 官方契约夹具（dsh 0.1.6-alpha 形状，无旧版分支）：list() 返回
  * SessionPersistenceSnapshot 数组、open() read 句柄读事件流、事件 data
  * 为官方 SessionEventMap 形状（user/message 本体、assistant/message 包装）。
  * 默认带 locate——jsonl 后端的诊断钩子（不在抽象契约上），
@@ -69,15 +69,16 @@ function makeFixture(options: {
     archivedSessionIds: [...(options.archived ?? [])],
   };
   const archiveRegistry = {
-    // 官方契约是 getter(读内部 state),setState 后必须读到新数组——
-    // 静态属性会在 setState 后与 state 脱钩,host 的 archivedSet() 快照
-    // 永远是旧集合(delete↔unarchive 互斥的锁内复验会因此失效)。
+    // 官方契约是 getter(读内部 state),unarchiveSession 后必须读到新数组——
+    // 静态属性会在移除后与 state 脱钩,host 的 archivedSet() 快照
+    // 永远是旧集合(delete↔unarchive 互斥的复验会因此失效)。
     get archivedSessionIds() {
       return registryState.archivedSessionIds;
     },
-    enqueueOperation: async (operation: () => unknown) => { await operation(); },
-    requireState: () => registryState,
-    setState: (next: Record<string, unknown>) => { Object.assign(registryState, next); },
+    // DSH 0.1.6 官方 unarchiveSession：幂等移除，未归档的 id 直接 resolve。
+    unarchiveSession: async (sessionId: string) => {
+      registryState.archivedSessionIds = registryState.archivedSessionIds.filter((id) => id !== sessionId);
+    },
   };
   const withLocate = options.withLocate ?? true;
   const headers = options.headers ?? [];
@@ -275,6 +276,9 @@ describe("session-archive host", () => {
     expect(!fs.existsSync(sessionPath("s-del"))).toBe(true);
     expect(fs.existsSync(sessionPath("s-busy")) && fs.existsSync(sessionPath("foreign"))).toBe(true);
     expect(mixed.removedFromArchive === 0).toBe(true);
+    // s-del 是冷文件(不在内存):needsRestart 为空,客户端刷新会话列表后
+    // 原生"设置 → 已归档会话"页即时消失。
+    expect(mixed.needsRestart).toEqual([]);
     clearInterval(appender);
 
     // 静默会话回归(线上误报用例):在内存(tab 恢复)、mtime 被宿主批量落盘/
@@ -284,6 +288,9 @@ describe("session-archive host", () => {
     expect(quiet.deleted.includes("s-quiet")
       && quiet.failed.length === 0
       && !fs.existsSync(sessionPath("s-quiet"))).toBe(true);
+    // s-quiet 文件已删但内存会话仍在:ghost 保留 + 内存摘要仍在 → 原生页在
+    // 宿主重启前仍会显示,如实返回 needsRestart 供客户端提示用户。
+    expect(quiet.needsRestart).toEqual(["s-quiet"]);
 
     // 损坏首行的孤儿文件:枚举不到但文件确实存在 → 拒绝并保留文件,不谎报成功。
     const orphanResult = await archiveHost.deleteArchived(["orphan"]);
@@ -309,6 +316,8 @@ describe("session-archive host", () => {
     expect(delBusy.deleted.includes("s-busy")
       && !fs.existsSync(sessionPath("s-busy"))
       && !fs.existsSync(path.join(saRoot, "--proj--", "s-busy"))).toBe(true);
+    // 内存已清空的冷删除:needsRestart 为空,原生页刷新即消失。
+    expect(delBusy.needsRestart).toEqual([]);
     expect(f.registryState.archivedSessionIds.includes("s-busy")).toBe(true);
     expect(!(await archiveHost.list()).items.some((i) => i.sessionId === "s-busy")).toBe(true);
   });
@@ -545,7 +554,7 @@ describe("session-archive host", () => {
   it("delete ↔ unarchive 互斥:并发时不出现「文件删除且归档标记移除」的错位", async () => {
     // 变体 A:删除先进临界区(在内存 + mtime 新鲜 → 300ms 沉降窗口),恢复
     // 排队等到删除完成后 confirm → absent → 拒绝恢复。没有互斥时 confirm
-    // 可在沉降窗口内探到 located,setState 会把 id 移出集合——文件没了、
+    // 可在沉降窗口内探到 located,unarchiveSession 会把 id 移出集合——文件没了、
     // 归档标记也没了,内存会话重回侧边栏。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-mx1-"));
     const f = makeFixture({

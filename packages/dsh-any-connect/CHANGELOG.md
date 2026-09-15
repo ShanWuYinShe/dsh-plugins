@@ -1,41 +1,22 @@
 # Changelog
 
-## 0.3.17 (2026-09-14)
+## 0.3.18-alpha.0 (2026-09-15)
 
 ### Fixes
 
-* 设置卡片补上加载态：状态路由返回前要串行读凭据文件并打一次上游 billing
-  接口，首屏往返可达数秒，期间已登录用户看到的是灰点「未登录」加引导登录
-  的提示（locale 里的 `loading` 词条一直存在但从未被使用）。现在首拉期间
-  显示「正在读取账号…」，响应形状异常（中间代理返回非 JSON 的 200）不再
-  直接 `setStatus(undefined)` 打崩渲染树
-* 拉取失败保留 last-good 数据并继续轮询：一次瞬态失败此前把整个状态替换
-  成 error 态，已展示的积分/账号全部消失，且轮询以「非 signed-in 即停」
-  门控后永不自动恢复；现在已有数据时错误降级为一条提示（`refreshFailed`），
-  轮询在展开期间无条件进行——「后来才登录」的用户也不再永远停在未登录态
-* 模型目录启动拉取改走 `store.resolve()`（按需刷新过期 token 并落盘）：
-  此前用不刷新的 `current()`，离屏很久后启动时 access token 已过期，
-  `fetchModels` 必 401，费率与促销徽章一直停在 fallback 快照；并在失败后
-  增加有限次延迟重试（60s 间隔至多 2 次，插件卸载即停），未登录仍静默
-  保留 fallback 目录
-* token 已过期时刷新失败退避不再被绕过：节流窗口此前只对未过期 token
-  生效，刷新端点故障 + token 过期的组合下每条聊天请求都串行等一次刷新
-  超时；现在窗口内失败同样快速失败（`lastRefreshFailureMs`），30s 后自动
-  再试
-* `chatStream` 的 fetch 抛错路径（用户取消/传输错误/头超时）补 `clearTimeout`：
-  此前每次失败泄漏一枚 30s 头超时定时器挂住事件循环
-* 进度条与 aria-valuenow 夹到 [0,100]（上游记账口径不保证 remain ≤ size）；
-  500 响应体附带的脱敏诊断现在拼进失败原因便于排障
-
-### Tests
-
-* 新增 2 用例：过期 token 刷新失败退避（窗口内快速失败、窗口过后再试）、
-  目录拉取失败重试且耗尽即停（installSection 安装即触发 onChange 的链路
-  一并覆盖）
-* build + typecheck + 全量测试通过，并在隔离测试实例真实验证（真实登录态
-  下账号/积分/进度条渲染正常，控制台零报错）
-
-## 0.3.16 (2026-09-12)
+* 同步稳定线 0.3.17 的全仓审查修复：设置卡片加载态（首拉期间不再误报
+  未登录）、非 JSON 200 不打崩渲染树、刷新失败保留 last-good 并继续轮询、
+  目录启动拉取改 `resolve()`（过期 token 自动刷新）+ 失败延迟重试、刷新
+  退避不再被绕过、chatStream 抛错路径补 `clearTimeout`、进度条无障碍与
+  500 诊断拼入失败原因
+* 跟进 DSH 宿主 0.1.6-alpha.1：仅依赖基线（`dsh.host` → `0.1.6-alpha.1`），
+  本包无代码改动——逐符号核对未命中任何宿主破坏性变更（`AssistantProvenance`
+  改名、`RequestImageOffloadPolicy` 及 `offloadedImagePrefixCount` /
+  `offloadRequestImagesWithPolicy` 删除、`ImageRequestPolicy` →
+  `ImageRequestTarget`、`priceImages` 参数收窄），新基线 typecheck 通过。
+  行为注意：宿主图片管线改为超预算抛 `IMAGE_OFFLOAD_REQUIRED`（不再静默
+  裁剪）；本包图片预算走 `PiAiAdapter` profile 默认路径，超大图片请求的
+  失败/重试语义跟随宿主
 
 ### Fixes
 
