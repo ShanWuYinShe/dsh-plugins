@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WorkBuddyCredentialStore } from '../src/auth.js'
-import { WorkBuddyCatalog } from '../src/catalog.js'
+import { WorkBuddyCatalog, FALLBACK_WORKBUDDY_MODELS } from '../src/catalog.js'
 import { createWorkBuddyShim, type WorkBuddyShim } from '../src/shim.js'
 import type { WorkBuddyChatResult } from '../src/upstream.js'
 
@@ -95,8 +95,13 @@ describe('WorkBuddy shim', () => {
     const ids = body.data.map(model => model.id)
     expect(ids).toContain('auto')
     expect(ids).toContain('deepseek-v4-pro')
-    // The fallback roster tracks the live `cli` agent's 15 models.
-    expect(ids.length).toBe(15)
+    // The fallback roster tracks the live `cli` agent's models (16 as of the
+    // 2026-09-15 re-verification against desktop 5.5.6). Asserted by identity
+    // rather than by count so a roster refresh does not fail this test.
+    expect(ids.length).toBe(FALLBACK_WORKBUDDY_MODELS.length)
+    expect(ids).toContain('deepseek-v4.1-flash')
+    expect(ids).toContain('kimi-k2.8-preview')
+    expect(ids).not.toContain('deepseek-v4-flash')
     expect(ids).toContain('hy4-preview')
     expect(ids).toContain('glm-5.3')
   })

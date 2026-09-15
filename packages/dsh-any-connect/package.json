@@ -1,6 +1,6 @@
 {
   "name": "@chaoset/dsh-any-connect",
-  "version": "0.3.18-alpha.0",
+  "version": "0.3.18-alpha.1",
   "description": "DSH plugin: bring models offered by WorkBuddy-style desktop agents into DeepSeek Harness — zero configuration, per-model thinking effort, and billing rate at a glance",
   "engines": {
     "node": ">=22.19.0"
