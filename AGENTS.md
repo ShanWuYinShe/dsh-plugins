@@ -10,8 +10,9 @@ README 面向用户，面向开发者的内容以 RELEASING.md 为准。
   随时可热修；`alpha` = dsh 进行中的 alpha 预发布线（`-alpha.N`，进入 rc 阶段
   换 `-rc.N`，dist-tag 由版本后缀自动决定）。**alpha 是用完即弃的适配线**：
   dsh 一条线终结后，它的改动合回 main，旧 alpha 分支删除，再从最新 main 重
-  建待命——等 dsh 出下一条 alpha 线再 `adapt` 跟进。因此 alpha 与 main 同基线
-  （待命）是常态，不存在需要长期维护的分叉，详见 RELEASING.md「双线生命周期」。
+  建待命——等 dsh 出下一条 alpha 线再 `adapt` 跟进。活跃期 alpha 领先 main、
+  线间待命期两者同基线，都是正常形态，不存在需要长期维护的分叉，详见
+  RELEASING.md「双线生命周期」。
 - **功能收敛原则（alpha 只进不出）**：活跃 alpha 线期间，功能开发与修复一律
   落在 alpha，**不往 main 搬**——两分支此时有功能差异是预期的，不是漂移。只有
   dsh 结束该 alpha 线、发布同基础号的**正式版之后**，才把 alpha 的改动一次性
@@ -86,7 +87,7 @@ pnpm run test           # vitest 回归
 pnpm run test:ci        # build + typecheck + test（提交/发布前必跑）
 pnpm run gate           # 发布门禁干跑：只读，看哪些包会被发布/为何被跳过
 pnpm run dsh-status     # 两分支 dsh 依赖基线 vs npm dist-tags 对照（详见 RELEASING.md）
-pnpm run adapt 0.1.2-alpha.5   # dsh 宿主升级适配（--dry-run 预览），详见 RELEASING.md
+pnpm run adapt <dsh 新线版本>   # dsh 宿主升级适配（--dry-run 预览），详见 RELEASING.md
 ```
 
 ## 已知技术债（重构候选，动手前先规划）
