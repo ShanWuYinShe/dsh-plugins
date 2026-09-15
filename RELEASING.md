@@ -257,45 +257,84 @@ dsh 新的 rc（如 `0.1.1-rc.2` → `0.1.2-rc.1`）时同样在 main 上执行�
 
 ## 双线生命周期（常态循环）
 
-alpha 分支是**一条用完即弃的适配线**：dsh 每出一条新 alpha 线，就从最新的
-main 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其正式版）后，适配
-成果合回 main，旧 alpha 分支删除，等下一条线再从 main 重建。alpha 分支
-**不需要长期存活**，因此不存在「把旧分支对齐回最新」这类历史搬运。
+alpha 分支是**一条用完即弃的适配线**：dsh 每出一条新 alpha 线，就从**最新的
+main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其正式版）后，适配
+成果压缩成单个提交合回 main，alpha 分支的**远程与本地一并删除**，等下一条线
+再从最新 main 重建。alpha 分支**不需要长期存活**，因此不存在「把旧分支对齐回
+最新」这类历史搬运。
+
+> **起点必须是「当下的最新 main」**，不能复用上一轮的旧分支、也不能从旧
+> main 分叉。这样 alpha 永远是 main 的后代：收敛时 `merge --ff-only` 必然
+> 可行，且**基线天然继承稳定线的全部成果**，不依赖人工搬运。反例（2026-09-15
+> 实际发生）：某轮 alpha 从 09-13 的旧 main 分叉，而 main 在 09-14 又落了
+> 一次稳定线修复，导致 alpha 祖先链上**缺那次修复**，只能靠提交信息里的人工
+> 「同步稳定线修复」补内容——一旦漏搬，收敛时就会把稳定线的修复覆盖掉。
 
 1. **待命**：alpha 分支由最新 main 创建（`git branch alpha main`），代码与
    依赖基线等于 main，不发版。此时 dsh 无进行中的预发布线（上一条已终结）。
 2. **dsh 出新高基础号的 alpha 线**（如 `0.1.3-alpha.0`）：alpha 分支执行
    「DSH 宿主升级适配」流程（`adapt` 到该线 + `pnpm install`），把包版本
-   bump 成 `-alpha.N` 发布到 `alpha` dist-tag。main 不动，继续服务稳定线。
+   bump 成 `-alpha.N` 发布到 `alpha` dist-tag。**main 就此整体搁置**——不再
+   开发、不再发布、不接受任何 cherry-pick，直到该线发出正式版（第 4 步）；
+   这期间的稳定线用户继续用 main 上已发布的最后一版 `latest`。
 3. **alpha 线进入 rc**：该线开始发同基础号的 rc（如 `0.1.3-rc.1`、`0.1.3-rc.2`
    …）。rc 是稳定候选，**最新的一版 rc 就是这条线的正式版**——dsh 不会再发
    同基础号的 alpha，该线就此归 main 线，进入下面的收敛。
 4. **dsh 该线发完最新 rc 后，插件收敛进稳定线**：触发条件是 dsh 已发布该线
    最新的 rc（无论是 `0.1.3-rc.1` 还是后续 rc.2/rc.3，**以版本列表里最新那版
-   为准**，不看 `latest` tag 指向谁），**此前不动 main**。此时把 alpha 上累积
-   的全部改动合回 main，同时让 main 跟进这个 rc。三件事一次做完：
-   - 在 alpha 的工作树里把「alpha 的改动」整理成基于 main 的提交（两分支
-     历史本就平行，`merge --ff-only` 直接合不了；用 `git reset --soft main`
-     保留工作区内容再提交，或 `git cherry-pick` 逐个搬源码，二者皆可得一个
-     main 的后代提交——**不要用会产生 merge commit 的 `git merge`**）；
-   - `node scripts/adapt-dsh.mjs <该线最新 rc>` + `pnpm install`，
-     让 main 的依赖基线与 `dsh.host` 对齐这条线的正式版；
-   - 去掉预发布后缀（`0.3.2-alpha.0` → `0.3.2`；若稳定线热修已占用该基础
-     号，先跳到下一个基础号），写 CHANGELOG，`pnpm run test:ci` 全绿 + 隔离
-     实例真实验证，然后在主工作树 `git merge --ff-only <分支>` 并推送发布
-     `latest`。
-5. **删旧分支、从 main 重建 alpha**：发布完成后删除已合并的 alpha 分支，
-   再从最新的 main 重新创建，回到第 1 步：
+   为准**，不看 `latest` tag 指向谁），**此前不动 main**。收敛必须在 alpha 的
+   工作树里完成（不在主检出目录操作），分三件事：
+
+   a. **`adapt` 到新正式版并去掉预发布后缀**：`node scripts/adapt-dsh.mjs
+      <该线最新 rc>` + `pnpm install`，让依赖基线与 `dsh.host` 对齐这条线的
+      正式版；把包版本去掉后缀（`0.3.2-alpha.0` → `0.3.2`；若稳定线热修已
+      占用该基础号，先跳到下一个基础号），写 CHANGELOG。
+
+   b. **压缩成单个提交**：整条 alpha 线的累积改动只留**一个**基于 main 的
+      提交——历史干净、main 上不出现 alpha 的迭代过程：
+
+      ```bash
+      git fetch origin
+      git reset --soft origin/main     # 内容全部保留在暂存区，历史回到 main
+      git commit -m "…本轮适配与功能的完整说明…"
+      ```
+
+      `reset --soft` 只移动 HEAD、**不动工作区与暂存区**，因此 alpha 的全部
+      成果原样保留，随后一次提交即得「一个 main 的后代提交」。**禁止
+      `git merge`（会产生 merge commit）；禁止 `git merge --squash`（会绕过
+      alpha 历史，且本条流程要求压缩在 alpha 侧完成）。**
+
+   c. **验证后合入 main 并发布**：`pnpm run test:ci` 全绿 + 隔离实例真实
+      验证，然后 `git merge --ff-only <alpha 分支>`（此刻它已是 main 的
+      后代，必然可 ff）→ 推送 `main` 发布 `latest`。
+
+   > 若收敛期间 main 因**紧急热修**又前进了，`origin/main` 已不是刚才那位，
+   > 需先把这条已压缩的提交 rebase 到最新 `origin/main` 之上（`git rebase
+   > origin/main`）再 ff 合并——`reset --soft` 的目标必须始终是当下的
+   > `origin/main`。
+
+5. **删除 alpha：远程与本地都删**：发布完成后该 alpha 分支即完成使命
+   （它的全部内容已进 main），**远程和本地都必须删除**，不留残留：
 
    ```bash
-   git branch -d alpha              # 已合入 main，可安全删除
-   git push origin --delete alpha   # 远程一并删除（远程只留主干 + CI 分支）
-   git branch alpha main            # 由最新 main 重建，代码与基线等于 main
+   git push origin --delete alpha   # 先删远程（远程只留主干 + CI 自动分支）
+   git branch -D alpha              # 再删本地（-D 而非 -d：alpha 已被压缩成
+                                    # 单个提交，不再是原分支的祖先，-d 会拒绝）
+   ```
+
+   随后从**最新的 main** 重建下一条待命 alpha（回到第 1 步）：
+
+   ```bash
+   git branch alpha main            # 由最新 main 创建，代码与基线等于 main
    git push origin alpha            # 全新分支，普通 push 即可（不需要 force）
    ```
 
-   重建后的 alpha 与 main 同提交，因此永远不存在 diverged 需要 force push
-   的状态。等 dsh 出下一条更高基础号的 alpha 线，回到第 2 步。
+   如此 alpha 的每次生命周期都是：**从最新 main 分叉 → 迭代若干提交 →
+   压缩成 1 个提交合回 main → 远程与本地删除 → 再从最新 main 重建**。因为
+   起点永远是当下的 main，alpha 永远是 main 的后代，既不会 diverged 需要
+   force push，也不会出现「alpha 缺了 main 某次修复」的祖先链断裂——那正是
+   靠人工同步才补上、极易漏搬的隐患。等 dsh 出下一条更高基础号的 alpha 线，
+   回到第 2 步。
 
 若某个时期同时活跃的宿主线超过两条，照同样模型再拉一条分支即可——分支数
 跟随活跃宿主线数，dist-tag 始终由版本后缀决定、与分支名无关。
