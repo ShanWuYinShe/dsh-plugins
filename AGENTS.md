@@ -6,21 +6,24 @@ README 面向用户，面向开发者的内容以 RELEASING.md 为准。
 
 ## 分支模型
 
-- `main` = dsh 稳定线适配（发 `latest`），工作树必须始终处于可直接发布状态，
-  随时可热修；`alpha` = dsh 进行中的 alpha 预发布线（`-alpha.N`，进入 rc 阶段
-  换 `-rc.N`，dist-tag 由版本后缀自动决定）。**alpha 是用完即弃的适配线**：
-  dsh 一条线终结后，它的改动合回 main，旧 alpha 分支删除，再从最新 main 重
-  建待命——等 dsh 出下一条 alpha 线再 `adapt` 跟进。活跃期 alpha 领先 main、
-  线间待命期两者同基线，都是正常形态，不存在需要长期维护的分叉，详见
-  RELEASING.md「双线生命周期」。
+- `main` = dsh 稳定线适配（发 `latest`），工作树必须始终处于可直接发布状态
+  （停在被搁置的最后一版，需要时能立刻放紧急热修）；`alpha` = dsh 进行中的
+  alpha 预发布线（`-alpha.N`，进入 rc 阶段换 `-rc.N`，dist-tag 由版本后缀
+  自动决定）。**alpha 是用完即弃的适配线**：dsh 一条线终结后，它的改动合回
+  main，旧 alpha 分支删除，再从最新 main 重建待命——等 dsh 出下一条 alpha
+  线再 `adapt` 跟进。活跃期 alpha 领先 main、线间待命期两者同基线，都是正常
+  形态，不存在需要长期维护的分叉，详见 RELEASING.md「双线生命周期」。
 - **功能收敛原则（alpha 只进不出）**：活跃 alpha 线期间，功能开发与修复一律
   落在 alpha，**不往 main 搬**——两分支此时有功能差异是预期的，不是漂移。只有
   dsh 该线发完最新 rc（**rc 即 dsh 的正式版**，dsh 从不发无后缀纯 X.Y.Z）之后，
-  才把 alpha 的改动一次性合回 main；main 期间只接稳定线独有的热修（详见
-  RELEASING.md「功能收敛原则」与「双线生命周期」）。
+  才把 alpha 的改动一次性合回 main（详见 RELEASING.md「功能收敛原则」与「双线
+  生命周期」）。
+- **main 搁置**：只要 dsh 有进行中的 alpha 线，**一切改动都落在 alpha**——源码、
+  文档、`scripts/`、workflows、根配置一律不往 main 搬，main 停在原地不开发不
+  发布。唯一例外是稳定线紧急热修（需明确指示，且修完必须把改动带回 alpha）。
+  收敛时随整条线一次搬过去，详见 RELEASING.md「跨分支同步」。
 - 依赖 range、`pnpm-lock.yaml`、`pnpm-workspace.yaml` 的排除清单**永不跨分支
-  搬运**；基础设施文件（workflows / scripts / 根配置 / 文档）两分支保持一致，
-  直接 cherry-pick。
+  搬运**。
 
 ## 开发工作流：worktree，不要切分支
 
@@ -35,8 +38,9 @@ git worktree add .worktrees/main main      # 首次创建（.worktrees/ 已 giti
 cd .worktrees/main && pnpm install && pnpm run build   # 每个工作树独立安装构建
 ```
 
-跨分支 cherry-pick 在两个工作树目录之间直接进行，互不污染；每次进入工作树
-或主检出目录后，先确认 `lib/` 是当前分支的产物（不确定就重新 build）。
+跨分支搬运（收敛时的 cherry-pick）在两个工作树目录之间直接进行，互不污染；
+搁置期不做任何跨分支搬运（见上「main 搁置」）。每次进入工作树或主检出目录后，
+先确认 `lib/` 是当前分支的产物（不确定就重新 build）。
 
 **命令执行目录纪律**：一切会产生文件改动的操作——包括 `node -e` 内联脚本、
 `sed -i`、代码生成——都必须先 `cd` 进目标 worktree 再执行，或在命令里写

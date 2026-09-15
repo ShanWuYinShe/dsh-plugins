@@ -87,19 +87,23 @@ main 分支的每次 dsh 稳定版适配都会被发布流水自动归档为一�
 ### 功能收敛原则（alpha 只进不出）
 
 **活跃 alpha 线期间，改动只落在 alpha，不回移 main。** alpha 是开发前沿：功能
-开发、bug 修复、宿主适配全部先在 alpha 落地并发布到 `alpha` dist-tag；此时
-两分支**存在功能差异是预期状态**，不是需要立即抹平的漂移。只有当 dsh 结束该
-alpha 线（即发出该线最新的 rc，也就是它的正式版）之后，才把 alpha 累积的全部
-改动一次性合回 main（见「双线生命周期」第 4 步），并同步跟进该正式版。
+开发、bug 修复、宿主适配、**文档与基础设施改动全部先在 alpha 落地**并发布到
+`alpha` dist-tag；此时两分支**存在差异是预期状态**，不是需要立即抹平的漂移。
+只要 dsh 开了 alpha 版本（有进行中的 alpha 线），**main 就整体搁置**——不 cherry-pick、
+不同步、不发布，直到该线发出最新 rc（即正式版）时，才把 alpha 累积的全部改动
+一次性合回 main（见「双线生命周期」第 4 步），并同步适配该正式版。
 
-允许的例外只有两类，都不构成「提前回移」：
+> 这条规则对**一切文件**生效，包括根文档（`AGENTS.md` / `RELEASING.md` /
+> `README.md`）、`scripts/` 与 `.github/workflows/` 等通常被视为「基础设施」
+> 的文件：alpha 期间它们也只在 alpha 上更新，不往 main 搬。理由是搁置期
+> main 不发布、不开发，提前同步只会制造两处需要维护的副本；等收敛一次带过去
+> 更省事、也不会出现「同一规则两个分支表述不同」的漂移。
 
-- **稳定线独有的热修**：只影响 dsh 稳定线用户、且与 alpha 线无关的问题，直接
-  在 main 修并发布 `latest`；它在 alpha 上的对应处理按 alpha 自身代码独立决定。
-- **基础设施与流程文件**（`.github/workflows/`、`scripts/`、根文档
-  `AGENTS.md` / `RELEASING.md` / `README.md`、根 `package.json`、`.npmrc`）：
-  两分支始终保持一致，随时可直接 cherry-pick（各包 `packages/*/README.md`
-  属包内容，不在此列，见「跨分支同步」）。
+允许的唯一例外：
+
+- **稳定线紧急热修**：只在 dsh 稳定线用户遇到严重问题、且经明确指示时才动
+  main——在该分支修复、发布 `latest`，随后把这处修复**带回 alpha**（避免收敛时
+  被 alpha 的旧代码覆盖）。非紧急问题一律等 alpha 收敛，不在搁置期开热修。
 
 这样规定的理由是**回移往往根本无处生效**：alpha 上的功能常依赖宿主新增能力，
 在稳定线宿主上不成立。2026-09-15 的 session-archive 修复即为此例——它修的是
@@ -110,20 +114,22 @@ DSH 0.1.6-alpha 新增的原生「设置 → 已归档会话」页（0.1.5 稳�
 由此推论：
 
 - **不写「两分支功能集一致」这类实时要求**：一致性是**收敛时点的结果**，不是
-  活跃期的约束。活跃期判断一次改动该落在哪条分支，只看它服务的是哪条宿主线。
+  活跃期的约束。活跃期只有一件事要做：所有改动都落在 alpha。
 - **CHANGELOG 不做双记录**：alpha 线期间改动只记在 alpha 分支的
   `CHANGELOG.md`（`-alpha.N` / `-rc.N` 小节）；收敛进 main 时去掉预发布后缀，
   在 main 补写对应的正式版小节。
 - **周期性体检**（每次宿主适配后跑一次）——目的是确认「没有不该出现的改动」，
-  而不是要求零差异：
+  而不是要求零差异。因为搁置期**一切文件**都不搬 main，查的是全仓而非只有
+  `packages/`：
 
   ```bash
-  git diff main alpha -- packages/
+  git diff main alpha          # 全仓；搁置期预期只有 alpha 单方面领先
   ```
 
-  活跃期：差异 = alpha 线累积的功能/修复/适配提交，属预期；要确认的是 main 上
-  不出现本应只属于 alpha 的改动。收敛后（alpha 已由 main 重建）：两分支预期
-  **零差异**，此时若仍有差异即为漏合，需排查。
+  活跃期：差异 = alpha 线累积的全部改动（源码/文档/脚本/配置），属预期；要
+  确认的是 **main 上没有本应只属于 alpha 的改动**（main 落后 alpha 是对的，
+  反向超前才是出问题）。收敛后（alpha 已由 main 重建）：两分支预期**零差异**，
+  此时若仍有差异即为漏合，需排查。
 
 ## 版本号规则
 
@@ -204,12 +210,14 @@ DSH 0.1.6-alpha 新增的原生「设置 → 已归档会话」页（0.1.5 稳�
 
 ## 跨分支同步
 
-**活跃 alpha 线期间不做源码同步**——功能/修复只进 alpha，等 dsh 该线发完最新
-rc（即其正式版）后随「双线生命周期」第 4 步一次性收敛进 main。本节的规则服务
-于两个时机：收敛（alpha → main）与基础设施对齐。
+**alpha 进行期间 main 整体搁置，什么都不搬。** 只要 dsh 有进行中的 alpha 线，
+所有改动（源码、文档、`scripts/`、workflows、根配置）一律只落 alpha；main
+停在原地，不 cherry-pick、不发布。本节规则只服务于**收敛**这一个时机——dsh
+该线发完最新 rc（即正式版）后，按「双线生命周期」第 4 步把 alpha 的累积改动
+一次性搬进 main 并适配该正式版。
 
-- **工作区隔离**：`main` 与 `alpha` 用 git worktree 并存（主检出目录固定停在
-  `alpha`，`.worktrees/main` 是稳定线工作树），不要在主检出目录里切分支——
+- **工作区隔离**：`main` 与 `alpha` 用 git worktree 并存（主检出目录停在活跃
+  的 `alpha`，`.worktrees/main` 是稳定线工作树），不要在主检出目录里切分支——
   `lib/` 与 `node_modules` 不受 git 管理，切分支会残留上一条线的构建产物与
   依赖解析。进入任一工作树后先 `pnpm install`，构建产物可疑就重新 build。
 - **收敛时搬源码**：只搬 `src/`、`client/`、`CHANGELOG.md` 和 `package.json`
@@ -218,14 +226,14 @@ rc（即其正式版）后随「双线生命周期」第 4 步一次性收敛进
   两分支的 lockfile 差异巨大，跨分支 merge 它们必然冲突。收敛的具体做法
   （整理成 main 的后代提交、`adapt` 到该线最新 rc、去掉预发布后缀）见「双线
   生命周期」第 4 步。
-- **基础设施与流程文件**（`.github/workflows/`、`scripts/`、根文档
-  `AGENTS.md` / `RELEASING.md` / `README.md`、根 `package.json`、`.npmrc`）：
-  两分支始终保持一致，**随时**直接 cherry-pick，不受上面的「活跃期不回移」
-  约束。注意根 `README.md` 指的是仓库根的用户文档；各包自己的
-  `packages/*/README.md` 属于包内容，随该包走正常发布流程，不在此列。
+- **搁置期不搬「基础设施」**：根文档（`AGENTS.md` / `RELEASING.md` /
+  `README.md`）、`scripts/`、`.github/workflows/`、根 `package.json` 等也只在
+  alpha 更新，不在搁置期 cherry-pick 到 main——搁置期 main 不开发不发布，提前
+  同步只会产生两处副本与表述漂移，收敛时随整条线一次带过去即可。各包
+  `packages/*/README.md` 属包内容，同样随该包走。
 - `pnpm-workspace.yaml` 两分支内容不同（`minimumReleaseAgeExclude` 清单各自
-  跟随本分支的宿主基线（由 adapt-dsh.mjs 整块重建），cherry-pick 基建提交
-  时跳过该文件。
+  跟随本分支的宿主基线（由 adapt-dsh.mjs 整块重建），收敛时按 main 的新基线
+  重建，不直接搬运该文件。
 
 ## DSH 宿主升级适配
 
@@ -266,7 +274,9 @@ main 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其�
    依赖基线等于 main，不发版。此时 dsh 无进行中的预发布线（上一条已终结）。
 2. **dsh 出新高基础号的 alpha 线**（如 `0.1.3-alpha.0`）：alpha 分支执行
    「DSH 宿主升级适配」流程（`adapt` 到该线 + `pnpm install`），把包版本
-   bump 成 `-alpha.N` 发布到 `alpha` dist-tag。main 不动，继续服务稳定线。
+   bump 成 `-alpha.N` 发布到 `alpha` dist-tag。**main 就此整体搁置**——不再
+   开发、不再发布、不接受任何 cherry-pick，直到该线发出正式版（第 4 步）。
+   这期间的稳定线用户继续用 main 上已发布的最后一版 `latest`。
 3. **alpha 线进入 rc**：该线开始发同基础号的 rc（如 `0.1.3-rc.1`、`0.1.3-rc.2`
    …）。rc 是稳定候选，**最新的一版 rc 就是这条线的正式版**——dsh 不会再发
    同基础号的 alpha，该线就此归 main 线，进入下面的收敛。
