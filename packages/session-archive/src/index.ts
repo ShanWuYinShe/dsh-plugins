@@ -24,7 +24,15 @@
  *                     移出归档集合，仍挂在内存里的会话会因"不再归档"而
  *                     立刻重新出现在侧边栏对话列表（效果等同"恢复"）。
  *                     保留 ghost id 后由 list() 的存在性过滤隐藏，归档面板
- *                     与侧边栏都不会再显示该会话。
+ *                     与侧边栏都不会再显示该会话；但宿主原生的"设置 → 已
+ *                     归档会话"页按"归档集合 JOIN 会话摘要（session.list，
+ *                     含内存 live 会话）"展示，ghost id 只要内存会话还在
+ *                     就仍会显示——内存会话的消亡没有官方 API（SessionStore
+ *                     无公开 dispose），只能随宿主重启。因此 delete 的返回
+ *                     附带 needsRestart（文件已删、但内存会话仍在的 id）：
+ *                     客户端据此提示用户"宿主重启后消失"，并在删除/恢复后
+ *                     主动刷新客户端会话列表，让已无内存、无文件的 cold
+ *                     删除即时从原生页消失。
  *   4. unarchive(ids) — 批量恢复：仅从归档集合移除**仍存在持久化文件**的
  *                     会话 id（文件已删的 ghost id 拒绝恢复，防止已彻底
  *                     删除的会话"复活"回侧边栏）；会话数据不动。
@@ -573,6 +581,11 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
      * "恢复"。ghost id 由 list() 的存在性过滤隐藏，面板与侧边栏均不再
      * 显示该会话；`removedFromArchive` 因此恒为 0。
      *
+     * 宿主原生的"设置 → 已归档会话"页按"归档集合 JOIN 会话摘要"展示，
+     * ghost id 只要内存会话还在就会继续显示（内存消亡无官方 API，只能
+     * 随宿主重启）。`needsRestart` 如实返回这类"文件已删、内存仍在"的
+     * id，调用方据此提示用户并刷新客户端会话列表（cold 删除即时见效）。
+     *
      * 失败语义（failed[].reason）：'not-archived' 非归档成员；'live' 内存
      * 未归档会话；'busy' 内存中的会话日志仍在增长（活跃生成流）；
      * 'unenumerable' 文件存在但持久化枚举不到（首行损坏的孤儿），或无法
@@ -583,6 +596,13 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
       const unique = [...new Set(sessionIds)];
       const deleted: string[] = [];
       const failed: Array<{ sessionId: string; reason: string }> = [];
+      const needsRestart: string[] = [];
+      /** 删除成功记账：文件已删、但内存会话仍在的 id 需要宿主重启才能
+       * 从原生"设置 → 已归档会话"页消失，如实返回给调用方提示用户。 */
+      const markDeleted = (sessionId: string): void => {
+        deleted.push(sessionId);
+        if (ctx.sessions.get(sessionId as SessionId) !== undefined) needsRestart.push(sessionId);
+      };
       // 归档成员前置校验:persistence 覆盖所有持久化会话而非仅归档会话,
       // 不校验的话任何"未归档、不在内存"的会话 id 都会绕过 live/busy
       // 两道保护被不可逆物理删除。快照只 stat 归档成员:非成员在循环里
@@ -602,7 +622,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
             (error: NodeJS.ErrnoException) => { if (error?.code === 'ENOENT') return null; throw error; },
           );
           if (fresh === null) {
-            deleted.push(sessionId);
+            markDeleted(sessionId);
             return;
           }
           // 生成流兜底:内存中的会话且 mtime 在窗口内,沉降观察一次,文件
@@ -612,7 +632,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
           if (inMemory && Date.now() - fresh.mtimeMs < BUSY_WRITE_WINDOW_MS) {
             const second = await settleStat(path);
             if (second === null) {
-              deleted.push(sessionId);
+              markDeleted(sessionId);
               return;
             }
             if (second.size > fresh.size) {
@@ -649,7 +669,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
               return;
             }
           }
-          deleted.push(sessionId);
+          markDeleted(sessionId);
         } catch (error) {
           failed.push({ sessionId, reason: (error as Error)?.message ?? 'delete-failed' });
         }
@@ -702,7 +722,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
               return;
             }
             if (fresh.state === 'absent') {
-              deleted.push(sessionId);
+              markDeleted(sessionId);
               return;
             }
             await deleteLocatedFile(sessionId, fresh.path);
@@ -719,7 +739,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
           await deleteLocatedFile(sessionId, file.path);
         });
       }
-      return { deleted, failed, removedFromArchive: 0 };
+      return { deleted, failed, removedFromArchive: 0, needsRestart };
     },
 
     /**

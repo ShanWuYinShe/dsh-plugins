@@ -129,7 +129,8 @@ const zh = {
   reasonUnlocatable: "无法定位会话文件",
   reasonReappeared: "删除后被重建",
   reasonNotArchived: "不是归档会话",
-  reasonNotRestorable: "文件已不在，无法恢复"
+  reasonNotRestorable: "文件已不在，无法恢复",
+  restartNeeded: "其中 {n} 个会话仍在内存中，设置 → 已归档会话的条目将在宿主重启后消失"
 };
 const en = {
   badge: "Archive",
@@ -169,7 +170,8 @@ const en = {
   reasonUnlocatable: "session file cannot be located",
   reasonReappeared: "recreated after delete",
   reasonNotArchived: "not an archived session",
-  reasonNotRestorable: "file no longer present"
+  reasonNotRestorable: "file no longer present",
+  restartNeeded: "{n} still live in memory; their Settings → Archived sessions entries will disappear after the host restarts"
 };
 
 // ── 工具函数 ─────────────────────────────────────────────────────────
@@ -445,6 +447,13 @@ function ArchivePanel(props: any) {
       const doneIds = result.deleted || result.restored || [];
       const n = doneIds.length;
       const doneText = t(doneKey).replace("{n}", String(n));
+      // delete 成功但内存会话仍在的 id：原生"设置 → 已归档会话"页按归档集合
+      // JOIN 会话摘要展示，ghost 保留 + 内存摘要仍在 → 该页在宿主重启前仍会
+      // 显示这些条目。如实提示，不让用户以为删除没生效。
+      const restartIds = Array.isArray(result.needsRestart) ? result.needsRestart : [];
+      const restartText = restartIds.length > 0
+        ? t("restartNeeded").replace("{n}", String(restartIds.length))
+        : null;
       if (Array.isArray(result.failed) && result.failed.length > 0) {
         // host 对每个失败项都给了 reason( live/busy/unenumerable/not-archived
         // /not-restorable/具体错误),只报数量会让用户不知道为什么失败、该等
@@ -467,9 +476,11 @@ function ArchivePanel(props: any) {
         const more = result.failed.length > 3 ? " (+" + (result.failed.length - 3) + ")" : "";
         const failText = t(failKey).replace("{n}", String(result.failed.length)) + " — " + detail + more;
         // 全失败才用 error 样式;部分成功是 warn,成功计数也要如实带上,
-        // 不能只报失败让用户以为一个都没成。
-        if (n > 0) setNotice({ kind: "warn", text: doneText + "；" + failText });
+        // 不能只报失败让用户以为一个都没成。附带 needsRestart 时同样 warn。
+        if (n > 0) setNotice({ kind: "warn", text: doneText + "；" + failText + (restartText !== null ? "；" + restartText : "") });
         else setNotice({ kind: "error", text: failText });
+      } else if (restartText !== null) {
+        setNotice({ kind: "warn", text: doneText + "；" + restartText });
       } else {
         setNotice({ kind: "ok", text: doneText });
       }
@@ -487,6 +498,13 @@ function ArchivePanel(props: any) {
       }
       setSelected(new Set());
       setConfirmingDelete(false);
+      if (doneIds.length > 0 && typeof props.refreshSessions === "function") {
+        // 删除/恢复后刷新客户端会话列表：原生"设置 → 已归档会话"页的每行是
+        // 归档集合 ∩ 会话摘要（byId），cold 会话的文件已删但客户端 byId 缓存
+        // 仍留着摘要，不刷新原生页会继续显示已彻底删除的条目。静默失败——本
+        // 面板自身的 load() 已保证面板正确，不拿它挡提示。
+        try { await props.refreshSessions(); } catch {}
+      }
       await load();
     } catch (actionError: any) {
       // 异常分支(整单失败,不是部分失败):带请求发出时的数量,与部分失败分支措辞区分。
@@ -714,6 +732,16 @@ async function apply(ctx: any) {
     && typeof workspaces.list.getSnapshot === "function"
     ? workspaces.list
     : void 0;
+  // 客户端 sessions 服务（会话摘要 byId 的持有者）：删除/恢复后主动刷新，
+  // 让原生"设置 → 已归档会话"页立刻丢弃已彻底删除的 cold 条目。**必须惰性
+  // 解析**——插件 apply 早于 sessions 服务挂载（实测同一页面多次加载中
+  // ctx.get("sessions") 有 undefined 的时序），此刻取值为 undefined 会让
+  // 刷新能力永久缺失。惰性 getter 在首次真正调用时（用户点删除）再解析。
+  const refreshSessions = () => {
+    const sessions = ctx.get("sessions");
+    if (sessions === null || typeof sessions !== "object" || typeof sessions.refresh !== "function") return;
+    return sessions.refresh();
+  };
   ctx.slots.inject("sidebar.footer.action", () => ctx.slots.register({
     name: "sidebar.footer.action",
     id: "session-archive",
@@ -721,6 +749,7 @@ async function apply(ctx: any) {
     locale: NS,
     inject: () => ({
       call,
+      refreshSessions,
       subscribeArchived: archivedStore !== void 0 ? (fn: any) => archivedStore.subscribe(fn) : void 0,
       archivedCountOf: archivedStore !== void 0 ? () => {
         const snapshot = archivedStore.getSnapshot();

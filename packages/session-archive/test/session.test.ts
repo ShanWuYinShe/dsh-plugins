@@ -276,6 +276,9 @@ describe("session-archive host", () => {
     expect(!fs.existsSync(sessionPath("s-del"))).toBe(true);
     expect(fs.existsSync(sessionPath("s-busy")) && fs.existsSync(sessionPath("foreign"))).toBe(true);
     expect(mixed.removedFromArchive === 0).toBe(true);
+    // s-del 是冷文件(不在内存):needsRestart 为空,客户端刷新会话列表后
+    // 原生"设置 → 已归档会话"页即时消失。
+    expect(mixed.needsRestart).toEqual([]);
     clearInterval(appender);
 
     // 静默会话回归(线上误报用例):在内存(tab 恢复)、mtime 被宿主批量落盘/
@@ -285,6 +288,9 @@ describe("session-archive host", () => {
     expect(quiet.deleted.includes("s-quiet")
       && quiet.failed.length === 0
       && !fs.existsSync(sessionPath("s-quiet"))).toBe(true);
+    // s-quiet 文件已删但内存会话仍在:ghost 保留 + 内存摘要仍在 → 原生页在
+    // 宿主重启前仍会显示,如实返回 needsRestart 供客户端提示用户。
+    expect(quiet.needsRestart).toEqual(["s-quiet"]);
 
     // 损坏首行的孤儿文件:枚举不到但文件确实存在 → 拒绝并保留文件,不谎报成功。
     const orphanResult = await archiveHost.deleteArchived(["orphan"]);
@@ -310,6 +316,8 @@ describe("session-archive host", () => {
     expect(delBusy.deleted.includes("s-busy")
       && !fs.existsSync(sessionPath("s-busy"))
       && !fs.existsSync(path.join(saRoot, "--proj--", "s-busy"))).toBe(true);
+    // 内存已清空的冷删除:needsRestart 为空,原生页刷新即消失。
+    expect(delBusy.needsRestart).toEqual([]);
     expect(f.registryState.archivedSessionIds.includes("s-busy")).toBe(true);
     expect(!(await archiveHost.list()).items.some((i) => i.sessionId === "s-busy")).toBe(true);
   });
