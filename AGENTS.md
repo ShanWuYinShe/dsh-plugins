@@ -12,8 +12,11 @@ README 面向用户，面向开发者的内容以 RELEASING.md 为准。
   dsh 一条线终结后，它的改动合回 main，旧 alpha 分支删除，再从最新 main 重
   建待命——等 dsh 出下一条 alpha 线再 `adapt` 跟进。因此 alpha 与 main 同基线
   （待命）是常态，不存在需要长期维护的分叉，详见 RELEASING.md「双线生命周期」。
-- **功能一致性原则**：功能集两分支一致，唯一允许的代码差异是 dsh 预发布线
-  破坏性 API 迫使的适配（详见 RELEASING.md 同名小节）。
+- **功能收敛原则（alpha 只进不出）**：活跃 alpha 线期间，功能开发与修复一律
+  落在 alpha，**不往 main 搬**——两分支此时有功能差异是预期的，不是漂移。只有
+  dsh 结束该 alpha 线、发布同基础号的**正式版之后**，才把 alpha 的改动一次性
+  合回 main；main 期间只接稳定线独有的热修（详见 RELEASING.md「功能收敛原则」
+  与「双线生命周期」）。
 - 依赖 range、`pnpm-lock.yaml`、`pnpm-workspace.yaml` 的排除清单**永不跨分支
   搬运**；基础设施文件（workflows / scripts / 根配置 / 文档）两分支保持一致，
   直接 cherry-pick。

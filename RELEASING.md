@@ -72,30 +72,45 @@ main 分支的每次 dsh 稳定版适配都会被发布流水自动归档为一�
 - **历史说明**：tag 体系自 2026-09-05 起；更早的适配（`0.1.1-rc.2` 等）
   的提交点被历史回退与补丁打断，不做回填——需要时以提交信息定位。
 
-### 功能一致性原则
+### 功能收敛原则（alpha 只进不出）
 
-两条分支的**功能集保持一致**：一个功能要么两边都有，要么两边都没有。唯一
-允许的代码差异是 **dsh 预发布线的破坏性 API 变更迫使的适配**——适配只
-改变「怎么接进宿主」，不改变功能本身。分线实现只在两分支跟随**不同宿主
-基础号**时出现（如 main 在 `0.1.1-rc.2`、alpha 在 `0.1.2-alpha.x` 时期的
-`dsh-any-connect`：dsh 0.1.2 移除了 `settingsNamespace()`、把
-`installSettingsSection()` 挪到 provider 服务）；两分支跟随同一条宿主线时
-预期**源码零差异**（当前即此状态）。
+**活跃 alpha 线期间，改动只落在 alpha，不回移 main。** alpha 是开发前沿：功能
+开发、bug 修复、宿主适配全部先在 alpha 落地并发布到 `alpha` dist-tag；此时
+两分支**存在功能差异是预期状态**，不是需要立即抹平的漂移。只有当 dsh 结束该
+alpha 线、发布同基础号的**正式版（进 `latest`）之后**，才把 alpha 累积的全部
+改动一次性合回 main（见「双线生命周期」第 4 步），并同步跟进新的宿主正式版。
+
+允许的例外只有两类，都不构成「提前回移」：
+
+- **稳定线独有的热修**：只影响 dsh 稳定线用户、且与 alpha 线无关的问题，直接
+  在 main 修并发布 `latest`；它在 alpha 上的对应处理按 alpha 自身代码独立决定。
+- **基础设施文件**（`.github/workflows/`、`scripts/`、`RELEASING.md`、根
+  `package.json`、`.npmrc`）：两分支始终保持一致，随时可直接 cherry-pick
+  （见「跨分支同步」）。
+
+这样规定的理由是**回移往往根本无处生效**：alpha 上的功能常依赖宿主新增能力，
+在稳定线宿主上不成立。2026-09-15 的 session-archive 修复即为此例——它修的是
+DSH 0.1.6-alpha 新增的原生「设置 → 已归档会话」页（0.1.5 稳定线既无该页面、
+也无 `unarchive` 相关代码），强行回移 main 只会凭空多出一个用户拿不到的版本，
+并让 main 的「可直接发布」状态掺入无法在稳定线验证的改动。
 
 由此推论：
 
-- 功能开发落在活跃的 alpha 分支（无进行中预发布线时两分支代码一致，在
-  main 做即可），完成后按需 cherry-pick；只对稳定线有意义的修复直接在
-  main 做并反向同步。
-- CHANGELOG 双记录：同一功能在两条分支各记一节，版本号按各自规则取。
-- 周期性体检（每次宿主适配完成后跑一次）：
+- **不写「两分支功能集一致」这类实时要求**：一致性是**收敛时点的结果**，不是
+  活跃期的约束。活跃期判断一次改动该落在哪条分支，只看它服务的是哪条宿主线。
+- **CHANGELOG 不做双记录**：alpha 线期间改动只记在 alpha 分支的
+  `CHANGELOG.md`（`-alpha.N` / `-rc.N` 小节）；收敛进 main 时去掉预发布后缀，
+  在 main 补写对应的正式版小节。
+- **周期性体检**（每次宿主适配后跑一次）——目的是确认「没有不该出现的改动」，
+  而不是要求零差异：
 
   ```bash
-  # 两分支同宿主基础号时：全部包预期零差异
-  # 两分支不同宿主基础号时：有分线实现的包预期 diff 全部是 dsh API 适配，
-  # 不出现功能增删
   git diff main alpha -- packages/
   ```
+
+  活跃期：差异 = alpha 线累积的功能/修复/适配提交，属预期；要确认的是 main 上
+  不出现本应只属于 alpha 的改动。收敛后（alpha 已由 main 重建）：两分支预期
+  **零差异**，此时若仍有差异即为漏合，需排查。
 
 ## 版本号规则
 
@@ -160,19 +175,23 @@ main 分支的每次 dsh 稳定版适配都会被发布流水自动归档为一�
 
 ## 跨分支同步
 
-同步的目标是维持功能一致性原则：功能差异零容忍，宿主适配差异才合法。
+**活跃 alpha 线期间不做源码同步**——功能/修复只进 alpha，等 dsh 正式版发布后
+随「双线生命周期」第 4 步一次性收敛进 main。本节的规则服务于两个时机：收敛
+（alpha → main）与基础设施对齐。
 
 - **工作区隔离**：`main` 与 `alpha` 用 git worktree 并存（主检出目录固定停在
   `alpha`，`.worktrees/main` 是稳定线工作树），不要在主检出目录里切分支——
   `lib/` 与 `node_modules` 不受 git 管理，切分支会残留上一条线的构建产物与
   依赖解析。进入任一工作树后先 `pnpm install`，构建产物可疑就重新 build。
-- **与宿主版本无关**的修复/功能：在 alpha 开发，cherry-pick 回 main（或反向）。
-  只搬 `src/`、`client/`、`CHANGELOG.md` 和 `package.json` 里与依赖无关的字段；
-  **依赖 range 与 `pnpm-lock.yaml` 永不跨分支搬运**——到达目标分支后按该线的
-  宿主版本核对依赖，`pnpm install` 重新生成 lockfile。两分支的 lockfile 差异
-  巨大，跨分支 merge 它们必然冲突。
+- **收敛时搬源码**：只搬 `src/`、`client/`、`CHANGELOG.md` 和 `package.json`
+  里与依赖无关的字段；**依赖 range 与 `pnpm-lock.yaml` 永不跨分支搬运**——
+  到达 main 后按稳定线宿主版本核对依赖，`pnpm install` 重新生成 lockfile。
+  两分支的 lockfile 差异巨大，跨分支 merge 它们必然冲突。收敛的具体做法
+  （整理成 main 的后代提交、`adapt` 到新正式版、去掉预发布后缀）见「双线
+  生命周期」第 4 步。
 - **基础设施文件**（`.github/workflows/`、`scripts/`、`RELEASING.md`、根
-  `package.json`、`.npmrc`）：两分支保持一致，直接 cherry-pick，不手改。
+  `package.json`、`.npmrc`）：两分支始终保持一致，**随时**直接 cherry-pick，
+  不受上面的「活跃期不回移」约束。
 - `pnpm-workspace.yaml` 两分支内容不同（`minimumReleaseAgeExclude` 清单各自
   跟随本分支的宿主基线（由 adapt-dsh.mjs 整块重建），cherry-pick 基建提交
   时跳过该文件。
@@ -219,8 +238,10 @@ main，旧 alpha 分支删除，等下一条线再从 main 重建。alpha 分支
    bump 成 `-alpha.N` 发布到 `alpha` dist-tag。main 不动，继续服务稳定线。
 3. **alpha 线进入 rc**：同基础号的 rc（如 `0.1.3-rc.1`）是稳定候选，dsh
    直接发成 `latest`，**该线就此归 main 线**——进入下面的收敛。
-4. **插件收敛进稳定线并跟进正式版**：把 alpha 上的改动合回 main，同时
-   main 跟进新的 dsh 正式版（`latest`）。三件事一次做完：
+4. **dsh 正式版发布后，插件收敛进稳定线**：触发条件是 dsh 已把同基础号的
+   正式版发成 `latest`（alpha 线就此终结），**此前不动 main**。此时把 alpha
+   上累积的全部改动合回 main，同时让 main 跟进新的 dsh 正式版。三件事一次
+   做完：
    - 在 alpha 的工作树里把「alpha 的改动」整理成基于 main 的提交（两分支
      历史本就平行，`merge --ff-only` 直接合不了；用 `git reset --soft main`
      保留工作区内容再提交，或 `git cherry-pick` 逐个搬源码，二者皆可得一个
