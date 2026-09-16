@@ -49,39 +49,19 @@ DeepSeek-V4.1-Flash、Kimi-K3、MiniMax-M3、Hy3 等，国际版另有 GPT/Gemin
 跟随）。
 
 ```bash
-# Web（推荐）
+# Web（唯一支持的界面）
 dsh plugin --profile web add @chaoset/dsh-any-connect
 dsh web
 
-# Desktop（DSH Desktop 桌面版）
-dsh plugin --profile desktop add @chaoset/dsh-any-connect
-dsh --profile desktop
-
 # 从本地源码安装
 dsh plugin --profile web add /absolute/path/to/dsh-plugins/packages/dsh-any-connect
-
-# TUI（终端界面）：先把终端壳升到对应版本，再在 TUI 画像里安装
-dsh plugin --profile <tui-profile> add @chaoset/dsh-any-connect
 
 # 卸载
 dsh plugin --profile web remove @chaoset/dsh-any-connect
 ```
 
-## 各界面支持情况
-
-| 界面 | 模型服务 | 配置卡片 | 档位检测 | 说明 |
-|---|---|---|---|---|
-| Web | ✅ | ✅ | ✅ | 完整功能 |
-| Desktop | ✅ | ✅ | ✅ | 与 Web 同一套卡片与 provider |
-| TUI | ✅ | —（无浏览器） | — | 经 `/settings` 配 `authFile`（国际版 `authFileAI`）；终端壳需对应版本 |
-| headless | ✅ | — | — | 非交互任务可用（如默认模型指到本包模型） |
-
-- TUI 下没有配置卡片（无浏览器），账号/积分改走 `dsh-any-connect status`
-  命令查看；`authFile` / `authFileAI` 在 TUI 的 `/settings` 里填写。
-  推理档位的手动检测入口目前仅 Web 与 Desktop 提供。
-- 无浏览器界面下，状态路由与探针路由自动停用（无 webServer 服务即不
-  挂载），provider 注册与模型服务不受影响——已在 headless 画像实测：
-  默认模型指到 `workbuddy/hy3` 后任务正常作答。
+> 本包目前只支持 Web 界面，其他界面（Desktop / TUI / headless）暂不
+> 考虑、不承诺可用。
 
 > 给 AI agent：直接执行 `dsh plugin ...` 命令即可，不要手动编辑
 > `cordis.patch.yml`。
