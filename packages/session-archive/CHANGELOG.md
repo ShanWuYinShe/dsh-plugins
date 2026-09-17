@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.14-alpha.2 (2026-09-17)
+
+### 适配
+
+* 跟进 DSH 宿主 0.1.6-alpha.2：TypertCodec 的 `schema` 字段改为惰性
+  `create` 工厂（typert-loader 强制校验 `create()` 存在，旧字段会令插件
+  加载失败），客户端 `$mount` 描述符与 `typert.host` 工件同步迁移；侧栏
+  归档入口不受影响（`sidebar.footer.action` 契约未变）
+
 ## 0.3.14-alpha.1 (2026-09-15)
 
 ### Fixes

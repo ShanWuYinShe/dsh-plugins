@@ -32,13 +32,10 @@ function apply(ctx: any): void {
       }
     }, 'dsh-any-connect: settings copy')
     const t = ctx.locale.bind(namespace)
-    // One card per variant (CN + AI), same guarded body.
-    for (const variant of [{ id: 'anyconnect' }, { id: 'anyconnect-ai' }]) {
-      ctx.slots.inject('settings.plugin.item', () => {
-        void variant
-        throw new Error('not reached')
-      })
-    }
+    // The bundle's single configuration entry on the Plugins page.
+    ctx.slots.inject('plugins.bundle.config', () => {
+      throw new Error('not reached')
+    })
     void t
   } catch (error: unknown) {
     console.error('[dsh-any-connect] client card failed to load (host provider unaffected):', error)
@@ -73,7 +70,7 @@ describe('client card fallback', () => {
     // Simulate a DSH loader that throws on ctx.slots.inject (the rc.7
     // "requires options.key" error). Loose `any` on purpose: we only test
     // the try/catch boundary, not the DSH client API types.
-    const ctx = fakeCtx({ injectThrows: new Error('keyed slot "settings.plugin.item" requires options.key') })
+    const ctx = fakeCtx({ injectThrows: new Error('keyed slot "plugins.bundle.config" requires options.key') })
 
     // Must not throw — the whole point of the fallback.
     expect(() => apply(ctx)).not.toThrow()

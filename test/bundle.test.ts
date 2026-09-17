@@ -92,14 +92,16 @@ describe("client bundles", () => {
     set: async (partial: any) => ({ ok: true, value: partial }),
   };
 
-  it("配置类包 settings.plugin.item 注册带 key", async () => {
+  it("配置类包 plugins.bundle.config 注册带包名 key", async () => {
     const cases: Array<[string, string]> = [
-      ["sandbox-extra-roots", "sandbox-extra-roots-config"],
+      ["sandbox-extra-roots", "@chaoset/sandbox-extra-roots"],
     ];
     for (const [pkg, key] of cases) {
-      // 宿主 settings 只接受 ^[a-z][a-z0-9-]*$，驼峰 key 会在注册时抛
-      // TypeError 且被静默吞掉（卡片从此不可见）——在此锁死合法性。
-      expect(key).toMatch(/^[a-z][a-z0-9-]*$/);
+      // plugins.bundle.config 按 npm 包名 dispatch（package.json 的 name，
+      // 亦即 cordis.patch.yml 的 name）；key 与包名不一致时配置表单不会
+      // 出现在本插件的 Plugins 页——在此锁死对应关系。
+      const pkgJson = JSON.parse(readFileSync(join(ROOT, "packages", pkg, "package.json"), "utf8"));
+      expect(key).toBe(pkgJson.name);
       const mod = await import(`../packages/${pkg}/client/index.tsx`);
       const registrations: Array<{ options: any }> = [];
       const ctx = {
@@ -114,7 +116,7 @@ describe("client bundles", () => {
           typeof svc === "string" && svc.startsWith("remote.") ? configServiceStub : {},
       };
       await mod.apply(ctx as any);
-      const item = registrations.find((r) => r.options.name === "settings.plugin.item");
+      const item = registrations.find((r) => r.options.name === "plugins.bundle.config");
       expect(item?.options.key).toBe(key);
     }
   });

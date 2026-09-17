@@ -1,26 +1,25 @@
-/** WorkBuddy status card contributed to Harness Plugin configuration. */
+/** WorkBuddy configuration page contributed to the DSH Plugins page. */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from '../src/status-paths.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebContextModel, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
 import type { WorkBuddySettingsKey } from './locales.js'
 
 /** Localized copy injected by the browser-plugin registration. */
-export interface WorkBuddyPluginCardInjected {
+export interface WorkBuddyConfigPageInjected {
   t: (key: WorkBuddySettingsKey, params?: Record<string, unknown>) => string
-  variant: WorkBuddyCardVariant
 }
 
 /**
  * One card per product variant. They show different accounts, balances, and
  * model sets, so a single merged card could not say which account a number
- * belongs to. The slot is key-dispatched: two keys, one component.
+ * belongs to.
  */
-export interface WorkBuddyCardVariant {
-  /** Slot key; `anyconnect` (CN) first so it keeps its historical position. */
+interface WorkBuddyCardVariant {
+  /** Stable React key; `anyconnect` (CN) first so it keeps its historical position. */
   id: string
   /** Status route this card polls. */
   statusPath: string
@@ -32,7 +31,7 @@ export interface WorkBuddyCardVariant {
   signedOutHintKey: WorkBuddySettingsKey
 }
 
-export const CARD_VARIANTS: readonly WorkBuddyCardVariant[] = [
+const CARD_VARIANTS: readonly WorkBuddyCardVariant[] = [
   {
     id: 'anyconnect',
     statusPath: WORKBUDDY_STATUS_PATH,
@@ -60,10 +59,10 @@ export const CARD_VARIANTS: readonly WorkBuddyCardVariant[] = [
  */
 type CardStatus = WorkBuddyWebStatus | { status: 'loading' }
 
-/** Props delivered by the Plugin configuration item slot. */
-export type WorkBuddyPluginCardProps =
-  PropsRuntime<'settings.plugin.item'>
-  & Partial<WorkBuddyPluginCardInjected>
+/** Props delivered by the Plugins page's bundle-configuration slot. */
+export type WorkBuddyConfigPageProps =
+  PropsRuntime<'plugins.bundle.config'>
+  & Partial<WorkBuddyConfigPageInjected>
 
 const POLL_INTERVAL_MS = 60_000
 
@@ -136,7 +135,7 @@ const probeRowEndStyle: CSSProperties = { display: 'flex', alignItems: 'center',
  */
 function ProbeSection({ probe, t, busy, runningModel, pending, setPending, onDetect, onClear }: {
   probe: WorkBuddyWebProbeSection
-  t: WorkBuddyPluginCardInjected['t']
+  t: WorkBuddyConfigPageInjected['t']
   busy: boolean
   runningModel: string | undefined
   pending: string | undefined
@@ -216,7 +215,7 @@ function ProbeSection({ probe, t, busy, runningModel, pending, setPending, onDet
 }
 
 /** Localize an upstream promotional badge label, with an unknown-badge fallback. */
-function modelBadgeLabel(badge: string, t: WorkBuddyPluginCardInjected['t']): string {
+function modelBadgeLabel(badge: string, t: WorkBuddyConfigPageInjected['t']): string {
   if (badge === '限时免费') return t('badgeLimitedFree')
   if (badge === '夜间折扣') return t('badgeNightDiscount')
   return badge
@@ -262,7 +261,7 @@ function formatTokens(value: number): string {
  */
 function ContextRow({ model, t }: {
   model: WorkBuddyWebContextModel
-  t: WorkBuddyPluginCardInjected['t']
+  t: WorkBuddyConfigPageInjected['t']
 }): React.ReactNode {
   return (
     <div style={modelOfferStyle}>
@@ -286,7 +285,7 @@ function formatTime(ms: number): string {
  * saved (this account's last good list, restored after restart/failure) →
  * fallback (compiled in). A stale list must not look like a live one.
  */
-function catalogLine(catalog: WorkBuddyWebCatalog, t: WorkBuddyPluginCardInjected['t']): string {
+function catalogLine(catalog: WorkBuddyWebCatalog, t: WorkBuddyConfigPageInjected['t']): string {
   const base = catalog.source === 'live'
     ? t('catalogLive')
     : catalog.source === 'saved'
@@ -300,7 +299,7 @@ function CreditBar({ label, remain, size, t }: {
   label: string
   remain: number
   size: number
-  t: WorkBuddyPluginCardInjected['t']
+  t: WorkBuddyConfigPageInjected['t']
 }): React.ReactNode {
   const detail = size > 0 ? t('exactRemaining', { remain: formatNumber(remain), size: formatNumber(size) }) : t('creditPackageUnknownSize', { remain: formatNumber(remain) })
   const percent = size > 0 ? (remain / size) * 100 : 100
@@ -338,7 +337,7 @@ function CreditBar({ label, remain, size, t }: {
  */
 function ModelOfferRow({ model, t }: {
   model: WorkBuddyWebModelBadge
-  t: WorkBuddyPluginCardInjected['t']
+  t: WorkBuddyConfigPageInjected['t']
 }): React.ReactNode {
   return (
     <div style={modelOfferStyle}>
@@ -357,10 +356,28 @@ function ModelOfferRow({ model, t }: {
   )
 }
 
-/** Render WorkBuddy sign-in state and credit as one expandable card. */
-export function WorkBuddyPluginCard({ t, variant }: WorkBuddyPluginCardProps) {
-  if (t === undefined) throw new Error('WorkBuddy plugin card requires its translation function')
-  if (variant === undefined) throw new Error('WorkBuddy plugin card requires its variant descriptor')
+/**
+ * The bundle's configuration entry on its Plugins page. The page draws the
+ * title, icon, and crumb itself and asks each entry for two views through its
+ * owner props; this slot's contract is `page`-only, so the defensive non-`page`
+ * branch stays a static one-liner instead of polling account state.
+ */
+export function WorkBuddyConfigPage({ t, view }: WorkBuddyConfigPageProps): React.ReactNode {
+  if (t === undefined) throw new Error('WorkBuddy config page requires its translation function')
+  if (view !== 'page') return t('intro')
+  return (
+    <div style={variantsListStyle}>
+      {CARD_VARIANTS.map(variant => (
+        <WorkBuddyVariantCard key={variant.id} t={t} variant={variant} />
+      ))}
+    </div>
+  )
+}
+
+const variantsListStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 12 }
+
+/** Render one variant's sign-in state and credit as an expandable card. */
+function WorkBuddyVariantCard({ t, variant }: { t: WorkBuddyConfigPageInjected['t'], variant: WorkBuddyCardVariant }): React.ReactNode {
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<CardStatus>({ status: 'loading' })
   /** 最近一次刷新失败的提示；成功刷新即清除。已有可展示数据时错误不清空
@@ -505,7 +522,7 @@ export function WorkBuddyPluginCard({ t, variant }: WorkBuddyPluginCardProps) {
         : t('signedOut')
 
   return (
-    <li style={cardStyle}>
+    <div style={cardStyle}>
       <button
         type="button"
         style={headerStyle}
@@ -601,6 +618,6 @@ export function WorkBuddyPluginCard({ t, variant }: WorkBuddyPluginCardProps) {
             {status.status !== 'error' && notice !== undefined ? <p style={errorStyle}>{t('refreshFailed', { message: notice })}</p> : null}
           </div>
         : null}
-    </li>
+    </div>
   )
 }

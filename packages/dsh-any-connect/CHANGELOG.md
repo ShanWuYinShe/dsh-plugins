@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.18-alpha.6 (2026-09-17)
+
+### 适配
+
+* 跟进 DSH 宿主 0.1.6-alpha.2：宿主把插件配置从「设置 → 插件配置 tab」
+  重构为独立的「插件」（Plugins）页面，配置注册从 `settings.plugin.item`
+  （keyed by 设置 namespace）迁移到 `plugins.bundle.config`（keyed by 包名）。
+  WorkBuddy 两张卡片现显示在本插件的 Plugins 页（描述与组件列表之间），
+  展开交互与内容不变；非 page 视图按契约防御性返回一句话 intro。编译期
+  契约依赖随之从 `dsh-client-ui-settings-plugins` 换为
+  `dsh-client-ui-plugin-manager`（import type 引入 slot 声明，零运行时依赖）
+
 ## 0.3.18-alpha.5 (2026-09-15)
 
 ### Features

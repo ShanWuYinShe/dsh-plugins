@@ -74,6 +74,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
     }
     const zh = {
       title: "沙盒额外允许目录（sandbox-extra-roots）",
+      summary: "为 workspace-write 沙箱追加可写目录（在官方白名单之外）",
       hint: "workspace-write 模式下，除官方白名单（工作区根 + /tmp + 平台临时目录）外额外允许写入的目录。每行一个绝对路径，支持 ~ 表示用户主目录。",
       unsaved: "有未保存的修改",
       discard: "放弃修改",
@@ -93,6 +94,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
     };
     const en = {
       title: "Extra sandbox roots (sandbox-extra-roots)",
+      summary: "Extra writable roots for the workspace-write sandbox, beyond the official allow-list",
       hint: "Extra writable roots under workspace-write mode, on top of the official allow-list (workspace root + /tmp + platform temp dirs). One absolute path per line; ~ expands to your home directory.",
       unsaved: "Unsaved changes",
       discard: "Discard",
@@ -112,6 +114,14 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
     };
 
     function SandboxRootsCard(props: any) {
+      // plugins.bundle.config 契约只 dispatch page 视图；防御性处理其余取值，
+      // 一句话 summary 不读配置、不发请求。view 判断留在无 hooks 的外层，
+      // 内层表单组件的 hooks 顺序不受影响。
+      if (props.view !== "page") return props.t("summary");
+      return React.createElement(SandboxRootsForm, props);
+    }
+
+    function SandboxRootsForm(props: any) {
       const t = props.t;
       const [open, setOpen] = React.useState(false);
       const [cfg, setCfg] = React.useState<any>(null);
@@ -162,7 +172,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       };
 
       return React.createElement(
-        "li",
+        "div",
         { className: "ser_card", "data-open": open },
         React.createElement(
           "button",
@@ -250,7 +260,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
           method: "get",
           invocation: { kind: "direct" },
           parameters: [],
-          result: { mode: "strict", typeSymbol: "sandboxExtraRootsConfig/get:result", schema: passthroughSchema }
+          result: { mode: "strict", typeSymbol: "sandboxExtraRootsConfig/get:result", create: () => passthroughSchema }
         },
         {
           id: "@chaoset/sandbox-extra-roots#sandboxExtraRootsConfig/set",
@@ -262,9 +272,9 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
             name: "partial",
             wire: "partial",
             source: "json",
-            codec: { mode: "strict", typeSymbol: "sandboxExtraRootsConfig/set:partial", schema: passthroughSchema }
+            codec: { mode: "strict", typeSymbol: "sandboxExtraRootsConfig/set:partial", create: () => passthroughSchema }
           }],
-          result: { mode: "strict", typeSymbol: "sandboxExtraRootsConfig/set:result", schema: passthroughSchema }
+          result: { mode: "strict", typeSymbol: "sandboxExtraRootsConfig/set:result", create: () => passthroughSchema }
         }
       ]
     };
@@ -294,14 +304,12 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
         if (!result.ok) throw new Error(`sandboxExtraRootsConfig.set failed: ${result.error.code}: ${result.error.message}`);
         return result.value;
       });
-      ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
-        name: "settings.plugin.item",
-        // keyed slot：key 为卡片编辑的设置 namespace（与 host 侧
-        // registerSettingsNamespace 的 ns 一致，须匹配宿主 ^[a-z][a-z0-9-]*$），
-        // 设置页按 key 与宿主 describe 的 namespace 配对渲染。
-        key: "sandbox-extra-roots-config",
-        id: "sandbox-extra-roots",
-        order: 40,
+      ctx.slots.inject("plugins.bundle.config", () => ctx.slots.register({
+        name: "plugins.bundle.config",
+        // keyed slot：key 为 bundle 的 npm 包名（plugins.bundle.config 契约，
+        // 与 package.json "name" / cordis.patch.yml 的 name 一致），配置表单
+        // 显示在本插件 Plugins 页（描述与 rows 之间）。
+        key: "@chaoset/sandbox-extra-roots",
         locale: NS,
         inject: () => ({ getConfig, setConfig })
       }, SandboxRootsCard));

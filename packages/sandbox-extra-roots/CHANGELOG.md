@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.13-alpha.1 (2026-09-17)
+
+### 适配
+
+* 跟进 DSH 宿主 0.1.6-alpha.2：配置卡片从 `settings.plugin.item` 迁移到
+  `plugins.bundle.config`（key 改为 npm 包名），显示在本插件的 Plugins 页
+  （描述与组件列表之间）；非 page 视图防御性返回一句话 summary（该 slot
+  契约只 dispatch page），view 判断留在无 hooks 的外层组件
+* TypertCodec 的 `schema` 字段在宿主侧改为惰性 `create` 工厂（typert-loader
+  强制校验 `create()` 存在，旧 `schema` 字段会令插件加载失败）：客户端
+  `$mount` 描述符与 `typert.host` 工件同步迁移
+
 ## 0.4.13-alpha.0 (2026-09-15)
 
 ### Fixes

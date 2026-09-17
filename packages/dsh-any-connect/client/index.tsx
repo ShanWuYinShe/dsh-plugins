@@ -1,12 +1,12 @@
-/** Browser half: WorkBuddy account status inside Plugin configuration. */
+/** Browser half: WorkBuddy account status inside the DSH Plugins page. */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { WorkBuddyPluginCard, CARD_VARIANTS } from './WorkBuddyPluginCard.js'
-import type { WorkBuddyPluginCardInjected } from './WorkBuddyPluginCard.js'
+import { WorkBuddyConfigPage } from './WorkBuddyConfigPage.js'
+import type { WorkBuddyConfigPageInjected } from './WorkBuddyConfigPage.js'
 import { en, zh } from './locales.js'
 import type { WorkBuddySettingsKey } from './locales.js'
 
@@ -23,7 +23,8 @@ export const name = 'dsh-any-connect-client'
 export const inject = ['slots', 'locale']
 
 /**
- * Register card copy and the WorkBuddy card under Plugin configuration.
+ * Register card copy and the WorkBuddy configuration page under the Plugins
+ * page.
  *
  * The entire body is wrapped so that a DSH slot-API breaking change (for
  * example the rc.6→rc.7 `id`→`key` / `order`→`priority` rename) degrades
@@ -55,18 +56,16 @@ export function apply(ctx: ClientContext): void {
         return () => {}
       }
     }, 'dsh-any-connect: settings copy')
-    const t = ctx.locale.bind(namespace) as WorkBuddyPluginCardInjected['t']
-    // One card per variant. They show different accounts, balances, and model
-    // sets, so a single merged card could not say which account a number
-    // belongs to. The slot is key-dispatched: two keys, one component.
-    for (const [index, variant] of CARD_VARIANTS.entries()) {
-      ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
-        name: 'settings.plugin.item',
-        key: variant.id,
-        priority: 30 - index,
-        inject: (): WorkBuddyPluginCardInjected => ({ t, variant }),
-      }, WorkBuddyPluginCard))
-    }
+    const t = ctx.locale.bind(namespace) as WorkBuddyConfigPageInjected['t']
+    // The bundle's configuration entry on its Plugins page. The key is the npm
+    // package name the plugins.bundle.config contract dispatches by (same as
+    // package.json "name" and the patch's row name); both product variants
+    // (CN + WorkBuddy AI) render inside this one entry.
+    ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+      name: 'plugins.bundle.config',
+      key: '@chaoset/dsh-any-connect',
+      inject: (): WorkBuddyConfigPageInjected => ({ t }),
+    }, WorkBuddyConfigPage))
   } catch (error: unknown) {
     // Degrade silently on the page: the host provider still serves models.
     // Developers see the full cause in the browser console; users see no banner.

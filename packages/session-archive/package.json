@@ -1,6 +1,6 @@
 {
   "name": "@chaoset/session-archive",
-  "version": "0.3.14-alpha.1",
+  "version": "0.3.14-alpha.2",
   "description": "DSH plugin: browse archived sessions, inspect their content, batch-restore or permanently delete them with multi-select",
   "engines": {
     "node": ">=22.19.0"
@@ -23,7 +23,7 @@
     "./package.json": "./package.json"
   },
   "dsh": {
-    "host": "0.1.6-alpha.1",
+    "host": "0.1.6-alpha.2",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -37,14 +37,14 @@
     }
   },
   "optionalDependencies": {
-    "@deepseek-ai/dsh-typert-protocol": "^0.1.6-alpha.1"
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.6-alpha.2"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-scope": "^0.1.6-alpha.1",
-    "@deepseek-ai/dsh-session": "^0.1.6-alpha.1",
-    "@deepseek-ai/dsh-session-persistence": "^0.1.6-alpha.1",
-    "@deepseek-ai/dsh-session-title": "^0.1.6-alpha.1",
-    "@deepseek-ai/dsh-workspace": "^0.1.6-alpha.1"
+    "@deepseek-ai/dsh-scope": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-session": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-session-persistence": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-session-title": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-workspace": "^0.1.6-alpha.2"
   },
   "scripts": {
     "build": "node ../../scripts/build.mjs",
