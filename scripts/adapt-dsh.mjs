@@ -69,10 +69,13 @@ function adaptWorkspaceYaml() {
   }
   const lock = readFileSync(join(ROOT, "pnpm-lock.yaml"), "utf8");
   const names = new Set();
-  // 包名口径与依赖扫描同源（DEP_PREFIX），不再维护第二份正则。
+  // 包名口径与依赖扫描同源（DEP_PREFIX），不再维护第二份正则。捕获组是
+  // `dsh-` 之后的短名，生成条目时必须用 DEP_PREFIX 拼回全名——曾因拼成
+  // `@deepseek-ai/<短名>` 生成整份无效清单（npm 上不存在该包名，pnpm 匹配
+  // 不到任何实际依赖，24 小时供应链门槛静默失效）。
   const lockNameRe = new RegExp(`${DEP_PREFIX}([a-z0-9-]+)`, "g");
   for (const m of lock.matchAll(lockNameRe)) names.add(m[1]);
-  const entries = [...names].sort().map((n) => `  - '@deepseek-ai/${n}@${version}'`);
+  const entries = [...names].sort().map((n) => `  - '${DEP_PREFIX}${n}@${version}'`);
   const rest = text.slice(listStart).split("\n");
   let end = 1;
   while (end < rest.length && !/^[A-Za-z]/.test(rest[end])) end++;

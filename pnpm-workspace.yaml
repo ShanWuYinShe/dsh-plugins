@@ -8,42 +8,13 @@ allowBuilds:
   esbuild: true
   koffi: true
   protobufjs: true
-# 供应链防护：依赖发布满 24 小时才允许安装。稳定线（本分支）的 dsh 官方
-# 包都早已超过 24 小时，无需排除清单；预发布线（alpha 分支）要即时跟进 dsh
-# 预发布包，在那边维护 minimumReleaseAgeExclude 清单（adapt-dsh.mjs 改写）。
+# 供应链防护：依赖发布满 24 小时才允许安装。本分支基线刚适配的 dsh 官方包
+# 常发布未满 24 小时，缺了清单 install 会解析不到；清单由 adapt-dsh.mjs 在
+# 每次宿主适配时按 lockfile 闭包整块重建（条目 = dsh-* 全名 @ 基线版本），
+# 仅当闭包外新增 dsh 依赖导致 install 解析不到时才手工补条目。
 autoInstallPeers: false
 minimumReleaseAgeExclude:
-  - '@deepseek-ai/agent@0.1.6-alpha.2'
-  - '@deepseek-ai/atomic-write@0.1.6-alpha.2'
-  - '@deepseek-ai/attachment@0.1.6-alpha.2'
-  - '@deepseek-ai/authorization@0.1.6-alpha.2'
-  - '@deepseek-ai/brand@0.1.6-alpha.2'
-  - '@deepseek-ai/client-locale@0.1.6-alpha.2'
-  - '@deepseek-ai/client-ui-renderer@0.1.6-alpha.2'
-  - '@deepseek-ai/client-ui-settings-plugins@0.1.6-alpha.2'
-  - '@deepseek-ai/client-ui-slots@0.1.6-alpha.2'
-  - '@deepseek-ai/credentials@0.1.6-alpha.2'
-  - '@deepseek-ai/fs@0.1.6-alpha.2'
-  - '@deepseek-ai/home-paths@0.1.6-alpha.2'
-  - '@deepseek-ai/host-webserver@0.1.6-alpha.2'
-  - '@deepseek-ai/invariants@0.1.6-alpha.2'
-  - '@deepseek-ai/launch-environment@0.1.6-alpha.2'
-  - '@deepseek-ai/llm@0.1.6-alpha.2'
-  - '@deepseek-ai/llm-pi-ai@0.1.6-alpha.2'
-  - '@deepseek-ai/sandbox@0.1.6-alpha.2'
-  - '@deepseek-ai/scope@0.1.6-alpha.2'
-  - '@deepseek-ai/session@0.1.6-alpha.2'
-  - '@deepseek-ai/session-persistence@0.1.6-alpha.2'
-  - '@deepseek-ai/session-projection@0.1.6-alpha.2'
-  - '@deepseek-ai/session-title@0.1.6-alpha.2'
-  - '@deepseek-ai/settings@0.1.6-alpha.2'
-  - '@deepseek-ai/storage@0.1.6-alpha.2'
-  - '@deepseek-ai/storage-domain@0.1.6-alpha.2'
-  - '@deepseek-ai/timeout@0.1.6-alpha.2'
-  - '@deepseek-ai/typert-protocol@0.1.6-alpha.2'
-  - '@deepseek-ai/util-crypto@0.1.6-alpha.2'
-  - '@deepseek-ai/util-values@0.1.6-alpha.2'
-  - '@deepseek-ai/workspace@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-agent@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-atomic-write@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-attachment@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-authorization@0.1.6-alpha.2'
@@ -58,14 +29,17 @@ minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-host-webserver@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-invariants@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-launch-environment@0.1.6-alpha.2'
-  - '@deepseek-ai/dsh-llm-pi-ai@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-llm@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-llm-pi-ai@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-sandbox@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-scope@0.1.6-alpha.2'
-  - '@deepseek-ai/dsh-session-persistence@0.1.6-alpha.2'
-  - '@deepseek-ai/dsh-session-title@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-session@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-session-persistence@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-session-projection@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-session-title@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-settings@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-storage@0.1.6-alpha.2'
+  - '@deepseek-ai/dsh-storage-domain@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-timeout@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-typert-protocol@0.1.6-alpha.2'
   - '@deepseek-ai/dsh-util-crypto@0.1.6-alpha.2'
