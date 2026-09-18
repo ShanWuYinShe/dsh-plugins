@@ -119,7 +119,7 @@ export interface WorkBuddyAdapter {
  * Three sources, strictly ordered:
  * - A model that declares explicit `supportedEfforts` offers exactly those —
  *   the declaration is authoritative and per-model (e.g. `glm-5.3` is
- *   low/high/xhigh while `glm-5.3-flash` is low/high/max). An observation
+ *   low/high/max while `glm-5.2` declares none). An observation
  *   never widens or narrows a declared set.
  * - A model that declares none (the older `{effort, summary}` shape) offers
  *   its default effort — unless a probe observation verified which spellings
