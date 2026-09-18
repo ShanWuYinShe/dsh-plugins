@@ -12,6 +12,10 @@ allowBuilds:
 # 常发布未满 24 小时，缺了清单 install 会解析不到；清单由 adapt-dsh.mjs 在
 # 每次宿主适配时按 lockfile 闭包整块重建（条目 = dsh-* 全名 @ 基线版本），
 # 仅当闭包外新增 dsh 依赖导致 install 解析不到时才手工补条目。
+# 关闭 auto-install-peers：默认开启时 pnpm 会把各包的 dsh peer 拉进同一次
+# 解析，不同包锁定的宿主 prerelease range 会互相冲突。关闭后 peer 由各包
+# optionalDependencies 显式满足，lockfile 固化完整解析。（不写在 .npmrc：
+# npm 不认识该配置，每次 npm 调用都会刷 Unknown project config 警告。）
 autoInstallPeers: false
 minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-agent@0.1.6-alpha.2'
