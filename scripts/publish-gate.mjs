@@ -32,6 +32,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PACKAGES = readdirSync(join(ROOT, "packages"), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name)
+  // 与 test/bundle.test.ts 同口径：包移除后的残留目录不参与枚举（否则
+  // 读 package.json 直接 ENOENT 崩溃）
+  .filter((name) => existsSync(join(ROOT, "packages", name, "package.json")))
   .sort();
 
 // 合法 semver（含 prerelease / build metadata）。非法版本号若放行，
@@ -61,6 +64,11 @@ function compareVersions(a, b) {
   for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
     const xi = x.pre[i];
     const yi = y.pre[i];
+    // 标识符段数呈前缀关系时少者更小（semver §11）。undefined 必须先拦，
+    // 否则下方 /^\d+$/.test(undefined) 恒 false 落进字母段分支得出反向结论
+    // （实测 0.3.14-alpha.1 与 0.3.14-alpha 的比较方向曾与 semver 相反）。
+    if (xi === undefined) return -1;
+    if (yi === undefined) return 1;
     const nx = /^\d+$/.test(xi);
     const ny = /^\d+$/.test(yi);
     if (nx && ny) {
@@ -79,6 +87,11 @@ function compareVersions(a, b) {
 
 function log(...args) {
   console.error(...args);
+}
+
+function revParse(ref) {
+  const r = spawnSync("git", ["rev-parse", "-q", "--verify", ref], { cwd: ROOT, encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : null;
 }
 
 // 本仓库全部 git tag（一次调用，供所有包共用）。CI checkout 用 fetch-depth: 0
@@ -126,6 +139,20 @@ for (const dir of PACKAGES) {
 
   const archiveTag = `${dir}-v${version}`;
   if (tags.has(archiveTag)) {
+    // 幂等重跑依赖「tag 已存在即跳过」，保留；但若 tag 不指向 HEAD 且该包
+    // 内容在 tag 之后又有改动（改了代码忘 bump），这些改动不会进入任何
+    // Release 且 CI 全绿——必须喊一声，提醒 bump 版本号。
+    const tagCommit = revParse(`${archiveTag}^{commit}`);
+    if (tagCommit !== null && tagCommit !== revParse("HEAD")) {
+      const dirty = spawnSync(
+        "git",
+        ["diff", "--name-only", `${archiveTag}..HEAD`, "--", join("packages", dir)],
+        { cwd: ROOT, encoding: "utf8" },
+      );
+      if (dirty.status === 0 && dirty.stdout.trim() !== "") {
+        log(`⚠ ${name}@${version} 在 ${archiveTag} 之后有内容改动但版本号未升，不会进入任何 Release。如需发布请升 version 并补 CHANGELOG。`);
+      }
+    }
     log(`= ${name}@${version} 已有 git tag ${archiveTag}，跳过（已发布并归档）`);
     continue;
   }

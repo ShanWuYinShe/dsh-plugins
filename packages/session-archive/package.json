@@ -61,7 +61,7 @@
     "access": "public"
   },
   "bugs": {
-    "url": "https://github.com/winliyou/dsh-plugins/issues"
+    "url": "https://github.com/ShanWuYinShe/dsh-plugins/issues"
   },
-  "homepage": "https://github.com/winliyou/dsh-plugins/tree/main/packages/session-archive#readme"
+  "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme"
 }

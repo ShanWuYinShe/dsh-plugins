@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
+import type { Context } from "@deepseek-ai/cordis";
 import { createArchiveHost } from "../src/index.js";
 
 const prevHome = process.env.HOME;
@@ -129,12 +130,13 @@ function makeFixture(options: {
       close: async () => {},
     };
   };
+  // 刻意的部分桩：只实现被测路径用到的服务面，单点断言为完整 Context。
   const ctx = {
     workspaceRegistry: archiveRegistry,
     sessionPersistence: persistenceMock,
     sessions: { get: (id: string) => sessions.get(id) },
-  };
-  return { ctx, registryState, headers, sessions, eventReads: () => eventReads, statCalls: () => statCalls, listCalls: () => listCalls };
+  } as unknown as Context;
+  return { ctx, registryState, headers, sessions, persistenceMock, eventReads: () => eventReads, statCalls: () => statCalls, listCalls: () => listCalls };
 }
 
 const baseCfg = { detailMaxMessages: 50, messagePreviewChars: 500, titleReadConcurrency: 2 };
@@ -181,8 +183,8 @@ describe("session-archive host", () => {
     // 未截断:messageCount 与 totalMessageCount 一致,truncated 为 false。
     const full = await archiveHost.detail("s1");
     expect(full.title === "第一个归档会话" && full.messages.length === 2
-      && full.messages[0].role === "user"
-      && full.messages[1].text.includes("可以帮你")).toBe(true);
+      && full.messages[0]!.role === "user"
+      && full.messages[1]!.text.includes("可以帮你")).toBe(true);
     expect(full.messageCount === 2 && full.totalMessageCount === 2 && full.truncated === false).toBe(true);
     expect(full.live === false).toBe(true);
 
@@ -197,7 +199,7 @@ describe("session-archive host", () => {
     ]);
     const truncatedDetail = await cappedHost.detail("s2");
     expect(truncatedDetail.messages.length === 2
-      && truncatedDetail.messages[0].text === "一" && truncatedDetail.messages[1].text === "二").toBe(true);
+      && truncatedDetail.messages[0]!.text === "一" && truncatedDetail.messages[1]!.text === "二").toBe(true);
     expect(truncatedDetail.messageCount === 2
       && truncatedDetail.totalMessageCount === 4
       && truncatedDetail.truncated === true).toBe(true);
@@ -231,7 +233,7 @@ describe("session-archive host", () => {
     // deleteArchived:未归档的会话(即使文件存在、不在内存)必须拒绝且不动文件。
     const delForeign = await archiveHost.deleteArchived(["live-unarchived"]);
     expect(delForeign.deleted.length === 0
-      && delForeign.failed[0].reason === "not-archived"
+      && delForeign.failed[0]!.reason === "not-archived"
       && fs.existsSync(sessionPath("live-unarchived"))).toBe(true);
 
     // detail:同样只对归档成员开放。
@@ -296,7 +298,7 @@ describe("session-archive host", () => {
     const orphanResult = await archiveHost.deleteArchived(["orphan"]);
     expect(orphanResult.deleted.length === 0
       && orphanResult.failed.length === 1
-      && orphanResult.failed[0].reason === "unenumerable"
+      && orphanResult.failed[0]!.reason === "unenumerable"
       && fs.existsSync(sessionPath("orphan"))).toBe(true);
 
     // 真 ghost(从未有文件):cwd 未知时 locate 只能探缺省目录,既探不到真实
@@ -305,8 +307,8 @@ describe("session-archive host", () => {
     const ghostResult = await archiveHost.deleteArchived(["s-ghost"]);
     expect(ghostResult.deleted.length === 0
       && ghostResult.failed.length === 1
-      && ghostResult.failed[0].sessionId === "s-ghost"
-      && ghostResult.failed[0].reason === "unenumerable"
+      && ghostResult.failed[0]!.sessionId === "s-ghost"
+      && ghostResult.failed[0]!.reason === "unenumerable"
       && f.registryState.archivedSessionIds.includes("s-ghost")).toBe(true);
 
     // 不在内存即冷文件:即使 mtime 新鲜(写入方已随会话停止消失)也直接删,
@@ -336,8 +338,8 @@ describe("session-archive host", () => {
     const hashDir = path.join(saRoot, "--proj--", "deadbeef");
     fs.mkdirSync(hashDir, { recursive: true });
     fs.writeFileSync(path.join(hashDir, "session.jsonl"), "[]");
-    const realLocate = f1.ctx.sessionPersistence.locate;
-    f1.ctx.sessionPersistence.locate = (meta: { id: string }) =>
+    const realLocate = f1.persistenceMock.locate;
+    f1.persistenceMock.locate = (meta: { id: string }) =>
       meta.id === "s-x" ? { kind: "jsonl", path: path.join(hashDir, "session.jsonl") } : realLocate(meta);
     const out1 = await archiveHost1.deleteArchived(["s-x"]);
     expect(out1.deleted.includes("s-x")).toBe(true);
@@ -387,7 +389,7 @@ describe("session-archive host", () => {
     const degraded = createArchiveHost({
       ...f.ctx,
       workspaceRegistry: { archivedSessionIds: ["u1", "u-ghost"] },
-    }, baseCfg);
+    } as unknown as Context, baseCfg);
     const degList = await degraded.list();
     expect(degList.items.length === 1 && degList.items[0].sessionId === "u1").toBe(true);
     const degUn = await degraded.unarchive(["u1"]);
@@ -427,8 +429,8 @@ describe("session-archive host", () => {
     clearInterval(writer);
     expect(repeated.deleted.length === 0
       && repeated.failed.length === 1
-      && repeated.failed[0].sessionId === "r2"
-      && repeated.failed[0].reason === "reappeared").toBe(true);
+      && repeated.failed[0]!.sessionId === "r2"
+      && repeated.failed[0]!.reason === "reappeared").toBe(true);
   });
 
   it("官方契约回归:list() 快照形状 + open 句柄下归档列表与详情完整语义(bug 复现用例)", async () => {
@@ -456,8 +458,8 @@ describe("session-archive host", () => {
     // 官方事件 data 形状:user/message 本体、assistant/message 包装(message.content)。
     const detail = await archiveHost.detail("v1");
     expect(detail.title === "快照形状" && detail.messages.length === 2
-      && detail.messages[0].role === "user" && detail.messages[0].text === "内容"
-      && detail.messages[1].role === "assistant" && detail.messages[1].text === "回复").toBe(true);
+      && detail.messages[0]!.role === "user" && detail.messages[0]!.text === "内容"
+      && detail.messages[1]!.role === "assistant" && detail.messages[1]!.text === "回复").toBe(true);
   });
 
   it("无 locate 的宿主后端:列表/详情可用(文件信息降级),删除按不可定位处理", async () => {
@@ -506,7 +508,7 @@ describe("session-archive host", () => {
     // g1(模拟宿主 list 能枚举历史代际),真实内容在 session.v1.jsonl 上。
     fs.writeFileSync(legacyPath, "[]");
     const currentGeneration = path.join(path.dirname(legacyPath), "session.v2.jsonl");
-    f.ctx.sessionPersistence.locate = () => ({ kind: "jsonl", path: currentGeneration });
+    f.persistenceMock.locate = () => ({ kind: "jsonl", path: currentGeneration });
 
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
 
@@ -536,15 +538,15 @@ describe("session-archive host", () => {
       headers: [{ id: "e1", cwd: "/proj/a", createdAt: 1000 }],
     });
     writeSession("e1", []);
-    f.ctx.sessionPersistence.locate = () => {
+    f.persistenceMock.locate = () => {
       throw new Error("backend contract drift");
     };
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const del = await archiveHost.deleteArchived(["e1"]);
     expect(del.deleted.length === 0
       && del.failed.length === 1
-      && del.failed[0].sessionId === "e1"
-      && del.failed[0].reason === "unlocatable"
+      && del.failed[0]!.sessionId === "e1"
+      && del.failed[0]!.reason === "unlocatable"
       && fs.existsSync(sessionPath("e1"))).toBe(true);
     // 恢复同样谨慎拒绝(unknown ≠ located)。
     const un = await archiveHost.unarchive(["e1"]);
@@ -590,7 +592,7 @@ describe("session-archive host", () => {
     expect(un2.restored.includes("m2")).toBe(true);
     expect(del2.deleted.length === 0
       && del2.failed.length === 1
-      && del2.failed[0].reason === "not-archived"
+      && del2.failed[0]!.reason === "not-archived"
       && fs.existsSync(sessionPath("m2"))).toBe(true);
   });
 
@@ -608,7 +610,7 @@ describe("session-archive host", () => {
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const detail = await archiveHost.detail("d1");
     expect(detail.messages.length === 1
-      && detail.messages[0].text === "正常消息").toBe(true);
+      && detail.messages[0]!.text === "正常消息").toBe(true);
   });
 
   it("标题/详情分块读取:>块长的事件流不重不漏,标题(块首)与尾部消息都可达", async () => {

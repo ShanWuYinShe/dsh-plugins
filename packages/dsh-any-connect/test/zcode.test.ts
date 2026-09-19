@@ -10,6 +10,7 @@ import { createWorkBuddyShim } from '../src/shim.js'
 import type { ZcodeCredential } from '../src/zcode-auth.js'
 import { ZcodeCredentialStore, maskApiKey, zcodeOwnAuthPath } from '../src/zcode-auth.js'
 import { ZcodeUpstreamClient } from '../src/zcode-upstream.js'
+import type { ZcodeChatResult } from '../src/zcode-upstream.js'
 import { ZcodeOffpeakCredentialStore } from '../src/zcode-offpeak.js'
 import { readZcodeClientCredentials } from '../src/zcode-credentials.js'
 
@@ -227,7 +228,7 @@ describe('ZcodeUpstreamClient.forwardMessages', () => {
 })
 
 describe('zcode shim route', () => {
-  function makeShim(credential: ZcodeCredential | undefined, forward: ReturnType<typeof vi.fn>) {
+  function makeShim(credential: ZcodeCredential | undefined, forward: (credential: unknown, rawBody: string, signal: AbortSignal) => Promise<ZcodeChatResult>) {
     return createWorkBuddyShim({
       kind: 'zcode',
       resolveCredential: async () => {

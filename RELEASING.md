@@ -369,6 +369,12 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 
 ## 手动兜底
 
+> **搁置期 main 流水不可用**：main 分支的 `publish.yml` 仍是 npm 时代流水
+> （`pnpm publish --registry=registry.npmjs.org`），npm 渠道随 Trusted
+> Publishing 收紧已死（alpha 线 926cbb8 迁移时的结论）。搁置期若需稳定线
+> 紧急热修，推 main 不会产出 Release 资产，直接用下述 `pnpm pack` +
+> `gh release create` 兜底；main 的 publish 流水留待双线收敛时随整线搬运。
+
 CI 失败或需要立即发布时：`cd packages/<pkg> && pnpm pack`（产物
 `chaoset-<目录>-<版本>.tgz`），然后 `gh release create <目录>-v<版本> <tgz>
 --target <sha> --title "<npm 包名> v<版本>" --notes "<说明>"`（prerelease 版本

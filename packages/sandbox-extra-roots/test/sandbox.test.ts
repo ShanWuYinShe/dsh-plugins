@@ -47,7 +47,9 @@ function makeSandboxMock() {
 function makeFsMock() {
   return {
     async resolve(displayPath: string) { return { targetKey: displayPath }; },
-    async checkedTarget(target: any) {
+    // 标注官方契约返回形状：未包装的桩只会 throw，推断成 Promise<never>
+    // 会让 apply 包装后的 await 结果失去 targetKey 类型。
+    async checkedTarget(target: any): Promise<{ targetKey: string }> {
       throw Object.assign(new Error("FS_SANDBOX_DENIED"), { code: "FS_SANDBOX_DENIED" });
     },
   };

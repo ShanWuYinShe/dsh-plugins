@@ -3,7 +3,7 @@
 //         scripts/dsh-follow-status.mjs（状态核对，容忍模式：打标记继续）。
 // 错误策略由调用方决定——本模块只负责读取与解析，不做任何 exit/log 决策。
 
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,13 +11,15 @@ export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 export const DEP_PREFIX = "@deepseek-ai/dsh-";
 export const DEP_SECTIONS = ["dependencies", "optionalDependencies", "devDependencies", "peerDependencies"];
 
-/** 仓库内全部 package.json 路径（根 + packages/*，与 build.mjs 的包枚举同源）。 */
+/** 仓库内全部 package.json 路径（根 + packages/*，与 build.mjs 的包枚举同源；
+ *  包移除后的残留目录无 package.json，跳过以免下游 readFileSync ENOENT）。 */
 export function manifestPaths(root = ROOT) {
   return [
     "package.json",
     ...readdirSync(join(root, "packages"), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
-      .map((entry) => `packages/${entry.name}/package.json`),
+      .map((entry) => `packages/${entry.name}/package.json`)
+      .filter((p) => existsSync(join(root, p))),
   ];
 }
 

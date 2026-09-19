@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { reasoningFields } from '../src/adapter.js'
-import type { WorkBuddyModelInfo } from '../src/upstream.js'
+import type { WorkBuddyModelInfo } from '../src/catalog.js'
 
 /**
  * Per-model thinking-level resolution. The DSH picker offers exactly what
@@ -107,7 +107,7 @@ describe('reasoningFields with probe observations', () => {
     const { reasoningFields } = await import('../src/adapter.js')
     const info = {
       id: 'm', name: 'M', contextWindow: 1, maxTokens: 1, supportsImages: false,
-      reasoning: { supports: true, onlyReasoning: true, supportedEfforts: ['low'], defaultEffort: 'low' as const, canDisableThinking: false },
+      reasoning: { supports: true, onlyReasoning: true, supportedEfforts: ['low'] as const, defaultEffort: 'low' as const, canDisableThinking: false },
     }
     const fields = reasoningFields(info, { validation: 'validating', efforts: ['low', 'high', 'max'] })
     expect(fields.thinkingLevelMap).toMatchObject({ low: 'low', high: null, max: null })

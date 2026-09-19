@@ -10,6 +10,12 @@ import type { WorkBuddyChatResult } from '../src/upstream.js'
 
 const CLEANUP: (() => Promise<void>)[] = []
 
+// ReadableStream.from 运行时可用（Node ≥ 20.6），TS 的 ES2022/DOM 类型库尚未
+// 收录该静态方法，这里按实际签名断言（仅类型层面，运行时行为不变）。
+const readableStreamFrom = (ReadableStream as unknown as {
+  from: (source: AsyncIterable<Uint8Array>) => ReadableStream<Uint8Array>
+}).from
+
 afterEach(async () => {
   await Promise.all(CLEANUP.splice(0).map(clean => clean()))
 })
@@ -338,7 +344,7 @@ describe('WorkBuddy shim', () => {
     }
     const harness = await startShim(() => ({
       ok: true,
-      response: new Response(ReadableStream.from(source()), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+      response: new Response(readableStreamFrom(source()), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
     }))
     const response = await fetch(`${harness.shim.baseUrl()}/v1/chat/completions`, {
       method: 'POST',
@@ -405,7 +411,7 @@ describe('WorkBuddy shim', () => {
           setTimeout(resolve, 80)
         }
       }, 10)
-      CLEANUP.push(() => clearInterval(abortOnceEntered))
+      CLEANUP.push(async () => clearInterval(abortOnceEntered))
     })
     expect(entered).toBe(true)
   })

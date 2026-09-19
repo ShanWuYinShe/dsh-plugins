@@ -102,11 +102,11 @@ describe('WorkBuddyProbeStore', () => {
 
 describe('fingerprintModel', () => {
   it('covers id, reasoning, and images — but not display fields', () => {
-    const base = { id: 'm', name: 'M', contextWindow: 1, maxTokens: 1, supportsImages: true, reasoning: { supports: true, onlyReasoning: true } }
+    const base = { id: 'm', name: 'M', contextWindow: 1, maxTokens: 1, supportsImages: true, reasoning: { supports: true, onlyReasoning: true, canDisableThinking: false } }
     const renamed = { ...base, name: 'Renamed', billing: { credits: 'x9.99', free: false } }
     expect(fingerprintModel(renamed)).toBe(fingerprintModel(base))
     expect(fingerprintModel({ ...base, id: 'other' })).not.toBe(fingerprintModel(base))
-    expect(fingerprintModel({ ...base, reasoning: { supports: false, onlyReasoning: false } })).not.toBe(fingerprintModel(base))
+    expect(fingerprintModel({ ...base, reasoning: { supports: false, onlyReasoning: false, canDisableThinking: false } })).not.toBe(fingerprintModel(base))
   })
 })
 

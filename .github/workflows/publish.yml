@@ -12,7 +12,6 @@ on:
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
-      - '.npmrc'
       - 'scripts/**'
       - '.github/workflows/publish.yml'
   # 不监听 release.published：本 workflow 发布成功后自己会 gh release create，

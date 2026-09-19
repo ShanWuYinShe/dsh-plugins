@@ -42,5 +42,5 @@ jobs:
         with:
           node-version: 24
 
-      - name: Compare branch baselines with dsh dist-tags
+      - name: Compare branch baselines with dsh published versions
         run: node scripts/dsh-follow-status.mjs --ci

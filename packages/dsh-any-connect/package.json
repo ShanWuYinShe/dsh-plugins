@@ -77,7 +77,7 @@
     "vitest": "^4.1.11"
   },
   "bugs": {
-    "url": "https://github.com/winliyou/dsh-plugins/issues"
+    "url": "https://github.com/ShanWuYinShe/dsh-plugins/issues"
   },
-  "homepage": "https://github.com/winliyou/dsh-plugins/tree/main/packages/dsh-any-connect#readme"
+  "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/dsh-any-connect#readme"
 }

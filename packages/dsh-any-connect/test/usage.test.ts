@@ -20,10 +20,14 @@ interface Registration {
   provider: string
   displayName: string | undefined
   query: (context: { provider: string; signal?: AbortSignal }) => Promise<{
+    provider: string
     windows: readonly { id: string; label: string; remain?: number; limit?: number; unit: string }[]
     displayName?: string
   }>
 }
+
+// unique symbol 类型要求 const 声明：类静态属性的计算键不能用内联 Symbol.for。
+const CORDIS_SERVICE = Symbol.for('cordis.service')
 
 /**
  * A stand-in for @chaoset/provider-usage's registry.
@@ -33,7 +37,7 @@ interface Registration {
  * service exposes and calls the captured querier directly.
  */
 class StubUsageRegistry {
-  static readonly [Symbol.for('cordis.service')] = true
+  static readonly [CORDIS_SERVICE] = true
   readonly registered: Registration[] = []
 
   register(provider: string, querier: Registration['query'], displayName?: string): () => void {

@@ -103,6 +103,7 @@ describe('prepareInternationalChatBody', () => {
   it('prepends the gateway-required system prompt when none leads', () => {
     const out = JSON.parse(prepareInternationalChatBody(body([{ role: 'user', content: 'hi' }]))) as {
       messages: { role: string; content: string }[]
+      stream: boolean
     }
     expect(out.messages[0]).toEqual({ role: 'system', content: 'You are a helpful assistant.' })
     expect(out.messages[1]).toEqual({ role: 'user', content: 'hi' })
