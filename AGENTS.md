@@ -1,6 +1,8 @@
 # AGENTS.md — AI 协作指引
 
-DSH host 插件 monorepo，双分支跟随 DSH 宿主线。动手前先读
+DSH host 插件 monorepo，双分支跟随 DSH 宿主线。通用约束以全局 `~/AGENTS.md` 为准
+（本项目例外：`alpha` 分支允许推送，见全局 Git 准则），本文件只做项目特有补充。
+动手前先读
 [RELEASING.md](RELEASING.md)（分支 / 版本号 / 发布流程的唯一权威约定）；
 README 面向用户，面向开发者的内容以 RELEASING.md 为准。
 
@@ -64,8 +66,9 @@ cd .worktrees/main && pnpm install && pnpm run build   # 每个工作树独立�
    # 页面渲染、插件卡片/设置行、模型列表，控制台零报错
    ```
 
-   插件用本地路径安装（`dsh plugin add /abs/path/to/packages/<pkg>`，符号
-   链接即装），**验证的是工作树产物，与 GitHub Release 分发的 tarball 同源**；
+   插件用本地路径安装（`dsh plugin --profile web add /abs/path/to/packages/<pkg>`，
+   符号链接即装；`--profile` 以各包 README 的用户口径为准），**验证的是工作树
+   产物，与 GitHub Release 分发的 tarball 同源**；
 3. 验证通过后才：bump `package.json` 版本 + 写 CHANGELOG → 提交。验证之后
    若有任何影响包产物的改动（src / client / 依赖 / 构建），必须用最终代码
    重新 build 并重走第 2 步——**送验产物必须与待发布产物一致**（版本号
@@ -121,10 +124,12 @@ pnpm run adapt <dsh 新线版本>   # dsh 宿主升级适配（--dry-run 预览�
   升版本必须同时补该包 `CHANGELOG.md` 的 `## <版本> (YYYY-MM-DD)` 小节
   （GitHub Release 说明自动取自这里）。
 - 推送 `main` / `alpha` 即触发测试 + 发布（GitHub Release tarball 分发，
-  不经过 npm）；改动代码不升版本号会直接红（版本低于已归档版本的包会被
-  门禁拒绝）。
-- 提交信息用中文 + 类型前缀，与仓库现有用法一致（`新增:` / `修复:` /
-  `重构:` / `文档:` / `测试:` / `ci:` 等，范围可选，如 `修复(认证): …`）。
+  不经过 npm）；门禁规则：版本号**严格低于**已归档版本会直接红；「改了
+  代码没升版本号」分两种——tag 不在 HEAD 且包内容有更新时门禁会告警
+  （不红），版本与已归档 tag 相同则幂等跳过。任何情况下不满足发布条件的
+  包不会出现在 Release 资产里。
+- 提交信息遵循全局 Commit 格式（`<分类>(<范围>): <中文描述>`），本项目惯例用
+  中文分类前缀（`新增:` / `修复:` / `重构:` / `文档:` / `测试:` / `ci:` 等）。
 - 测试环境通过 vitest 配置里的 `DSH_HOME` 与真实用户目录隔离，不要在测试里
   读写真实的 `~/.dsh`。
 - 测试涉及平台差异时必须显式判定平台（如
