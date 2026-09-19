@@ -9,6 +9,7 @@
 import { createProvider } from '@earendil-works/pi-ai'
 import type { Api, AuthContext, CredentialStore, Model, ModelThinkingLevel, Provider, ThinkingLevelMap } from '@earendil-works/pi-ai'
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy'
+import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy'
 import { resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { LlmModelInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
@@ -95,11 +96,21 @@ function withRate(name: string, info: WorkBuddyModelInfo): string {
 /** Constructor dependencies. */
 export interface WorkBuddyAdapterOptions {
   shim: WorkBuddyShim
-  store: WorkBuddyCredentialStore
+  /** Unused since the shim took over credential resolution; kept optional for callers. */
+  store?: WorkBuddyCredentialStore
   catalog: WorkBuddyCatalog
   /** Provider id and display name; default to the CN `workbuddy` route. */
   providerId?: string
   displayName?: string
+  /**
+   * Wire API between pi-ai and the shim. `openai-completions` (default) is
+   * the WorkBuddy shape; `anthropic-messages` is the zcode passthrough.
+   * The model `baseUrl` matches: the OpenAI SDK appends `/chat/completions`
+   * to `baseURL` (so the shim's `/v1` prefix rides inside baseUrl), while
+   * the Anthropic SDK posts to `{baseURL}/v1/messages` (so baseUrl is the
+   * shim root).
+   */
+  api?: 'openai-completions' | 'anthropic-messages'
   /** Probe observation consulted for undeclared models; a declared set always wins. */
   recordFor?: (modelId: string) => Pick<WorkBuddyProbeRecord, 'validation' | 'efforts'> | undefined
   /** Resolve the durable attachment service at request time, when present. */
@@ -172,12 +183,13 @@ function toPiModel(
   info: WorkBuddyModelInfo,
   baseUrl: string,
   providerId: string,
+  api: 'openai-completions' | 'anthropic-messages',
   observe?: (modelId: string) => Pick<WorkBuddyProbeRecord, 'validation' | 'efforts'> | undefined,
 ): Model<Api> {
   return {
     id: info.id,
     name: info.name,
-    api: 'openai-completions',
+    api,
     provider: providerId,
     baseUrl,
     input: info.supportsImages === true ? ['text', 'image'] : ['text'],
@@ -194,15 +206,17 @@ function toPiModel(
  * ephemeral port applies from the first snapshot after startup.
  */
 export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBuddyAdapter {
-  const { shim, store, catalog, resolveAttachments } = options
+  const { shim, catalog, resolveAttachments } = options
   const providerId = options.providerId ?? WORKBUDDY_PROVIDER
   const displayName = options.displayName ?? 'WorkBuddy'
+  const api = options.api ?? 'openai-completions'
 
   const buildModels = (): Model<Api>[] => {
-    // The OpenAI SDK pi-ai drives appends `/chat/completions` to baseURL,
-    // so the shim's routes line up with the `/v1` prefix in place.
-    const baseUrl = `${shim.baseUrl()}/v1`
-    return catalog.current().map(info => toPiModel(info, baseUrl, providerId, options.recordFor))
+    // The OpenAI SDK pi-ai drives appends `/chat/completions` to baseURL, so
+    // the shim's routes line up with the `/v1` prefix in place; the Anthropic
+    // SDK posts to `{baseURL}/v1/messages`, so its baseUrl is the shim root.
+    const baseUrl = api === 'anthropic-messages' ? shim.baseUrl() : `${shim.baseUrl()}/v1`
+    return catalog.current().map(info => toPiModel(info, baseUrl, providerId, api, options.recordFor))
   }
 
   const base = createProvider({
@@ -220,7 +234,7 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
       },
     },
     models: buildModels(),
-    api: openAICompletionsApi(),
+    api: api === 'anthropic-messages' ? anthropicMessagesApi() : openAICompletionsApi(),
   })
 
   // `getModels` is delegated to a live read (the reuse-catalog pattern from

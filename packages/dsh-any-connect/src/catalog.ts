@@ -89,6 +89,29 @@ export const FALLBACK_WORKBUDDY_AI_MODELS: readonly WorkBuddyModelInfo[] = [
   { id: 'kimi-k2.8-preview', name: 'Kimi-K2.8-Preview', contextWindow: 300000, maxTokens: 32000, supportsImages: true, reasoning: { supports: true, onlyReasoning: true, supportedEfforts: ['low', 'high', 'max'], defaultEffort: 'high', canDisableThinking: true }, billing: { credits: 'x0.77', free: false } },
 ]
 
+/**
+ * Static GLM Coding Plan roster (the `zcode` provider), compiled from the
+ * zcode CLI's own provider registry plus bigmodel's published specs
+ * (2026-09-19): GLM-5.3 / GLM-5.3-Flash / GLM-5.2 serve 1M context and 128K
+ * output; GLM-5-Turbo serves 200K context (its output ceiling is not
+ * documented — 64K is a conservative placeholder to revisit against the live
+ * endpoint). The zcode surface is a fixed plan roster, not a live document,
+ * so this provider serves only this list — there is no live fetch layer for
+ * it.
+ *
+ * Reasoning metadata: GLM-5.3-Flash documents `reasoning_effort`
+ * low/high/max; the same set is assumed for GLM-5.3 pending a live check.
+ * GLM-5.2 / GLM-5-Turbo declare no ladder and offer their default effort
+ * only. All four are hybrid-thinking models (`canDisableThinking`). Values
+ * here ride the Anthropic Messages wire through the shim untouched.
+ */
+export const FALLBACK_ZCODE_MODELS: readonly WorkBuddyModelInfo[] = [
+  { id: 'GLM-5.3', name: 'GLM-5.3', contextWindow: 1000000, maxTokens: 128000, supportsImages: true, reasoning: { supports: true, onlyReasoning: true, supportedEfforts: ['low', 'high', 'max'], defaultEffort: 'high', canDisableThinking: true } },
+  { id: 'GLM-5.3-Flash', name: 'GLM-5.3-Flash', contextWindow: 1000000, maxTokens: 128000, supportsImages: true, reasoning: { supports: true, onlyReasoning: true, supportedEfforts: ['low', 'high', 'max'], defaultEffort: 'high', canDisableThinking: true } },
+  { id: 'GLM-5.2', name: 'GLM-5.2', contextWindow: 1000000, maxTokens: 128000, supportsImages: true, reasoning: { supports: true, onlyReasoning: true, defaultEffort: 'high', canDisableThinking: true } },
+  { id: 'GLM-5-Turbo', name: 'GLM-5-Turbo', contextWindow: 200000, maxTokens: 64000, supportsImages: false, reasoning: { supports: true, onlyReasoning: true, defaultEffort: 'high', canDisableThinking: true } },
+]
+
 /** Mutable catalog shared by the shim's `/v1/models` and the adapter.
  *
  * Visibility gates the whole roster: a signed-out variant is *empty* rather

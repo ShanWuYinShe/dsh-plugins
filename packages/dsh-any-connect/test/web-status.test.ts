@@ -3,7 +3,7 @@ import type { WorkBuddyCredential } from '../src/auth.js'
 import type { WorkBuddyCredentialStore } from '../src/auth.js'
 import type { WorkBuddyModelInfo } from '../src/catalog.js'
 import { workBuddyWebStatus } from '../src/web-status.js'
-import type { WorkBuddyUpstreamClient } from '../src/upstream.js'
+import type { WorkBuddyStatusRouteOptions } from '../src/web-status.js'
 
 /**
  * Offline unit tests for the status document the plugin card renders: the
@@ -29,8 +29,8 @@ function storeWith(credential: WorkBuddyCredential | undefined): WorkBuddyCreden
   } as unknown as WorkBuddyCredentialStore
 }
 
-function clientWith(result: Promise<unknown>): Pick<WorkBuddyUpstreamClient, 'fetchCredits'> {
-  return { fetchCredits: () => result } as Pick<WorkBuddyUpstreamClient, 'fetchCredits'>
+function clientWith(result: Promise<unknown>): WorkBuddyStatusRouteOptions["fetchCredits"] {
+  return (async () => result) as WorkBuddyStatusRouteOptions["fetchCredits"]
 }
 
 function model(overrides: Partial<WorkBuddyModelInfo>): WorkBuddyModelInfo {
@@ -50,7 +50,7 @@ describe('workBuddyWebStatus', () => {
     const fetchCredits = vi.fn()
     const status = await workBuddyWebStatus({
       store: storeWith(undefined),
-      client: { fetchCredits } as unknown as Pick<WorkBuddyUpstreamClient, 'fetchCredits'>,
+      fetchCredits: fetchCredits as unknown as NonNullable<WorkBuddyStatusRouteOptions['fetchCredits']>,
       models: () => [],
       catalog: () => ({ source: 'fallback' }),
       probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
@@ -63,7 +63,7 @@ describe('workBuddyWebStatus', () => {
   it('keeps the multiplier on a promo model and suppresses it on a free one', async () => {
     const status = await workBuddyWebStatus({
       store: storeWith(CREDENTIAL),
-      client: clientWith(Promise.resolve({ total: 43, accounts: [] })),
+      fetchCredits: clientWith(Promise.resolve({ total: 43, accounts: [] })),
       models: () => [
         model({ id: 'promo', name: 'Promo', billing: { credits: 'x0.79 credits', badges: ['夜间折扣'], free: false } }),
         model({ id: 'free', name: 'Free', billing: { credits: 'x0.00', badges: ['限时免费'], free: true } }),
@@ -82,7 +82,7 @@ describe('workBuddyWebStatus', () => {
   it('omits the models field when no model is free or badged', async () => {
     const status = await workBuddyWebStatus({
       store: storeWith(CREDENTIAL),
-      client: clientWith(Promise.resolve({ total: 1, accounts: [] })),
+      fetchCredits: clientWith(Promise.resolve({ total: 1, accounts: [] })),
       models: () => [model({ id: 'plain', name: 'Plain', billing: { credits: 'x1.62', free: false } })],
       catalog: () => ({ source: 'saved', fetchedAt: 1700000000000 }),
       probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
@@ -95,7 +95,7 @@ describe('workBuddyWebStatus', () => {
   it('carries the catalog source, fetch time, and last error through', async () => {
     const live = await workBuddyWebStatus({
       store: storeWith(CREDENTIAL),
-      client: clientWith(Promise.resolve({ total: 1, accounts: [] })),
+      fetchCredits: clientWith(Promise.resolve({ total: 1, accounts: [] })),
       models: () => [],
       catalog: () => ({ source: 'live', fetchedAt: 1700000000000 }),
       probe: () => ({ consent: true, running: true, candidates: ['m'], results: [] }),
@@ -106,7 +106,7 @@ describe('workBuddyWebStatus', () => {
     expect(live.probeKey).toBe('test-key')
     const failed = await workBuddyWebStatus({
       store: storeWith(CREDENTIAL),
-      client: clientWith(Promise.resolve({ total: 1, accounts: [] })),
+      fetchCredits: clientWith(Promise.resolve({ total: 1, accounts: [] })),
       models: () => [],
       catalog: () => ({ source: 'saved', fetchedAt: 1699999999999, error: 'upstream down' }),
       probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
@@ -118,7 +118,7 @@ describe('workBuddyWebStatus', () => {
   it('degrades a credits failure to creditsError and keeps the model facts', async () => {
     const status = await workBuddyWebStatus({
       store: storeWith(CREDENTIAL),
-      client: clientWith(Promise.reject(new Error('boom'))),
+      fetchCredits: clientWith(Promise.reject(new Error('boom'))),
       models: () => [model({ id: 'free', name: 'Free', billing: { credits: 'x0.00', free: true } })],
       catalog: () => ({ source: 'fallback', error: 'boom' }),
       probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
@@ -133,7 +133,7 @@ describe('workBuddyWebStatus context', () => {
   it('lists working budgets and larger options for every served model', async () => {
     const status = await workBuddyWebStatus({
       store: storeWith(CREDENTIAL),
-      client: clientWith(Promise.resolve({ total: 1, accounts: [] })),
+      fetchCredits: clientWith(Promise.resolve({ total: 1, accounts: [] })),
       models: () => [
         model({ id: 'plain', name: 'Plain', contextWindow: 200000 }),
         {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
-import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from '../src/status-paths.js'
+import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH, ZCODE_PROBE_PATH, ZCODE_STATUS_PATH } from '../src/status-paths.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebContextModel, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
 import type { WorkBuddySettingsKey } from './locales.js'
 
@@ -47,6 +47,14 @@ const CARD_VARIANTS: readonly WorkBuddyCardVariant[] = [
     titleKey: 'titleAI',
     introKey: 'introAI',
     signedOutHintKey: 'signedOutHintAI',
+  },
+  {
+    id: 'anyconnect-zcode',
+    statusPath: ZCODE_STATUS_PATH,
+    probePath: ZCODE_PROBE_PATH,
+    titleKey: 'titleZcode',
+    introKey: 'introZcode',
+    signedOutHintKey: 'signedOutHintZcode',
   },
 ]
 

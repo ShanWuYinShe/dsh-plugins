@@ -174,7 +174,9 @@ export function defaultDesktopAuthCandidates(): string[] {
  * reused rather than reimplemented.
  */
 export function desktopAuthCandidatesFor(variant: WorkBuddyVariant): string[] {
-  return defaultDesktopAuthCandidates().map(path => join(dirname(path), variant.desktopFilename))
+  // desktopFilename is WorkBuddy-only by construction: only WorkBuddy
+  // variants ever reach the shared auth-directory probe order.
+  return defaultDesktopAuthCandidates().map(path => join(dirname(path), variant.desktopFilename!))
 }
 
 /** First platform-default candidate for one variant, for diagnostics. */

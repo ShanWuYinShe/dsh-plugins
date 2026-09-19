@@ -62,4 +62,53 @@ describe('dsh-any-connect CLI --provider', () => {
       spy.mockRestore()
     }
   })
+
+  it('reports the zcode provider signed out against an empty home', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-bin-'))
+    vi.stubEnv('DSH_HOME', root)
+    vi.stubEnv('ZCODE_API_KEY', '')
+    const out: string[] = []
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out.push(String(chunk))
+      return true
+    })
+    try {
+      expect(await run(['status', '--provider=zcode'])).toBe(1)
+      expect(out.join('')).toContain('ZCode Connect: signed out')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('zcode status reports the key source once configured and doctor runs a live check', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-bin-'))
+    vi.stubEnv('DSH_HOME', root)
+    vi.stubEnv('ZCODE_API_KEY', 'abcd1234efgh5678')
+    // doctor 的 live check 打桩：CLI 测试不发真实上游请求。
+    const zcode = await import('../src/zcode-upstream.js')
+    const spy = vi.spyOn(zcode.ZcodeUpstreamClient.prototype, 'forwardMessages')
+      .mockImplementation(async () => ({
+        ok: true as const,
+        status: 200,
+        response: new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }),
+      }))
+    const out: string[] = []
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out.push(String(chunk))
+      return true
+    })
+    try {
+      expect(await run(['status', '--provider=zcode'])).toBe(0)
+      expect(out.join('')).toContain('key from env')
+      out.length = 0
+      expect(await run(['doctor', '--provider=zcode', '--json'])).toBe(0)
+      const report = JSON.parse(out.join('')) as { keySource: string; keyMasked: string; ping: { ok: boolean } }
+      expect(report.keySource).toBe('env')
+      expect(report.keyMasked).toBe('abcd••••5678')
+      expect(report.ping.ok).toBe(true)
+    } finally {
+      stdout.mockRestore()
+      spy.mockRestore()
+    }
+  })
 })

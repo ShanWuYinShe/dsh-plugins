@@ -3,10 +3,12 @@
 
 import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { WorkBuddyCredentialStore, workbuddyOwnAuthPath } from './auth.js'
+import { WorkBuddyCredentialStore, workbuddyOwnAuthPath, WORKBUDDY_AUTH_FILE_ENV } from './auth.js'
 import { WorkBuddyUpstreamClient } from './upstream.js'
-import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS } from './catalog.js'
-import { CN_VARIANT, variantFor, WORKBUDDY_VARIANTS } from './variants.js'
+import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS } from './catalog.js'
+import { ZcodeCredentialStore, maskApiKey, zcodeOwnAuthPath, ZCODE_API_KEY_ENV } from './zcode-auth.js'
+import { ZcodeUpstreamClient } from './zcode-upstream.js'
+import { CN_VARIANT, variantFor, WORKBUDDY_VARIANTS, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { isHeartbeatProcessAlive, readHostHeartbeat, workbuddyHostHeartbeatPath } from './host-heartbeat.js'
@@ -30,7 +32,8 @@ function printHelp(): void {
     '  doctor   secret-free sign-in and environment diagnostics',
     '  status   sign-in state, remaining WorkBuddy credit, and host-bundle health',
     '  logout   remove the plugin-owned credential copy (the desktop app keeps its sign-in)',
-    '  --provider  which product to inspect; defaults to workbuddy',
+    '  --provider  which product to inspect: workbuddy, workbuddy-ai, or zcode',
+    '              (defaults to workbuddy)',
     '  --json   emit one secret-free JSON document (doctor/status only)',
     '',
   ].join('\n'))
@@ -40,17 +43,26 @@ function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`)
 }
 
-function makeStore(variant: WorkBuddyVariant): WorkBuddyCredentialStore {
+/** WorkBuddy credential store wired for CLI diagnostics. */
+function makeWorkBuddyStore(variant: WorkBuddyVariant): WorkBuddyCredentialStore {
   const client = new WorkBuddyUpstreamClient()
   return new WorkBuddyCredentialStore({ variant, refresh: credential => client.refreshToken(credential) })
 }
 
+/** Compiled-in roster size per provider id. */
+const FALLBACK_COUNT_BY_ID = new Map<string, number>([
+  [CN_VARIANT.id, FALLBACK_WORKBUDDY_MODELS.length],
+  [WORKBUDDY_VARIANTS[1]!.id, FALLBACK_WORKBUDDY_AI_MODELS.length],
+  [ZCODE_VARIANT.id, FALLBACK_ZCODE_MODELS.length],
+])
+
 function fallbackFor(variant: WorkBuddyVariant): number {
-  return variant.id === CN_VARIANT.id ? FALLBACK_WORKBUDDY_MODELS.length : FALLBACK_WORKBUDDY_AI_MODELS.length
+  return FALLBACK_COUNT_BY_ID.get(variant.id) ?? 0
 }
 
 async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
-  const store = makeStore(variant)
+  if (variant.kind === 'zcode') return zcodeDoctor(jsonOutput, variant)
+  const store = makeWorkBuddyStore(variant)
   const status = await store.status()
   const desktopPresent = await store.desktopFilePresent()
   const heartbeat = await readHostHeartbeat()
@@ -62,7 +74,7 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
     provider: variant.id,
     node: process.version,
     desktopAuthFile: {
-      path: store.desktopAuthPath() ?? `(no platform default; set ${variant.env})`,
+      path: store.desktopAuthPath() ?? `(no platform default; set ${variant.env ?? WORKBUDDY_AUTH_FILE_ENV})`,
       present: desktopPresent,
     },
     ownAuthFile: workbuddyOwnAuthPath(variant.ownFilename),
@@ -77,7 +89,7 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
     fallbackModels: fallbackFor(variant),
     hints: [
       ...status.state === 'signed-in' ? [] : [`Sign in once in the ${variant.appName} desktop app, then run status again.`],
-      ...desktopPresent ? [] : [`No ${variant.appName} desktop auth file at the expected path; set ${variant.env} if it lives elsewhere.`],
+      ...desktopPresent ? [] : [`No ${variant.appName} desktop auth file at the expected path; set ${variant.env ?? WORKBUDDY_AUTH_FILE_ENV} if it lives elsewhere.`],
       ...hostAlive ? [] : ['Host bundle not running in this DSH profile (or the process exited). The browser card and provider are unavailable until DSH starts the plugin.'],
     ],
   }
@@ -97,9 +109,75 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
   return status.state === 'signed-in' && desktopPresent ? 0 : 1
 }
 
+/** zcode doctor: key presence, source, and a one-request live validation. */
+async function zcodeDoctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
+  const store = new ZcodeCredentialStore()
+  const status = await store.status()
+  const credential = await store.current().catch(() => undefined)
+  const heartbeat = await readHostHeartbeat()
+  const hostAlive = heartbeat !== undefined && isHeartbeatProcessAlive(heartbeat)
+  // Live key check: one tiny messages request. Coding-plan keys bill by
+  // units, and 32 output tokens are negligible — an invalid key is exactly
+  // what doctor exists to catch, so the request is worth its cost.
+  let ping: { ok: boolean; status?: number; message: string } | undefined
+  if (credential !== undefined) {
+    const client = new ZcodeUpstreamClient()
+    try {
+      const result = await client.forwardMessages(
+        credential,
+        JSON.stringify({ model: 'GLM-5.3-Flash', max_tokens: 32, messages: [{ role: 'user', content: 'ping' }] }),
+        AbortSignal.timeout(15_000),
+      )
+      ping = result.ok
+        ? { ok: true, status: result.status, message: 'key accepted' }
+        : { ok: false, status: result.status, message: result.body.slice(0, 200) }
+    } catch (error: unknown) {
+      ping = { ok: false, message: safeMessage(error) }
+    }
+  }
+  const report = {
+    schemaVersion: JSON_SCHEMA_VERSION,
+    package: 'dsh-any-connect',
+    version: ANYCONNECT_VERSION,
+    provider: variant.id,
+    node: process.version,
+    keySource: credential?.source,
+    keyMasked: credential === undefined ? undefined : maskApiKey(credential.accessToken),
+    ownKeyFile: zcodeOwnAuthPath(),
+    hostHeartbeat: {
+      path: workbuddyHostHeartbeatPath(),
+      present: heartbeat !== undefined,
+      ...heartbeat === undefined ? {} : { registeredAt: heartbeat.registeredAt, pid: heartbeat.pid },
+      processAlive: hostAlive,
+    },
+    signIn: status.state,
+    fallbackModels: fallbackFor(variant),
+    ping,
+    hints: [
+      ...credential !== undefined ? [] : [`No GLM Coding Plan API key configured; set it via the plugin settings (apiKeyZcode), ${ZCODE_API_KEY_ENV}, or ${zcodeOwnAuthPath()}.`],
+      ...hostAlive ? [] : ['Host bundle not running in this DSH profile (or the process exited). The browser card and provider are unavailable until DSH starts the plugin.'],
+    ],
+  }
+  if (jsonOutput) {
+    printJson(report)
+  } else {
+    process.stdout.write([
+      `${variant.displayName} Connect ${ANYCONNECT_VERSION} on ${process.version}`,
+      `API key: ${report.keySource === undefined ? 'not configured' : `configured (${report.keySource}; ${report.keyMasked})`}`,
+      `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : heartbeat !== undefined ? 'stale heartbeat (process exited)' : 'not started'}`,
+      `Static fallback models: ${report.fallbackModels}`,
+      ...ping === undefined ? [] : [`Live key check: ${ping.ok ? 'accepted' : `rejected (http ${ping.status ?? '?'}): ${ping.message}`}`],
+      ...report.hints.map(hint => `Hint: ${hint}`),
+      '',
+    ].join('\n'))
+  }
+  return credential !== undefined && (ping === undefined || ping.ok) ? 0 : 1
+}
+
 async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
-  const store = makeStore(variant)
-  const client = new WorkBuddyUpstreamClient()
+  const store: WorkBuddyCredentialStore | ZcodeCredentialStore = variant.kind === 'zcode'
+    ? new ZcodeCredentialStore()
+    : makeWorkBuddyStore(variant)
   const authStatus = await store.status()
   const heartbeat = await readHostHeartbeat()
   const hostAlive = heartbeat !== undefined && isHeartbeatProcessAlive(heartbeat)
@@ -112,10 +190,36 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
     }
     return 1
   }
+  // zcode 无积分账本（套餐额度藏在有签名的管理面之后），也不存在 token
+  // 过期——status 只报 key 来源与掩码。
+  if (variant.kind === 'zcode') {
+    const credential = await (store as ZcodeCredentialStore).current()
+    if (jsonOutput) {
+      printJson({
+        schemaVersion: JSON_SCHEMA_VERSION,
+        package: 'dsh-any-connect',
+        version: ANYCONNECT_VERSION,
+        provider: variant.id,
+        status: 'signed-in',
+        keySource: credential?.source,
+        keyMasked: credential === undefined ? undefined : maskApiKey(credential.accessToken),
+        hostBundle: hostState,
+      })
+      return 0
+    }
+    process.stdout.write([
+      `${variant.displayName} Connect: signed in (key from ${credential?.source ?? 'unknown'})`,
+      `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : hostState === 'stale' ? 'stale heartbeat (DSH process exited)' : 'not started in this profile'}`,
+      'Client card: load failures are logged to the browser console only; the host provider is unaffected.',
+      '',
+    ].join('\n'))
+    return 0
+  }
+  const workbuddyStore = store as WorkBuddyCredentialStore
   let credits: { total: number; error?: string } | undefined
   try {
-    const credential = await store.current()
-    if (credential !== undefined) credits = { total: (await client.fetchCredits(credential)).total }
+    const credential = await workbuddyStore.current()
+    if (credential !== undefined) credits = { total: (await new WorkBuddyUpstreamClient().fetchCredits(credential)).total }
   } catch (error: unknown) {
     credits = { total: 0, error: safeMessage(error) }
   }
@@ -201,7 +305,13 @@ export async function run(argv: readonly string[]): Promise<number> {
       case 'status':
         return await status(jsonOutput, variant)
       case 'logout': {
-        const store = makeStore(variant)
+        if (variant.kind === 'zcode') {
+          const zcodeStore = new ZcodeCredentialStore()
+          await zcodeStore.logout()
+          process.stdout.write(`ZCode Connect: removed ${zcodeStore.ownAuthPath()}; a key configured via settings or ${ZCODE_API_KEY_ENV} is untouched\n`)
+          return 0
+        }
+        const store = makeWorkBuddyStore(variant)
         await store.logout()
         process.stdout.write(`${variant.displayName} Connect: removed ${workbuddyOwnAuthPath(variant.ownFilename)}; the desktop app's sign-in is untouched\n`)
         return 0

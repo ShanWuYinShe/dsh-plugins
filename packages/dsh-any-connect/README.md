@@ -40,6 +40,11 @@ DeepSeek-V4.1-Flash、Kimi-K3、MiniMax-M3、Hy3 等，国际版另有 GPT/Gemin
   模型分组、账号、积分与配置卡片，与国内版互不混用；只装一版就只出现
   一版。从未登录的一版不显示分组（而不是展示点选必错的名单）。
 
+- **ZCode（GLM Coding Plan）**：配置一个智谱 bigmodel 控制台创建的 API key
+  （与 coding plan 同账号），即可把 coding plan 的 GLM 模型接入 DSH。key
+  消耗的正是 zcode CLI 使用的同一份套餐额度。获取方式与如实限制见下方
+  「ZCode（GLM Coding Plan）接入」一节。
+
 ## 安装
 
 > 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段；仓库的 `dsh-v*`
@@ -78,18 +83,49 @@ dsh-any-connect status     # 当前登录态与积分
 dsh-any-connect logout     # 移除本插件的凭据副本（不动桌面 App 的登录）
 ```
 
-默认操作国内版；加 `--provider workbuddy-ai` 操作国际版：
+默认操作国内版；加 `--provider workbuddy-ai` 操作国际版，`--provider zcode`
+操作 ZCode（GLM Coding Plan）：
 
 ```bash
 dsh-any-connect status --provider workbuddy-ai
 dsh-any-connect doctor --provider workbuddy-ai
+dsh-any-connect doctor --provider zcode   # 含一次真实 key 校验（≤32 token）
+dsh-any-connect status --provider zcode
 ```
+
+## ZCode（GLM Coding Plan）接入
+
+zcode 桌面端（ZCode.app）的 OAuth 凭据是应用级加密存储，插件无法复用；
+本 provider 走「用户自建 API key」路线：
+
+1. 在 [bigmodel 控制台](https://bigmodel.cn/usercenter/proj-mgmt/apikeys)
+   （用户中心 → API Keys）创建一个 API key，账号须与你的 coding plan 一致；
+2. 三选一配置（优先级从高到低）：插件设置卡的 `apiKeyZcode` 字段 →
+   `ZCODE_API_KEY` 环境变量 → `~/.dsh/.zcode-auth.json`
+   （内容 `{"version":1,"apiKey":"..."}`）；
+3. 模型分组即出现在 DSH 模型选择器（GLM-5.3 / GLM-5.3-Flash / GLM-5.2 /
+   GLM-5-Turbo），对话经本机 loopback shim 以 Anthropic Messages 协议直通
+   `open.bigmodel.cn`。
+
+如实说明：
+
+- **额度**：coding plan 的 key 调用即按套餐结算，与 zcode CLI 共享同一份
+  额度（含加量促销，以智谱服务端实际结算为准）。
+- **夜间免费（off-peak）不可用**：zcode 的免费时段依赖其客户端持有的服务端
+  票据（`x-off-peak-ticket-id`），第三方直连拿不到；能否享受优惠以智谱按时段
+  的计费策略为准，插件不承诺。
+- **额度余量不显示**：查询余额的管理面有签名 + PoW 防护，插件不复刻；卡片只
+  展示 key 来源与掩码。
+- 上游为智谱非官方承诺的第三方接入面，调整可能需要跟随。
 
 ## 配置
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | `authFile` | 自动探测 | 显式指定 WorkBuddy 桌面凭据文件路径（覆盖环境变量与平台默认探测） |
+| `authFileAI` | 自动探测 | 同上，作用于 WorkBuddy AI（国际版） |
+| `apiKeyZcode` | 空 | GLM Coding Plan API key（bigmodel 控制台创建；空值回落 `ZCODE_API_KEY` env 与 `~/.dsh/.zcode-auth.json`） |
+| `probeConsent` | false | 授权推理档位检测（检测会发送真实请求，可能消耗积分） |
 
 生效顺序（后者覆盖前者）：内置默认值 → bundle patch 的 config →
 profile/home 的 `cordis.patch.yml` → 设置页。凭据来源的探测顺序与上游一致：

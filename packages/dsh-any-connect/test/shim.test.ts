@@ -70,6 +70,7 @@ async function startShim(upstreamResponse: () => WorkBuddyChatResult): Promise<H
     upstreamResponse,
   }
   harness.shim = createWorkBuddyShim({
+    kind: 'workbuddy',
     store,
     catalog: new WorkBuddyCatalog(),
     client: {
@@ -368,6 +369,7 @@ describe('WorkBuddy shim', () => {
     })
     let entered = false
     const shim = createWorkBuddyShim({
+      kind: 'workbuddy',
       store,
       catalog: new WorkBuddyCatalog(),
       client: {

@@ -6,10 +6,12 @@
 # This patch inserts the host plugin row with the default configuration. The
 # plugin reads WorkBuddy desktop credentials from the app's own location, so
 # an empty config is the normal case; set `authFile` to point at a specific
-# credential file.
+# credential file. The zcode provider needs a GLM Coding Plan API key — set
+# `apiKeyZcode` here (or in the settings card) to enable it.
 
 - insert:
     - id: dsh-any-connect
       name: '@chaoset/dsh-any-connect'
       config:
         authFile: ''
+        apiKeyZcode: ''

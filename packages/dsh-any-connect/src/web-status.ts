@@ -9,26 +9,35 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import type { WorkBuddyCredentialStore } from './auth.js'
-import type { WorkBuddyUpstreamClient } from './upstream.js'
+import type { WorkBuddyAuthStatus, WorkBuddyCredential } from './auth.js'
+import type { WorkBuddyCredits } from './upstream.js'
 import { normalizeCredits } from './upstream.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import { WORKBUDDY_STATUS_PATH } from './status-paths.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebContextModel, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
-export { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from './status-paths.js'
+export { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH, ZCODE_PROBE_PATH, ZCODE_STATUS_PATH } from './status-paths.js'
 export type { WorkBuddyWebCatalog, WorkBuddyWebContextModel, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
 /** Constructor dependencies. */
 export interface WorkBuddyStatusRouteOptions {
-  store: WorkBuddyCredentialStore
-  client: Pick<WorkBuddyUpstreamClient, 'fetchCredits'>
+  /**
+   * Structural minimum both credential stores satisfy: sign-in summary for
+   * the document, and the current credential (only consumed when
+   * {@link fetchCredits} is provided, which is WorkBuddy-only).
+   */
+  store: {
+    status(): Promise<WorkBuddyAuthStatus>
+    current(): Promise<{ accessToken: string } | undefined>
+  }
+  /** Live billing answer; absent for providers without a credit ledger (zcode). */
+  fetchCredits?: (credential: WorkBuddyCredential) => Promise<WorkBuddyCredits>
   /** Resolve the current model catalog for free/badge display. */
   models: () => readonly WorkBuddyModelInfo[]
   /** Resolve where the served models came from, for the card's catalog line. */
   catalog: () => WorkBuddyWebCatalog
-  /** Resolve the probe section, for the card's detection controls. */
-  probe: () => WorkBuddyWebProbeSection
+  /** Resolve the probe section, for the card's detection controls. Omitted hides it. */
+  probe?: () => WorkBuddyWebProbeSection
   /** In-process key authorizing probe control writes; handed to the card. */
   probeKey: string
   /** Route path; one per variant. */
@@ -81,7 +90,7 @@ export async function workBuddyWebStatus(
     ...authStatus.source === undefined ? {} : { source: authStatus.source },
     ...authStatus.expiresAtMs === undefined ? {} : { expiresAt: authStatus.expiresAtMs },
     catalog: deps.catalog(),
-    probe: deps.probe(),
+    ...deps.probe === undefined ? {} : { probe: deps.probe() },
     probeKey: deps.probeKey,
   }
   // Model billing facts ride the signed-in document so the card can show which
@@ -119,10 +128,14 @@ export async function workBuddyWebStatus(
     ? { ...status, models: modelsField, context }
     : { ...status, context }
   try {
-    const credential = await deps.store.current()
-    if (credential !== undefined) {
-      const credits = await deps.client.fetchCredits(credential)
-      return { ...statusWithModels, credits }
+    if (deps.fetchCredits !== undefined) {
+      const credential = await deps.store.current()
+      if (credential !== undefined) {
+        // zcode credentials are plain API keys and never reach this call —
+        // fetchCredits is only provided for the WorkBuddy variants.
+        const credits = await deps.fetchCredits(credential as WorkBuddyCredential)
+        return { ...statusWithModels, credits }
+      }
     }
   } catch (error: unknown) {
     return { ...statusWithModels, creditsError: safeMessage(error) }

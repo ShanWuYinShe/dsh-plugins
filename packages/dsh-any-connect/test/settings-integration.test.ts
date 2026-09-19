@@ -243,6 +243,72 @@ describe('WorkBuddy Host settings integration', () => {
   })
 })
 
+describe('zcode provider (GLM Coding Plan)', () => {
+  it('registers zcode and keeps its group hidden until a key is configured', async () => {
+    // 与 WorkBuddy 变体同一显隐约定：无 key 时分组隐藏，provider 与设置区照常
+    // 注册——key 配置（卡片/env/key 文件）之后无需重新注册。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-zcode-'))
+    vi.stubEnv('DSH_HOME', root)
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(MemorySettings)
+    await ctx.plugin(WorkBuddy, {
+      authFile: join(root, 'no-such-file.info'),
+      authFileAI: join(root, 'no-such-ai-file.info'),
+    })
+    await vi.waitFor(() => {
+      const ids = ctx.llm.listProviders().map(provider => provider.id)
+      expect(ids).toContain('workbuddy')
+      expect(ids).toContain('workbuddy-ai')
+      expect(ids).toContain('zcode')
+    })
+    expect(ctx.llm.listConfigurableProviders()).toContainEqual({
+      provider: 'zcode',
+      displayName: 'ZCode',
+      settingsNs: 'anyconnect-zcode',
+      settingsPath: [],
+      declared: false,
+    })
+    await vi.waitFor(async () => {
+      expect(await ctx.llm.listModels('zcode')).toEqual([])
+    })
+    const namespaces = ctx.settings.describe().map(entry => entry.ns)
+    expect(namespaces).toContain(WorkBuddy.WORKBUDDY_ZCODE_SETTINGS_NS)
+  })
+
+  it('serves the GLM roster once a key is configured, and hides it again after the key is cleared', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-zcode-roster-'))
+    vi.stubEnv('DSH_HOME', root)
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(MemorySettings)
+    await ctx.plugin(WorkBuddy, {
+      authFile: join(root, 'no-such-file.info'),
+      authFileAI: join(root, 'no-such-ai-file.info'),
+      apiKeyZcode: 'plan-key-123456',
+    })
+    // WorkBuddy 侧无凭据保持隐藏；zcode 静态名单可见，id 用上游大写拼写。
+    await vi.waitFor(async () => {
+      const ids = (await ctx.llm.listModels('zcode')).map(m => m.id)
+      expect(ids).toContain('GLM-5.3')
+      expect(ids).toContain('GLM-5.3-Flash')
+      expect(ids).toContain('GLM-5.2')
+      expect(ids).toContain('GLM-5-Turbo')
+    })
+    expect(await ctx.llm.listModels('workbuddy')).toEqual([])
+
+    // 设置卡清空 key（schemastery 会物化成空字符串）→ 分组隐藏。
+    // （env 兜底的优先级链由 zcode.test.ts 的 store 用例覆盖；这里不依赖
+    // 「同值 settings.update 是否触发 onChange」的宿主语义。）
+    await ctx.settings.update(WorkBuddy.WORKBUDDY_ZCODE_SETTINGS_NS, { apiKeyZcode: '' })
+    await vi.waitFor(async () => {
+      expect(await ctx.llm.listModels('zcode')).toEqual([])
+    })
+  })
+})
+
 describe('WorkBuddy international variant', () => {
   it('registers both providers but hides each group independently', async () => {
     // 双分组独立显隐：都不登录时两个分组都隐藏，但 provider 注册与设置区
