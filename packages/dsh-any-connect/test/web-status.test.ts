@@ -7,8 +7,9 @@ import type { WorkBuddyStatusRouteOptions } from '../src/web-status.js'
 
 /**
  * Offline unit tests for the status document the plugin card renders: the
- * model-offer selection (free / promo rows) and the rate suppression for
- * models whose 免费 chip already says it all.
+ * unified per-model rows (one row per served model carrying window, billing
+ * facts, and declared efforts) and the rate suppression for models whose
+ * 免费 chip already says it all.
  */
 
 const CREDENTIAL: WorkBuddyCredential = {
@@ -65,30 +66,35 @@ describe('workBuddyWebStatus', () => {
       store: storeWith(CREDENTIAL),
       fetchCredits: clientWith(Promise.resolve({ total: 43, accounts: [] })),
       models: () => [
-        model({ id: 'promo', name: 'Promo', billing: { credits: 'x0.79 credits', badges: ['夜间折扣'], free: false } }),
-        model({ id: 'free', name: 'Free', billing: { credits: 'x0.00', badges: ['限时免费'], free: true } }),
+        model({ id: 'promo', name: 'Promo', contextWindow: 200000, billing: { credits: 'x0.79 credits', badges: ['夜间折扣'], free: false } }),
+        model({ id: 'free', name: 'Free', contextWindow: 192000, billing: { credits: 'x0.00', badges: ['限时免费'], free: true } }),
       ],
       catalog: () => ({ source: 'live', fetchedAt: 1700000000000 }),
       probe: () => ({ consent: true, running: false, candidates: ['m'], results: [] }),
       probeKey: 'test-key',
     })
     expect(status.status).toBe('signed-in')
+    // 统一行：每个被服务的模型一行，窗口字段恒在；免费行的倍率被抑制
+    //（免费 chip 已说明一切），促销行保留归一化后的倍率。
     expect(status.models).toEqual([
-      { id: 'promo', name: 'Promo', badges: ['夜间折扣'], credits: 'x0.79' },
-      { id: 'free', name: 'Free', badges: ['限时免费'], free: true },
+      { id: 'promo', name: 'Promo', contextWindow: 200000, largerWindows: [], badges: ['夜间折扣'], credits: 'x0.79' },
+      { id: 'free', name: 'Free', contextWindow: 192000, largerWindows: [], badges: ['限时免费'], free: true },
     ])
   })
 
-  it('omits the models field when no model is free or badged', async () => {
+  it('serves a row for every model, not only the promo ones', async () => {
     const status = await workBuddyWebStatus({
       store: storeWith(CREDENTIAL),
       fetchCredits: clientWith(Promise.resolve({ total: 1, accounts: [] })),
-      models: () => [model({ id: 'plain', name: 'Plain', billing: { credits: 'x1.62', free: false } })],
+      models: () => [model({ id: 'plain', name: 'Plain', contextWindow: 256000, billing: { credits: 'x1.62', free: false } })],
       catalog: () => ({ source: 'saved', fetchedAt: 1700000000000 }),
       probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
       probeKey: 'test-key',
     })
-    expect(status.models).toBeUndefined()
+    // 统一模型列表是全量行：普通倍率模型同样有一行（倍率裸显）。
+    expect(status.models).toEqual([
+      { id: 'plain', name: 'Plain', contextWindow: 256000, largerWindows: [], credits: 'x1.62' },
+    ])
     expect(status.credits).toEqual({ total: 1, accounts: [] })
   })
 
@@ -119,13 +125,68 @@ describe('workBuddyWebStatus', () => {
     const status = await workBuddyWebStatus({
       store: storeWith(CREDENTIAL),
       fetchCredits: clientWith(Promise.reject(new Error('boom'))),
-      models: () => [model({ id: 'free', name: 'Free', billing: { credits: 'x0.00', free: true } })],
+      models: () => [model({ id: 'free', name: 'Free', contextWindow: 192000, billing: { credits: 'x0.00', free: true } })],
       catalog: () => ({ source: 'fallback', error: 'boom' }),
       probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
       probeKey: 'test-key',
     })
     expect(status.creditsError).toBe('boom')
-    expect(status.models).toEqual([{ id: 'free', name: 'Free', free: true }])
+    expect(status.models).toEqual([
+      { id: 'free', name: 'Free', contextWindow: 192000, largerWindows: [], free: true },
+    ])
+  })
+
+  it('carries declared effort levels and larger windows on the unified rows', async () => {
+    const status = await workBuddyWebStatus({
+      store: storeWith(CREDENTIAL),
+      fetchCredits: clientWith(Promise.resolve({ total: 1, accounts: [] })),
+      models: () => [
+        model({ id: 'plain', name: 'Plain', contextWindow: 200000 }),
+        {
+          ...model({
+            id: 'tiered',
+            name: 'Tiered',
+            contextWindow: 300000,
+            reasoning: { supports: true, onlyReasoning: true, supportedEfforts: ['low', 'high', 'max'], defaultEffort: 'high', canDisableThinking: true },
+          }),
+          supportedContextWindows: [300000, 1000000],
+          maxInputTokens: 1000000,
+        },
+      ],
+      catalog: () => ({ source: 'live' }),
+      probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
+      probeKey: 'test-key',
+    })
+    expect(status.models).toEqual([
+      { id: 'plain', name: 'Plain', contextWindow: 200000, largerWindows: [] },
+      {
+        id: 'tiered',
+        name: 'Tiered',
+        contextWindow: 300000,
+        largerWindows: [1000000],
+        efforts: ['low', 'high', 'max'],
+      },
+    ])
+  })
+
+  it('degrades an off-peak window failure to an error row', async () => {
+    const failing = async (): Promise<never> => { throw new Error('ticket server down') }
+    const status = await workBuddyWebStatus({
+      store: storeWith(CREDENTIAL),
+      models: () => [],
+      catalog: () => ({ source: 'fallback' }),
+      offPeakWindow: failing,
+      probeKey: 'test-key',
+    })
+    expect(status.offPeakWindow).toEqual({ canTakeNumber: false, error: 'ticket server down' })
+    const ok = await workBuddyWebStatus({
+      store: storeWith(CREDENTIAL),
+      models: () => [],
+      catalog: () => ({ source: 'fallback' }),
+      offPeakWindow: async () => ({ canTakeNumber: false, nextTakeAtSec: 1700000000 }),
+      probeKey: 'test-key',
+    })
+    expect(ok.offPeakWindow).toEqual({ canTakeNumber: false, nextTakeAtSec: 1700000000 })
   })
 })
 
@@ -146,7 +207,8 @@ describe('workBuddyWebStatus context', () => {
       probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
       probeKey: 'test-key',
     })
-    expect(status.context).toEqual([
+    // 旧 context 区块已并入统一行：窗口与可选更大窗口随每行携带。
+    expect(status.models).toEqual([
       { id: 'plain', name: 'Plain', contextWindow: 200000, largerWindows: [] },
       { id: 'tiered', name: 'Tiered', contextWindow: 300000, largerWindows: [1000000] },
     ])

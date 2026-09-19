@@ -8,6 +8,7 @@ async function mount(deps?: {
   probe?: (modelId: string) => Promise<{ state: string; reason?: string }>
   clear?: () => void
   refresh?: () => Promise<{ state: string; reason?: string }>
+  setConsent?: (enabled: boolean) => void
 }): Promise<{ server: Server; port: number; calls: string[] }> {
   const calls: string[] = []
   const handler = workBuddyProbeHandler({
@@ -24,6 +25,12 @@ async function mount(deps?: {
       : async () => {
         calls.push('refresh')
         return deps.refresh!()
+      },
+    setConsent: deps?.setConsent === undefined
+      ? undefined
+      : enabled => {
+        calls.push(`consent:${String(enabled)}`)
+        deps.setConsent!(enabled)
       },
   }, KEY)
   const server = createServer((req, res) => { void handler(req, res) })
@@ -107,5 +114,28 @@ describe('workBuddyProbeHandler', () => {
 
   it('mints unique per-process keys', () => {
     expect(createProbeKey()).not.toBe(createProbeKey())
+  })
+
+  it('dispatches set-consent and rejects malformed payloads', async () => {
+    const m = await mount({ setConsent: () => {} })
+    mounted = m
+    expect(await post(m.port, { action: 'set-consent', enabled: true }, AUTH)).toEqual({
+      status: 200,
+      json: { state: 'ok', enabled: true },
+    })
+    expect(await post(m.port, { action: 'set-consent', enabled: false }, AUTH)).toEqual({
+      status: 200,
+      json: { state: 'ok', enabled: false },
+    })
+    // 缺 enabled 或非布尔：形状校验拒绝，不触碰处理器。
+    expect((await post(m.port, { action: 'set-consent' }, AUTH)).status).toBe(400)
+    expect((await post(m.port, { action: 'set-consent', enabled: 'yes' }, AUTH)).status).toBe(400)
+    expect(m.calls).toEqual(['consent:true', 'consent:false'])
+  })
+
+  it('answers 404 for set-consent when the handler has no consent hook', async () => {
+    const m = await mount()
+    mounted = m
+    expect((await post(m.port, { action: 'set-consent', enabled: true }, AUTH)).status).toBe(404)
   })
 })

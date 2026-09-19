@@ -139,6 +139,20 @@ describe('WorkBuddyUpstreamClient.fetchModels', () => {
       canDisableThinking: false,
     })
     expect(byId.get('m-free')?.billing).toEqual({ credits: 'x0.00', badges: ['限时免费'], free: true })
+    // 带单位后缀的免费拼写（live 目录实测形态 "x0.00 credits"）同样判免费：
+    // free 测的是归一化后的倍率，不是原始字符串。
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(modelsEnvelope([
+      {
+        id: 'm-suffixed',
+        name: 'Suffixed Free',
+        maxInputTokens: 100_000, maxOutputTokens: 32_000,
+        supportsReasoning: true, onlyReasoning: true, reasoning: { canDisableThinking: false },
+        credits: 'x0.00 credits',
+        tags: ['badge:限时免费:#FF0000'],
+      },
+    ], ['m-suffixed']))))
+    const suffixed = await new WorkBuddyUpstreamClient().fetchModels(CREDENTIAL)
+    expect(suffixed[0]?.billing).toEqual({ credits: 'x0.00 credits', badges: ['限时免费'], free: true })
     // A model with no reasoning or billing fields is explicitly non-reasoning
     // (supports: false) and carries no free/badge facts.
     expect(byId.get('m-plain')?.reasoning).toEqual({

@@ -171,4 +171,26 @@ export class WorkBuddyProbeService {
       this.pending.delete(pendingKey)
     }
   }
+
+  /**
+   * Enqueue an automatic probe for every candidate the catalog serves that has
+   * no usable observation yet. A no-op unless detection is authorized; each
+   * model goes through the same serial queue, pending dedup, and account
+   * attribution as a manual probe, so a sweep triggered this way can never
+   * overlap a user's chat traffic or double-run a model.
+   *
+   * Called after every catalog refresh (startup, credential change, scheduled
+   * refresh), which is when the candidate set can actually change. The catalog
+   * fingerprint on each record makes re-probes automatic: a changed row
+   * invalidates its old observation and the model becomes a candidate again.
+   */
+  probeMissingCandidates(): void {
+    if (!this.options.consent()) return
+    const candidates = this.options.catalog.current().filter(info =>
+      info.reasoning?.supports === true
+      && (info.reasoning.supportedEfforts?.length ?? 0) === 0)
+    for (const info of candidates) {
+      if (this.recordFor(info.id) === undefined) void this.probe(info.id)
+    }
+  }
 }

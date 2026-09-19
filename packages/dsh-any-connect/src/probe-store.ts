@@ -81,6 +81,14 @@ export interface WorkBuddyProbeRecord {
 interface ProbeDocument {
   version: typeof PROBE_FORMAT_VERSION
   records: Record<string, WorkBuddyProbeRecord>
+  /**
+   * Whether automatic effort detection is authorized. Lives here rather than
+   * in the settings config because the probe route (the card's write path)
+   * has no way back into the settings store, and because authorization for
+   * spending credit belongs with the records it governs. Absent reads as
+   * false, so pre-existing documents stay unauthorized.
+   */
+  consent?: boolean
 }
 
 /**
@@ -165,6 +173,7 @@ export class WorkBuddyProbeStore {
   private readonly pluginVersion: string
   private readonly now: () => number
   private records: Record<string, WorkBuddyProbeRecord> | undefined
+  private consent: boolean | undefined
 
   constructor(options: WorkBuddyProbeStoreOptions) {
     this.path = options.path ?? workbuddyProbePath()
@@ -176,6 +185,20 @@ export class WorkBuddyProbeStore {
   /** Resolved state-file path, for the CLI and tests. */
   filePath(): string {
     return this.path
+  }
+
+  /** Whether automatic effort detection is authorized; defaults to false. */
+  consentEnabled(): boolean {
+    if (this.consent === undefined) {
+      this.consent = readDocument(this.path)?.consent === true
+    }
+    return this.consent
+  }
+
+  /** Persist the automatic-detection authorization. */
+  setConsent(enabled: boolean): void {
+    this.consent = enabled
+    this.persist()
   }
 
   private load(): Record<string, WorkBuddyProbeRecord> {
@@ -269,6 +292,7 @@ export class WorkBuddyProbeStore {
     try {
       if (!existsSync(directory)) mkdirSync(directory, { recursive: true })
       const document: ProbeDocument = { version: PROBE_FORMAT_VERSION, records: this.load() }
+      if (this.consent === true) document.consent = true
       const temporary = resolve(`${this.path}.tmp`)
       writeFileSync(temporary, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
       renameSync(temporary, this.path)

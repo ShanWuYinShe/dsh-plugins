@@ -25,7 +25,7 @@ import { ZcodeOffpeakCredentialStore, ZcodeOffpeakUpstreamClient } from './zcode
 import type { ZcodeCredential } from './zcode-auth.js'
 import type { ZcodeOffpeakCredential } from './zcode-offpeak.js'
 import type { WorkBuddyCredential } from './auth.js'
-import type { WorkBuddyWebCatalog, WorkBuddyWebProbeSection } from './status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebOffPeakWindow, WorkBuddyWebProbeSection } from './status-paths.js'
 import { WorkBuddyProbeService } from './probe-service.js'
 import { newestFirst, workbuddyProbePath, WorkBuddyProbeStore } from './probe-store.js'
 import { createProbeKey, registerWorkBuddyProbeRoute } from './probe-route.js'
@@ -205,29 +205,21 @@ export interface Config {
    * `ZCODE_API_KEY` and then the plugin-owned key file.
    */
   apiKeyZcode?: string
-  /**
-   * Whether the user has authorized sending probe requests about reasoning
-   * efforts. Off by default: a probe spends real credit, so nothing is sent
-   * until the user explicitly agrees. (Only manual, per-click-confirmed
-   * probes run; this gates any future automatic trigger.)
-   */
-  probeConsent?: boolean
+  // probeConsent lived here until automatic detection moved its authorization
+  // into the probe-store file (the card's write path cannot reach the settings
+  // store). schemastery strips unknown fields, so a stale `probeConsent` in a
+  // cordis.patch.yml is ignored rather than rejected.
 }
-
-const PROBE_CONSENT_FIELD = z.boolean().default(false)
-  .description('Authorize reasoning-effort probes (each probe sends real requests that may consume credit)')
 
 export const Config: z<Config> = z.object({
   authFile: z.string().description('WorkBuddy desktop auth file (defaults to the app\'s own location)'),
   authFileAI: z.string().description('WorkBuddy AI desktop auth file (defaults to the app\'s own location)'),
   apiKeyZcode: z.string().description('GLM Coding Plan API key (bigmodel console; blank = ZCODE_API_KEY env or ~/.dsh/.zcode-auth.json)'),
-  probeConsent: PROBE_CONSENT_FIELD,
 })
 
 /** One variant's settings section: only the fields that card edits. */
 const CN_SECTION: z<Config> = z.object({
   authFile: z.string().description('WorkBuddy desktop auth file (defaults to the app\'s own location)'),
-  probeConsent: PROBE_CONSENT_FIELD,
 })
 
 /** The international card's settings section: only its own auth-file path. */
@@ -255,6 +247,15 @@ const CATALOG_REFRESH_RETRY_MS = 60_000
  * 登录态翻转最多延迟一拍即现形。unref，不拖住进程退出。
  */
 const IDENTITY_SWEEP_MS = 60_000
+
+/**
+ * 目录周期刷新节拍：上游目录会漂移（促销上下线、倍率与声明档位调整、新
+ * 模型），启动只拉一次的话长驻宿主会一直服务旧名单。每小时对 WorkBuddy
+ * 变体重拉一次（一次免费的 catalog GET，无积分消耗）；拉取失败走既有重试，
+ * 耗尽后等下个周期自然再试——「启动时网络不好就永远停在 fallback」从此
+ * 不存在。zcode 家族目录是编译期静态名单，不参与。unref，不拖住进程退出。
+ */
+const CATALOG_REFRESH_INTERVAL_MS = 60 * 60_000
 
 /**
  * Structural minimum every variant's credential store satisfies. Credentials
@@ -444,7 +445,9 @@ export function apply(ctx: Context, config: Config): void {
       catalog,
       credentials: credentialStore,
       client,
-      consent: () => current().probeConsent === true,
+      // 授权持久化在 probe-store 文件（卡片开关经 probe 路由写入）；默认关，
+      // 因为每档检测都发真实请求消耗积分。
+      consent: () => probeStore.consentEnabled(),
       // Observations are per account: the service reads and writes its records
       // against this identity, so one account's detected levels never answer
       // for another's.
@@ -467,10 +470,12 @@ export function apply(ctx: Context, config: Config): void {
    * that always wins) — showing one would have the card promise levels the
    * model picker does not offer.
    */
-  function probeSection(runtime: VariantRuntime, consent: boolean): WorkBuddyWebProbeSection {
+  function probeSection(runtime: VariantRuntime): WorkBuddyWebProbeSection {
     // 仅 WorkBuddy 变体携带探针服务；status 路由也只对它们启用 probe 字段。
+    // consent 现持久化在 probe-store（卡片开关经 probe 路由写入），不再读
+    // settings config。
     if (runtime.probeService === undefined) {
-      return { consent, running: false, candidates: [], results: [] }
+      return { consent: false, running: false, candidates: [], results: [] }
     }
     const results = runtime.catalog.current().flatMap(info => {
       const record = runtime.probeService!.recordFor(info.id)
@@ -484,7 +489,7 @@ export function apply(ctx: Context, config: Config): void {
       }]
     })
     return {
-      consent,
+      consent: runtime.probeStore!.consentEnabled(),
       running: runtime.probeService.isRunning(),
       candidates: runtime.catalog.current()
         .filter(info => info.reasoning?.supports === true && (info.reasoning.supportedEfforts?.length ?? 0) === 0)
@@ -498,6 +503,41 @@ export function apply(ctx: Context, config: Config): void {
       source: runtime.catalogSource,
       ...runtime.catalogFetchedAtMs === undefined ? {} : { fetchedAt: runtime.catalogFetchedAtMs },
       ...runtime.catalogError === undefined ? {} : { error: runtime.catalogError },
+    }
+  }
+
+  /** off-peak 窗口状态的短 TTL 缓存：status 是 60s 轮询端点，availability
+   * 是一次真实票据系统调用，缓存让轮询不会每次都真打上游。失败值同样缓存
+   * （网络抖动等暂态错误 60s 后自愈），调用方无需重复兜底。 */
+  const OFFPEAK_WINDOW_TTL_MS = 60_000
+  let offpeakWindowCache: { at: number; value: WorkBuddyWebOffPeakWindow } | undefined
+  async function offPeakWindowCached(runtime: VariantRuntime): Promise<WorkBuddyWebOffPeakWindow> {
+    const offpeak = runtime.offpeak
+    if (offpeak === undefined) return { canTakeNumber: false, error: 'off-peak client unavailable' }
+    const now = Date.now()
+    if (offpeakWindowCache !== undefined && now - offpeakWindowCache.at < OFFPEAK_WINDOW_TTL_MS) {
+      return offpeakWindowCache.value
+    }
+    try {
+      const credential = await offpeak.store.current()
+      if (credential === undefined) {
+        // signed-in 文档才会走到这里；拿不到凭据按会话缺失如实上报。
+        return { canTakeNumber: false, error: 'zcode session missing' }
+      }
+      const window = await offpeak.client.tickets.availability(credential, AbortSignal.timeout(15_000))
+      const value: WorkBuddyWebOffPeakWindow = {
+        canTakeNumber: window.canTakeNumber,
+        ...window.nextTakeAt === undefined ? {} : { nextTakeAtSec: window.nextTakeAt },
+      }
+      offpeakWindowCache = { at: now, value }
+      return value
+    } catch (error: unknown) {
+      const value: WorkBuddyWebOffPeakWindow = {
+        canTakeNumber: false,
+        error: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+      }
+      offpeakWindowCache = { at: now, value }
+      return value
     }
   }
 
@@ -531,8 +571,13 @@ export function apply(ctx: Context, config: Config): void {
         // 探针区只属于 WorkBuddy 变体；zcode 的 status 文档省略 probe 字段，
         // 卡片随即隐藏检测 UI（.refreshModels 的目录刷新走下方 probe 路由）。
         ...runtime.variant.kind === 'workbuddy'
-          ? { probe: () => probeSection(runtime, current().probeConsent === true) }
+          ? { probe: () => probeSection(runtime) }
           : {},
+        // 夜间窗口状态只属于 off-peak 变体：availability 是一次真实 API 调用，
+        // 带 TTL 缓存，卡片 60s 轮询 status 时不会每次真打票据系统。
+        ...runtime.offpeak === undefined ? {} : {
+          offPeakWindow: () => offPeakWindowCached(runtime),
+        },
         probeKey,
       })
       registerWorkBuddyProbeRoute(webCtx, {
@@ -546,6 +591,14 @@ export function apply(ctx: Context, config: Config): void {
               : { state: 'unavailable' as const, reason: result.reason }
           },
         clear: () => { runtime.probeStore?.clear() },
+        setConsent: runtime.variant.kind !== 'workbuddy'
+          ? undefined
+          : enabled => {
+              runtime.probeStore?.setConsent(enabled)
+              // 开启即视为对现有候选的一次授权：立即补齐缺失检测，不用等
+              // 下一次目录刷新。
+              if (enabled) runtime.probeService?.probeMissingCandidates()
+            },
         refresh: async () => {
           if (stopped) return { state: 'failed' as const, reason: 'plugin is stopping' }
           // 先重读凭据：用户按刷新多半因为名单看起来不对，而最常见的
@@ -647,7 +700,7 @@ export function apply(ctx: Context, config: Config): void {
     const scopeByNs = new Map<SettingsNamespace, () => Config>()
     /** 每个 section 拥有的 Config 字段（onChange 与合并视图都以它为准）。 */
     const fieldsByNs = new Map<SettingsNamespace, ReadonlyArray<keyof Config>>([
-      [WORKBUDDY_SETTINGS_NS, ['authFile', 'probeConsent']],
+      [WORKBUDDY_SETTINGS_NS, ['authFile']],
       [WORKBUDDY_AI_SETTINGS_NS, ['authFileAI']],
       [WORKBUDDY_ZCODE_SETTINGS_NS, ['apiKeyZcode']],
       [WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS, []],
@@ -772,6 +825,10 @@ export function apply(ctx: Context, config: Config): void {
           }
           runtime.catalogError = undefined
           catalog.setVisible(true)
+          // saved/fallback 目录先行发布时同样补齐缺失检测：行与旧目录不同
+          // 的候选（fingerprint 失效）在这里入队；随后 live 拉取成功会再触
+          // 发一次，pending 去重保证同一模型不重复跑。
+          runtime.probeService?.probeMissingCandidates()
         }
         const generation = runtime.lastIdentity
         const models = await client.fetchModels(credential as Parameters<WorkBuddyUpstreamClient['fetchModels']>[0])
@@ -789,6 +846,9 @@ export function apply(ctx: Context, config: Config): void {
           fetchedAtMs: runtime.catalogFetchedAtMs,
           models: [...models],
         })
+        // 目录落地即补齐缺失的档位检测（仅当用户开启过自动检测）：新模型、
+        // 行变化导致旧记录失效的模型，都在这里自动入队。
+        runtime.probeService?.probeMissingCandidates()
       } catch (error: unknown) {
         if (error instanceof RegionMismatchError) {
           // 配错了文件：隐藏分组并把原因留给卡片，不重试。
@@ -815,6 +875,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => () => {
     stopped = true
     clearInterval(sweep)
+    clearInterval(catalogTimer)
     // close 期间 server 的 error 事件会 reject 该 promise,不捕获就是
     // unhandled rejection——Node 默认策略下会终止宿主进程,且恰发生在
     // dispose 路径。降级为告警日志。
@@ -850,6 +911,17 @@ export function apply(ctx: Context, config: Config): void {
     }
   }, IDENTITY_SWEEP_MS)
   sweep.unref()
+
+  // 目录周期刷新：上游名单漂移（促销/倍率/档位/新模型）不再依赖用户手点。
+  // 只轮 WorkBuddy 变体——zcode 家族是静态名单，身份核对已覆盖其凭据跟随。
+  // refreshCatalog 内部先探登录态：未登录时等价于一次身份核对，无上游请求。
+  const catalogTimer = setInterval(() => {
+    if (stopped) return
+    for (const runtime of runtimes) {
+      if (runtime.variant.kind === 'workbuddy') refreshCatalog(runtime, 'scheduled refresh')
+    }
+  }, CATALOG_REFRESH_INTERVAL_MS)
+  catalogTimer.unref()
 
   for (const runtime of runtimes) {
     const { catalog, shim, variant } = runtime

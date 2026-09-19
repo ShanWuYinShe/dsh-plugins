@@ -51,6 +51,12 @@ export interface WorkBuddyProbeRouteOptions {
    */
   refresh?: () => Promise<{ state: string; reason?: string }>
   /**
+   * Persist the automatic-detection authorization. Disabling it here does not
+   * cancel sweeps already in flight (they were individually authorized when
+   * queued); it only stops future automatic triggers.
+   */
+  setConsent?: (enabled: boolean) => void
+  /**
    * Route path to mount. Defaults to the CN variant's path so existing callers
    * and tests keep their behaviour; the international variant passes its own.
    */
@@ -106,6 +112,10 @@ function parseAction(text: string): WorkBuddyProbeAction | undefined {
   // No payload: the variant is already known from the route the request arrived
   // on, so the browser cannot ask this route to refresh a different provider.
   if (action === 'refresh') return { action: 'refresh' }
+  if (action === 'set-consent') {
+    if (typeof wrapped['enabled'] !== 'boolean') return undefined
+    return { action: 'set-consent', enabled: wrapped['enabled'] }
+  }
   if (action === 'probe') {
     const model = wrapped['model']
     if (typeof model !== 'string' || model.trim() === '') return undefined
@@ -157,6 +167,15 @@ export function workBuddyProbeHandler(
           return
         }
         json(res, 200, await deps.refresh())
+        return
+      }
+      if (action.action === 'set-consent') {
+        if (deps.setConsent === undefined) {
+          json(res, 404, { error: 'consent-not-supported' })
+          return
+        }
+        deps.setConsent(action.enabled as boolean)
+        json(res, 200, { state: 'ok', enabled: action.enabled })
         return
       }
       json(res, 200, await deps.probe(action.model as string))

@@ -14,10 +14,10 @@ import type { WorkBuddyCredits } from './upstream.js'
 import { normalizeCredits } from './upstream.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import { WORKBUDDY_STATUS_PATH } from './status-paths.js'
-import type { WorkBuddyWebCatalog, WorkBuddyWebContextModel, WorkBuddyWebModelBadge, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebOffPeakWindow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
 export { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH, ZCODE_PROBE_PATH, ZCODE_STATUS_PATH } from './status-paths.js'
-export type { WorkBuddyWebCatalog, WorkBuddyWebContextModel, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
+export type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebOffPeakWindow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
 /** Constructor dependencies. */
 export interface WorkBuddyStatusRouteOptions {
@@ -32,12 +32,18 @@ export interface WorkBuddyStatusRouteOptions {
   }
   /** Live billing answer; absent for providers without a credit ledger (zcode). */
   fetchCredits?: (credential: WorkBuddyCredential) => Promise<WorkBuddyCredits>
-  /** Resolve the current model catalog for free/badge display. */
+  /** Resolve the current model catalog for the card's unified model list. */
   models: () => readonly WorkBuddyModelInfo[]
   /** Resolve where the served models came from, for the card's catalog line. */
   catalog: () => WorkBuddyWebCatalog
   /** Resolve the probe section, for the card's detection controls. Omitted hides it. */
   probe?: () => WorkBuddyWebProbeSection
+  /**
+   * Night-free window state for the zcode-offpeak card. The callback is
+   * expected to cache (the status route polls), and may fail — a failure
+   * degrades to an `error` row in the document, never a failed request.
+   */
+  offPeakWindow?: () => Promise<WorkBuddyWebOffPeakWindow>
   /** In-process key authorizing probe control writes; handed to the card. */
   probeKey: string
   /** Route path; one per variant. */
@@ -93,40 +99,35 @@ export async function workBuddyWebStatus(
     ...deps.probe === undefined ? {} : { probe: deps.probe() },
     probeKey: deps.probeKey,
   }
-  // Model billing facts ride the signed-in document so the card can show which
-  // models are free or on a promo, without touching the Models picker. The
-  // rate is normalized here (not in the card) so both halves agree on one
-  // display form; the card additionally localizes it.
-  const models = deps.models()
-  const modelsField: readonly WorkBuddyWebModelBadge[] = models
-    .filter(model => model.billing?.free === true || (model.billing?.badges?.length ?? 0) > 0 || model.billing?.rateUnknown === true)
-    .map(model => {
-      // A free model's card row already carries the 免费 chip; the
-      // "x0.00 credits per message" line under it would be pure noise.
-      const rate = model.billing?.free === true ? undefined : normalizeCredits(model.billing?.credits)
-      return {
-        id: model.id,
-        name: model.name,
-        ...model.billing?.free === true ? { free: true as const } : {},
-        ...model.billing?.badges !== undefined && model.billing.badges.length > 0 ? { badges: model.billing.badges } : {},
-        ...rate === undefined ? {} : { credits: rate },
-        ...model.billing?.rateUnknown === true ? { rateUnknown: true as const } : {},
-      }
-    })
-  // Context facts ride the signed-in document for every served model (not just
-  // the promo rows): the card's context section lists working budgets, and the
-  // larger selectable windows where the upstream declares them.
-  const context: readonly WorkBuddyWebContextModel[] = models.map(model => ({
-    id: model.id,
-    name: model.name,
-    contextWindow: model.contextWindow,
-    largerWindows: [...(model.supportedContextWindows ?? [])]
-      .filter(windows => windows > model.contextWindow)
-      .sort((a, b) => a - b),
-  }))
-  const statusWithModels: WorkBuddyWebStatus = modelsField.length > 0
-    ? { ...status, models: modelsField, context }
-    : { ...status, context }
+  // One unified row per served model: display name, working window, billing
+  // facts, declared efforts, and the larger selectable windows. The rate is
+  // normalized here (not in the card) so both halves agree on one display
+  // form; the card additionally localizes badge labels.
+  const models: readonly WorkBuddyWebModelRow[] = deps.models().map(model => {
+    const rate = model.billing?.free === true ? undefined : normalizeCredits(model.billing?.credits)
+    const efforts = model.reasoning?.supportedEfforts
+    return {
+      id: model.id,
+      name: model.name,
+      contextWindow: model.contextWindow,
+      largerWindows: [...(model.supportedContextWindows ?? [])]
+        .filter(windows => windows > model.contextWindow)
+        .sort((a, b) => a - b),
+      ...model.billing?.free === true ? { free: true as const } : {},
+      ...model.billing?.badges !== undefined && model.billing.badges.length > 0 ? { badges: model.billing.badges } : {},
+      ...rate === undefined ? {} : { credits: rate },
+      ...model.billing?.rateUnknown === true ? { rateUnknown: true as const } : {},
+      ...efforts === undefined || efforts.length === 0 ? {} : { efforts: [...efforts] },
+    }
+  })
+  const statusWithModels: WorkBuddyWebStatus = { ...status, models }
+  try {
+    if (deps.offPeakWindow !== undefined) {
+      statusWithModels.offPeakWindow = await deps.offPeakWindow()
+    }
+  } catch (error: unknown) {
+    statusWithModels.offPeakWindow = { canTakeNumber: false, error: safeMessage(error) }
+  }
   try {
     if (deps.fetchCredits !== undefined) {
       const credential = await deps.store.current()

@@ -57,18 +57,27 @@ export interface WorkBuddyWebProbeSection {
 export interface WorkBuddyProbeAction {
   /**
    * `probe` spends credit on one model; `clear` drops recorded observations;
-   * `refresh` re-reads the credential and re-fetches the model catalog.
+   * `refresh` re-reads the credential and re-fetches the model catalog;
+   * `set-consent` persists the automatic-detection authorization.
    *
-   * All three are writes, which is why they share this route's in-process key
+   * All four are writes, which is why they share this route's in-process key
    * and loopback guards rather than the read-only status GET.
    */
-  action: 'probe' | 'clear' | 'refresh'
+  action: 'probe' | 'clear' | 'refresh' | 'set-consent'
   /** Target model id; required for `probe`. */
   model?: string
+  /** New authorization state; required for `set-consent`. */
+  enabled?: boolean
 }
 
-/** One model's context capacity facts, as the card displays them. */
-export interface WorkBuddyWebContextModel {
+/**
+ * One served model, as the card's unified model list renders it: one row
+ * carrying every per-model fact the card shows — display name, working
+ * context window, billing convenience facts, declared effort levels, and the
+ * larger selectable windows. (Detection results stay in the probe section:
+ * they carry their own validation/probed-at metadata.)
+ */
+export interface WorkBuddyWebModelRow {
   id: string
   name: string
   /**
@@ -77,6 +86,31 @@ export interface WorkBuddyWebContextModel {
    * declared, else the row's input ceiling).
    */
   contextWindow: number
+  /** Whether the model is currently free (`x0.00` credits). */
+  free?: boolean
+  /** Promotional badges, e.g. `限时免费`, `夜间折扣`. */
+  badges?: readonly string[]
+  /**
+   * Credits multiplier in display form, e.g. `x0.79`. Unlike the model
+   * picker's copy, the card renders through the browser locale, so this value
+   * may be interpolated into a localized sentence rather than shown bare.
+   */
+  credits?: string
+  /**
+   * The rate cannot be stated right now, and the card must say so.
+   *
+   * Set for a row whose price came from a promotion that has since ended: the
+   * upstream bakes the discounted value into the cached row, and the original
+   * price is not recoverable from it, so neither the old figure nor `free` may
+   * be repeated. The card renders "refresh to see the price" instead.
+   */
+  rateUnknown?: true
+  /**
+   * Upstream-declared effort levels, exactly as the catalog row declares them.
+   * Absent means the row declares no explicit set — the probe section's
+   * detection results (if any) then say what the upstream actually accepts.
+   */
+  efforts?: readonly string[]
   /**
    * Selectable larger windows the upstream declares, excluding the working
    * budget itself. Reported, never chosen: offering the ceiling as though it
@@ -99,29 +133,14 @@ export interface WorkBuddyWebCredits {
   accounts: readonly WorkBuddyWebCreditAccount[]
 }
 
-/** Billing convenience facts for one model, rendered as card badges. */
-export interface WorkBuddyWebModelBadge {
-  id: string
-  name: string
-  /** Whether the model is currently free (`x0.00` credits). */
-  free?: boolean
-  /** Promotional badges, e.g. `限时免费`, `夜间折扣`. */
-  badges?: readonly string[]
-  /**
-   * Credits multiplier in display form, e.g. `x0.79`. Unlike the model
-   * picker's copy, the card renders through the browser locale, so this value
-   * may be interpolated into a localized sentence rather than shown bare.
-   */
-  credits?: string
-  /**
-   * The rate cannot be stated right now, and the card must say so.
-   *
-   * Set for a row whose price came from a promotion that has since ended: the
-   * upstream bakes the discounted value into the cached row, and the original
-   * price is not recoverable from it, so neither the old figure nor `free` may
-   * be repeated. The card renders "refresh to see the price" instead.
-   */
-  rateUnknown?: true
+/** The off-peak (night-free) window state, as the zcode-offpeak card renders it. */
+export interface WorkBuddyWebOffPeakWindow {
+  /** Whether the relay is taking numbers right now. */
+  canTakeNumber: boolean
+  /** Next take-number instant, epoch **seconds** (upstream's own unit), when given. */
+  nextTakeAtSec?: number
+  /** Why the window state is unavailable, when the probe failed. */
+  error?: string
 }
 
 /**
@@ -166,12 +185,12 @@ export type WorkBuddyWebStatus =
     expiresAt?: number
     credits?: WorkBuddyWebCredits
     creditsError?: string
-    /** Billing convenience facts for the models the plugin serves. */
-    models?: readonly WorkBuddyWebModelBadge[]
+    /** Every served model, one row each — the card's unified model list. */
+    models?: readonly WorkBuddyWebModelRow[]
     /** Where those models came from, and whether the last fetch failed. */
     catalog?: WorkBuddyWebCatalog
-    /** Context capacity facts for every served model. */
-    context?: readonly WorkBuddyWebContextModel[]
+    /** Night-free window state (zcode-offpeak only). */
+    offPeakWindow?: WorkBuddyWebOffPeakWindow
     /** Reasoning-effort probe state, consent, and recorded observations. */
     probe?: WorkBuddyWebProbeSection
     /**

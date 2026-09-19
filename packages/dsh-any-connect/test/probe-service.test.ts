@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorkBuddyCatalog } from '../src/catalog.js'
 import type { ProbeSender } from '../src/probe.js'
 import { WorkBuddyProbeService } from '../src/probe-service.js'
-import { WorkBuddyProbeStore } from '../src/probe-store.js'
+import { WorkBuddyProbeStore, fingerprintModel } from '../src/probe-store.js'
 
 let root: string | undefined
 
@@ -144,5 +144,35 @@ describe('WorkBuddyProbeService', () => {
     // Nothing stored under either account.
     expect(store.get('probe-me', 'x', 'uid-1:')).toBeUndefined()
     expect(store.get('probe-me', 'x', 'uid-2:')).toBeUndefined()
+  })
+
+  it('auto-detects missing candidates only when authorized', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-psvc-'))
+    // 未授权：自动检测是空操作，零请求。
+    const gated = harness(async () => ACCEPT, 'uid-1:', false)
+    gated.service.probeMissingCandidates()
+    expect(gated.calls).toEqual([])
+
+    // 已授权：候选（未声明档位且无有效记录）自动入队并落盘。
+    const h = harness(async effort => effort === undefined ? ACCEPT : (effort === 'low' ? ACCEPT : REJECT))
+    h.service.probeMissingCandidates()
+    // isRunning 在队列入队前为 false，不能当完成信号——直接等请求发出、
+    // 再等记录落盘（单候选时队列即空）。
+    await vi.waitFor(() => expect(h.calls.length).toBeGreaterThan(0))
+    await vi.waitFor(() =>
+      expect(h.store.get('probe-me', fingerprintModel(undeclaredCatalog().current()[0]!), 'uid-1:')?.validation).toBe('validating'))
+  })
+
+  it('skips candidates that already have a usable observation', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-psvc-'))
+    const h = harness(async effort => effort === undefined ? ACCEPT : (effort === 'low' ? ACCEPT : REJECT))
+    const first = await h.service.probe('probe-me', true)
+    expect(first.state).toBe('ok')
+    const sent = h.calls.length
+    expect(sent).toBeGreaterThan(0)
+    // 再次自动检测：记录仍有效（同指纹、同账号、未过期），零新请求。
+    h.service.probeMissingCandidates()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(h.calls.length).toBe(sent)
   })
 })
