@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.3.18-alpha.8 (2026-09-19)
+
+### Features
+
+* 新增 ZCode（GLM Coding Plan）provider：把 coding plan 的 GLM-5.3 /
+  GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo 接入 DSH，额度与 zcode CLI 消耗
+  同一份套餐。**零配置跟随 zcode 桌面端登录态**（只读解密其本机凭据存储，
+  以用户本人身份读取本人数据；不涉及系统钥匙串），也可手动覆盖
+  （设置卡 `apiKeyZcode` → `ZCODE_API_KEY` env → `~/.dsh/.zcode-auth.json`）
+* 请求以完整 zcode 客户端身份发出（`ZCode/<app 版本>` 身份头、每请求
+  attribution 头、`x-api-key` + `Authorization: Bearer` 双鉴权头、设备 id
+  跟随 zcode 注册值），客户端签名七件套按 zcode 3.12.3 线上行为复刻
+  （握手换 Ed25519 私钥、8-bit PoW），401 签名拒绝按同款语义自愈
+  （重握手一次 → 永久 unsigned）；模型对话经本机 loopback shim 以
+  Anthropic Messages 协议直通 open.bigmodel.cn，请求体与上游错误体零翻译
+  原样中继
+* 新增实验性「ZCode 夜间免费」（zcode-offpeak）provider：凭 zcode 会话向
+  排队系统取免费票据（availability → take → poll → active 复用 →
+  settle/retake 状态机），带 `X-Off-Peak-Ticket-ID` 走夜间中继（GLM-5.3 /
+  GLM-5.3-Flash）。窗口与排队完全由服务端裁决；实测该中继存在传输层
+  反滥用风控（code 3012，请求语义与头已与官方客户端对齐仍被拦），通道
+  保留、失败模式如实报错，恢复可用性取决于智谱风控策略，不承诺
+* provider 额度查询（provider-usage 集成）仅对 WorkBuddy 系 provider 注册：
+  zcode 套餐余量在有签名的管理面之后不可查，zcode 系凭据打 credits 端点
+  必然失败
+
+### 修复
+
+* settings 多 section 装配 bug：`installSection` 每次覆盖共享的 config
+  source 引用，导致非最后安装的 section（authFile、probeConsent）改动后
+  的即时生效从未真正生效——改为按 namespace 自存 scope + 按 section
+  字段归属合并的合成视图
+* shim 路由按 pathname 匹配：Anthropic SDK 请求带 `?beta=true` 查询串，
+  此前的 URL 全等匹配会把合法请求打成 404（zcode provider 因此完全不可用）
+
 ## 0.3.18-alpha.7 (2026-09-19)
 
 ### Features
