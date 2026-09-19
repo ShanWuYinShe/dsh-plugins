@@ -150,8 +150,8 @@ Windows 用户目录；也可用 `WORKBUDDY_AUTH_FILE` 环境变量直接指定�
 ## 发布线
 
 稳定线随 monorepo `main` 分支发布；适配 dsh 预发布线的版本在 alpha 分支
-维护，用 `-alpha.N` / `-rc.N` 后缀 + 对应 dist-tag 发布。本包实际适配的
-宿主版本看 `npm view @chaoset/dsh-any-connect dsh.host`。与 dsh 版本无关
+维护，用 `-alpha.N` / `-rc.N` 后缀发布（prerelease Release）。本包实际适配的
+宿主版本看发布产物 `package.json` 的 `dsh.host` 字段。与 dsh 版本无关
 的改动会同步到两条线。
 
 ## 与上游的差异

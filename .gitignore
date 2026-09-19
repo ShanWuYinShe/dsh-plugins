@@ -11,6 +11,7 @@ packages/*/client/client.cjs
 .workwork/
 .worktrees/
 .workbuddy-ai/
+.zcode/
 
 # 工具临时文件(如 pnpm / 编辑器落盘时产生的 _tmp_* 空文件)
 _tmp_*
