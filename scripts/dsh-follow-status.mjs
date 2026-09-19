@@ -11,8 +11,9 @@
 //   alpha ↔ 基础号高于该正式版的进行中 -alpha 线；无新线时与 main 同基线
 //           待命（分支由最新 main 重建，见「双线生命周期」第 5 步）
 // 判定**不使用任何 dist-tag**：latest / next / alpha 都会滞后或错位——同
-// 一条 rc 迭代多版时，只有首版可能拿到 latest（如 0.1.5-rc.2 挂在 next 而
-// latest 仍指 0.1.5-rc.1），拿 dist-tag 当目标会把正确的基线误报成超前。
+// 一条 rc 迭代多版时，可能只有首版拿到 latest（2026-09-15 曾实测 latest 指
+// 0.1.5-rc.1、更新的 0.1.5-rc.2 挂在 next），拿 dist-tag 当目标会把正确的
+// 基线误报成超前。
 //
 // 用法：node scripts/dsh-follow-status.mjs [--ci]
 //   --ci  落后/漂移时输出 GitHub Actions `::warning::` annotation
@@ -122,9 +123,9 @@ const head = currentBranch();
 // ── 按 DSH 发布习惯判定跟随目标 ────────────────────────────────────
 // 稳定线目标 = 已发布版本里「非进行中预发布」的最高版：rc 即该线正式版
 // （dsh 从不发无后缀纯 X.Y.Z；将来若发，它天然高于同基础号 rc、自动胜出）。
-// 越过了 dist-tag——同一条 rc 迭代多版时只有首版可能拿到 latest（实测
-// 0.1.5-rc.2 挂在 next、latest 仍指 0.1.5-rc.1），拿 latest 当目标会把
-// 已跟到最新 rc 的 main 误报成「超前」。
+// 越过了 dist-tag——同一条 rc 迭代多版时可能只有首版拿到 latest（2026-09-15
+// 曾实测 0.1.5-rc.2 挂在 next、latest 仍指 0.1.5-rc.1），拿 latest 当目标会
+// 把已跟到最新 rc 的 main 误报成「超前」。
 // 进行中预发布线 = 高于该正式版的最高 -alpha/-beta 版本。
 const stableVersions = versions.filter((v) => {
   const p = parseVersion(v);
