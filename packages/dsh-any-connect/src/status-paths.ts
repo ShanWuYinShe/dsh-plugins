@@ -25,6 +25,12 @@ export const ZCODE_STATUS_PATH = '/plugins/dsh-any-connect/zcode/status'
 /** Plugin-owned probe control endpoint (zcode; refresh-only in practice). */
 export const ZCODE_PROBE_PATH = '/plugins/dsh-any-connect/zcode/probe'
 
+/** Plugin-owned status endpoint consumed by the zcode off-peak card. */
+export const ZCODE_OFFPEAK_STATUS_PATH = '/plugins/dsh-any-connect/zcode-offpeak/status'
+
+/** Plugin-owned probe control endpoint (zcode off-peak; refresh-only in practice). */
+export const ZCODE_OFFPEAK_PROBE_PATH = '/plugins/dsh-any-connect/zcode-offpeak/probe'
+
 /** One model's recorded probe observation, as the card displays it. */
 export interface WorkBuddyWebProbeModel {
   id: string

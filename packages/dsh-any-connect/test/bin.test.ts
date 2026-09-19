@@ -4,6 +4,12 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { run } from '../src/bin.js'
 
+// CLI 测试与宿主机真实 zcode 登录态隔离：跟随 zcode 的来源恒空，
+// 登录态只由 env/文件等测试显式给出。
+vi.mock('../src/zcode-credentials.js', () => ({
+  readZcodeClientCredentials: async () => undefined,
+}))
+
 let root: string | undefined
 
 afterEach(async () => {

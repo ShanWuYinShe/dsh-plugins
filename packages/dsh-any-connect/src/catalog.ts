@@ -112,6 +112,16 @@ export const FALLBACK_ZCODE_MODELS: readonly WorkBuddyModelInfo[] = [
   { id: 'GLM-5-Turbo', name: 'GLM-5-Turbo', contextWindow: 200000, maxTokens: 64000, supportsImages: false, reasoning: { supports: true, onlyReasoning: true, defaultEffort: 'high', canDisableThinking: true } },
 ]
 
+/**
+ * Static off-peak（夜间免费）roster（`zcode-offpeak` provider）——zcode 内置
+ * 注册表只为 off-peak 模式配置了 GLM-5.3 / GLM-5.3-Flash 两行（服务端下发
+ * 的 builtinModelIds），其余模型不在免费通道内。规格与直连同名行一致。
+ */
+export const FALLBACK_ZCODE_OFFPEAK_MODELS: readonly WorkBuddyModelInfo[] = [
+  { id: 'GLM-5.3', name: 'GLM-5.3', contextWindow: 1000000, maxTokens: 128000, supportsImages: true, reasoning: { supports: true, onlyReasoning: true, supportedEfforts: ['low', 'high', 'max'], defaultEffort: 'high', canDisableThinking: true } },
+  { id: 'GLM-5.3-Flash', name: 'GLM-5.3-Flash', contextWindow: 1000000, maxTokens: 128000, supportsImages: true, reasoning: { supports: true, onlyReasoning: true, supportedEfforts: ['low', 'high', 'max'], defaultEffort: 'high', canDisableThinking: true } },
+]
+
 /** Mutable catalog shared by the shim's `/v1/models` and the adapter.
  *
  * Visibility gates the whole roster: a signed-out variant is *empty* rather

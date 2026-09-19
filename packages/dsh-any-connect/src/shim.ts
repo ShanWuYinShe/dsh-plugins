@@ -24,8 +24,6 @@ import { Readable } from 'node:stream'
 import type { WorkBuddyCredentialStore } from './auth.js'
 import type { WorkBuddyCatalog } from './catalog.js'
 import { prepareChatBody, WorkBuddyUpstreamClient, type UpstreamErrorKind } from './upstream.js'
-import type { ZcodeCredentialStore } from './zcode-auth.js'
-import type { ZcodeUpstreamClient } from './zcode-upstream.js'
 
 /** Minimal logger surface the plugin context already provides. */
 export interface ShimLogger {
@@ -60,13 +58,18 @@ export interface WorkBuddyShimKindOptions {
 }
 
 /**
- * zcode variant wiring: an Anthropic Messages passthrough. The client adds
- * only the auth headers; bodies (and upstream error bodies) relay verbatim.
+ * zcode family wiring: an Anthropic Messages passthrough. Both zcode kinds
+ * (direct + off-peak relay) share this shape — the shim treats the credential
+ * as an opaque value piped from the resolver into the forwarder, which adds
+ * only the kind-specific auth headers. Bodies (and upstream error bodies)
+ * relay verbatim.
  */
 export interface ZcodeShimOptions {
-  kind: 'zcode'
-  store: ZcodeCredentialStore
-  client: Pick<ZcodeUpstreamClient, 'forwardMessages'>
+  kind: 'zcode' | 'zcode-offpeak'
+  /** Resolve the upstream credential; rejects when not signed in. */
+  resolveCredential: () => Promise<unknown>
+  /** Relay one request; the resolved credential travels back opaquely. */
+  forwardMessages: (credential: unknown, rawBody: string, signal: AbortSignal) => Promise<import('./zcode-upstream.js').ZcodeChatResult>
   catalog: WorkBuddyCatalog
   logger?: ShimLogger
 }
@@ -178,8 +181,8 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
   const workbuddy = options.kind === 'workbuddy'
     ? { store: options.store, client: options.client }
     : undefined
-  const zcode = options.kind === 'zcode'
-    ? { store: options.store, client: options.client }
+  const zcode = options.kind === 'zcode' || options.kind === 'zcode-offpeak'
+    ? { resolveCredential: options.resolveCredential, forwardMessages: options.forwardMessages }
     : undefined
 
   // Per-process shared secret. Lives only in memory; the adapter resolves it
@@ -233,7 +236,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
 
   /** Kind-shaped auth failure so the calling SDK can parse the rejection. */
   function writeUnauthorized(res: ServerResponse): void {
-    if (kind === 'zcode') {
+    if (kind !== 'workbuddy') {
       writeAnthropicError(res, 401, 'authentication_error', 'missing or invalid request credential')
       return
     }
@@ -254,32 +257,35 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         writeOpenAIError(res, 403, 'origin_not_allowed', 'Origin must be a loopback origin')
         return
       }
-      if (!bearerOk(req) && !(kind === 'zcode' && apiKeyOk(req))) {
+      if (!bearerOk(req) && !(kind !== 'workbuddy' && apiKeyOk(req))) {
         writeUnauthorized(res)
         return
       }
       const url = req.url ?? '/'
-      if (req.method === 'GET' && (url === '/healthz' || url === '/healthz/')) {
+      // 按 pathname 匹配：Anthropic SDK 会带查询串（如 ?beta=true），全等
+      // 匹配会把合法请求打成 404。
+      const pathname = new URL(url, 'http://127.0.0.1').pathname
+      if (req.method === 'GET' && (pathname === '/healthz' || pathname === '/healthz/')) {
         writeJson(res, 200, { ok: true })
         return
       }
-      if (req.method === 'GET' && (url === '/v1/models' || url === '/v1/models/')) {
+      if (req.method === 'GET' && (pathname === '/v1/models' || pathname === '/v1/models/')) {
         writeJson(res, 200, {
           object: 'list',
           data: catalog.current().map(model => ({
             id: model.id,
             object: 'model',
             created: 0,
-            owned_by: kind === 'zcode' ? 'zcode' : 'workbuddy',
+            owned_by: kind === 'workbuddy' ? 'workbuddy' : kind,
           })),
         })
         return
       }
-      if (kind === 'workbuddy' && req.method === 'POST' && (url === '/v1/chat/completions' || url === '/v1/chat/completions/')) {
+      if (kind === 'workbuddy' && req.method === 'POST' && (pathname === '/v1/chat/completions' || pathname === '/v1/chat/completions/')) {
         await chatCompletions(req, res)
         return
       }
-      if (kind === 'zcode' && req.method === 'POST' && (url === '/v1/messages' || url === '/v1/messages/')) {
+      if ((kind === 'zcode' || kind === 'zcode-offpeak') && req.method === 'POST' && (pathname === '/v1/messages' || pathname === '/v1/messages/')) {
         await messages(req, res)
         return
       }
@@ -365,7 +371,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     }
     let credential
     try {
-      credential = await zcode!.store.resolve()
+      credential = await zcode!.resolveCredential()
     } catch (error: unknown) {
       writeAnthropicError(res, 401, 'authentication_error', String(error))
       return
@@ -375,7 +381,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
 
     const controller = new AbortController()
     req.on('close', () => controller.abort())
-    const result = await zcode!.client.forwardMessages(credential, raw, controller.signal)
+    const result = await zcode!.forwardMessages(credential, raw, controller.signal)
 
     // 客户端已断开：写已销毁的 socket 只会留下噪音，静默收尾。
     if (controller.signal.aborted || res.destroyed) return

@@ -8,8 +8,10 @@
  * key 的来源优先级（先者胜，空白值视为未配置）：
  *   1. 设置卡的 `apiKeyZcode` 字段；
  *   2. `ZCODE_API_KEY` 环境变量；
- *   3. `$DSH_HOME` 下的插件自有 key 文件。
- * key 不存在过期与刷新周期，store 是静态读取。
+ *   3. zcode 客户端凭据库（解密 `~/.zcode/v2/credentials.json` 跟随其登录态，
+ *      plan 权益结算的关键来源，见 zcode-credentials.ts）；
+ *   4. `$DSH_HOME` 下的插件自有 key 文件。
+ * key 不存在过期与刷新周期，store 是静态读取；zcode 重新登录后下一拍自动跟随。
  *
  * @module dsh-any-connect/zcode-auth
  */
@@ -18,12 +20,13 @@ import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { WorkBuddyAuthStatus } from './auth.js'
+import { readZcodeClientCredentials } from './zcode-credentials.js'
 
 /** Normalized zcode credential: the API key is the whole credential. */
 export interface ZcodeCredential {
   accessToken: string
   /** Which source the key came from; mirrors WorkBuddyCredential.source's role. */
-  source: 'config' | 'env' | 'file'
+  source: 'config' | 'env' | 'zcode' | 'file'
 }
 
 /** Env variable that carries the GLM Coding Plan API key. */
@@ -88,6 +91,9 @@ export interface ZcodeCredentialStoreOptions {
   configuredKey?: string
   /** Explicit plugin-owned key-file path, defaulting under `$DSH_HOME`. */
   ownPath?: string
+  /** Explicit zcode credentials-file path for the follow-zcode source
+   * (defaults to the real zcode store; tests point it at a dummy path). */
+  zcodeCredentialsPath?: string
 }
 
 /**
@@ -104,10 +110,12 @@ export interface ZcodeCredentialStoreOptions {
 export class ZcodeCredentialStore {
   private configuredKey: string | undefined
   private readonly ownPath: string
+  private readonly zcodeCredentialsPath: string | undefined
 
   constructor(options: ZcodeCredentialStoreOptions = {}) {
     this.configuredKey = normalizeKey(options.configuredKey)
     this.ownPath = options.ownPath ?? zcodeOwnAuthPath()
+    this.zcodeCredentialsPath = options.zcodeCredentialsPath
   }
 
   /** Live-update the settings-card key (blank clears the override). */
@@ -126,6 +134,12 @@ export class ZcodeCredentialStore {
     if (this.configuredKey !== undefined) return { accessToken: this.configuredKey, source: 'config' }
     const fromEnv = normalizeKey(process.env[ZCODE_API_KEY_ENV])
     if (fromEnv !== undefined) return { accessToken: fromEnv, source: 'env' }
+    // 跟随 zcode 登录态：plan key 由此来源才有权益结算；解密失败向上抛
+    // （由 status/refreshCatalog 转成可诊断原因，不吞成「未配置」）。
+    const fromZcode = await readZcodeClientCredentials(
+      this.zcodeCredentialsPath === undefined ? {} : { path: this.zcodeCredentialsPath },
+    )
+    if (fromZcode !== undefined) return { accessToken: fromZcode.planApiKey, source: 'zcode' }
     const fromFile = await readOwnKey(this.ownPath)
     return fromFile === undefined ? undefined : { accessToken: fromFile, source: 'file' }
   }
@@ -135,7 +149,7 @@ export class ZcodeCredentialStore {
     const credential = await this.current()
     if (credential === undefined) {
       throw new Error(
-        `no GLM Coding Plan API key configured; set it via the plugin settings (apiKeyZcode), ${ZCODE_API_KEY_ENV}, or ${this.ownPath}`,
+        `no GLM Coding Plan API key configured; sign in to the zcode desktop app, or set the plugin settings (apiKeyZcode), ${ZCODE_API_KEY_ENV}, or ${this.ownPath}`,
       )
     }
     return credential

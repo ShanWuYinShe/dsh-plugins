@@ -11,7 +11,7 @@ import z from '@deepseek-ai/schemastery'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-attachment'
 import { RegionMismatchError, WorkBuddyCredentialStore } from './auth.js'
-import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS, WorkBuddyCatalog } from './catalog.js'
+import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS, FALLBACK_ZCODE_OFFPEAK_MODELS, WorkBuddyCatalog } from './catalog.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import { WorkBuddyCatalogStore, credentialIdentity, workbuddyCatalogPath } from './catalog-store.js'
 import { createWorkBuddyAdapter, WORKBUDDY_PROVIDER } from './adapter.js'
@@ -19,13 +19,18 @@ import { createWorkBuddyShim } from './shim.js'
 import type { WorkBuddyShim } from './shim.js'
 import { WorkBuddyUpstreamClient, chatBase } from './upstream.js'
 import { ZcodeCredentialStore } from './zcode-auth.js'
-import { ZcodeUpstreamClient } from './zcode-upstream.js'
+import { ZcodeClientSigning } from './zcode-signing.js'
+import { zcodeIdentity, ZcodeUpstreamClient } from './zcode-upstream.js'
+import { ZcodeOffpeakCredentialStore, ZcodeOffpeakUpstreamClient } from './zcode-offpeak.js'
+import type { ZcodeCredential } from './zcode-auth.js'
+import type { ZcodeOffpeakCredential } from './zcode-offpeak.js'
+import type { WorkBuddyCredential } from './auth.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebProbeSection } from './status-paths.js'
 import { WorkBuddyProbeService } from './probe-service.js'
 import { newestFirst, workbuddyProbePath, WorkBuddyProbeStore } from './probe-store.js'
 import { createProbeKey, registerWorkBuddyProbeRoute } from './probe-route.js'
 import { ANYCONNECT_VERSION } from './version.js'
-import { AI_VARIANT, CN_VARIANT, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_VARIANT } from './variants.js'
+import { AI_VARIANT, CN_VARIANT, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_OFFPEAK_VARIANT, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { registerWorkBuddyStatusRoute } from './web-status.js'
 import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
@@ -47,7 +52,17 @@ export {
   zcodeOwnAuthPath,
   type ZcodeCredential,
 } from './zcode-auth.js'
-export { ZCODE_ANTHROPIC_BASE, ZcodeUpstreamClient, type ZcodeChatResult } from './zcode-upstream.js'
+export { ZCODE_ANTHROPIC_BASE, ZcodeUpstreamClient, resolveZcodeAppVersion, zcodeIdentityHeaders, type ZcodeChatResult } from './zcode-upstream.js'
+export { ZcodeClientSigning, parseClientSigningCredential, isSignatureRejection, ZcodeHandshakeError } from './zcode-signing.js'
+export {
+  ZCODE_OFFPEAK_BASE,
+  ZcodeOffpeakCredentialStore,
+  ZcodeOffpeakTickets,
+  ZcodeOffpeakUpstreamClient,
+  ZcodeOffpeakUnavailableError,
+  type ZcodeOffpeakCredential,
+  type ZcodeOffpeakTicketState,
+} from './zcode-offpeak.js'
 export {
   WorkBuddyCatalogStore,
   WORKBUDDY_CATALOG_FILENAME,
@@ -175,6 +190,9 @@ export const WORKBUDDY_AI_SETTINGS_NS = 'anyconnect-ai' as SettingsNamespace
 /** Settings namespace owning the zcode variant's card. */
 export const WORKBUDDY_ZCODE_SETTINGS_NS = 'anyconnect-zcode' as SettingsNamespace
 
+/** Settings namespace owning the zcode off-peak variant's card. */
+export const WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS = 'anyconnect-zcode-offpeak' as SettingsNamespace
+
 /** Plugin configuration. */
 export interface Config {
   /** Explicit WorkBuddy desktop auth-file path, overriding env and platform defaults. */
@@ -222,6 +240,10 @@ const ZCODE_SECTION: z<Config> = z.object({
   apiKeyZcode: z.string().description('GLM Coding Plan API key (bigmodel console; blank = ZCODE_API_KEY env or ~/.dsh/.zcode-auth.json)'),
 })
 
+/** off-peak 卡无用户可编辑字段（凭据完全跟随 zcode 登录态），装一个空 section
+ * 让 provider 目录能挂上命名空间。 */
+const ZCODE_OFFPEAK_SECTION = z.object({}) as unknown as z<Config>
+
 /** 目录拉取失败后的延迟重试：最多再试 2 次、间隔 60s（暂态故障自愈，耗尽即停）。 */
 const CATALOG_REFRESH_RETRIES = 2
 const CATALOG_REFRESH_RETRY_MS = 60_000
@@ -235,13 +257,13 @@ const CATALOG_REFRESH_RETRY_MS = 60_000
 const IDENTITY_SWEEP_MS = 60_000
 
 /**
- * Structural minimum every variant's credential store satisfies. WorkBuddy
- * credentials carry more fields, but downstream consumers only ever need the
- * access token — and the zcode store's credentials *are* only that.
+ * Structural minimum every variant's credential store satisfies. Credentials
+ * travel opaquely: WorkBuddy carries OAuth fields, zcode an API key, off-peak
+ * a JWT+key pair — only the WorkBuddy paths ever look inside.
  */
 interface RuntimeStore {
-  current(): Promise<{ accessToken: string } | undefined>
-  resolve(): Promise<{ accessToken: string }>
+  current(): Promise<unknown>
+  resolve(): Promise<unknown>
   status(): Promise<import('./auth.js').WorkBuddyAuthStatus>
   logout(): Promise<void>
 }
@@ -265,6 +287,11 @@ interface VariantRuntime {
   probeService?: WorkBuddyProbeService
   /** zcode-only parts: static catalog, API-key credential store. */
   zcodeStore?: ZcodeCredentialStore
+  /** off-peak-only parts: JWT+plan-key credential store and the relay client. */
+  offpeak?: {
+    store: ZcodeOffpeakCredentialStore
+    client: ZcodeOffpeakUpstreamClient
+  }
 }
 
 /**
@@ -298,15 +325,18 @@ interface ProviderUsageRegistryLike {
   }>, displayName?: string): () => void
 }
 
-/** 常量账号身份（zcode）：key 可随时更换且无账号概念，目录又是静态的，
- * 无需按账号隔离任何状态。 */
-const ZCODE_IDENTITY = 'zcode'
+/** 常量账号身份（zcode 家族）：key 可随时更换且无账号概念，目录又是静态的，
+ * 无需按账号隔离任何状态——直接用 provider id。 */
+function zcodeFamilyIdentity(variant: WorkBuddyVariant): string {
+  return variant.id
+}
 
 /** The static catalog a variant serves before its first successful fetch. */
 const FALLBACK_BY_ID = new Map<string, readonly WorkBuddyModelInfo[]>([
   [CN_VARIANT.id, FALLBACK_WORKBUDDY_MODELS],
   [AI_VARIANT.id, FALLBACK_WORKBUDDY_AI_MODELS],
   [ZCODE_VARIANT.id, FALLBACK_ZCODE_MODELS],
+  [ZCODE_OFFPEAK_VARIANT.id, FALLBACK_ZCODE_OFFPEAK_MODELS],
 ])
 
 function fallbackFor(variant: WorkBuddyVariant): readonly WorkBuddyModelInfo[] {
@@ -350,10 +380,37 @@ export function apply(ctx: Context, config: Config): void {
       const zcodeStore = new ZcodeCredentialStore({
         configuredKey: current().apiKeyZcode,
       })
-      const zcodeClient = new ZcodeUpstreamClient()
-      const shim = createWorkBuddyShim({ kind: 'zcode', store: zcodeStore, client: zcodeClient, catalog, logger: ctx.logger })
+      const signing = new ZcodeClientSigning({ clientVersion: () => zcodeIdentity()['x-zcode-app-version'] ?? '3.12.3' })
+      const zcodeClient = new ZcodeUpstreamClient({ signing, logger: ctx.logger })
+      const shim = createWorkBuddyShim({
+        kind: 'zcode',
+        resolveCredential: () => zcodeStore.resolve(),
+        forwardMessages: (credential, rawBody, signal) =>
+          zcodeClient.forwardMessages(credential as ZcodeCredential, rawBody, signal),
+        catalog,
+        logger: ctx.logger,
+      })
       return {
         variant, store: zcodeStore, catalog, shim, zcodeStore,
+        catalogSource: 'fallback',
+        catalogFetchedAtMs: undefined,
+        catalogError: undefined,
+        lastIdentity: undefined,
+      }
+    }
+    if (variant.kind === 'zcode-offpeak') {
+      const offpeakStore = new ZcodeOffpeakCredentialStore()
+      const offpeakClient = new ZcodeOffpeakUpstreamClient({ identityHeaders: zcodeIdentity, logger: ctx.logger })
+      const shim = createWorkBuddyShim({
+        kind: 'zcode-offpeak',
+        resolveCredential: () => offpeakStore.resolve(),
+        forwardMessages: (credential, rawBody, signal) =>
+          offpeakClient.forwardMessages(credential as ZcodeOffpeakCredential, rawBody, signal),
+        catalog,
+        logger: ctx.logger,
+      })
+      return {
+        variant, store: offpeakStore, catalog, shim, offpeak: { store: offpeakStore, client: offpeakClient },
         catalogSource: 'fallback',
         catalogFetchedAtMs: undefined,
         catalogError: undefined,
@@ -480,8 +537,8 @@ export function apply(ctx: Context, config: Config): void {
       })
       registerWorkBuddyProbeRoute(webCtx, {
         path: runtime.variant.probePath,
-        probe: runtime.variant.kind === 'zcode'
-          ? async () => ({ state: 'unavailable' as const, reason: 'the zcode provider does not support effort detection' })
+        probe: runtime.variant.kind !== 'workbuddy'
+          ? async () => ({ state: 'unavailable' as const, reason: 'this provider does not support effort detection' })
           : async modelId => {
             const result = await runtime.probeService!.probe(modelId, true)
             return result.state === 'ok'
@@ -530,10 +587,13 @@ export function apply(ctx: Context, config: Config): void {
     const usage = usageCtx.get('providerUsage') as ProviderUsageRegistryLike | undefined
     if (usage === undefined) return
     for (const runtime of runtimes) {
+      // 额度查询是 WorkBuddy 专属（credits 账本）；zcode 系凭据打这个端点
+      // 必然失败（zcode 套餐余量在有签名的管理面之后，不可查），不注册。
+      if (runtime.variant.kind !== 'workbuddy') continue
       usageCtx.effect(() => usage.register(
         runtime.variant.id,
         async context => {
-          const credential = await runtime.store.resolve()
+          const credential = await runtime.store.resolve() as WorkBuddyCredential
           if (context.signal?.aborted === true) throw context.signal.reason ?? new Error('aborted')
           const credits = await client.fetchCredits(credential)
           return {
@@ -576,13 +636,44 @@ export function apply(ctx: Context, config: Config): void {
       { ns: WORKBUDDY_SETTINGS_NS, schema: CN_SECTION, field: 'authFile' },
       { ns: WORKBUDDY_AI_SETTINGS_NS, schema: AI_SECTION, field: 'authFileAI' },
       { ns: WORKBUDDY_ZCODE_SETTINGS_NS, schema: ZCODE_SECTION, field: 'apiKeyZcode' },
+      // off-peak 卡无编辑字段，只为 provider 目录挂命名空间。
+      { ns: WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS, schema: ZCODE_OFFPEAK_SECTION, field: undefined },
     ] as const
+    // installSection 的 setSource 每次都会覆盖同一个引用：若所有 section 共享
+    // 一个 `current`，只有最后安装的 section 的 scope 是新鲜的，其余 section
+    // 的 onChange 会读到 base 旧值（authFile / probeConsent 的「改后即时生效」
+    // 因此一直是坏的）。改为按 ns 自存 scope，`current` 合成各 ns 自有字段
+    // 的最新视图。
+    const scopeByNs = new Map<SettingsNamespace, () => Config>()
+    /** 每个 section 拥有的 Config 字段（onChange 与合并视图都以它为准）。 */
+    const fieldsByNs = new Map<SettingsNamespace, ReadonlyArray<keyof Config>>([
+      [WORKBUDDY_SETTINGS_NS, ['authFile', 'probeConsent']],
+      [WORKBUDDY_AI_SETTINGS_NS, ['authFileAI']],
+      [WORKBUDDY_ZCODE_SETTINGS_NS, ['apiKeyZcode']],
+      [WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS, []],
+    ])
+    const mergedCurrent = (): Config => {
+      const merged: Config = { ...config }
+      const writable = merged as Record<string, unknown>
+      for (const [ns, fields] of fieldsByNs) {
+        const get = scopeByNs.get(ns)
+        if (get === undefined) continue
+        const resolved = get() as Partial<Config>
+        for (const field of fields) writable[field] = resolved[field]
+      }
+      return merged
+    }
     for (const [index, section] of sections.entries()) {
       const runtime = runtimes[index]!
       settingsCtx.settings.installSection(ctx, section.ns, section.schema, config, {
-        setSource(source: () => Config) { current = source },
+        setSource(source: () => Config) {
+          scopeByNs.set(section.ns, source)
+          current = mergedCurrent
+        },
         onChange() {
-          const next = current()[section.field] as string | undefined
+          if (section.field === undefined) return
+          const own = scopeByNs.get(section.ns)
+          const next = (own === undefined ? current() : own())[section.field] as string | undefined
           // WorkBuddy 卡改的是凭据文件路径；zcode 卡改的是 key 本身。
           if (section.field === 'apiKeyZcode') {
             runtime.zcodeStore?.setConfiguredKey(next)
@@ -612,9 +703,9 @@ export function apply(ctx: Context, config: Config): void {
    *   策略重试，重试耗尽即停。 */
   function refreshCatalog(runtime: VariantRuntime, reason: string, retriesLeft = CATALOG_REFRESH_RETRIES): void {
     const { store, catalog, catalogStore, variant } = runtime
-    // zcode 的目录是编译期静态名单：没有 live/saved 两层，唯一的生命周期
-    // 事件是「key 从无到有 / 从有到无」——出现即发布并可见，消失即隐藏。
-    if (variant.kind === 'zcode') {
+    // zcode 家族的目录是编译期静态名单：没有 live/saved 两层，唯一的生命周期
+    // 事件是「凭据从无到有 / 从有到无」——出现即发布并可见，消失即隐藏。
+    if (variant.kind !== 'workbuddy') {
       void (async () => {
         try {
           const credential = await store.current()
@@ -622,8 +713,9 @@ export function apply(ctx: Context, config: Config): void {
             if (credential === undefined && !stopped) adoptSignedOut(runtime)
             return
           }
-          if (runtime.lastIdentity !== ZCODE_IDENTITY) {
-            runtime.lastIdentity = ZCODE_IDENTITY
+          const identity = zcodeFamilyIdentity(variant)
+          if (runtime.lastIdentity !== identity) {
+            runtime.lastIdentity = identity
             catalog.set(fallbackFor(variant))
             catalog.setVisible(true)
             runtime.catalogSource = 'fallback'
@@ -742,10 +834,10 @@ export function apply(ctx: Context, config: Config): void {
       void (async () => {
         try {
           const signedIn = await runtime.store.current()
-          // zcode 无账号概念：配置了 key 即恒定身份；WorkBuddy 按 uid 判定。
+          // zcode 家族无账号概念：凭据在即恒定身份；WorkBuddy 按 uid 判定。
           const identity = signedIn === undefined
             ? undefined
-            : runtime.variant.kind === 'zcode' ? ZCODE_IDENTITY : credentialIdentity(signedIn as unknown as Parameters<typeof credentialIdentity>[0])
+            : runtime.variant.kind === 'workbuddy' ? credentialIdentity(signedIn as unknown as Parameters<typeof credentialIdentity>[0]) : zcodeFamilyIdentity(runtime.variant)
           if (identity !== runtime.lastIdentity && !stopped) refreshCatalog(runtime, 'identity sweep')
         } catch (error: unknown) {
           if (error instanceof RegionMismatchError) {
@@ -775,7 +867,7 @@ export function apply(ctx: Context, config: Config): void {
             catalog,
             providerId: variant.id,
             displayName: variant.displayName,
-            ...variant.kind === 'zcode'
+            ...variant.kind !== 'workbuddy'
               ? { api: 'anthropic-messages' as const }
               : {
                   store: runtime.credentialStore!,

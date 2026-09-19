@@ -9,21 +9,23 @@
  * sign-in into the *same* shared `CodeBuddyExtension` auth directory — they
  * differ by file basename, base URL, catalog endpoint, and display identity.
  *
- * The zcode provider is *not* a WorkBuddy region flip: its credential is a
- * static API key and its wire is the Anthropic Messages protocol. The
- * descriptor carries a `kind` discriminator so the host assembly can pick
- * the credential store, shim routes, and catalog lifecycle per provider
- * while registration itself stays one data-driven loop.
+ * The zcode providers are *not* WorkBuddy region flips: their credential is
+ * the GLM Coding Plan (followed from the zcode desktop app's own store or a
+ * manual key) and their wire is the Anthropic Messages protocol — `zcode`
+ * talks to open.bigmodel.cn directly, `zcode-offpeak` rides the night-free
+ * relay with a queue ticket. The descriptor carries a `kind` discriminator so
+ * the host assembly can pick the credential store, shim routes, and catalog
+ * lifecycle per provider while registration itself stays one data-driven loop.
  *
  * @module dsh-any-connect/variants
  */
 
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
-import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH, ZCODE_PROBE_PATH, ZCODE_STATUS_PATH } from './status-paths.js'
+import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH, ZCODE_OFFPEAK_PROBE_PATH, ZCODE_OFFPEAK_STATUS_PATH, ZCODE_PROBE_PATH, ZCODE_STATUS_PATH } from './status-paths.js'
 import type { WorkBuddyRegion } from './upstream.js'
 
 /** Which upstream family a variant talks to; selects the per-kind wiring. */
-export type VariantKind = 'workbuddy' | 'zcode'
+export type VariantKind = 'workbuddy' | 'zcode' | 'zcode-offpeak'
 
 /** One provider variant. */
 export interface WorkBuddyVariant {
@@ -107,6 +109,18 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
     statusPath: ZCODE_STATUS_PATH,
     probePath: ZCODE_PROBE_PATH,
   },
+  {
+    id: 'zcode-offpeak',
+    kind: 'zcode-offpeak',
+    displayName: 'ZCode 夜间免费',
+    appName: 'ZCode',
+    ownFilename: '.zcode-offpeak-auth.json',
+    probeFilename: '.zcode-offpeak-probe.json',
+    catalogFilename: '.zcode-offpeak-catalog.json',
+    settingsNs: 'anyconnect-zcode-offpeak' as SettingsNamespace,
+    statusPath: ZCODE_OFFPEAK_STATUS_PATH,
+    probePath: ZCODE_OFFPEAK_PROBE_PATH,
+  },
 ]
 
 /** All provider variants, in registration order. */
@@ -120,6 +134,9 @@ export const AI_VARIANT: WorkBuddyVariant = WORKBUDDY_VARIANTS[1]!
 
 /** The GLM Coding Plan variant. */
 export const ZCODE_VARIANT: WorkBuddyVariant = WORKBUDDY_VARIANTS[2]!
+
+/** The GLM Coding Plan off-peak（夜间免费）variant. */
+export const ZCODE_OFFPEAK_VARIANT: WorkBuddyVariant = WORKBUDDY_VARIANTS[3]!
 
 /** Look up a variant by provider id. */
 export function variantFor(id: string): WorkBuddyVariant | undefined {

@@ -23,12 +23,12 @@ export type { WorkBuddyWebCatalog, WorkBuddyWebContextModel, WorkBuddyWebProbeSe
 export interface WorkBuddyStatusRouteOptions {
   /**
    * Structural minimum both credential stores satisfy: sign-in summary for
-   * the document, and the current credential (only consumed when
+   * the document, and the current credential (opaque; only consumed when
    * {@link fetchCredits} is provided, which is WorkBuddy-only).
    */
   store: {
     status(): Promise<WorkBuddyAuthStatus>
-    current(): Promise<{ accessToken: string } | undefined>
+    current(): Promise<unknown>
   }
   /** Live billing answer; absent for providers without a credit ledger (zcode). */
   fetchCredits?: (credential: WorkBuddyCredential) => Promise<WorkBuddyCredits>
@@ -131,8 +131,9 @@ export async function workBuddyWebStatus(
     if (deps.fetchCredits !== undefined) {
       const credential = await deps.store.current()
       if (credential !== undefined) {
-        // zcode credentials are plain API keys and never reach this call —
-        // fetchCredits is only provided for the WorkBuddy variants.
+        // zcode credentials never reach this call — fetchCredits is only
+        // provided for the WorkBuddy variants, whose credential is a full
+        // WorkBuddyCredential.
         const credits = await deps.fetchCredits(credential as WorkBuddyCredential)
         return { ...statusWithModels, credits }
       }

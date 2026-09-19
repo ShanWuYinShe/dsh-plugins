@@ -9,6 +9,12 @@ import SettingsProvider from '@deepseek-ai/dsh-settings'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import * as WorkBuddy from '../src/index.js'
 
+// 集成测试必须与宿主机真实 zcode 登录态隔离：跟随 zcode 的凭据来源统一
+// 打成「无 zcode 凭据」，登录态只由测试显式给出（配置/env/文件）。
+vi.mock('../src/zcode-credentials.js', () => ({
+  readZcodeClientCredentials: async () => undefined,
+}))
+
 class MemorySettings extends SettingsProvider {
   readonly writable = true
   private storedDocument: Record<string, unknown> = {}
@@ -262,6 +268,7 @@ describe('zcode provider (GLM Coding Plan)', () => {
       expect(ids).toContain('workbuddy')
       expect(ids).toContain('workbuddy-ai')
       expect(ids).toContain('zcode')
+      expect(ids).toContain('zcode-offpeak')
     })
     expect(ctx.llm.listConfigurableProviders()).toContainEqual({
       provider: 'zcode',
@@ -275,6 +282,7 @@ describe('zcode provider (GLM Coding Plan)', () => {
     })
     const namespaces = ctx.settings.describe().map(entry => entry.ns)
     expect(namespaces).toContain(WorkBuddy.WORKBUDDY_ZCODE_SETTINGS_NS)
+    expect(namespaces).toContain(WorkBuddy.WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS)
   })
 
   it('serves the GLM roster once a key is configured, and hides it again after the key is cleared', async () => {

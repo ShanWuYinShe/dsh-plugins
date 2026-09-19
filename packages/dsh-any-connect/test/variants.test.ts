@@ -5,12 +5,13 @@ import {
   PROVIDER_VARIANTS,
   variantFor,
   WORKBUDDY_VARIANTS,
+  ZCODE_OFFPEAK_VARIANT,
   ZCODE_VARIANT,
 } from '../src/variants.js'
 
 describe('WorkBuddy variants', () => {
-  it('declares exactly the two WorkBuddy products and the zcode provider', () => {
-    expect(WORKBUDDY_VARIANTS.map(v => v.id)).toEqual(['workbuddy', 'workbuddy-ai', 'zcode'])
+  it('declares exactly the two WorkBuddy products and the two zcode providers', () => {
+    expect(WORKBUDDY_VARIANTS.map(v => v.id)).toEqual(['workbuddy', 'workbuddy-ai', 'zcode', 'zcode-offpeak'])
     expect(PROVIDER_VARIANTS).toBe(WORKBUDDY_VARIANTS)
     expect(CN_VARIANT.kind).toBe('workbuddy')
     expect(CN_VARIANT.region).toBe('cn')
@@ -18,6 +19,8 @@ describe('WorkBuddy variants', () => {
     expect(AI_VARIANT.region).toBe('global')
     expect(ZCODE_VARIANT.kind).toBe('zcode')
     expect(ZCODE_VARIANT.region).toBeUndefined()
+    expect(ZCODE_OFFPEAK_VARIANT.kind).toBe('zcode-offpeak')
+    expect(ZCODE_OFFPEAK_VARIANT.region).toBeUndefined()
   })
 
   it('keeps the three providers on disjoint files, env vars, and routes', () => {
@@ -47,6 +50,7 @@ describe('WorkBuddy variants', () => {
     expect(variantFor('workbuddy')).toBe(CN_VARIANT)
     expect(variantFor('workbuddy-ai')).toBe(AI_VARIANT)
     expect(variantFor('zcode')).toBe(ZCODE_VARIANT)
+    expect(variantFor('zcode-offpeak')).toBe(ZCODE_OFFPEAK_VARIANT)
     expect(variantFor('nope')).toBeUndefined()
   })
 })
