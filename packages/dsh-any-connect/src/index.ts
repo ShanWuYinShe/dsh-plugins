@@ -219,6 +219,37 @@ interface VariantRuntime {
   lastIdentity: string | undefined
 }
 
+/**
+ * The slice of @chaoset/provider-usage's registry this plugin calls.
+ *
+ * Declared structurally instead of imported: the two packages install
+ * independently, and only the provider-usage owner should have to change when
+ * its registry surface moves. If that surface changes, this is the mirror to
+ * update — the host route and the browser pill both come from the other side.
+ */
+interface ProviderUsageRegistryLike {
+  register(provider: string, querier: (context: {
+    provider: string
+    baseURL?: string
+    apiKey?: string
+    signal?: AbortSignal
+  }) => Promise<{
+    provider: string
+    displayName?: string
+    plan?: string
+    windows: readonly {
+      id: string
+      label: string
+      remain?: number
+      unit: string
+      limit?: number
+      resetsAt?: string
+    }[]
+    fetchedAt: number
+    error?: string
+  }>, displayName?: string): () => void
+}
+
 /** The static catalog a variant serves before its first successful fetch. */
 function fallbackFor(variant: WorkBuddyVariant): readonly WorkBuddyModelInfo[] {
   return variant.id === AI_VARIANT.id ? FALLBACK_WORKBUDDY_AI_MODELS : FALLBACK_WORKBUDDY_MODELS
@@ -387,6 +418,54 @@ export function apply(ctx: Context, config: Config): void {
           return { state: 'ok' as const }
         },
       }, probeKey)
+    }
+  })
+
+  // Usage readout: this plugin owns the WorkBuddy routes and already holds the
+  // credential store that reads the desktop app's sign-in, so it is the right
+  // place to answer "how much credit is left" — the provider-usage package
+  // deliberately ships no WorkBuddy querier, because only this package knows
+  // how to reach that app's billing endpoint. Absent provider-usage (the user
+  // removed it), the registration never happens and the model channel is
+  // unaffected.
+  //
+  // The service is read structurally through `ctx.get` rather than by
+  // declaring `providerUsage` on Context: two packages declaring the same
+  // member is a TypeScript error, and this package must not import the other's
+  // types just to reach an optional neighbour (they install independently).
+  ctx.inject(['providerUsage'], (usageCtx: Context) => {
+    const usage = usageCtx.get('providerUsage') as ProviderUsageRegistryLike | undefined
+    if (usage === undefined) return
+    for (const runtime of runtimes) {
+      usageCtx.effect(() => usage.register(
+        runtime.variant.id,
+        async context => {
+          const credential = await runtime.store.resolve()
+          if (context.signal?.aborted === true) throw context.signal.reason ?? new Error('aborted')
+          const credits = await client.fetchCredits(credential)
+          return {
+            provider: runtime.variant.id,
+            displayName: runtime.variant.displayName,
+            // One window per *live* billing package: these are monthly
+            // (occasionally half-yearly) cycles, and only the per-package rows
+            // say which one is about to run dry. Zero-remain packages are
+            // dropped for the same reason the card drops them — a real account
+            // accumulates dozens of drained and expired grants, and listing
+            // them would bury the two that still have credit.
+            windows: credits.accounts
+              .filter(account => account.remain > 0)
+              .map((account, index) => ({
+                id: `package-${String(index)}`,
+                label: account.packageName,
+                remain: account.remain,
+                unit: 'credits',
+                ...account.size > 0 ? { limit: account.size } : {},
+              })),
+            fetchedAt: Date.now(),
+          }
+        },
+        runtime.variant.displayName,
+      ), 'dsh-any-connect: usage querier')
     }
   })
 

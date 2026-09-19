@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugins",
   "private": true,
-  "description": "DSH host 层插件集：sandbox-extra-roots（沙盒额外目录）/ session-archive（归档会话管理）/ dsh-any-connect（WorkBuddy 模型接入）",
+  "description": "DSH host 层插件集：sandbox-extra-roots（沙盒额外目录）/ session-archive（归档会话管理）/ dsh-any-connect（WorkBuddy 模型接入）/ provider-usage（provider 额度显示）",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -17,7 +17,10 @@
     "archive",
     "sandbox",
     "workbuddy",
-    "any-connect"
+    "any-connect",
+    "provider-usage",
+    "quota",
+    "usage"
   ],
   "packageManager": "pnpm@11.24.0",
   "devDependencies": {

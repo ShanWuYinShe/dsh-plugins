@@ -1,0 +1,74 @@
+{
+  "name": "@chaoset/provider-usage",
+  "version": "0.1.0-alpha.0",
+  "description": "DSH plugin: show the current LLM provider's remaining quota in the composer dock — a generic querier registry any provider plugin can extend",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "lib",
+    "client",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client/client.cjs",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./typert": "./lib/typert.host.js"
+  },
+  "dsh": {
+    "host": "0.1.6-alpha.2",
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "slots",
+        "locale"
+      ]
+    }
+  },
+  "optionalDependencies": {
+    "@deepseek-ai/dsh-llm": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-settings": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-credentials": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.6-alpha.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-client-locale": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-client-ui-model-selection": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-client-ui-session": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.6-alpha.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.6-alpha.2",
+    "vitest": "^4.1.11"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node ../../scripts/build.mjs && vitest run",
+    "prepublishOnly": "pnpm run test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/winliyou/dsh-plugins.git",
+    "directory": "packages/provider-usage"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bugs": {
+    "url": "https://github.com/winliyou/dsh-plugins/issues"
+  },
+  "homepage": "https://github.com/winliyou/dsh-plugins/tree/main/packages/provider-usage#readme"
+}

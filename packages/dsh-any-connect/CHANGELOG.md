@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.18-alpha.7 (2026-09-18)
+
+### Features
+
+* 向 `@chaoset/provider-usage` 注册 WorkBuddy 额度查询器：本插件拥有 `workbuddy` /
+  `workbuddy-ai` 路由并已持有读取桌面 App 登录态的凭据存储，因此由本包回答「还剩
+  多少额度」——provider-usage 刻意不内置 WorkBuddy 查询器（只有本包知道该 App 的
+  计费接口）
+* 展开口径为「每个仍有余额的计费包一行」：真实账号会累积数十个已用尽/已过期的赠送包，
+  与卡片一致地过滤 `remain > 0`，只保留尚可用度的包，避免把有用的两三行淹没
+* 服务通过 `ctx.inject(['providerUsage'])` + `ctx.get` 结构化读取，**不新增安装期
+  依赖**：未安装 provider-usage 时回调不触发，模型通道完全不受影响
+
 ## 0.3.18-alpha.6 (2026-09-17)
 
 ### 适配

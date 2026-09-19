@@ -7,6 +7,7 @@ DSH（DeepSeek Harness）host 层全局插件的 monorepo：
 | [`@chaoset/sandbox-extra-roots`](packages/sandbox-extra-roots/) | 沙盒额外允许写入目录（Seatbelt/bwrap/Landlock + fs fence） |
 | [`@chaoset/session-archive`](packages/session-archive/) | 归档会话管理：浏览、批量恢复或彻底删除归档会话 |
 | [`@chaoset/dsh-any-connect`](packages/dsh-any-connect/) | 接入 WorkBuddy 桌面 App 的模型到 DSH（零配置 + 思考强度/费率显示；源自 corrinehu/dsh-workbuddy-connect 的独立分支） |
+| [`@chaoset/provider-usage`](packages/provider-usage/) | 对话区底栏显示当前 provider 的剩余额度；通用查询器注册机制，任何 provider 插件都能接入 |
 
 每个包都提供：
 
@@ -27,6 +28,7 @@ DSH（DeepSeek Harness）host 层全局插件的 monorepo：
 dsh plugin --profile web add @chaoset/sandbox-extra-roots
 dsh plugin --profile web add @chaoset/session-archive
 dsh plugin --profile web add @chaoset/dsh-any-connect
+dsh plugin --profile web add @chaoset/provider-usage
 
 # 预发布线（适配 dsh 预发布版本，发布在对应 dist-tag，npm tag 语法）
 dsh plugin --profile web add @chaoset/sandbox-extra-roots@alpha
@@ -38,6 +40,7 @@ dsh plugin --profile web add /absolute/path/to/dsh-plugins/packages/session-arch
 dsh plugin --profile web remove @chaoset/sandbox-extra-roots
 dsh plugin --profile web remove @chaoset/session-archive
 dsh plugin --profile web remove @chaoset/dsh-any-connect
+dsh plugin --profile web remove @chaoset/provider-usage
 ```
 
 其他来源：
