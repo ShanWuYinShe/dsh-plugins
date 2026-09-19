@@ -61,14 +61,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/winliyou/dsh-plugins.git",
+    "url": "git+https://github.com/ShanWuYinShe/dsh-plugins.git",
     "directory": "packages/provider-usage"
   },
   "publishConfig": {
     "access": "public"
   },
   "bugs": {
-    "url": "https://github.com/winliyou/dsh-plugins/issues"
+    "url": "https://github.com/ShanWuYinShe/dsh-plugins/issues"
   },
-  "homepage": "https://github.com/winliyou/dsh-plugins/tree/main/packages/provider-usage#readme"
+  "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme"
 }
