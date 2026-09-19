@@ -14,15 +14,15 @@
 
 ## 安装
 
-> 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段
-> （`npm view <包名> dsh.host` 可查）；仓库的 `dsh-v*` git tag 是各次
-> 稳定版适配的归档点。
+> 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段；仓库的 `dsh-v*`
+> git tag 是各次稳定版适配的归档点。
 
 ```bash
-dsh plugin --profile web add @chaoset/session-archive
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v<版本>/chaoset-session-archive-<版本>.tgz
 dsh plugin --profile web remove @chaoset/session-archive
 ```
 
+`<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。
 重启 web profile 后，侧边栏底部出现「归档」入口。其他安装来源见仓库根
 `README.md` 的「安装」。
 

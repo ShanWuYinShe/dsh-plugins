@@ -6,10 +6,10 @@ README 面向用户，面向开发者的内容以 RELEASING.md 为准。
 
 ## 分支模型
 
-- `main` = dsh 稳定线适配（发 `latest`），工作树必须始终处于可直接发布状态
-  （停在被搁置的最后一版，需要时能立刻放紧急热修）；`alpha` = dsh 进行中的
-  alpha 预发布线（`-alpha.N`，进入 rc 阶段换 `-rc.N`，dist-tag 由版本后缀
-  自动决定）。**alpha 是用完即弃的适配线**，每轮生命周期固定四步：**从最新
+- `main` = dsh 稳定线适配（发正式 Release），工作树必须始终处于可直接发布
+  状态（停在被搁置的最后一版，需要时能立刻放紧急热修）；`alpha` = dsh 进行
+  中的 alpha 预发布线（`-alpha.N`，进入 rc 阶段换 `-rc.N`，Release 的
+  prerelease 标记由版本后缀自动决定）。**alpha 是用完即弃的适配线**，每轮生命周期固定四步：**从最新
   main 分叉 → 迭代若干提交 → 压缩成单个提交合回 main → 远程与本地删除
   alpha，再从最新 main 重建待命**。起点永远是当下的 main，因此 alpha 恒为
   main 的后代（基线自动继承稳定线成果，不靠人工搬运），收敛时 `merge
@@ -65,7 +65,7 @@ cd .worktrees/main && pnpm install && pnpm run build   # 每个工作树独立�
    ```
 
    插件用本地路径安装（`dsh plugin add /abs/path/to/packages/<pkg>`，符号
-   链接即装），**验证的是工作树产物，与 npm 发布产物同源**；
+   链接即装），**验证的是工作树产物，与 GitHub Release 分发的 tarball 同源**；
 3. 验证通过后才：bump `package.json` 版本 + 写 CHANGELOG → 提交。验证之后
    若有任何影响包产物的改动（src / client / 依赖 / 构建），必须用最终代码
    重新 build 并重走第 2 步——**送验产物必须与待发布产物一致**（版本号
@@ -74,8 +74,9 @@ cd .worktrees/main && pnpm install && pnpm run build   # 每个工作树独立�
 4. **推送前逐提交复核**：`git log --oneline origin/<分支>..HEAD` 与
    `git diff origin/<分支>..HEAD` 对照——提交信息声称的每项变更都要在
    diff 里找到，diff 里每处行为变更都要有 CHANGELOG 与版本号对应；
-   对不上就不要推。然后 push（CI 自动发布），完成后核对 npm 的版本号与
-   `dsh.host` 字段符合预期。
+   对不上就不要推。然后 push（CI 自动发布为 GitHub Release 资产），完成后
+   核对 Release 资产 tarball 与 `dsh.host` 字段符合预期（解包
+   `tar -xOf <tgz> package/package.json`）。
 
 历史反例（先发布再验证连发 6+ 版本、发布产物缺字段多发一版）见
 RELEASING.md「日常发布流程」——工作未完成期间代码可以本地 commit（worktree
@@ -119,8 +120,9 @@ pnpm run adapt <dsh 新线版本>   # dsh 宿主升级适配（--dry-run 预览�
 - 版本号只在本地手工改（各包 `package.json` 的 `version`），CI 绝不改写。
   升版本必须同时补该包 `CHANGELOG.md` 的 `## <版本> (YYYY-MM-DD)` 小节
   （GitHub Release 说明自动取自这里）。
-- 推送 `main` / `alpha` 即触发测试 + 发布（npm Trusted Publishing）；改动
-  代码不升版本号会直接红（版本落后于 npm 的包会被门禁拒绝）。
+- 推送 `main` / `alpha` 即触发测试 + 发布（GitHub Release tarball 分发，
+  不经过 npm）；改动代码不升版本号会直接红（版本低于已归档版本的包会被
+  门禁拒绝）。
 - 提交信息用中文 + 类型前缀，与仓库现有用法一致（`新增:` / `修复:` /
   `重构:` / `文档:` / `测试:` / `ci:` 等，范围可选，如 `修复(认证): …`）。
 - 测试环境通过 vitest 配置里的 `DSH_HOME` 与真实用户目录隔离，不要在测试里

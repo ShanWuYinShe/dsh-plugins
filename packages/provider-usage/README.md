@@ -31,8 +31,10 @@ workbuddy
 ## 安装
 
 ```bash
-dsh plugin --profile web add @chaoset/provider-usage
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v<版本>/chaoset-provider-usage-<版本>.tgz
 ```
+
+`<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。
 
 前置：DSH 宿主版本见本包 `package.json` 的 `dsh.host` 字段。
 

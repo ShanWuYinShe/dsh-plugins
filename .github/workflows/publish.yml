@@ -1,10 +1,10 @@
-name: Publish to npm
+name: Publish to GitHub Releases
 
 on:
   push:
     branches:
-      # main = dsh 稳定线适配（发 latest）；alpha = dsh 预发布线适配（发
-      # alpha 等 dist-tag）。分支模型与发布规则见 RELEASING.md。
+      # main = dsh 稳定线适配（发正式版 Release）；alpha = dsh 预发布线适配
+      # （发 prerelease Release）。分支模型与发布规则见 RELEASING.md。
       - main
       - alpha
     paths:
@@ -21,8 +21,8 @@ on:
   workflow_dispatch:
 
 # 仓库级并发组（不按分支区分）：main 与 alpha 的发布也必须排队——两个分支
-# 可能存在同版本号的包，并发发布会双发同一版本，npm 会拒绝第二个、白红一个
-# job。不取消进行中的发布：已开始的 npm publish 让它跑完，排队的用最新代码重来。
+# 可能存在同版本号的包，并发发布会双发同一版本，git tag 冲突会让第二个 job
+# 红掉。不取消进行中的发布：已开始的发布让它跑完，排队的用最新代码重来。
 concurrency:
   group: publish
   cancel-in-progress: false
@@ -31,10 +31,8 @@ jobs:
   test-and-publish:
     runs-on: ubuntu-latest
     permissions:
+      # 发布成功后要打 git tag 并创建 GitHub Release（含 tarball 资产）
       contents: write
-      # 发布成功后要打 git tag 并创建 GitHub Release
-      # npm Trusted Publishing (OIDC): publish without a long-lived token
-      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -43,8 +41,8 @@ jobs:
           # 浅克隆会漏 tag 导致重复发布尝试。
           fetch-depth: 0
 
-      # pnpm is the only toolchain entry point: install / test / version reads
-      # all run through pnpm. pnpm 版本取自 package.json 的 packageManager 字段,
+      # pnpm is the only toolchain entry point: install / test / pack all run
+      # through pnpm. pnpm 版本取自 package.json 的 packageManager 字段,
       # 与本地保持一致(Corepack 也认这个字段)。
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -63,8 +61,8 @@ jobs:
       - name: Run tests
         run: pnpm run test:ci
 
-      # 状态式门禁：该发什么由 git tag 与 npm 注册表状态决定，与推送形状无关
-      # （判定规则见 scripts/publish-gate.mjs 头注释）。版本号落后于 npm 的包
+      # 状态式门禁：该发什么由 git tag 归档状态决定，与推送形状无关（判定
+      # 规则见 scripts/publish-gate.mjs 头注释）。版本号低于已归档版本的包
       # 会让整个 job 失败——「改了代码没升版本」从此是红灯而不是静默跳过。
       - name: Plan publish
         id: plan
@@ -72,51 +70,51 @@ jobs:
           PLAN=$(node scripts/publish-gate.mjs)
           echo "plan=$PLAN" >> "$GITHUB_OUTPUT"
 
-      - name: Publish planned packages
+      # 发布 = 每个待发布包 pnpm pack 出标准 npm tarball（与原 npm registry
+      # 产物同格式：lib/、client/、cordis.patch.yml、dsh.host 等字段齐全，
+      # dsh 的 plugin add（= pnpm add）可直接装 tarball URL），作为 GitHub
+      # Release 资产上传。tag `<目录>-v<版本>` 由 gh release create 打在触发
+      # 提交上，发布门禁据此幂等跳过；prerelease 布尔取自门禁计划（版本带
+      # `-` 即 true）。消费者安装命令见各包 README。
+      - name: Pack and publish planned packages
         id: publish
         if: steps.plan.outputs.plan != '[]'
         env:
           PLAN: ${{ steps.plan.outputs.plan }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           PUBLISHED=""
           while IFS= read -r entry; do
-            dir="${entry%%@*}"; rest="${entry#*@}"; version="${rest%%@*}"; dist_tag="${rest#*@}"
-            echo "Publishing packages/$dir@$version under dist-tag '$dist_tag' ..."
+            dir="${entry%%@*}"; rest="${entry#*@}"; version="${rest%%@*}"; prerelease="${rest#*@}"
+            TAG="$dir-v$version"
+            echo "Packing packages/$dir@$version → GitHub Release $TAG (prerelease=$prerelease) ..."
             cd "packages/$dir"
-            # `pnpm publish`: OIDC Trusted Publishing happens automatically
-            # when id-token: write is set and the package has a trusted
-            # publisher configured on npmjs.com. --provenance adds attestation.
-            # pnpm 11.0.x 曾在这里抛 404(pnpm/pnpm#11513,已由 #11526 修复),
-            # 11.24.0 起 pnpm 自己的发版流程就是走的这条路。
-            # --no-git-checks: checkout 出来是 detached HEAD,pnpm 默认的分支
-            # 检查会拒绝发布。
-            pnpm publish --provenance --access public --no-git-checks --tag "$dist_tag" --registry=https://registry.npmjs.org
-            cd ../..
-            PUBLISHED="$PUBLISHED $dir@$version"
-          done < <(node -e 'for (const p of JSON.parse(process.argv[1])) console.log(`${p.dir}@${p.version}@${p.tag}`)' "$PLAN")
-          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
-
-      # 发布成功后归档：git tag（`<目录>-v<版本>`，发布门禁据此幂等跳过）+
-      # GitHub Release（说明取该包 CHANGELOG 对应版本小节，README 的 tarball
-      # 安装方式由此获得与 npm 一致的版本）。发布中途失败时直接重跑整个 job：
-      # 已发布的包被门禁跳过，未完成的继续。
-      - name: Create git tags and GitHub releases
-        if: steps.publish.outputs.published != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PUBLISHED: ${{ steps.publish.outputs.published }}
-        run: |
-          for entry in $PUBLISHED; do
-            dir="${entry%%@*}"; rest="${entry#*@}"; version="${rest#*@}"
-            tag="$dir-v$version"
-            if gh release view "$tag" >/dev/null 2>&1; then
-              echo "Release $tag already exists, skipping."
-              continue
+            TARBALL=$(pnpm pack | tail -1)
+            if [ ! -f "$TARBALL" ]; then
+              echo "pnpm pack 未能产出预期的 tarball（得到: $TARBALL）"
+              exit 1
             fi
-            PKG_NAME=$(node -e "console.log(require('./packages/$dir/package.json').name)")
+            PKG_NAME=$(node -e "console.log(require('./package.json').name)")
+            cd ../..
             NOTES=$(node scripts/release-notes.mjs "$dir" "$version")
-            gh release create "$tag" --target "$GITHUB_SHA" --title "$PKG_NAME v$version" --notes "$NOTES"
-          done
+            PRERELEASE_FLAG=""
+            [ "$prerelease" = "true" ] && PRERELEASE_FLAG="--prerelease"
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              # 重跑幂等：Release 已在（上次运行发布步骤中途失败），只补缺失
+              # 的资产；资产也在才整体跳过。
+              if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx "$TARBALL"; then
+                echo "Release $TAG 与资产均已存在，跳过。"
+              else
+                gh release upload "$TAG" "packages/$dir/$TARBALL" --clobber
+                echo "Release $TAG 已存在，补传资产 $TARBALL。"
+              fi
+            else
+              gh release create "$TAG" "packages/$dir/$TARBALL" --target "$GITHUB_SHA" \
+                --title "$PKG_NAME v$version" --notes "$NOTES" $PRERELEASE_FLAG
+            fi
+            PUBLISHED="$PUBLISHED $dir@$version"
+          done < <(node -e 'for (const p of JSON.parse(process.argv[1])) console.log(`${p.dir}@${p.version}@${p.prerelease}`)' "$PLAN")
+          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
 
       # dsh 稳定版适配归档：main 流水成功（测试全绿 + 门禁走完）后，按当前
       # dsh 依赖基线打 `dsh-v<版本>` tag（幂等：基线没变则 tag 已存在跳过）。

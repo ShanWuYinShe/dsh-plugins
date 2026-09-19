@@ -42,16 +42,15 @@ DeepSeek-V4.1-Flash、Kimi-K3、MiniMax-M3、Hy3 等，国际版另有 GPT/Gemin
 
 ## 安装
 
-> 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段
-> （`npm view <包名> dsh.host` 可查）；仓库的 `dsh-v*` git tag 是各次
-> 稳定版适配的归档点。
+> 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段；仓库的 `dsh-v*`
+> git tag 是各次稳定版适配的归档点。
 
 前置：已安装并登录 WorkBuddy 桌面 App（插件复用 App 的登录状态，账号切换自动
 跟随）。
 
 ```bash
 # Web（唯一支持的界面）
-dsh plugin --profile web add @chaoset/dsh-any-connect
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v<版本>/chaoset-dsh-any-connect-<版本>.tgz
 dsh web
 
 # 从本地源码安装
@@ -60,6 +59,8 @@ dsh plugin --profile web add /absolute/path/to/dsh-plugins/packages/dsh-any-conn
 # 卸载
 dsh plugin --profile web remove @chaoset/dsh-any-connect
 ```
+
+`<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。
 
 > 本包目前只支持 Web 界面，其他界面（Desktop / TUI / headless）暂不
 > 考虑、不承诺可用。
