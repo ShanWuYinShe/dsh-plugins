@@ -10,8 +10,7 @@ on:
     paths:
       - 'packages/**'
       - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
+      - 'bun.lock'
       - 'scripts/**'
       - '.github/workflows/publish.yml'
   # 不监听 release.published：本 workflow 发布成功后自己会 gh release create，
@@ -40,25 +39,24 @@ jobs:
           # 浅克隆会漏 tag 导致重复发布尝试。
           fetch-depth: 0
 
-      # pnpm is the only toolchain entry point: install / test / pack all run
-      # through pnpm. pnpm 版本取自 package.json 的 packageManager 字段,
-      # 与本地保持一致(Corepack 也认这个字段)。
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+      # bun 是唯一的包管理器入口:install / test / pack 全走 bun。
+      # bun 版本取根 package.json 的 packageManager 字段,与本地保持一致。
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
 
-      # setup-node 提供 Node(下面的 `node -e` 与 pnpm 自身都要用)并缓存
-      # pnpm store;必须在 action-setup 之后,cache: pnpm 才能找到 store 路径。
+      # setup-node 只提供 Node(下面的 `node -e` 与 scripts/*.mjs 直接调用)。
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Run tests
-        run: pnpm run test:ci
+        run: bun run test:ci
 
       # 状态式门禁：该发什么由 git tag 归档状态决定，与推送形状无关（判定
       # 规则见 scripts/publish-gate.mjs 头注释）。版本号低于已归档版本的包
@@ -69,9 +67,9 @@ jobs:
           PLAN=$(node scripts/publish-gate.mjs)
           echo "plan=$PLAN" >> "$GITHUB_OUTPUT"
 
-      # 发布 = 每个待发布包 pnpm pack 出标准 npm tarball（与原 npm registry
+      # 发布 = 每个待发布包 bun pm pack 出标准 npm tarball（与原 npm registry
       # 产物同格式：lib/、client/、cordis.patch.yml、dsh.host 等字段齐全，
-      # dsh 的 plugin add（= pnpm add）可直接装 tarball URL），作为 GitHub
+      # dsh 的 plugin add 可直接装 tarball URL），作为 GitHub
       # Release 资产上传。tag `<目录>-v<版本>` 由 gh release create 打在触发
       # 提交上，发布门禁据此幂等跳过；prerelease 布尔取自门禁计划（版本带
       # `-` 即 true）。消费者安装命令见各包 README。
@@ -88,9 +86,9 @@ jobs:
             TAG="$dir-v$version"
             echo "Packing packages/$dir@$version → GitHub Release $TAG (prerelease=$prerelease) ..."
             cd "packages/$dir"
-            TARBALL=$(pnpm pack | tail -1)
+            TARBALL=$(bun pm pack --quiet | tail -1)
             if [ ! -f "$TARBALL" ]; then
-              echo "pnpm pack 未能产出预期的 tarball（得到: $TARBALL）"
+              echo "bun pm pack 未能产出预期的 tarball（得到: $TARBALL）"
               exit 1
             fi
             PKG_NAME=$(node -e "console.log(require('./package.json').name)")

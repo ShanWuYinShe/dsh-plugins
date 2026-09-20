@@ -94,16 +94,16 @@ DSH 从源码仓库运行（不全局安装 `dsh` 与 `@deepseek-ai/*`）时，�
 
 ## 开发
 
-`@deepseek-ai/*` 内部包来自公共 registry，作为根部 `devDependencies` 由 pnpm 安装
-（workspace 声明在 `pnpm-workspace.yaml`，pnpm 版本由根 `package.json` 的
-`packageManager` 字段锁定，Corepack 会自动匹配）：
+`@deepseek-ai/*` 内部包来自公共 registry，作为根部 `devDependencies` 由 bun 安装
+（workspace 声明在根 `package.json` 的 `workspaces` 字段，bun 版本由
+`packageManager` 字段锁定）：
 
 ```bash
-pnpm install       # 安装依赖
-pnpm run build     # 全仓构建：每包 tsc 编译 src/ → lib/，esbuild 打包 client
-pnpm run typecheck # tsc --noEmit（host + client 两套 tsconfig）
-pnpm run test      # vitest 回归（host 插件 / config-store / 上游客户端等）
-pnpm run test:ci   # build + typecheck + test（发布前验证）
+bun install        # 安装依赖
+bun run build      # 全仓构建：每包 tsc 编译 src/ → lib/，esbuild 打包 client
+bun run typecheck  # tsc --noEmit（host + client 两套 tsconfig）
+bun run test       # vitest 回归（host 插件 / config-store / 上游客户端等）
+bun run test:ci    # build + typecheck + test（发布前验证）
 ```
 
 ## 版本管理与发布

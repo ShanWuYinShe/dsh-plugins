@@ -13,7 +13,7 @@
 //      所有已归档版本（含稳定线）；正式版目标只与
 //      已归档的稳定版比较——低于 alpha 在途预发布是
 //      合法的晋升/热修路径（semver 保证转正号更大）。
-//   3. 否则                                         → 发布（pnpm pack → GitHub Release
+//   3. 否则                                         → 发布（bun pm pack → GitHub Release
 //                                                      资产，tag 与资产名见 workflow）
 //
 // stdout 只输出计划 JSON（`[{"dir","name","version","prerelease"}]`），人类可读

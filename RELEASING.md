@@ -7,7 +7,7 @@
 
 | 分支 | 适配的 DSH 线 | 跟随的宿主版本 | 版本号形态 | Release 形态 |
 |---|---|---|---|---|
-| `main` | DSH 稳定线 | **dsh 已发布版本中最新的一版 rc**（没有正式版期间，rc 即正式版；当前值以 `pnpm run dsh-status` 为准） | 纯 semver（如 `0.10.3`） | 正式 Release |
+| `main` | DSH 稳定线 | **dsh 已发布版本中最新的一版 rc**（没有正式版期间，rc 即正式版；当前值以 `bun run dsh-status` 为准） | 纯 semver（如 `0.10.3`） | 正式 Release |
 | `alpha` | DSH 进行中的 alpha 线 | 基础号高于上述 rc 的最新 `-alpha`（无新线时与 `main` 同基线待命） | `-alpha.N` 后缀（进入 rc 阶段换 `-rc.N`，如 `0.10.4-alpha.0`） | prerelease Release |
 
 **双线并行是常态，不是过渡方案**：DSH 快速迭代期间，稳定线与 alpha 预发布
@@ -57,7 +57,7 @@ npm 的**版本列表**：稳定线目标 = 非进行中预发布的最高版（
   现改为分支直接由 main 重建，基线天然等于稳定线目标，无需靠 semver 技巧
   覆盖，也不会出现两分支基线不同的中间态。
 
-核对手段：`pnpm run dsh-status`（本地随时跑，输出稳定线、进行中线与两分支
+核对手段：`bun run dsh-status`（本地随时跑，输出稳定线、进行中线与两分支
 基线的对照）；CI 的 `dsh-follow.yml` 每日定时核对（push 仅在核对脚本自身
 变更时触发），不一致发
 warning（刻意非阻塞——提醒，不是门禁）。
@@ -172,14 +172,14 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
 
 ## 日常发布流程
 
-**发布门槛：功能完全实现 + 本地 `pnpm run test:ci` 全绿 + dsh 测试实例真实
+**发布门槛：功能完全实现 + 本地 `bun run test:ci` 全绿 + dsh 测试实例真实
 验证通过，三者齐备才 bump 版本并推送。** 版本一旦归档（git tag + Release）不可
 撤回，"发布后
 再验证发现问题再发一版"会产生大量无意义的版本号（2026-09-03 单日 6+ 版本、
 2026-09-05 连发 0.10.4/0.10.5 的教训——后者是改动散落两个工作树，提交信息
 声称新增的字段实际不在提交里，发布产物缺字段）。
 
-1. 在目标分支改代码，`pnpm run test:ci` 全绿。
+1. 在目标分支改代码，`bun run test:ci` 全绿。
 2. 启动隔离测试实例（独立 `DSH_HOME` + 本地路径安装插件），在真实浏览器
    里验证功能与控制台（详见 AGENTS.md「发布纪律」）。未通过就回到 1，
    **不要 push**。
@@ -192,7 +192,7 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    必须互相印证——提交信息声称的每一项变更都要能在 diff 里找到，diff 里的
    每一处行为变更都要有 CHANGELOG 与版本号对应。**任何一项对不上就不要推**。
 5. 推送。CI（`.github/workflows/publish.yml`）自动执行：测试 → 状态式门禁 →
-   发布（`pnpm pack` 出 tarball，`gh release create` 打 tag `<目录>-v<版本>`、
+   发布（`bun pm pack` 出 tarball，`gh release create` 打 tag `<目录>-v<版本>`、
    创建 GitHub Release 并把 tarball 挂为资产，prerelease 版本带 prerelease
    标记）→（仅 main）按当前 dsh 基线更新 `dsh-v*` 归档 tag。发布完成后核对
    Release 的资产 tarball 与 `dsh.host` 字段符合预期（解包资产读
@@ -230,10 +230,10 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
 - **工作区隔离**：`main` 与 `alpha` 用 git worktree 并存（主检出目录停在活跃
   的 `alpha`，`.worktrees/main` 是稳定线工作树），不要在主检出目录里切分支——
   `lib/` 与 `node_modules` 不受 git 管理，切分支会残留上一条线的构建产物与
-  依赖解析。进入任一工作树后先 `pnpm install`，构建产物可疑就重新 build。
+  依赖解析。进入任一工作树后先 `bun install`，构建产物可疑就重新 build。
 - **收敛时搬源码**：只搬 `src/`、`client/`、`CHANGELOG.md` 和 `package.json`
-  里与依赖无关的字段；**依赖 range 与 `pnpm-lock.yaml` 永不跨分支搬运**——
-  到达 main 后按稳定线宿主版本核对依赖，`pnpm install` 重新生成 lockfile。
+  里与依赖无关的字段；**依赖 range 与 `bun.lock` 永不跨分支搬运**——
+  到达 main 后按稳定线宿主版本核对依赖，`bun install` 重新生成 lockfile。
   两分支的 lockfile 差异巨大，跨分支直接 merge 它们必然冲突。收敛的完整做法
   （`adapt` 到该线最新 rc、去预发布后缀、`reset --soft origin/main` 压缩成单个
   提交、ff 合入 main）见「双线生命周期」第 4 步。
@@ -242,9 +242,9 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
   alpha 更新，不在搁置期 cherry-pick 到 main——搁置期 main 不开发不发布，提前
   同步只会产生两处副本与表述漂移，收敛时随整条线一次带过去即可。各包
   `packages/*/README.md` 属包内容，同样随该包走。
-- `pnpm-workspace.yaml` 两分支内容不同（`minimumReleaseAgeExclude` 清单各自
-  跟随本分支的宿主基线（由 adapt-dsh.mjs 整块重建），收敛时按 main 的新基线
-  重建，不直接搬运该文件）。
+- 根 `package.json` 的 `workspaces` 与 `trustedDependencies` 两分支保持一致
+  （声明是静态的，不跟随宿主基线）；各分支的依赖差异只体现在 `bun.lock`
+  里，收敛时按 main 的新基线重建，不直接搬运 lockfile。
 
 ## DSH 宿主升级适配
 
@@ -252,18 +252,14 @@ DSH 出新高基础号的 alpha 线（如 `0.1.2` 终结后的 `0.1.3-alpha.0`�
 alpha 分支：
 
 ```bash
-node scripts/adapt-dsh.mjs 0.1.3-alpha.0   # 改全部 @deepseek-ai/dsh-* range + exclude 清单
-pnpm install                                # 重新生成 lockfile
+node scripts/adapt-dsh.mjs 0.1.3-alpha.0   # 改全部 @deepseek-ai/dsh-* range
+bun install                                 # 重新生成 lockfile
 # 对照新宿主的 diff 复核用到的契约（参照历史 CHANGELOG 的记录方式），
 # 升版本号、写 CHANGELOG，然后：
-pnpm run test:ci && git push
+bun run test:ci && git push
 ```
 
-`adapt-dsh.mjs` 支持 `--dry-run` 预览；它按 lockfile 闭包整块重建 exclude
-清单，宿主新引入的 dsh 子依赖会自动纳入。若 `pnpm install` 仍报某 dsh 包
-解析不到（闭包外的新依赖），把该包手工补进清单后重试。稳定线（main）跟进
-dsh 新的 rc（如 `0.1.1-rc.2` → `0.1.2-rc.1`）时同样在 main 上执行同一
-流程；排除清单按本分支基线同样重建。
+`adapt-dsh.mjs` 支持 `--dry-run` 预览，它只改各 package.json 的依赖 range。若 `bun install` 报某 dsh 包解析不到，先检查 adapt 是否已把 range 改写。稳定线（main）跟进 dsh 新的 rc（如 `0.1.1-rc.2` → `0.1.2-rc.1`）时同样在 main 上执行同一流程。
 
 `adapt-dsh.mjs` 同时把每个发布包 `package.json` 的 `dsh.host` 字段改写为
 目标版本——那是 npm 消费者可见的「本包适配的宿主版本」声明
@@ -272,7 +268,7 @@ dsh 新的 rc（如 `0.1.1-rc.2` → `0.1.2-rc.1`）时同样在 main 上执行�
 
 同一命令也用于让重建后的 alpha 分支跟进新预发布线：adapt 不比较新旧、按
 指定版本整块覆写，因此「待命的 alpha 分支等到 dsh 新 alpha 线后开始适配」
-就是 `node scripts/adapt-dsh.mjs <新线版本>` + `pnpm install`。
+就是 `node scripts/adapt-dsh.mjs <新线版本>` + `bun install`。
 
 ## 双线生命周期（常态循环）
 
@@ -292,7 +288,7 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 1. **待命**：alpha 分支由最新 main 创建（`git branch alpha main`），代码与
    依赖基线等于 main，不发版。此时 dsh 无进行中的预发布线（上一条已终结）。
 2. **dsh 出新高基础号的 alpha 线**（如 `0.1.3-alpha.0`）：alpha 分支执行
-   「DSH 宿主升级适配」流程（`adapt` 到该线 + `pnpm install`），把包版本
+   「DSH 宿主升级适配」流程（`adapt` 到该线 + `bun install`），把包版本
    bump 成 `-alpha.N` 发布 prerelease Release。**main 就此整体搁置**——不再
    开发、不再发布、不接受任何 cherry-pick，直到该线发出正式版（第 4 步）；
    这期间的稳定线用户继续用 main 上已发布的最后一版 `latest`。
@@ -305,7 +301,7 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
    工作树里完成（不在主检出目录操作），分三件事：
 
    a. **`adapt` 到新正式版并去掉预发布后缀**：`node scripts/adapt-dsh.mjs
-      <该线最新 rc>` + `pnpm install`，让依赖基线与 `dsh.host` 对齐这条线的
+      <该线最新 rc>` + `bun install`，让依赖基线与 `dsh.host` 对齐这条线的
       正式版；把包版本去掉后缀（`0.3.2-alpha.0` → `0.3.2`；若稳定线热修已
       占用该基础号，先跳到下一个基础号），写 CHANGELOG。
 
@@ -323,7 +319,7 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
       `git merge`（会产生 merge commit）；禁止 `git merge --squash`（会绕过
       alpha 历史，且本条流程要求压缩在 alpha 侧完成）。**
 
-   c. **验证后合入 main 并发布**：`pnpm run test:ci` 全绿 + 隔离实例真实
+   c. **验证后合入 main 并发布**：`bun run test:ci` 全绿 + 隔离实例真实
       验证，然后 `git merge --ff-only <alpha 分支>`（此刻它已是 main 的
       后代，必然可 ff）→ 推送 `main` 发布 `latest`。
 
@@ -375,7 +371,7 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 > 紧急热修，推 main 不会产出 Release 资产，直接用下述 `pnpm pack` +
 > `gh release create` 兜底；main 的 publish 流水留待双线收敛时随整线搬运。
 
-CI 失败或需要立即发布时：`cd packages/<pkg> && pnpm pack`（产物
+CI 失败或需要立即发布时：`cd packages/<pkg> && bun pm pack`（产物
 `chaoset-<目录>-<版本>.tgz`），然后 `gh release create <目录>-v<版本> <tgz>
 --target <sha> --title "<npm 包名> v<版本>" --notes "<说明>"`（prerelease 版本
 加 `--prerelease`）。`gh release create` 会同时打 git tag，归档自动完成，无需

@@ -10,8 +10,7 @@ on:
     paths:
       - 'packages/**'
       - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
+      - 'bun.lock'
       - 'scripts/**'
       - '.github/workflows/*'
 
@@ -27,17 +26,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+      # bun 是唯一的包管理器入口：install / test / pack 全走 bun。
+      # bun 版本与根 package.json 的 packageManager 字段保持一致。
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
 
+      # setup-node 只提供 node 二进制（scripts/*.mjs 直接用 node 调用），
+      # 不再做任何包管理器的缓存。
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Build and test
-        run: pnpm run test:ci
+        run: bun run test:ci

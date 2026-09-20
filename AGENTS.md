@@ -1,7 +1,7 @@
 # AGENTS.md — AI 协作指引
 
 DSH host 插件 monorepo，双分支跟随 DSH 宿主线。通用约束以全局 `~/AGENTS.md` 为准
-（本项目例外：`alpha` 分支允许推送，见全局 Git 准则），本文件只做项目特有补充。
+（本项目例外：`alpha` 分支允许推送，见全局「Git 与提交」），本文件只做项目特有补充。
 动手前先读
 [RELEASING.md](RELEASING.md)（分支 / 版本号 / 发布流程的唯一权威约定）；
 README 面向用户，面向开发者的内容以 RELEASING.md 为准。
@@ -25,20 +25,16 @@ README 面向用户，面向开发者的内容以 RELEASING.md 为准。
   文档、`scripts/`、workflows、根配置一律不往 main 搬，main 停在原地不开发不
   发布。唯一例外是稳定线紧急热修（需明确指示，且修完必须把改动带回 alpha）。
   收敛时随整条线一次搬过去，详见 RELEASING.md「跨分支同步」。
-- 依赖 range、`pnpm-lock.yaml`、`pnpm-workspace.yaml` 的排除清单**永不跨分支
-  搬运**。
+- 依赖 range、`bun.lock` 只在所属分支重建，不跨分支搬运。
 
-## 开发工作流：worktree，不要切分支
+## 开发工作流：worktree
 
 活跃预发布线开发期，主检出目录固定停在 `alpha`；待命期（两分支代码一致时）
-停在 `main` 即可。需要另一条分支时用 git worktree，**绝不在主检出目录里来回
-checkout**：`lib/` 与 `node_modules` 被 gitignore，切分支后残留的是上一条
-分支的构建产物和依赖解析（曾导致旧宿主线的 `installSettingsSection` lib 在
-新源码下直接崩溃）。
+停在 `main` 即可。需要另一条分支时用 git worktree；主检出目录固定停在当前分支（`lib/` 与 `node_modules` 被 gitignore，切分支会残留上一条分支的构建产物和依赖解析，曾导致旧宿主线的 `installSettingsSection` lib 在新源码下直接崩溃）。
 
 ```bash
 git worktree add .worktrees/main main      # 首次创建（.worktrees/ 已 gitignore）
-cd .worktrees/main && pnpm install && pnpm run build   # 每个工作树独立安装构建
+cd .worktrees/main && bun install && bun run build   # 每个工作树独立安装构建
 ```
 
 跨分支 cherry-pick 在两个工作树目录之间直接进行，互不污染；每次进入工作树
@@ -52,12 +48,10 @@ cd .worktrees/main && pnpm install && pnpm run build   # 每个工作树独立�
 
 ## 发布纪律（重要）
 
-**任何插件更新（功能、修复、依赖调整一律适用）：必须先在本地的隔离测试
-环境中全部测试通过，才能更新版本号、提交、推送——顺序不可颠倒，无例外。**
-版本号是发布动作的一部分，不是开发动作——功能有问题就修功能，绝不靠
-"再发一版"解决。一次功能开发的完整顺序：
+**任何插件更新（功能、修复、依赖调整一律适用），顺序是本地隔离测试环境全部通过 → 更新版本号 → 提交 → 推送。**
+版本号是发布动作的一部分，不是开发动作——功能有问题就修功能，修好再发版。一次功能开发的完整顺序：
 
-1. 开发 + `pnpm run test:ci`（build + typecheck + test）全绿；
+1. 开发 + `bun run test:ci`（build + typecheck + test）全绿；
 2. 启动隔离测试实例真实验证（不占用用户的 `~/.dsh`）：
 
    ```bash
@@ -77,25 +71,25 @@ cd .worktrees/main && pnpm install && pnpm run build   # 每个工作树独立�
 4. **推送前逐提交复核**：`git log --oneline origin/<分支>..HEAD` 与
    `git diff origin/<分支>..HEAD` 对照——提交信息声称的每项变更都要在
    diff 里找到，diff 里每处行为变更都要有 CHANGELOG 与版本号对应；
-   对不上就不要推。然后 push（CI 自动发布为 GitHub Release 资产），完成后
+   确认对上再 push（CI 自动发布为 GitHub Release 资产），完成后
    核对 Release 资产 tarball 与 `dsh.host` 字段符合预期（解包
    `tar -xOf <tgz> package/package.json`）。
 
 历史反例（先发布再验证连发 6+ 版本、发布产物缺字段多发一版）见
-RELEASING.md「日常发布流程」——工作未完成期间代码可以本地 commit（worktree
-隔离），但**不要 push**——push 即发布。
+RELEASING.md「日常发布流程」——工作未完成期间代码只在本地 commit（worktree
+隔离）；push 即发布。
 
 ## 常用命令
 
 ```bash
-pnpm install            # 依赖安装（切分支后 lockfile 不同，记得重新 install）
-pnpm run build          # tsc 编译 host + esbuild 打包 client
-pnpm run typecheck      # host + client 两套 tsconfig --noEmit
-pnpm run test           # vitest 回归
-pnpm run test:ci        # build + typecheck + test（提交/发布前必跑）
-pnpm run gate           # 发布门禁干跑：只读，看哪些包会被发布/为何被跳过
-pnpm run dsh-status     # 两分支 dsh 依赖基线 vs dsh 最新 rc（正式版）对照（详见 RELEASING.md）
-pnpm run adapt <dsh 新线版本>   # dsh 宿主升级适配（--dry-run 预览），详见 RELEASING.md
+bun install             # 依赖安装（切分支后 lockfile 不同，记得重新 install）
+bun run build           # tsc 编译 host + esbuild 打包 client
+bun run typecheck       # host + client 两套 tsconfig --noEmit
+bun run test            # vitest 回归
+bun run test:ci         # build + typecheck + test（提交/发布前必跑）
+bun run gate            # 发布门禁干跑：只读，看哪些包会被发布/为何被跳过
+bun run dsh-status      # 两分支 dsh 依赖基线 vs dsh 最新 rc（正式版）对照（详见 RELEASING.md）
+bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览），详见 RELEASING.md
 ```
 
 ## 已知技术债（重构候选，动手前先规划）
@@ -120,7 +114,7 @@ pnpm run adapt <dsh 新线版本>   # dsh 宿主升级适配（--dry-run 预览�
 
 ## 约定
 
-- 版本号只在本地手工改（各包 `package.json` 的 `version`），CI 绝不改写。
+- 版本号只在本地手工改（各包 `package.json` 的 `version`），CI 只读不写。
   升版本必须同时补该包 `CHANGELOG.md` 的 `## <版本> (YYYY-MM-DD)` 小节
   （GitHub Release 说明自动取自这里）。
 - 推送 `main` / `alpha` 即触发测试 + 发布（GitHub Release tarball 分发，
@@ -128,14 +122,12 @@ pnpm run adapt <dsh 新线版本>   # dsh 宿主升级适配（--dry-run 预览�
   代码没升版本号」分两种——tag 不在 HEAD 且包内容有更新时门禁会告警
   （不红），版本与已归档 tag 相同则幂等跳过。任何情况下不满足发布条件的
   包不会出现在 Release 资产里。
-- 提交信息遵循全局 Commit 格式（`<分类>(<范围>): <中文描述>`），本项目惯例用
+- 提交信息遵循全局「Git 与提交」里的格式（`<分类>(<范围>): <中文描述>`），本项目惯例用
   中文分类前缀（`新增:` / `修复:` / `重构:` / `文档:` / `测试:` / `ci:` 等）。
-- 测试环境通过 vitest 配置里的 `DSH_HOME` 与真实用户目录隔离，不要在测试里
-  读写真实的 `~/.dsh`。
+- 测试环境通过 vitest 配置里的 `DSH_HOME` 与真实用户目录隔离，测试一律读写隔离目录。
 - 测试涉及平台差异时必须显式判定平台（如
   `it.skipIf(process.platform !== "darwin")`），或改用运行时取值
-  （`canonicalPath`、`dirname(fakeHome)` 等）保持用例平台无关——禁止写死
-  单一平台的路径拼写，避免用例在其他平台永远跑不过。新增平台相关用例时
+  （`canonicalPath`、`dirname(fakeHome)` 等）保持用例平台无关；路径拼写取自运行时，在其他平台也跑得过。新增平台相关用例时
   建议在 Linux 容器实测一遍（`node:24` 镜像 + tar 管道传入源码跑
-  `pnpm run test:ci`；macOS 打 tar 要带 `COPYFILE_DISABLE=1 --no-xattrs`，
+  `bun run test:ci`；macOS 打 tar 要带 `COPYFILE_DISABLE=1 --no-xattrs`，
   否则 `._*` AppleDouble 文件会被 vitest 当测试文件收集）。

@@ -1,5 +1,5 @@
-// DSH 宿主升级适配：一条命令改齐所有 `@deepseek-ai/dsh-*` 依赖 range 与
-// pnpm-workspace.yaml 里 minimumReleaseAgeExclude 清单的版本号。
+// DSH 宿主升级适配：一条命令改齐所有 `@deepseek-ai/dsh-*` 依赖 range
+// 的版本号。
 // 用法：node scripts/adapt-dsh.mjs <新宿主版本> [--dry-run]
 //   例：node scripts/adapt-dsh.mjs 0.1.2-alpha.4
 //
@@ -9,7 +9,7 @@
 //
 // 脚本不做的事（按 RELEASING.md 手工完成）：
 //   - 升各包版本号、写 CHANGELOG（发布决策）
-//   - pnpm install 重新生成 lockfile（需要网络）
+//   - bun install 重新生成 lockfile（需要网络）
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -54,44 +54,13 @@ function adaptPackageJson(path) {
   if (!dryRun) writeFileSync(path, JSON.stringify(json, null, 2) + "\n");
 }
 
-// 从 pnpm-lock.yaml 提取当前 @deepseek-ai/dsh-* 闭包的包名，整块重建
-// minimumReleaseAgeExclude 清单（全部指向新版本）。闭包重建而非逐行改写：
-// 宿主新版本常引入新的 dsh 子依赖，逐行改写会漏掉它们——新版本通常发布
-// 未满 24 小时，install 会因供应链门槛解析不到而直接失败。清单不存在的
-// 分支（稳定线）跳过。
-function adaptWorkspaceYaml() {
-  const path = join(ROOT, "pnpm-workspace.yaml");
-  const text = readFileSync(path, "utf8");
-  const listStart = text.indexOf("minimumReleaseAgeExclude:");
-  if (listStart === -1) {
-    console.log("  pnpm-workspace.yaml: 无 minimumReleaseAgeExclude 清单，跳过（稳定线无需排除）");
-    return;
-  }
-  const lock = readFileSync(join(ROOT, "pnpm-lock.yaml"), "utf8");
-  const names = new Set();
-  // 包名口径与依赖扫描同源（DEP_PREFIX），不再维护第二份正则。捕获组是
-  // `dsh-` 之后的短名，生成条目时必须用 DEP_PREFIX 拼回全名——曾因拼成
-  // `@deepseek-ai/<短名>` 生成整份无效清单（npm 上不存在该包名，pnpm 匹配
-  // 不到任何实际依赖，24 小时供应链门槛静默失效）。
-  const lockNameRe = new RegExp(`${DEP_PREFIX}([a-z0-9-]+)`, "g");
-  for (const m of lock.matchAll(lockNameRe)) names.add(m[1]);
-  const entries = [...names].sort().map((n) => `  - '${DEP_PREFIX}${n}@${version}'`);
-  const rest = text.slice(listStart).split("\n");
-  let end = 1;
-  while (end < rest.length && !/^[A-Za-z]/.test(rest[end])) end++;
-  const block = ["minimumReleaseAgeExclude:", ...entries, ""].join("\n");
-  if (!dryRun) writeFileSync(path, text.slice(0, listStart) + block + rest.slice(end).join("\n"));
-  console.log(`  pnpm-workspace.yaml [minimumReleaseAgeExclude] 从 lockfile 闭包重建：${entries.length} 项 → @${version}${dryRun ? "（dry-run，未写入）" : ""}`);
-}
-
 console.log(`适配 DSH 宿主 ${version}${dryRun ? "（dry-run，不写入）" : ""}:`);
 for (const rel of manifestPaths()) {
   adaptPackageJson(join(ROOT, rel));
 }
-adaptWorkspaceYaml();
 
 console.log(dryRun ? "\n[dry-run] 未写入任何文件。" : "\n已写入。");
 console.log("后续手工步骤（详见 RELEASING.md）:");
 console.log("  1. 升相关包 package.json 的 version，并在 CHANGELOG.md 记录本次适配");
-console.log("  2. pnpm install 重新生成 lockfile");
-console.log("  3. pnpm run test:ci 验证后提交推送");
+console.log("  2. bun install 重新生成 lockfile");
+console.log("  3. bun run test:ci 验证后提交推送");

@@ -34,9 +34,6 @@ jobs:
           # 脚本要 git show 另一条分支的 package.json
           fetch-depth: 0
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
       - name: Setup Node
         uses: actions/setup-node@v7
         with:

@@ -202,8 +202,8 @@ for (const { branch, baseline, target, state } of rows) {
   problems++;
   let advice = "核对 RELEASING.md「宿主跟随规则」";
   if (state === "落后") {
-    if (branch === "main") advice = `请在该分支执行 pnpm run adapt ${stable} 跟进`;
-    else if (devLine !== null) advice = `请在该分支执行 pnpm run adapt ${devLine} 跟进`;
+    if (branch === "main") advice = `请在该分支执行 bun run adapt ${stable} 跟进`;
+    else if (devLine !== null) advice = `请在该分支执行 bun run adapt ${devLine} 跟进`;
     // 待命期没有新线可跟：alpha 落后只可能是它没跟上 main，重建即可。
     else advice = "待命期无新线，alpha 应由最新 main 重建：git branch -f alpha main";
   }
