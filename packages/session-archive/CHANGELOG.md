@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.14-alpha.3 (2026-09-20)
+
+### 修复
+
+* unarchive 的 confirm 复核路径补上意外异常的兜底：confirm 抛错时该会话
+  id 此前既不进 restored 也不进 failed（违反"restored 之外的每个请求 id
+  都必须有下落"的自约定），现一律如实计入 failed('not-restorable')。
+  fileInfo 自身全路径兜底，该分支当前不可达，纯防御性收口
+
 ## 0.3.14-alpha.2 (2026-09-17)
 
 ### 适配

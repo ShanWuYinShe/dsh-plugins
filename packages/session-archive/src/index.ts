@@ -773,16 +773,26 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
         candidates.push(sessionId);
       }
       const restored = await removeFromArchiveSet(candidates, async (sessionId) => {
-        const snapshot = snapshots.get(sessionId);
-        if (snapshot === undefined) return false;
-        const file = await fileInfo(snapshot.header);
-        if (file.state !== 'located') {
-          // located 才确认文件在:absent(快照后文件消失)/unknown(无法确认)
-          // 谨慎拒绝,并如实计入 failed。
+        try {
+          const snapshot = snapshots.get(sessionId);
+          if (snapshot === undefined) return false;
+          const file = await fileInfo(snapshot.header);
+          if (file.state !== 'located') {
+            // located 才确认文件在:absent(快照后文件消失)/unknown(无法确认)
+            // 谨慎拒绝,并如实计入 failed。
+            failed.push({ sessionId, reason: 'not-restorable' });
+            return false;
+          }
+          return true;
+        } catch {
+          // confirm 路径任何意外异常等价于"不可恢复":必须给这个 id 一个
+          // failed 下落(reason 复用 not-restorable),否则它既不在 restored
+          // 也不在 failed,违反"restored 之外的每个请求 id 都必须有下落"的
+          // 约定。fileInfo 自身全路径兜底,此分支当前不可达——防的是宿主
+          // 契约漂移时的静默丢失。
           failed.push({ sessionId, reason: 'not-restorable' });
           return false;
         }
-        return true;
       });
       return { restored, failed, removedFromArchive: restored.length };
     },
