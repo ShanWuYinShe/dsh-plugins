@@ -98,25 +98,9 @@ pnpm run dsh-status     # 两分支 dsh 依赖基线 vs dsh 最新 rc（正式�
 pnpm run adapt <dsh 新线版本>   # dsh 宿主升级适配（--dry-run 预览），详见 RELEASING.md
 ```
 
-## 已知技术债（重构候选，动手前先规划）
+## 已知技术债
 
-按 2026-09-05 可维护性审查登记，均为「有测试兜底前的已知债务」，不阻塞
-日常开发，但改动相邻代码时应优先考虑顺手消化：
-
-- scripts 的 semver 比较、CHANGELOG 小节判定仍各有两份实现
-  （`scripts/lib/dsh-deps.mjs` 已承载 dsh 基线提取与包枚举，adapt-dsh 已
-  接入；剩余重复在 publish-gate / release-notes 之间）；脚本无自动化测试，
-  发布时才暴露回归。
-- 客户端 `ctx.locale.register` 重复注册防护三包源码已对齐（2026-09-12），
-  待一次 dsh 实例 HMR 手验后销项。
-- config-store.ts / remote.ts 在 sandbox-extra-roots 与 session-archive
-  两包各持一份近乎逐字重复（两包刻意零运行时依赖、可独立安装，不宜提为
-  共享 npm 包）；config-store 有 test/bundle.test.ts 的源码一致锁兜底，
-  remote.ts 的加载器/标记机制（loadTypert、markRemoteMethod）无锁，改动
-  一侧时记得同步另一侧。
-
-（2026-09-11 adaptive-perf 废弃移除后，原登记的两条 adaptive-perf 相关
-债务——index.ts 巨型闭包拆分、REMOTE_CONTRIBUTION 样板双包重复——随之消失。）
+登记在 GitHub issues（label: [`tech-debt`](https://github.com/ShanWuYinShe/dsh-plugins/issues?q=label%3Atech-debt)），均为「有测试兜底前的已知债务」，不阻塞日常开发，但改动相邻代码时应优先考虑顺手消化，销项后关闭对应 issue。
 
 ## 约定
 
