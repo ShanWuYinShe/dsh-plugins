@@ -15,7 +15,9 @@ export default defineConfig({
     include: ["test/**/*.test.ts", "packages/*/test/**/*.test.ts"],
     environment: "node",
     testTimeout: 30000,
-    passWithNoTests: true,
+    // false：测试目录被清空/改名（include 匹配不到任何用例）时必须红灯，
+    // 不允许「零用例即通过」静默放行。
+    passWithNoTests: false,
     env: { DSH_HOME: TEST_DSH_HOME },
   },
 });

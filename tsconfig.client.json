@@ -11,5 +11,5 @@
     "types": ["react"],
     "typeRoots": ["./node_modules/@types"]
   },
-  "include": ["packages/*/client/**/*.tsx"]
+  "include": ["packages/*/client/**/*.tsx", "packages/*/client/**/*.ts"]
 }
