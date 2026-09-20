@@ -25,6 +25,8 @@ vi.mock("react", () => ({
   useCallback: (fn: any) => fn,
   useEffect: () => {},
   useRef: () => ({ current: null }),
+  // provider-usage 的 ProviderUsagePill 导入（仅模块求值期解构，本套件不渲染组件）
+  useSyncExternalStore: () => null,
   default: undefined,
 }));
 
@@ -184,6 +186,48 @@ describe("client bundles", () => {
     const props = action!.options.inject();
     expect(props.subscribeArchived).toBeUndefined();
     expect(props.archivedCountOf).toBeUndefined();
+  });
+
+  it("provider-usage 额度 pill 挂载 composer dock（注册 + inject 两条取数路径）", async () => {
+    // provider-usage 的 client 入口同样只运行时依赖 react 与包内文件（dsh
+    // 客户端包全是 type-only 导入），可在此直接 import 真实源码做挂载冒烟。
+    const mod = await import("../packages/provider-usage/client/index.tsx");
+    const registrations: Array<{ options: any; component?: any }> = [];
+    // modelDirectories 桩：验证有 session 时 inject 解析出的目录与 lazy load 接线。
+    const directoryStub = { subscribe: () => () => {}, getSnapshot: () => ({}) };
+    const directoryLoad = vi.fn(() => Promise.resolve());
+    const ctx = {
+      slots: {
+        inject: (_slot: string, fn: () => void) => { fn(); },
+        register: (options: any, component?: any) => registrations.push({ options, component }),
+      },
+      locale: Object.assign(() => () => "", { bind: () => () => "", register: () => () => {} }),
+      effect: (fn: () => void) => { fn(); },
+      remote: { $mount: async () => {} },
+      get: (svc: string) =>
+        svc === "modelDirectories"
+          ? { directoryFor: () => ({ store: directoryStub, load: directoryLoad }) }
+          : {},
+    };
+    await mod.apply(ctx as any);
+    const dock = registrations.find((r) => r.options.name === "conversation.composer.dock");
+    expect(dock !== undefined && dock.options.id === "provider-usage").toBe(true);
+    expect(dock!.options.order).toBe(10);
+    // 注册必须携带 pill 组件本体（register 的第二参），缺了 slot 出口无物可渲染。
+    expect(typeof dock!.component).toBe("function");
+    // 无 session（dock 注入器未交付 session）→ 只回译写函数，不解析模型目录。
+    const bare = dock!.options.inject();
+    expect(typeof bare.t).toBe("function");
+    expect(bare.directory).toBeUndefined();
+    expect(bare.load).toBeUndefined();
+    expect(directoryLoad).not.toHaveBeenCalled();
+    // 有 session → 额度目录接线：directory 即 modelDirectories 的 store，
+    // load 包装目录的 lazy load（供 pill 挂载时拉取目录）。
+    const seated = dock!.options.inject("session-1");
+    expect(seated.directory).toBe(directoryStub);
+    expect(typeof seated.load).toBe("function");
+    seated.load();
+    expect(directoryLoad).toHaveBeenCalledTimes(1);
   });
 });
 
