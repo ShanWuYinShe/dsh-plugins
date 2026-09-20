@@ -117,4 +117,25 @@ describe('dsh-any-connect CLI --provider', () => {
       spy.mockRestore()
     }
   })
+
+  it('logout for the off-peak variant is an honest no-op, not a fake removal', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-bin-'))
+    vi.stubEnv('DSH_HOME', root)
+    const out: string[] = []
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out.push(String(chunk))
+      return true
+    })
+    try {
+      // off-peak 凭据完全跟随 zcode 登录态，没有自有副本：不能掉进 WorkBuddy
+      // 分支去删一个不存在的文件还声称 removed。
+      expect(await run(['logout', '--provider=zcode-offpeak'])).toBe(0)
+      const text = out.join('')
+      expect(text).not.toContain('removed')
+      expect(text).toContain('nothing to remove')
+      expect(text).toContain('follow the zcode desktop sign-in')
+    } finally {
+      spy.mockRestore()
+    }
+  })
 })

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.19-alpha.1 (2026-09-20)
+
+### 修复
+
+* `dsh-any-connect logout --provider zcode-offpeak` 误导输出：off-peak 凭据
+  完全跟随 zcode 桌面端登录态、没有自有副本，之前的实现掉进 WorkBuddy
+  分支去删一个从不存在的文件并声称 "removed"——改为如实报 no-op 并提示
+  正确的登出方式
+
 ## 0.3.19-alpha.0 (2026-09-20)
 
 ### Features

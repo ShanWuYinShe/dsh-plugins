@@ -420,6 +420,13 @@ export async function run(argv: readonly string[]): Promise<number> {
           process.stdout.write(`ZCode Connect: removed ${zcodeStore.ownAuthPath()}; a key configured via settings or ${ZCODE_API_KEY_ENV} is untouched\n`)
           return 0
         }
+        if (variant.kind === 'zcode-offpeak') {
+          // off-peak 凭据（JWT + plan key）完全跟随 zcode 桌面端登录态，没有
+          // 也不需要自有副本——之前的实现会掉进 WorkBuddy 分支去删一个从不
+          // 存在的文件并声称"已删除"。如实报 no-op，别误导排障方向。
+          process.stdout.write(`${variant.displayName} Connect: nothing to remove; credentials follow the zcode desktop sign-in (log out there, or log out the zcode provider)\n`)
+          return 0
+        }
         const store = makeWorkBuddyStore(variant)
         await store.logout()
         process.stdout.write(`${variant.displayName} Connect: removed ${workbuddyOwnAuthPath(variant.ownFilename)}; the desktop app's sign-in is untouched\n`)
