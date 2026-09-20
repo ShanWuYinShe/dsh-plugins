@@ -13,6 +13,9 @@ on:
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'scripts/**'
+      - 'test/**'
+      - 'vitest.config.ts'
+      - 'tsconfig*.json'
       - '.github/workflows/*'
 
 # 同一 PR 连续推送时取消旧的测试，只跑最新代码。

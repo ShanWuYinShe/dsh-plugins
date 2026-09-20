@@ -375,7 +375,9 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 > 紧急热修，推 main 不会产出 Release 资产，直接用下述 `pnpm pack` +
 > `gh release create` 兜底；main 的 publish 流水留待双线收敛时随整线搬运。
 
-CI 失败或需要立即发布时：`cd packages/<pkg> && pnpm pack`（产物
+CI 失败或需要立即发布时：**先在仓库根执行 `pnpm run build`**——`lib/` 与
+`client/client.cjs` 都是 gitignore 的构建产物，跳过构建直接 `pnpm pack` 会打出
+缺文件的 tarball（装上即坏）。构建完成后再 `cd packages/<pkg> && pnpm pack`（产物
 `chaoset-<目录>-<版本>.tgz`），然后 `gh release create <目录>-v<版本> <tgz>
 --target <sha> --title "<npm 包名> v<版本>" --notes "<说明>"`（prerelease 版本
 加 `--prerelease`）。`gh release create` 会同时打 git tag，归档自动完成，无需
