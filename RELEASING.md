@@ -70,7 +70,7 @@ main 分支的每次 dsh 稳定版适配都归档为一个 git tag，**由用户
 - **命名**：`dsh-v<dsh 版本>`（如 `dsh-v0.1.2-rc.1`），与包发布归档 tag
   （`<目录>-v<版本>`）同一模式、互不冲突——`dsh` 不是任何包的目录名。
 - **时机**：跟进新稳定版、验证通过后手工打在对应提交上：
-  `git tag dsh-v<基线> && git push origin dsh-v<基线>`（基线值取
+  `git tag -a dsh-v<基线> -m "dsh v<基线> 适配归档" && git push origin dsh-v<基线>`（基线值取
   `bun run dsh-status` 的输出）。dsh 基线没变的日常开发不打；alpha 分支
   **不打**：它永远追随 dsh 最新的 alpha 线，没有按宿主版本回退的管理需求。
 - **用途**：「该提交 = 对 dsh 此稳定版的已验证适配」。回退场景（如某次
@@ -194,9 +194,10 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    每一处行为变更都要有 CHANGELOG 与版本号对应。**任何一项对不上就不要推**。
    另跑一遍 `bun run gate` 干跑，确认门禁视角下该版本可发布。
 5. 推送分支。CI（`.github/workflows/test.yml`）只跑测试，永远不发布。
-6. **明确要发版时才打 tag**：`git tag <目录>-v<版本> && git push origin <目录>-v<版本>`。
+6. **明确要发版时才打 tag**（annotated，详见 skill dsh-plugin-tag）：
+   `git tag -a <目录>-v<版本> -m "<包名> v<版本>" && git push origin <目录>-v<版本>`。
    tag 推出去即发版——CI（`.github/workflows/publish.yml`）对该 tag 执行：测试 →
-   门禁校验（tag 形态、tag 与 package.json 版本一致、版本不落后已归档）→
+   门禁校验（tag 形态、annotated、tag 与 package.json 版本一致、版本不落后已归档）→
    `bun pm pack` 出 tarball 并创建 GitHub Release 挂为资产（prerelease 版本带
    prerelease 标记）。**tag 由你明确打出，CI 绝不创建 tag**：没推 tag 就没有任何
    Release，不存在「顺手多发一版」。发版后核对 Release 的资产 tarball 与 `dsh.host`
@@ -383,8 +384,8 @@ CI tag 流水失败、或需要完全手工发版时，按顺序兜底：
 
 1. **先在仓库根执行 `bun run build`**——`lib/` 与 `client/client.cjs` 都是
    gitignore 的构建产物，跳过构建直接 pack 会打出缺文件的 tarball（装上即坏）。
-2. 自己打 tag 并推出，让 CI 走完发布：`git tag <目录>-v<版本> && git push
-   origin <目录>-v<版本>`（tag 流水会自动测试 → 门禁 → 建 Release）。
+2. 自己打 tag 并推出，让 CI 走完发布：`git tag -a <目录>-v<版本> -m "<包名> v<版本>"
+   && git push origin <目录>-v<版本>`（tag 流水会自动测试 → 门禁 → 建 Release）。
 3. CI 实在不可用时才完全手工：构建完成后 `cd packages/<pkg> && bun pm pack`
    （产物 `chaoset-<目录>-<版本>.tgz`），然后 `gh release create <目录>-v<版本>
    <tgz> --title "<npm 包名> v<版本>" --notes "<说明>"`（prerelease 版本加

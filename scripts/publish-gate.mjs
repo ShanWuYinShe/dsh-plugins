@@ -23,8 +23,9 @@
 //   3. 否则                                         → 发布（bun pm pack → GitHub Release
 //                                                      资产，tag 与资产名见 workflow）
 //
-// `--tag` 模式的额外校验：tag 必须形如 `<已知包目录>-v<合法 semver>`，且
-// tag 所在提交的 package.json 版本必须与 tag 版本一致（防止 tag 打错提交）；
+// `--tag` 模式的额外校验：tag 必须形如 `<已知包目录>-v<合法 semver>`，必须
+// 是 annotated（轻量 tag 直接红灯），且 tag 所在提交的 package.json 版本必须
+// 与 tag 版本一致（防止 tag 打错提交）；
 // `dsh-v<基线>`（手工宿主适配归档 tag）与非发布形态 tag 直接输出空计划跳过。
 //
 // stdout 只输出计划 JSON（`[{"dir","name","version","prerelease"}]`），人类可读
@@ -169,6 +170,13 @@ if (tagFlag !== -1) {
   }
   if (!VERSION_RE.test(tagVersion)) {
     log(`✗ tag ${onlyTag} 的版本部分不是合法 semver。若是手误请删 tag 重打。`);
+    process.exit(1);
+  }
+  // 发布 tag 必须是 annotated：轻量 tag 没有 tagger/日期/message，不可审计
+  // （历史遗留的轻量 tag 只读不碰，但新打的一律 annotated）。
+  const tagType = spawnSync("git", ["cat-file", "-t", onlyTag], { cwd: ROOT, encoding: "utf8" });
+  if (tagType.status !== 0 || tagType.stdout.trim() !== "tag") {
+    log(`✗ tag ${onlyTag} 是轻量 tag。请删 tag 后用 annotated 重打：git tag -a ${onlyTag} -m "<包名> v${tagVersion}"（先 git tag -d ${onlyTag}，已推则同步删远程同名 tag）。`);
     process.exit(1);
   }
   targets = [{ dir: tagDir, expectVersion: tagVersion }];
