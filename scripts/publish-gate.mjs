@@ -1,14 +1,21 @@
 // 发布门禁：按「git tag 归档状态」判定每个包本次是否要发布。发布渠道为
 // GitHub Release tarball 资产（见 RELEASING.md），不再经过 npm registry。
-// 状态式判定不依赖推送形状（多提交推送、新分支首推、force push、workflow
-// dispatch 触发都一致），且重跑天然幂等：发布中途失败后直接重跑 job，
-// 已归档的包会被跳过。
+//
+// 两种模式：
+//   无参数（本地干跑 `bun run gate`）：全仓判定，输出全部待发布包的计划。
+//   `--tag <tag>`（CI tag 驱动发版）：只校验该 tag 对应的包。tag 由用户明确
+//     打出并推出（`git tag <目录>-v<版本> && git push origin <tag>`），CI 绝不
+//     创建 tag——发版与否完全由用户手里的 tag 决定。
+// 状态式判定不依赖推送形状，且重跑天然幂等：发布中途失败后直接重跑 tag 流水，
+// 已发布的包会被跳过。
 //
 // 判定规则（对每个包依次）：
-//   1. git tag `<目录>-v<版本>` 已存在              → 静默跳过（该版本已发布并归档）
-//   2. 该包已有 git tag 中存在更高的已归档版本       → 失败（改了代码没升版本号从此是
-//                                                    红灯，不是静默跳过；任一包失败则
-//                                                    本次不发布任何包）
+//   1. git tag `<目录>-v<版本>` 已存在              → 静默跳过（该版本已发布并归档；
+//                                                    `--tag` 模式不适用本条——tag 本来
+//                                                    就已存在，跳过则每次发版都是空转）
+//   2. 该包已有 git tag 中存在更高的已归档版本       → 失败（`--tag` 模式下即「不许给
+//                                                    落后版本打 tag 发版」；无参数模式下
+//                                                    任一包失败则本次不发布任何包）
 //      比较口径与 npm 时代一致：预发布目标必须高于
 //      所有已归档版本（含稳定线）；正式版目标只与
 //      已归档的稳定版比较——低于 alpha 在途预发布是
@@ -16,8 +23,12 @@
 //   3. 否则                                         → 发布（bun pm pack → GitHub Release
 //                                                      资产，tag 与资产名见 workflow）
 //
+// `--tag` 模式的额外校验：tag 必须形如 `<已知包目录>-v<合法 semver>`，且
+// tag 所在提交的 package.json 版本必须与 tag 版本一致（防止 tag 打错提交）；
+// `dsh-v<基线>`（手工宿主适配归档 tag）与非发布形态 tag 直接输出空计划跳过。
+//
 // stdout 只输出计划 JSON（`[{"dir","name","version","prerelease"}]`），人类可读
-// 日志全部走 stderr——workflow 里用 `PLAN=$(node scripts/publish-gate.mjs)`
+// 日志全部走 stderr——workflow 里用 `PLAN=$(node scripts/publish-gate.mjs --tag "$TAG")`
 // 捕获计划。prerelease 布尔（版本带 `-` 即真）供 workflow 决定 GitHub Release
 // 是否打 prerelease 标记；版本形态的约定（-alpha.N / -rc.N / 无后缀）见
 // RELEASING.md「版本号规则」。
@@ -128,7 +139,42 @@ const tags = gitTags();
 const plan = [];
 let failed = false;
 
-for (const dir of PACKAGES) {
+// `--tag <tag>` 模式：只校验该 tag 对应的包。targets 为 [{ dir, expectVersion }]，
+// expectVersion 为 null 时走全仓默认判定。
+let targets = PACKAGES.map((dir) => ({ dir, expectVersion: null }));
+const tagFlag = process.argv.indexOf("--tag");
+if (tagFlag !== -1) {
+  const onlyTag = process.argv[tagFlag + 1];
+  if (onlyTag === undefined || onlyTag.startsWith("-")) {
+    log("✗ --tag 缺少 tag 参数（用法：node scripts/publish-gate.mjs --tag <目录>-v<版本>）。");
+    process.exit(1);
+  }
+  const m = onlyTag.match(/^(.*)-v(.+)$/);
+  if (!m) {
+    // 非发布形态的 tag（如随手打的标记）：不发布，不红灯。
+    log(`= tag ${onlyTag} 不是 <目录>-v<版本> 形态，非发布 tag，跳过。`);
+    console.log("[]");
+    process.exit(0);
+  }
+  const [, tagDir, tagVersion] = m;
+  if (!PACKAGES.includes(tagDir)) {
+    if (tagDir === "dsh") {
+      // `dsh-v<基线>` 是用户手工打的宿主适配归档 tag，不触发任何发布。
+      log(`= tag ${onlyTag} 是 dsh 适配归档 tag，不发布任何包。`);
+      console.log("[]");
+      process.exit(0);
+    }
+    log(`✗ tag ${onlyTag} 的目录 ${tagDir} 不是已知发布包。若是手误请删 tag 重打（git tag -d ${onlyTag} && git push origin :refs/tags/${onlyTag}）。`);
+    process.exit(1);
+  }
+  if (!VERSION_RE.test(tagVersion)) {
+    log(`✗ tag ${onlyTag} 的版本部分不是合法 semver。若是手误请删 tag 重打。`);
+    process.exit(1);
+  }
+  targets = [{ dir: tagDir, expectVersion: tagVersion }];
+}
+
+for (const { dir, expectVersion } of targets) {
   const { name, version } = JSON.parse(readFileSync(join(ROOT, "packages", dir, "package.json"), "utf8"));
 
   if (typeof version !== "string" || !VERSION_RE.test(version)) {
@@ -137,8 +183,15 @@ for (const dir of PACKAGES) {
     continue;
   }
 
+  if (expectVersion !== null && version !== expectVersion) {
+    log(`✗ tag ${dir}-v${expectVersion} 与该提交的 package.json 版本 ${version} 不一致：tag 打错了提交。请删 tag（见上）后在正确提交重打。`);
+    failed = true;
+    continue;
+  }
+
   const archiveTag = `${dir}-v${version}`;
-  if (tags.has(archiveTag)) {
+  // `--tag` 模式跳过本条：tag 本来就已存在（用户刚推的），跳过则每次发版空转。
+  if (expectVersion === null && tags.has(archiveTag)) {
     // 幂等重跑依赖「tag 已存在即跳过」，保留；但若 tag 不指向 HEAD 且该包
     // 内容在 tag 之后又有改动（改了代码忘 bump），这些改动不会进入任何
     // Release 且 CI 全绿——必须喊一声，提醒 bump 版本号。

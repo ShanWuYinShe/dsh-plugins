@@ -1,8 +1,22 @@
 name: Test
 
-# PR 校验：推送 main / alpha 的测试由发布工作流顺带完成，这里只补 PR 这一环
-# （此前对 main/alpha 的 PR 不会触发任何测试）。
+# 测试链路：分支推送只跑测试、永远不发布（发版只由 tag 推送触发，见
+# publish.yml）；PR 同样跑测试。tag 推送的测试由 publish.yml 顺带完成，
+# 这里不监听 tags，避免双跑。
 on:
+  push:
+    branches:
+      - main
+      - alpha
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'bun.lock'
+      - 'scripts/**'
+      - 'test/**'
+      - 'vitest.config.ts'
+      - 'tsconfig*.json'
+      - '.github/workflows/*'
   pull_request:
     branches:
       - main
@@ -17,7 +31,7 @@ on:
       - 'tsconfig*.json'
       - '.github/workflows/*'
 
-# 同一 PR 连续推送时取消旧的测试，只跑最新代码。
+# 同一 ref 连续推送时取消旧的测试，只跑最新代码。
 concurrency:
   group: test-${{ github.ref }}
   cancel-in-progress: true

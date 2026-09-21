@@ -2,28 +2,22 @@ name: Publish to GitHub Releases
 
 on:
   push:
-    branches:
-      # main = dsh 稳定线适配（发正式版 Release）；alpha = dsh 预发布线适配
-      # （发 prerelease Release）。分支模型与发布规则见 RELEASING.md。
-      - main
-      - alpha
-    paths:
-      - 'packages/**'
-      - 'package.json'
-      - 'bun.lock'
-      - 'scripts/**'
-      - 'test/**'
-      - 'vitest.config.ts'
-      - 'tsconfig*.json'
-      - '.github/workflows/publish.yml'
-  # 不监听 release.published：本 workflow 发布成功后自己会 gh release create，
-  # 那会再触发一次 release 事件造成空转循环（门禁幂等不会双发，但每次发布
-  # 都多跑一轮全量 build+test）。发布只由推送驱动。
+    # tag 驱动发版：只有用户明确打出 `<目录>-v<版本>` 并推出去，才会发版。
+    # 分支推送只跑测试（test.yml），永远不发布；CI 也绝不创建任何 tag。
+    # 分支模型与发布规则见 RELEASING.md。
+    tags:
+      - '*-v*'
+  # 不监听 release.published：本 workflow 只消费用户已推的 tag，不会自己建
+  # release 事件源，不存在自触发循环。发布只由 tag 推送驱动。
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '已存在的发布 tag（如 dsh-any-connect-v0.3.19-alpha.2），用于重跑失败的发布或补传资产'
+        required: true
+        type: string
 
-# 仓库级并发组（不按分支区分）：main 与 alpha 的发布也必须排队——两个分支
-# 可能存在同版本号的包，并发发布会双发同一版本，git tag 冲突会让第二个 job
-# 红掉。不取消进行中的发布：已开始的发布让它跑完，排队的用最新代码重来。
+# 仓库级并发组（不按 tag 区分）：排队发布，不取消进行中的发布——
+# 已开始的发布让它跑完，排队的用最新代码重来。
 concurrency:
   group: publish
   cancel-in-progress: false
@@ -32,15 +26,18 @@ jobs:
   test-and-publish:
     runs-on: ubuntu-latest
     permissions:
-      # 发布成功后要打 git tag 并创建 GitHub Release（含 tarball 资产）
+      # 创建 GitHub Release（含 tarball 资产）。注意：CI 只消费用户已推的
+      # tag，从不创建 tag——发版与否完全由用户手里的 tag 决定。
       contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # 全量历史：publish-gate 靠 git tag 判定「该版本是否已发布归档」，
-          # 浅克隆会漏 tag 导致重复发布尝试。
+          # 全量历史：publish-gate 靠 git tag 判定归档状态，
+          # 浅克隆会漏 tag 导致误判。
           fetch-depth: 0
+          # tag 推送默认检出该 tag；手动触发则检出指定的 tag。
+          ref: ${{ inputs.tag || github.ref }}
 
       # bun 是唯一的包管理器入口:install / test / pack 全走 bun。
       # bun 版本取根 package.json 的 packageManager 字段,与本地保持一致。
@@ -61,21 +58,34 @@ jobs:
       - name: Run tests
         run: bun run test:ci
 
-      # 状态式门禁：该发什么由 git tag 归档状态决定，与推送形状无关（判定
-      # 规则见 scripts/publish-gate.mjs 头注释）。版本号低于已归档版本的包
-      # 会让整个 job 失败——「改了代码没升版本」从此是红灯而不是静默跳过。
+      # 解析本次要发的 tag：tag 推送取 ref 名，手动触发取输入。
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          if [ -z "$TAG" ]; then
+            echo "未能解析 tag（既非 tag 推送也非手动指定），失败。"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # 门禁只校验该 tag 对应的包：tag 形态合法、tag 与该提交的 package.json
+      # 版本一致、版本不落后于已归档。`dsh-v*` 归档 tag 与非发布 tag 输出空
+      # 计划直接跳过（判定规则见 scripts/publish-gate.mjs 头注释）。
       - name: Plan publish
         id: plan
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          PLAN=$(node scripts/publish-gate.mjs)
+          PLAN=$(node scripts/publish-gate.mjs --tag "$TAG")
           echo "plan=$PLAN" >> "$GITHUB_OUTPUT"
 
       # 发布 = 每个待发布包 bun pm pack 出标准 npm tarball（与原 npm registry
       # 产物同格式：lib/、client/、cordis.patch.yml、dsh.host 等字段齐全，
       # dsh 的 plugin add 可直接装 tarball URL），作为 GitHub
-      # Release 资产上传。tag `<目录>-v<版本>` 由 gh release create 打在触发
-      # 提交上，发布门禁据此幂等跳过；prerelease 布尔取自门禁计划（版本带
-      # `-` 即 true）。消费者安装命令见各包 README。
+      # Release 资产上传。tag 由用户明确打出并推出，CI 绝不创建 tag——
+      # gh release create 只建 Release 不建 tag；prerelease 布尔取自门禁计划
+      # （版本带 `-` 即 true）。消费者安装命令见各包 README。
       - name: Pack and publish planned packages
         id: publish
         if: steps.plan.outputs.plan != '[]'
@@ -109,29 +119,9 @@ jobs:
                 echo "Release $TAG 已存在，补传资产 $TARBALL。"
               fi
             else
-              gh release create "$TAG" "packages/$dir/$TARBALL" --target "$GITHUB_SHA" \
+              gh release create "$TAG" "packages/$dir/$TARBALL" \
                 --title "$PKG_NAME v$version" --notes "$NOTES" $PRERELEASE_FLAG
             fi
             PUBLISHED="$PUBLISHED $dir@$version"
           done < <(node -e 'for (const p of JSON.parse(process.argv[1])) console.log(`${p.dir}@${p.version}@${p.prerelease}`)' "$PLAN")
           echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
-
-      # dsh 稳定版适配归档：main 流水成功（测试全绿 + 门禁走完）后，按当前
-      # dsh 依赖基线打 `dsh-v<版本>` tag（幂等：基线没变则 tag 已存在跳过）。
-      # 语义：「该提交 = 对 dsh 此稳定版的已验证适配」，供回退与对照（见
-      # RELEASING.md「dsh 适配归档 tag」）。alpha 分支不打——它永远追随
-      # dsh 最新的 alpha 线，没有按宿主版本回退的管理需求。基线未变的日常
-      # 发布不影响此 tag；基线前进（跟进新稳定版）的首次成功流水自动落
-      # 一个新 tag。
-      - name: Tag the dsh release baseline
-        if: github.ref == 'refs/heads/main'
-        run: |
-          BASELINE=$(node scripts/dsh-baseline.mjs)
-          TAG="dsh-v$BASELINE"
-          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "refs/tags/$TAG$"; then
-            echo "$TAG already exists, skipping."
-          else
-            git tag "$TAG" "$GITHUB_SHA"
-            git push origin "$TAG"
-            echo "Tagged $TAG at $GITHUB_SHA"
-          fi

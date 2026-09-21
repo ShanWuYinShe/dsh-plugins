@@ -10,7 +10,7 @@ README 面向用户，面向开发者的内容以 RELEASING.md 为准。
 
 | skill | 何时加载 |
 |---|---|
-| dsh-plugin-release | 发版、升版本、推送 main/alpha、合线、查门禁规则时（分支模型+发布纪律+版本约定） |
+| dsh-plugin-release | 发版（打 tag 才发）、升版本、合线、查门禁规则时（分支模型+发布纪律+版本约定） |
 | dsh-plugin-worktree | 跨分支切换、cherry-pick、确认 lib 产物归属时 |
 
 ## 常用命令

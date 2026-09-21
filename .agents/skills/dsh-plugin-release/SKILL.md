@@ -31,7 +31,8 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
 ## 发布纪律（重要）
 
 **任何插件更新（功能、修复、依赖调整一律适用）：必须先在本地的隔离测试
-环境中全部测试通过，才能更新版本号、提交、推送——顺序不可颠倒，无例外。**
+环境中全部测试通过，才能更新版本号、提交、推送——推送分支只跑测试，发版
+是另一个显式动作（打 tag 推出），顺序不可颠倒，无例外。**
 版本号是发布动作的一部分，不是开发动作——功能有问题就修功能，绝不靠
 "再发一版"解决。一次功能开发的完整顺序：
 
@@ -55,21 +56,28 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
 4. **推送前逐提交复核**：`git log --oneline origin/<分支>..HEAD` 与
    `git diff origin/<分支>..HEAD` 对照——提交信息声称的每项变更都要在
    diff 里找到，diff 里每处行为变更都要有 CHANGELOG 与版本号对应；
-   对不上就不要推。然后 push（CI 自动发布为 GitHub Release 资产），完成后
-   核对 Release 资产 tarball 与 `dsh.host` 字段符合预期（解包
+   对不上就不要推。另跑一遍 `bun run gate` 干跑确认。然后 push
+   （分支推送只跑测试，不发布）。
+5. **明确要发版时才打 tag**：`git tag <目录>-v<版本> && git push origin
+   <目录>-v<版本>`。tag 推出去即发版——CI 对该 tag 执行测试 → 门禁校验
+   （tag 形态、tag 与 package.json 版本一致、版本不落后已归档）→ 建
+   GitHub Release。**tag 由你明确打出，CI 绝不创建 tag**。发版后核对
+   Release 资产 tarball 与 `dsh.host` 字段符合预期（解包
    `tar -xOf <tgz> package/package.json`）。
 
 历史反例（先发布再验证连发 6+ 版本、发布产物缺字段多发一版）见
 RELEASING.md「日常发布流程」——工作未完成期间代码可以本地 commit（worktree
-隔离），但**不要 push**——push 即发布。
+隔离），分支推送只跑测试；**不要打 tag**——推 tag 即发版。
 
 ## 版本与推送约定
 
 - 版本号只在本地手工改（各包 `package.json` 的 `version`），CI 绝不改写。
   升版本必须同时补该包 `CHANGELOG.md` 的 `## <版本> (YYYY-MM-DD)` 小节
   （GitHub Release 说明自动取自这里）。
-- 推送 `main` / `alpha` 即触发测试 + 发布（GitHub Release tarball 分发，
-  不经过 npm）；门禁规则：版本号**严格低于**已归档版本会直接红；「改了
-  代码没升版本号」分两种——tag 不在 HEAD 且包内容有更新时门禁会告警
-  （不红），版本与已归档 tag 相同则幂等跳过。任何情况下不满足发布条件的
-  包不会出现在 Release 资产里。
+- 推送 `main` / `alpha` 只跑测试（test.yml），永远不发布；发版只由 tag 推送
+  触发（`git tag <目录>-v<版本> && git push origin <目录>-v<版本>`，
+  GitHub Release tarball 分发，不经过 npm）。**tag 由你明确打出，CI 绝不
+  创建 tag**——没推 tag 就没有任何 Release。门禁规则（打 tag 发版时强制
+  执行）：版本号**严格低于**已归档版本会直接红；「改了代码没升版本号」
+  不再是 CI 红灯——那种推送只跑测试，想发版就升版本打新 tag。版本与已归档
+  tag 相同则幂等跳过。任何情况下不满足发布条件的包不会出现在 Release 资产里。

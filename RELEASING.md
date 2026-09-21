@@ -50,8 +50,8 @@ npm 的**版本列表**：稳定线目标 = 非进行中预发布的最高版（
 
 - **待命期的暂替语义**：alpha 与 main 同基线时处于 main 形态（这是新线到
   来前的常态，不是待修正的漂移）。此状态下 alpha 不发版——它的版本号与
-  main 相同，push 会被发布门禁以「已有 git tag」静默跳过；真要发版必须先
-  `adapt` 到新线并把版本 bump 成 `-alpha.N`。
+  main 相同，推送分支只跑测试；真要发版必须先 `adapt` 到新线并把版本
+  bump 成 `-alpha.N`，再打 tag 推出。
 - **不再维护「上一条线的 alpha 锚点」**：旧流程会让 alpha 维持
   `^0.1.2-alpha.5` 这类锚点，靠同基础号的 prerelease range 向上覆盖稳定线。
   现改为分支直接由 main 重建，基线天然等于稳定线目标，无需靠 semver 技巧
@@ -64,14 +64,15 @@ warning（刻意非阻塞——提醒，不是门禁）。
 
 ### dsh 适配归档 tag（main 专属）
 
-main 分支的每次 dsh 稳定版适配都会被发布流水自动归档为一个 git tag：
+main 分支的每次 dsh 稳定版适配都归档为一个 git tag，**由用户手工打，CI
+绝不自动创建**（推送这类 tag 只跑测试，不触发任何发布）：
 
 - **命名**：`dsh-v<dsh 版本>`（如 `dsh-v0.1.2-rc.1`），与包发布归档 tag
   （`<目录>-v<版本>`）同一模式、互不冲突——`dsh` 不是任何包的目录名。
-- **时机**：publish.yml 的 main 流水成功（测试全绿 + 门禁走完）后自动打在
-  触发提交上，幂等——dsh 基线没变的日常发布跳过；基线前进（跟进新稳定版）
-  的首次成功流水落一个新 tag。alpha 分支**不打**：它永远追随 dsh 最新的
-  alpha 线，没有按宿主版本回退的管理需求。
+- **时机**：跟进新稳定版、验证通过后手工打在对应提交上：
+  `git tag dsh-v<基线> && git push origin dsh-v<基线>`（基线值取
+  `bun run dsh-status` 的输出）。dsh 基线没变的日常开发不打；alpha 分支
+  **不打**：它永远追随 dsh 最新的 alpha 线，没有按宿主版本回退的管理需求。
 - **用途**：「该提交 = 对 dsh 此稳定版的已验证适配」。回退场景（如某次
   适配引入问题、或需要为旧版 dsh 维护热修）从对应 tag 拉：
 
@@ -103,7 +104,7 @@ cherry-pick、不同步、不发布，直到该线发出最新 rc（即正式版
 允许的唯一例外：
 
 - **稳定线紧急热修**：只在 dsh 稳定线用户遇到严重问题、且经明确指示时才动
-  main——在该分支修复、发布 `latest`，随后把这处修复**带回 alpha**（避免收敛时
+  main——在该分支修复、打 tag 发 `latest`，随后把这处修复**带回 alpha**（避免收敛时
   被 alpha 的旧代码覆盖）。非紧急问题一律等 alpha 收敛，不在搁置期开热修。
 
 这样规定的理由是**回移往往根本无处生效**：alpha 上的功能常依赖宿主新增能力，
@@ -191,20 +192,26 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    `git diff origin/<分支>..HEAD`）：版本号、CHANGELOG 小节、实际 diff 三者
    必须互相印证——提交信息声称的每一项变更都要能在 diff 里找到，diff 里的
    每一处行为变更都要有 CHANGELOG 与版本号对应。**任何一项对不上就不要推**。
-5. 推送。CI（`.github/workflows/publish.yml`）自动执行：测试 → 状态式门禁 →
-   发布（`bun pm pack` 出 tarball，`gh release create` 打 tag `<目录>-v<版本>`、
-   创建 GitHub Release 并把 tarball 挂为资产，prerelease 版本带 prerelease
-   标记）→（仅 main）按当前 dsh 基线更新 `dsh-v*` 归档 tag。发布完成后核对
-   Release 的资产 tarball 与 `dsh.host` 字段符合预期（解包资产读
-   `package/package.json` 的 `dsh.host`：`tar -xOf <tgz> package/package.json`）。
+   另跑一遍 `bun run gate` 干跑，确认门禁视角下该版本可发布。
+5. 推送分支。CI（`.github/workflows/test.yml`）只跑测试，永远不发布。
+6. **明确要发版时才打 tag**：`git tag <目录>-v<版本> && git push origin <目录>-v<版本>`。
+   tag 推出去即发版——CI（`.github/workflows/publish.yml`）对该 tag 执行：测试 →
+   门禁校验（tag 形态、tag 与 package.json 版本一致、版本不落后已归档）→
+   `bun pm pack` 出 tarball 并创建 GitHub Release 挂为资产（prerelease 版本带
+   prerelease 标记）。**tag 由你明确打出，CI 绝不创建 tag**：没推 tag 就没有任何
+   Release，不存在「顺手多发一版」。发版后核对 Release 的资产 tarball 与 `dsh.host`
+   字段符合预期（解包资产读 `package/package.json` 的 `dsh.host`：
+   `tar -xOf <tgz> package/package.json`）。
 
-发布门禁（`scripts/publish-gate.mjs`）的判定，按每个包依次：
+发布门禁（`scripts/publish-gate.mjs --tag <tag>`，只在 tag 流水里强制执行；
+本地可用 `bun run gate` 干跑全仓计划）的判定，对该 tag 的包：
 
 | 状态 | 结果 |
 |---|---|
-| git tag `<目录>-v<版本>` 已存在 | 静默跳过（已发布并归档，重跑幂等的保证） |
-| 已归档版本（该包已有 git tag）中无更高版本 | 发布（pack → Release 资产） |
-| 已归档版本中存在**更高**版本 | **CI 失败**（改了代码没升版本号从此是红灯，不再是静默跳过） |
+| tag 形态非法 / 目录未知 / 与 package.json 版本不一致 | **CI 失败**（tag 打错了，删 tag 重打） |
+| 已归档版本中存在**更高**版本 | **CI 失败**（不许给落后版本发版；请升版本打新 tag） |
+| 其余（版本高于已归档） | 发布（pack → Release 资产） |
+| `dsh-v*` 归档 tag / 非发布形态 tag | 跳过（只跑测试，不发布） |
 
 「更高版本」的比较口径按目标版本类型分两种，这决定了转正能否通过：
 
@@ -215,9 +222,9 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
   在途的 `0.3.14-alpha.1` 也允许发布——这正是「去后缀转正」的合法路径
   （semver 保证同基础号的正式版大于其预发布）。
 
-发布中途失败：直接重跑整个 job。已发布的包被 git tag 跳过（tag 在 Release
-创建成功后即存在）；Release 已建但资产缺失的（如资产上传中断），重跑会补传
-资产；未完成的继续，不会重复发布。
+发布中途失败：重跑该 tag 的流水（Actions 页面 Re-run jobs，或
+`gh workflow run publish.yml -f tag=<tag>`）。tag 与已建的 Release 都已存在，
+重跑只会补传缺失的资产，不会重复发布。
 
 ## 跨分支同步
 
@@ -289,7 +296,7 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
    依赖基线等于 main，不发版。此时 dsh 无进行中的预发布线（上一条已终结）。
 2. **dsh 出新高基础号的 alpha 线**（如 `0.1.3-alpha.0`）：alpha 分支执行
    「DSH 宿主升级适配」流程（`adapt` 到该线 + `bun install`），把包版本
-   bump 成 `-alpha.N` 发布 prerelease Release。**main 就此整体搁置**——不再
+   bump 成 `-alpha.N`，打 tag 发 prerelease Release。**main 就此整体搁置**——不再
    开发、不再发布、不接受任何 cherry-pick，直到该线发出正式版（第 4 步）；
    这期间的稳定线用户继续用 main 上已发布的最后一版 `latest`。
 3. **alpha 线进入 rc**：该线开始发同基础号的 rc（如 `0.1.3-rc.1`、`0.1.3-rc.2`
@@ -321,7 +328,8 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 
    c. **验证后合入 main 并发布**：`bun run test:ci` 全绿 + 隔离实例真实
       验证，然后 `git merge --ff-only <alpha 分支>`（此刻它已是 main 的
-      后代，必然可 ff）→ 推送 `main` 发布 `latest`。
+      后代，必然可 ff）→ 推送 `main`（只跑测试），再给各包打 tag 发版
+      （无后缀正式版即 `latest`）。
 
    > 若收敛期间 main 因**紧急热修**又前进了，`origin/main` 已不是刚才那位，
    > 需先把这条已压缩的提交 rebase 到最新 `origin/main` 之上（`git rebase
@@ -371,17 +379,20 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 > 紧急热修，推 main 不会产出 Release 资产，直接用下述 `pnpm pack` +
 > `gh release create` 兜底；main 的 publish 流水留待双线收敛时随整线搬运。
 
-CI 失败或需要立即发布时：**先在仓库根执行 `bun run build`**——`lib/` 与
-`client/client.cjs` 都是 gitignore 的构建产物，跳过构建直接 pack 会打出
-缺文件的 tarball（装上即坏）。构建完成后再 `cd packages/<pkg> && bun pm pack`（产物
-`chaoset-<目录>-<版本>.tgz`），然后 `gh release create <目录>-v<版本> <tgz>
---target <sha> --title "<npm 包名> v<版本>" --notes "<说明>"`（prerelease 版本
-加 `--prerelease`）。`gh release create` 会同时打 git tag，归档自动完成，无需
-再手工补；说明可用 `node scripts/release-notes.mjs <目录> <版本>` 生成。
+CI tag 流水失败、或需要完全手工发版时，按顺序兜底：
+
+1. **先在仓库根执行 `bun run build`**——`lib/` 与 `client/client.cjs` 都是
+   gitignore 的构建产物，跳过构建直接 pack 会打出缺文件的 tarball（装上即坏）。
+2. 自己打 tag 并推出，让 CI 走完发布：`git tag <目录>-v<版本> && git push
+   origin <目录>-v<版本>`（tag 流水会自动测试 → 门禁 → 建 Release）。
+3. CI 实在不可用时才完全手工：构建完成后 `cd packages/<pkg> && bun pm pack`
+   （产物 `chaoset-<目录>-<版本>.tgz`），然后 `gh release create <目录>-v<版本>
+   <tgz> --title "<npm 包名> v<版本>" --notes "<说明>"`（prerelease 版本加
+   `--prerelease`；tag 须事先自己打好推出，`gh release create` 只建 Release；
+   说明可用 `node scripts/release-notes.mjs <目录> <版本>` 生成）。
 
 ## 分支保护（暂不开启）
 
 当前只有仓库所有者一人提交，未开启分支保护。若未来开放协作或 PR，建议给
-`main` 与 `alpha` 开保护并要求 "Publish to GitHub Releases" / "Test" check
-通过——本仓库是 push 即发布（GitHub Release tarball 分发），保护能拦住误推
-直接进 Release。
+`main` 与 `alpha` 开保护并要求 "Test" check 通过；发版 tag（`<目录>-v*`）
+建议另用 ruleset 限制推送者——推 tag 即发版，tag 推送本身没有二次确认。
