@@ -20,7 +20,7 @@ README 面向用户，面向开发者的内容以 RELEASING.md 为准。
 bun install             # 依赖安装（切分支后 lockfile 不同，记得重新 install）
 bun run build           # tsc 编译 host + esbuild 打包 client
 bun run typecheck       # host + client 两套 tsconfig --noEmit
-bun run test            # vitest 回归
+bun run test            # vitest 回归（先跑 scripts/build.mjs 构建，含 tsc + esbuild 产物）
 bun run test:ci         # build + typecheck + test（提交/发布前必跑）
 bun run gate            # 发布门禁干跑：只读，看哪些包会被发布/为何被跳过
 bun run dsh-status      # 两分支 dsh 依赖基线 vs dsh 最新 rc（正式版）对照（详见 RELEASING.md）
