@@ -44,11 +44,14 @@ jobs:
         uses: actions/checkout@v7
 
       # bun 是唯一的包管理器入口：install / test / pack 全走 bun。
-      # bun 版本与根 package.json 的 packageManager 字段保持一致。
+      # bun 版本从根 package.json 的 packageManager 字段读取，单一来源。
+      # bun-version-file 支持 package.json：2026-09-22 查证 oven-sh/setup-bun
+      # 的 action.yml 与 v2 tag 源码（读 packageManager 的 bun@<版本>，回退
+      # engines.bun）。
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version-file: package.json
 
       # setup-node 只提供 node 二进制（scripts/*.mjs 直接用 node 调用），
       # 不再做任何包管理器的缓存。

@@ -40,11 +40,14 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
 
       # bun 是唯一的包管理器入口:install / test / pack 全走 bun。
-      # bun 版本取根 package.json 的 packageManager 字段,与本地保持一致。
+      # bun 版本从根 package.json 的 packageManager 字段读取，单一来源。
+      # bun-version-file 支持 package.json：2026-09-22 查证 oven-sh/setup-bun
+      # 的 action.yml 与 v2 tag 源码（读 packageManager 的 bun@<版本>，回退
+      # engines.bun）。
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version-file: package.json
 
       # setup-node 只提供 Node(下面的 `node -e` 与 scripts/*.mjs 直接调用)。
       - name: Setup Node
