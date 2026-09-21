@@ -255,7 +255,7 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
         ? t('failed')
         : snapshot!.windows.length === 0
           ? t('noWindows')
-          : `${formatAmount(snapshot!.windows[0]!.remain ?? 0)} ${snapshot!.windows[0]!.unit} ${t('remaining')}`
+          : `${formatAmount(snapshot!.windows[0]!.remain ?? 0)} ${snapshot!.windows[0]!.unit} ${t('remaining')}${snapshot!.windows.length > 1 ? ` +${snapshot!.windows.length - 1}` : ''}`
 
   return (
     <span style={{ ...rootStyle, position: 'relative' }}>

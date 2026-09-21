@@ -577,6 +577,19 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
     }
   }, [control, refresh, t])
 
+  // Stale 目录自动刷新一次：saved/fallback 或上次失败时，后台重拉目录，
+  // 用户不用按刷新。once per mount；失败只进 notice，不打扰不循环。
+  const autoRefreshTried = useRef(false)
+  useEffect(() => {
+    if (autoRefreshTried.current) return
+    if (probeKey === undefined) return
+    const catalog = status.catalog
+    if (catalog === undefined) return
+    if (catalog.source === 'live' && catalog.error === undefined) return
+    autoRefreshTried.current = true
+    void refreshWithCatalog()
+  }, [probeKey, status.catalog, refreshWithCatalog])
+
   const runControl = useCallback(async (action: ProbeAction): Promise<void> => {
     setBusy(true)
     try {
@@ -664,6 +677,14 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
     ? t('signedInAs', { nickname: '' }).replace(/[:：]\s*$/, '')
     : t('signedInAs', { nickname: status.nickname })
 
+  // 卡头摘要：已登录身份 + 积分合计 + 模型数，常见查询零点击。
+  // 静态产品介绍退到 title tooltip，不丢失。
+  const headerSummary = [
+    label,
+    status.credits !== undefined ? t('creditsTotal', { total: formatNumber(status.credits.total) }) : undefined,
+    status.models !== undefined ? t('modelsCount', { n: status.models.length }) : undefined,
+  ].filter(part => part !== undefined).join(' · ')
+
   /** Efforts shown on one model row: a declared set wins, then a validating
    * observation (mirrors the adapter's own precedence). */
   const effortsOf = (row: WorkBuddyWebModelRow): readonly string[] | undefined => {
@@ -688,7 +709,7 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
       >
         <span style={headTextStyle}>
           <span style={nameStyle}>{title}</span>
-          <span style={descriptionStyle}>{t(variant.introKey)}</span>
+          <span style={descriptionStyle} title={t(variant.introKey)}>{headerSummary}</span>
         </span>
         <span aria-hidden="true" style={{ ...chevronStyle, transform: open ? 'rotate(180deg)' : 'none' }}>⌄</span>
       </button>
@@ -752,8 +773,15 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                       notValidating={notValidatingOf(row)}
                       detecting={detectingIds.has(row.id)}
                       busy={busy || detecting}
-                      pendingDetect={pendingDetect === row.id}
+                      // 已授权（自动检测开）时不走两段式：pending 确认只留给
+                      // 未授权的手动探测，授权态点一次直接跑。
+                      pendingDetect={pendingDetect === row.id && probe?.consent !== true}
                       onDetect={!isCandidate || hasEfforts ? undefined : () => {
+                        if (probe?.consent === true) {
+                          setPendingDetect(undefined)
+                          void runOneDetect(row.id)
+                          return
+                        }
                         if (pendingDetect === row.id) {
                           setPendingDetect(undefined)
                           void runOneDetect(row.id)
@@ -803,7 +831,11 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                         style={{ ...buttonStyle, minHeight: 26, padding: '2px 10px', fontSize: 12, borderRadius: 13 }}
                         disabled={busy}
                         title={t('autoDetectHint')}
-                        onClick={() => { setConfirmingAll(true) }}
+                        // 已授权时一批直接跑，未授权才进两段式确认。
+                        onClick={() => {
+                          if (probe?.consent === true) void runBatchDetect(detectable)
+                          else setConfirmingAll(true)
+                        }}
                       >
                         {t('detectAll', { n: detectable.length })}
                       </button>
