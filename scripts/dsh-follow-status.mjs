@@ -2,6 +2,12 @@
 // npm 上 @deepseek-ai/dsh 的实际发布与两条分支的 dsh-* 依赖基线，报告谁
 // 落后、谁漂移。
 //
+// 各分支的包清单与基线都从该分支自己读取（git ls-tree 枚举 + git show 逐
+// 包读 manifest），不取磁盘列表——磁盘属于当前检出的分支，单侧独有的包
+// （如 main 侧没有的 provider-usage）拿去 git show 另一分支会 ENOENT。
+// 单侧独有的包在输出中标注「仅 <分支> 侧」（双线活跃期的预期差异，见
+// RELEASING.md「功能收敛原则」），不参与跨分支对比。
+//
 // DSH 的发布习惯（RELEASING.md「宿主跟随规则」）：每条版本线都是
 // `<基础号>-alpha.N` 迭代若干版 → 进入 rc（= 稳定候选，即该线的正式版）
 // → 该基础号终结（出了正式版就不会再有同基础号的 alpha）→ 下一条线从
@@ -24,7 +30,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { aggregateBaseline, ROOT } from "./lib/dsh-deps.mjs";
+import { aggregateBaseline, manifestPaths, ROOT } from "./lib/dsh-deps.mjs";
 
 const ci = process.argv.includes("--ci");
 // 与 publish-gate 钉定同一 registry：本地 .npmrc 指向镜像时，两个脚本对
@@ -83,7 +89,11 @@ function branchRef(branch) {
 /** 读某分支的全部 package.json 基线并聚合成单一基线（应全仓一致）；
  *  同时收集 dsh.host 适配声明（npm 消费者的可见元数据），供一致性核对。
  *  分支不可读（CI checkout 只有当前分支、本地无该分支等）时返回 unmixed
- *  的哨兵形态，由调用方按「无法读取」呈报而非裸栈崩溃。 */
+ *  的哨兵形态，由调用方按「无法读取」呈报而非裸栈崩溃。
+ *  包清单按目标分支自己枚举（git ls-tree），不取磁盘列表：磁盘列表属于
+ *  当前检出的分支，单侧独有的包（如 main 侧没有的 provider-usage）拿去
+ *  git show 会 ENOENT，曾把整侧基线误判成「分支不可读」，每日 cron 的
+ *  main 侧核对因此长期失效。 */
 function branchBaseline(ref) {
   try {
     const resolved = ref === null ? null : branchRef(ref);
@@ -91,12 +101,33 @@ function branchBaseline(ref) {
       if (resolved === null) return JSON.parse(readFileSync(join(ROOT, path), "utf8"));
       return JSON.parse(execFileSync("git", ["show", `${resolved}:${path}`], { cwd: ROOT, encoding: "utf8" }));
     };
-    const { baseline, host } = aggregateBaseline(read, ROOT);
+    const manifestPaths = resolved === null ? manifestPaths(ROOT) : branchManifestPaths(resolved);
+    const { baseline, host } = aggregateBaseline(read, ROOT, manifestPaths);
     const mixed = baseline.startsWith("[不一致") || host === "[不一致]";
-    return { baseline, host, mixed, unreadable: false };
+    const packageDirs = manifestPaths
+      .filter((p) => p.startsWith("packages/") && p.endsWith("/package.json"))
+      .map((p) => p.slice("packages/".length, -"/package.json".length));
+    return { baseline, host, mixed, unreadable: false, packageDirs };
   } catch {
-    return { baseline: "(分支不可读)", host: undefined, mixed: false, unreadable: true };
+    return { baseline: "(分支不可读)", host: undefined, mixed: false, unreadable: true, packageDirs: [] };
   }
+}
+
+/** 枚举某分支 packages/ 下实际带 package.json 的包目录（git ls-tree 读
+ *  该分支的树对象，与磁盘无关）。目录残留但无 package.json 的条目跳过，
+ *  与磁盘枚举 manifestPaths 的 existsSync 过滤同语义。 */
+function branchManifestPaths(ref) {
+  const out = execFileSync("git", ["ls-tree", "--name-only", `${ref}:packages/`], { cwd: ROOT, encoding: "utf8" });
+  const names = out.split("\n").map((s) => s.trim()).filter(Boolean);
+  const paths = ["package.json"];
+  for (const name of names) {
+    const manifest = `packages/${name}/package.json`;
+    try {
+      execFileSync("git", ["cat-file", "-e", `${ref}:${manifest}`]);
+      paths.push(manifest);
+    } catch {}
+  }
+  return paths;
 }
 
 function currentBranch() {
@@ -147,7 +178,7 @@ const devLine = devVersions.length > 0
 
 const rows = [];
 for (const branch of ["main", "alpha"]) {
-  const { baseline, host, mixed, unreadable } = branchBaseline(branch === head ? null : branch);
+  const { baseline, host, mixed, unreadable, packageDirs } = branchBaseline(branch === head ? null : branch);
   // 基线不是合法版本号（无 dsh 依赖 / 包间不一致 / 分支不可读）时比较
   // 无意义——NaN 会让 cmpVersion 的结果静默落进「超前」分支，报出荒谬
   // 状态；这里显式归入漂移并说明原因。
@@ -178,7 +209,7 @@ for (const branch of ["main", "alpha"]) {
     const cmp = cmpVersion(baseline, stable);
     state = cmp === 0 ? "就位(待命)" : cmp < 0 ? "落后" : "超前";
   }
-  rows.push({ branch, baseline, host, target, state });
+  rows.push({ branch, baseline, host, target, state, packageDirs });
 }
 
 console.log(`dsh 稳定线(最新 rc) = ${stable}`);
@@ -194,6 +225,23 @@ for (const { branch, baseline, host, target, state } of rows) {
     const message = `dsh 跟随: ${branch} 分支 package.json 的 dsh.host (${host}) 与依赖基线 (${baseline}) 不一致——npm 消费者看到的适配声明失真，请以依赖基线为准修正。`;
     if (ci) console.log(`::warning::${message}`);
     console.log(`⚠ ${message}`);
+  }
+}
+
+// 单侧独有的包标注：双线活跃期两分支包集存在差异是预期（RELEASING.md
+// 「功能收敛原则」），不计为问题；各分支的基线聚合本来就限定在分支自己的
+// 包清单内，独有包不参与跨分支对比。任一侧不可读时不标注——空清单会把
+// 可读侧的全部包误报成单侧。
+const rowsByBranch = new Map(rows.map((row) => [row.branch, row]));
+if (rows.every((row) => !row.unreadable)) {
+  for (const branch of ["main", "alpha"]) {
+    const other = branch === "main" ? "alpha" : "main";
+    const otherDirs = new Set(rowsByBranch.get(other).packageDirs);
+    for (const dir of rowsByBranch.get(branch).packageDirs) {
+      if (!otherDirs.has(dir)) {
+        console.log(`ℹ packages/${dir} 仅 ${branch} 侧（${other} 无此包；双线活跃期的预期差异，见 RELEASING.md「功能收敛原则」）`);
+      }
+    }
   }
 }
 

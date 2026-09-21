@@ -55,14 +55,18 @@ export function scanManifest(manifest) {
 /**
  * 聚合一个「分支」的全部 package.json。reader(path) 由调用方提供（本地
  * readFileSync 或 `git show <ref>:<path>`），返回解析后的 manifest 对象。
+ * @param paths 参与聚合的 manifest 路径，默认磁盘枚举（manifestPaths）。
+ *   跨分支读取时由调用方传入该分支的实际路径清单（如 `git ls-tree` 枚举
+ *   结果）——磁盘清单属于当前检出的分支，直接拿去 git show 另一分支会因
+ *   单侧独有的包而整侧读取失败。
  * @returns {{ baseline: string, host: string|undefined, invalid: number }}
  *   baseline 为全仓共同基线；不一致时为 `[不一致: ...]` 标记（host 同理）。
  */
-export function aggregateBaseline(reader, root = ROOT) {
+export function aggregateBaseline(reader, root = ROOT, paths = manifestPaths(root)) {
   const all = new Set();
   const hosts = new Set();
   let invalidCount = 0;
-  for (const path of manifestPaths(root)) {
+  for (const path of paths) {
     const { baselines, hosts: manifestHosts, invalid } = scanManifest(reader(path));
     for (const b of baselines) all.add(b);
     for (const h of manifestHosts) hosts.add(h);
