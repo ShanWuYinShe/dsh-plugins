@@ -231,10 +231,13 @@ describe("client bundles", () => {
   });
 });
 
-describe("settings namespace 注册（宿主 rc.7+ 设置页可见性）", () => {
-  it("sandbox-extra-roots 导出注册函数", async () => {
+describe("settings namespace 注册（DSH 0.1.7 已移除）", () => {
+  it("sandbox-extra-roots 不再导出注册函数", async () => {
+    // DSH 0.1.7 移除了 settings namespace 注册体系（`settings.register`
+    // 不复存在）：卡片可见性改由 Loader profile entry 与
+    // `plugins.bundle.config` slot 决定，旧的注册 helper 已删除。
     const sbNS = await import("../packages/sandbox-extra-roots/src/index.js");
-    expect(typeof sbNS.registerSettingsNamespace).toBe("function");
+    expect("registerSettingsNamespace" in sbNS).toBe(false);
   });
 });
 

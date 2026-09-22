@@ -7,7 +7,8 @@
 # plugin reads WorkBuddy desktop credentials from the app's own location, so
 # an empty config is the normal case; set `authFile` to point at a specific
 # credential file. The zcode provider needs a GLM Coding Plan API key — set
-# `apiKeyZcode` here (or in the settings card) to enable it.
+# `apiKeyZcode` here to enable it (DSH 0.1.7 renders third-party provider
+# forms read-only; edits here apply live via volatile config, no reinstall).
 
 - insert:
     - id: dsh-any-connect

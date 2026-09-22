@@ -98,7 +98,8 @@ dsh-any-connect status --provider zcode
 把 coding plan 的 GLM 模型（GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo）
 接入 DSH，额度与 zcode CLI 消耗同一份套餐。key 的来源优先级（先者胜）：
 
-1. 插件设置卡的 `apiKeyZcode` 字段（手动覆盖）；
+1. 插件配置的 `apiKeyZcode` 字段（`cordis.patch.yml` 对应 entry，手动覆盖；DSH
+   0.1.7 起「设置 → 模型」的第三方 provider 表单不再渲染该字段，改走补丁文件）;
 2. `ZCODE_API_KEY` 环境变量；
 3. **跟随 zcode 桌面端登录态（默认路径）**：只读解密 zcode 的本机凭据存储
    `~/.zcode/v2/credentials.json`，取得 plan key——同一台机器上 zcode 登录
@@ -143,7 +144,8 @@ unsigned）。
 | `probeConsent` | false | 授权推理档位检测（检测会发送真实请求，可能消耗积分） |
 
 生效顺序（后者覆盖前者）：内置默认值 → bundle patch 的 config →
-profile/home 的 `cordis.patch.yml` → 设置页。凭据来源的探测顺序与上游一致：
+profile/home 的 `cordis.patch.yml`（DSH 0.1.7 起第三方 provider 的模型设置表单
+只读，字段改走补丁文件即时生效——Loader 以 volatile 引用提交，无需重装）。凭据来源的探测顺序与上游一致：
 macOS/Linux 的原生路径、Windows 的 Local → Roaming AppData、WSL 下挂载的
 Windows 用户目录；也可用 `WORKBUDDY_AUTH_FILE` 环境变量直接指定。
 

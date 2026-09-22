@@ -77,7 +77,10 @@ export function createProviderResolver(ctx: Context): (provider: string, signal:
     const entry = llm.listConfigurableProviders().find(candidate => candidate.provider === provider)
     if (entry === undefined) return {}
 
-    const section = ctx.get('settings')?.get(entry.settingsNs)
+    // DSH 0.1.7 removed the namespace section read (`settings.get(ns)`): the
+    // forms service projects Loader profile entries, so the section is the
+    // resolved value of the descriptor keyed by the directory's settingsNs.
+    const section = ctx.get('settings')?.describe().find(candidate => candidate.ns === entry.settingsNs)?.value
     const profile = profileOf(section, entry.settingsPath)
     const baseURL = str(profile?.['baseURL'])
     const apiKeyEnv = str(profile?.['apiKeyEnv'])

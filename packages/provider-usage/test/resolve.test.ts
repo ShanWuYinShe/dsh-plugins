@@ -34,7 +34,9 @@ function fakeCtx(options: {
     services['llm'] = { listConfigurableProviders: () => options.entries ?? [] }
   }
   if (options.noSettings !== true) {
-    services['settings'] = { get: (ns: string) => options.sections?.[ns] }
+    services['settings'] = {
+      describe: () => Object.entries(options.sections ?? {}).map(([ns, value]) => ({ ns, value })),
+    }
   }
   if (options.noCredentials !== true) {
     services['credentials'] = {
@@ -142,7 +144,7 @@ describe('createProviderResolver', () => {
     expect(await resolve('deepseek', signal)).toEqual({})
 
     services['llm'] = { listConfigurableProviders: () => [entry('deepseek', 'llm-deepseek')] }
-    services['settings'] = { get: () => ({ apiKeyEnv: 'DEEPSEEK_API_KEY', baseURL: 'https://api.deepseek.com' }) }
+    services['settings'] = { describe: () => [{ ns: 'llm-deepseek', value: { apiKeyEnv: 'DEEPSEEK_API_KEY', baseURL: 'https://api.deepseek.com' } }] }
     services['credentials'] = { resolve: async () => ({ value: 'sk-late', source: 'store' }) }
     expect(await resolve('deepseek', signal)).toEqual({ baseURL: 'https://api.deepseek.com', apiKey: 'sk-late' })
   })
@@ -180,7 +182,7 @@ describe('createProviderResolver', () => {
     const ctx = {
       get: (name: string) => {
         if (name === 'llm') return { listConfigurableProviders: () => [entry('deepseek', 'llm-deepseek')] }
-        if (name === 'settings') return { get: () => ({ apiKeyEnv: 'DEEPSEEK_API_KEY' }) }
+        if (name === 'settings') return { describe: () => [{ ns: 'llm-deepseek', value: { apiKeyEnv: 'DEEPSEEK_API_KEY' } }] }
         if (name === 'credentials') return { resolve: async () => ({ value, source: 'store' }) }
         return undefined
       },

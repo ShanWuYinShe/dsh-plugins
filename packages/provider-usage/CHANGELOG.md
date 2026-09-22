@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-alpha.2 (2026-09-22)
+
+### 适配
+
+* 跟进 DSH 宿主 0.1.7-alpha.1：settings 体系重构（`SettingsProvider.get`
+  移除），profile 解析改读 `settings.describe()` 按目录条目 `settingsNs`
+  匹配的描述符 `value`；语义不变（目录 + `settingsPath` 仍是唯一事实来源）。
+* cordis `^4.0.2` → `^4.0.3`（新宿主线的 peer 要求）。
+
 ## 0.1.0-alpha.1 (2026-09-20)
 
 ### 优化

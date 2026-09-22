@@ -5,8 +5,6 @@ import { setTimeout as realSleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import SettingsProvider from '@deepseek-ai/dsh-settings'
-import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import * as WorkBuddy from '../src/index.js'
 
 // 集成测试必须与宿主机真实 zcode 登录态隔离：跟随 zcode 的凭据来源统一
@@ -14,20 +12,6 @@ import * as WorkBuddy from '../src/index.js'
 vi.mock('../src/zcode-credentials.js', () => ({
   readZcodeClientCredentials: async () => undefined,
 }))
-
-class MemorySettings extends SettingsProvider {
-  readonly writable = true
-  private storedDocument: Record<string, unknown> = {}
-
-  protected load(): Promise<Record<string, unknown>> {
-    return Promise.resolve(structuredClone(this.storedDocument))
-  }
-
-  protected persist(ns: SettingsNamespace, section: Record<string, unknown>): Promise<void> {
-    this.storedDocument[ns] = structuredClone(section)
-    return Promise.resolve()
-  }
-}
 
 let context: Context | undefined
 let root: string | undefined
@@ -51,7 +35,6 @@ describe('WorkBuddy Host settings integration', () => {
     const ctx = new Context()
     context = ctx
     await ctx.plugin(LlmRuntime)
-    await ctx.plugin(MemorySettings)
     // Point the desktop probe at a path that cannot exist: the test must be
     // hermetic (CI runners may carry a real signed-in desktop file, which
     // would flip this case to signed-in). An explicit authFile overrides the
@@ -70,19 +53,29 @@ describe('WorkBuddy Host settings integration', () => {
       declared: false,
     })
 
-    // The section is what the Models settings page joins on to render a card.
-    const descriptor = ctx.settings.describe().find(entry => entry.ns === WorkBuddy.WORKBUDDY_SETTINGS_NS)
-    expect(descriptor).toBeDefined()
+    // The directory entries are what the Models settings page joins on to
+    // render a card. Without a Loader the settingsNs falls back to the
+    // legacy namespace constants.
+    const directory = ctx.llm.listConfigurableProviders()
+    for (const [provider, settingsNs] of [
+      ['workbuddy', WorkBuddy.WORKBUDDY_SETTINGS_NS],
+      ['workbuddy-ai', WorkBuddy.WORKBUDDY_AI_SETTINGS_NS],
+      ['zcode', WorkBuddy.WORKBUDDY_ZCODE_SETTINGS_NS],
+      ['zcode-offpeak', WorkBuddy.WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS],
+    ] as const) {
+      expect(directory).toContainEqual({
+        provider,
+        displayName: expect.any(String),
+        settingsNs,
+        settingsPath: [],
+        declared: false,
+      })
+    }
 
     // No credential anywhere: the group is hidden (empty), not fallback-filled.
     await vi.waitFor(async () => {
       expect(await ctx.llm.listModels('workbuddy')).toEqual([])
     })
-
-    // A settings write validates against the schema and persists.
-    await ctx.settings.update(WorkBuddy.WORKBUDDY_SETTINGS_NS, { authFile: '/tmp/other-workbuddy.info' })
-    const updated = ctx.settings.describe().find(entry => entry.ns === WorkBuddy.WORKBUDDY_SETTINGS_NS)
-    expect((updated?.value as Record<string, unknown>)['authFile']).toBe('/tmp/other-workbuddy.info')
   })
 
   it('serves the fallback model list once signed in (fetch failing)', async () => {
@@ -100,8 +93,7 @@ describe('WorkBuddy Host settings integration', () => {
       const ctx = new Context()
       context = ctx
       await ctx.plugin(LlmRuntime)
-      await ctx.plugin(MemorySettings)
-      await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+        await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(() => {
         expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
       })
@@ -137,11 +129,6 @@ describe('WorkBuddy Host settings integration', () => {
     const modalities = new Map(models.map(model => [model.id, model.inputModalities]))
     expect(modalities.get('auto')).toContain('image')
     expect(modalities.get('glm-5.1')).toEqual(['text'])
-
-    // A settings write validates against the schema and persists.
-    await ctx.settings.update(WorkBuddy.WORKBUDDY_SETTINGS_NS, { authFile: '/tmp/other-workbuddy.info' })
-    const updated = ctx.settings.describe().find(entry => entry.ns === WorkBuddy.WORKBUDDY_SETTINGS_NS)
-    expect((updated?.value as Record<string, unknown>)['authFile']).toBe('/tmp/other-workbuddy.info')
     } finally {
       spy.mockRestore()
     }
@@ -164,7 +151,6 @@ describe('WorkBuddy Host settings integration', () => {
     const ctx1 = new Context()
     try {
       await ctx1.plugin(LlmRuntime)
-      await ctx1.plugin(MemorySettings)
       await ctx1.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(async () => {
         expect((await ctx1.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
@@ -185,8 +171,7 @@ describe('WorkBuddy Host settings integration', () => {
       const ctx = new Context()
       context = ctx
       await ctx.plugin(LlmRuntime)
-      await ctx.plugin(MemorySettings)
-      await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+        await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(async () => {
         expect((await ctx.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
       })
@@ -216,32 +201,32 @@ describe('WorkBuddy Host settings integration', () => {
     const ctx = new Context()
     context = ctx
     await ctx.plugin(LlmRuntime)
-    await ctx.plugin(MemorySettings)
 
-    // 假时钟从插件安装前开启:installSection 安装即触发一次 onChange 拉取,
-    // shim 就绪后再来一次启动拉取——两条失败链各自带重试。
+    // 假时钟从插件安装前开启。DSH 0.1.7 起配置是 volatile 引用、启动只有
+    // shim 就绪后的一次拉取（旧 installSection 的装配期 onChange 拉取已随
+    // settings provider 一并移除）：单条失败链带重试。
     vi.useFakeTimers()
     try {
       await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       // waitFor 在假时钟下自动按 50ms 推进(上限 1s,远够不到 60s 重试点),
-      // 等两条链的首次失败都落地。
-      await vi.waitFor(() => { expect(calls).toBe(2) })
+      // 等首次失败落地。
+      await vi.waitFor(() => { expect(calls).toBe(1) })
       // 假时钟推进只负责触发重试定时器;重试回调里的 fs 读取走真实 I/O,
       // 用真实时钟小步等待其收敛(Date 已被假时钟接管,不读钟)。
       const waitForReal = async (expected: number): Promise<void> => {
         for (let i = 0; i < 200 && calls < expected; i += 1) await realSleep(10)
         expect(calls).toBe(expected)
       }
-      // 第一次重试:两条链各 +1。
+      // 第一次重试。
       await vi.advanceTimersByTimeAsync(60_000)
-      await waitForReal(4)
-      // 第二次重试(每链最后一次)。
+      await waitForReal(2)
+      // 第二次重试(最后一次)。
       await vi.advanceTimersByTimeAsync(60_000)
-      await waitForReal(6)
-      // 重试耗尽(每链初始 1 次 + 最多 2 次),不再发起。
+      await waitForReal(3)
+      // 重试耗尽(初始 1 次 + 最多 2 次),不再发起。
       await vi.advanceTimersByTimeAsync(180_000)
       for (let i = 0; i < 20; i += 1) await realSleep(10)
-      expect(calls).toBe(6)
+      expect(calls).toBe(3)
     } finally {
       vi.useRealTimers()
       spy.mockRestore()
@@ -258,7 +243,6 @@ describe('zcode provider (GLM Coding Plan)', () => {
     const ctx = new Context()
     context = ctx
     await ctx.plugin(LlmRuntime)
-    await ctx.plugin(MemorySettings)
     await ctx.plugin(WorkBuddy, {
       authFile: join(root, 'no-such-file.info'),
       authFileAI: join(root, 'no-such-ai-file.info'),
@@ -280,23 +264,32 @@ describe('zcode provider (GLM Coding Plan)', () => {
     await vi.waitFor(async () => {
       expect(await ctx.llm.listModels('zcode')).toEqual([])
     })
-    const namespaces = ctx.settings.describe().map(entry => entry.ns)
-    expect(namespaces).toContain(WorkBuddy.WORKBUDDY_ZCODE_SETTINGS_NS)
-    expect(namespaces).toContain(WorkBuddy.WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS)
+    const entries = ctx.llm.listConfigurableProviders()
+    expect(entries.map(entry => entry.provider)).toEqual(
+      expect.arrayContaining(['workbuddy', 'workbuddy-ai', 'zcode', 'zcode-offpeak']),
+    )
+    expect(entries.find(entry => entry.provider === 'zcode')).toMatchObject({
+      settingsNs: WorkBuddy.WORKBUDDY_ZCODE_SETTINGS_NS,
+      settingsPath: [],
+    })
+    expect(entries.find(entry => entry.provider === 'zcode-offpeak')).toMatchObject({
+      settingsNs: WorkBuddy.WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS,
+      settingsPath: [],
+    })
   })
 
   it('serves the GLM roster once a key is configured, and hides it again after the key is cleared', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-zcode-roster-'))
     vi.stubEnv('DSH_HOME', root)
-    const ctx = new Context()
-    context = ctx
-    await ctx.plugin(LlmRuntime)
-    await ctx.plugin(MemorySettings)
-    await ctx.plugin(WorkBuddy, {
+    const options = {
       authFile: join(root, 'no-such-file.info'),
       authFileAI: join(root, 'no-such-ai-file.info'),
       apiKeyZcode: 'plan-key-123456',
-    })
+    }
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(WorkBuddy, options)
     // WorkBuddy 侧无凭据保持隐藏；zcode 静态名单可见，id 用上游大写拼写。
     await vi.waitFor(async () => {
       const ids = (await ctx.llm.listModels('zcode')).map(m => m.id)
@@ -307,12 +300,16 @@ describe('zcode provider (GLM Coding Plan)', () => {
     })
     expect(await ctx.llm.listModels('workbuddy')).toEqual([])
 
-    // 设置卡清空 key（schemastery 会物化成空字符串）→ 分组隐藏。
-    // （env 兜底的优先级链由 zcode.test.ts 的 store 用例覆盖；这里不依赖
-    // 「同值 settings.update 是否触发 onChange」的宿主语义。）
-    await ctx.settings.update(WorkBuddy.WORKBUDDY_ZCODE_SETTINGS_NS, { apiKeyZcode: '' })
+    // key 清空 → 分组隐藏。DSH 0.1.7 起配置变更走 Loader（volatile 引用或
+    // 重装）；无 Loader 的测试以重装表达「同一配置项的下一次生效值」。
+    // （env 兜底的优先级链由 zcode.test.ts 的 store 用例覆盖。）
+    await context?.fiber.dispose()
+    const ctx2 = new Context()
+    context = ctx2
+    await ctx2.plugin(LlmRuntime)
+    await ctx2.plugin(WorkBuddy, { ...options, apiKeyZcode: '' })
     await vi.waitFor(async () => {
-      expect(await ctx.llm.listModels('zcode')).toEqual([])
+      expect(await ctx2.llm.listModels('zcode')).toEqual([])
     })
   })
 })
@@ -326,7 +323,6 @@ describe('WorkBuddy international variant', () => {
     const ctx = new Context()
     context = ctx
     await ctx.plugin(LlmRuntime)
-    await ctx.plugin(MemorySettings)
     await ctx.plugin(WorkBuddy, {
       authFile: join(root, 'no-such-file.info'),
       authFileAI: join(root, 'no-such-ai-file.info'),
@@ -340,9 +336,15 @@ describe('WorkBuddy international variant', () => {
       expect(await ctx.llm.listModels('workbuddy')).toEqual([])
       expect(await ctx.llm.listModels('workbuddy-ai')).toEqual([])
     })
-    const namespaces = ctx.settings.describe().map(entry => entry.ns)
-    expect(namespaces).toContain(WorkBuddy.WORKBUDDY_SETTINGS_NS)
-    expect(namespaces).toContain(WorkBuddy.WORKBUDDY_AI_SETTINGS_NS)
+    const entries = ctx.llm.listConfigurableProviders()
+    expect(entries.find(entry => entry.provider === 'workbuddy')).toMatchObject({
+      settingsNs: WorkBuddy.WORKBUDDY_SETTINGS_NS,
+      settingsPath: [],
+    })
+    expect(entries.find(entry => entry.provider === 'workbuddy-ai')).toMatchObject({
+      settingsNs: WorkBuddy.WORKBUDDY_AI_SETTINGS_NS,
+      settingsPath: [],
+    })
   })
 
   it('serves the AI fallback roster when only the AI side is signed in', async () => {
@@ -359,8 +361,7 @@ describe('WorkBuddy international variant', () => {
       const ctx = new Context()
       context = ctx
       await ctx.plugin(LlmRuntime)
-      await ctx.plugin(MemorySettings)
-      await ctx.plugin(WorkBuddy, {
+        await ctx.plugin(WorkBuddy, {
         authFile: join(root, 'no-such-file.info'),
         authFileAI: desktopAI,
       })
@@ -376,5 +377,52 @@ describe('WorkBuddy international variant', () => {
     } finally {
       spy.mockRestore()
     }
+  })
+})
+
+describe('volatile configuration (DSH 0.1.7)', () => {
+  it('repoints each variant store from the live values', () => {
+    const credentialSet: Array<string | undefined> = []
+    const keySet: Array<string | undefined> = []
+    const stores = {
+      credentialStore: { setDesktopPath: (path: string | undefined) => { credentialSet.push(path) } },
+      zcodeStore: { setConfiguredKey: (key: string | undefined) => { keySet.push(key) } },
+    }
+    expect(WorkBuddy.applyVariantConfig(WorkBuddy.CN_VARIANT, stores, { authFile: '/tmp/a.info' })).toBe('authFile')
+    expect(credentialSet).toEqual(['/tmp/a.info'])
+    expect(WorkBuddy.applyVariantConfig(WorkBuddy.AI_VARIANT, stores, { authFileAI: '/tmp/ai.info' })).toBe('authFile')
+    expect(credentialSet).toEqual(['/tmp/a.info', '/tmp/ai.info'])
+    expect(WorkBuddy.applyVariantConfig(WorkBuddy.ZCODE_VARIANT, stores, { apiKeyZcode: 'k' })).toBe('apiKey')
+    expect(keySet).toEqual(['k'])
+    // off-peak 凭据跟随 zcode 登录态：无可编辑字段，不碰任何 store。
+    expect(WorkBuddy.applyVariantConfig(WorkBuddy.ZCODE_OFFPEAK_VARIANT, stores, {})).toBeUndefined()
+    expect(credentialSet).toHaveLength(2)
+    expect(keySet).toHaveLength(1)
+  })
+
+  it('tolerates absent stores (variant without a live runtime part)', () => {
+    expect(() => WorkBuddy.applyVariantConfig(WorkBuddy.CN_VARIANT, {}, { authFile: '/tmp/a.info' })).not.toThrow()
+    expect(() => WorkBuddy.applyVariantConfig(WorkBuddy.ZCODE_VARIANT, {}, {})).not.toThrow()
+  })
+
+  it('survives a volatile-update with no Loader (install-time values, no crash)', async () => {
+    // 无 Loader 时配置静态：事件只重读安装值并重走 refresh（此处无凭据，
+    // 即 adoptSignedOut），不断言目录变化，只证明接线不抛错。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-volatile-'))
+    vi.stubEnv('DSH_HOME', root)
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(LlmRuntime)
+    const fiber = await ctx.plugin(WorkBuddy, {
+      authFile: join(root, 'no-such-file.info'),
+      authFileAI: join(root, 'no-such-ai-file.info'),
+    })
+    await vi.waitFor(() => {
+      expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
+    })
+    expect(() => fiber.ctx.emit('loader/volatile-update', [])).not.toThrow()
+    await vi.waitFor(async () => {
+      expect(await ctx.llm.listModels('workbuddy')).toEqual([])
+    })
   })
 })

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.13-alpha.2 (2026-09-22)
+
+### 适配
+
+* 跟进 DSH 宿主 0.1.7-alpha.1：settings 体系重构（`settings.register`
+  不复存在），删除 `registerSettingsNamespace` 及其调用——卡片可见性改由
+  Loader profile entry 与 `plugins.bundle.config` slot 决定（0.1.6-alpha.2
+  已迁移），卡片读写仍走 config gateway。核心沙盒包装无改动。
+
 ## 0.4.13-alpha.1 (2026-09-17)
 
 ### 适配

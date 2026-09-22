@@ -6,7 +6,8 @@
  * @module dsh-any-connect
  */
 
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import z from '@deepseek-ai/schemastery'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-attachment'
@@ -89,6 +90,7 @@ export {
   PROVIDER_VARIANTS,
   variantFor,
   WORKBUDDY_VARIANTS,
+  ZCODE_OFFPEAK_VARIANT,
   ZCODE_VARIANT,
   type VariantKind,
   type WorkBuddyVariant,
@@ -171,70 +173,61 @@ export const name = 'llm-anyconnect'
 export const inject = ['llm']
 
 /**
- * Settings namespace owning the configuration card.
+ * Fallback settings namespace owning the configuration card.
  *
- * DSH 0.1.2 dropped the `settingsNamespace()` branding function: a namespace is
- * now a nominal string, validated by the type system where it is used rather
- * than at runtime by a function call. The brand is compile-time only, so this
- * stays the plain string it always was — every comparison, descriptor lookup,
- * and `dsh` config file still sees `'anyconnect'`. It is cast once here so the
- * public constant carries the seam's type without pulling the brand helper
- * into this package (upstream DSH plugins, `dsh-llm-pi-ai` included, pass
- * their namespaces as plain string literals).
+ * DSH 0.1.7 removed registered settings namespaces: the directory entry's
+ * `settingsNs` is now the Loader profile entry id
+ * (`ctx.fiber.entry?.options.id`), and these constants only survive as the
+ * fallback when no Loader hosts the plugin (bare-`Context` tests) plus the
+ * stable provider-identity strings the client and tests already key on.
  */
 export const WORKBUDDY_SETTINGS_NS = 'anyconnect' as SettingsNamespace
 
-/** Settings namespace owning the international variant's card. */
+/** Fallback settings namespace owning the international variant's card. */
 export const WORKBUDDY_AI_SETTINGS_NS = 'anyconnect-ai' as SettingsNamespace
 
-/** Settings namespace owning the zcode variant's card. */
+/** Fallback settings namespace owning the zcode variant's card. */
 export const WORKBUDDY_ZCODE_SETTINGS_NS = 'anyconnect-zcode' as SettingsNamespace
 
-/** Settings namespace owning the zcode off-peak variant's card. */
+/** Fallback settings namespace owning the zcode off-peak variant's card. */
 export const WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS = 'anyconnect-zcode-offpeak' as SettingsNamespace
 
-/** Plugin configuration. */
+/** Plugin configuration: live volatile references committed by the Loader.
+ *
+ * DSH 0.1.7 removed the settings provider service (`settings.installSection`
+ * / `register`): editable fields are declared `.volatile()` and read with
+ * `.get()`, which tracks profile edits without a remount (see
+ * `loader/volatile-update` below, mirroring upstream `dsh-llm-pi-ai`). The
+ * `Options` type is the plain-value shape callers pass to `ctx.plugin()`;
+ * Cordis parses it through this schema into the `Config` references.
+ */
 export interface Config {
   /** Explicit WorkBuddy desktop auth-file path, overriding env and platform defaults. */
-  authFile?: string
+  authFile: Volatile<string | undefined>
   /** Explicit WorkBuddy AI desktop auth-file path, overriding env and platform defaults. */
-  authFileAI?: string
+  authFileAI: Volatile<string | undefined>
   /**
    * GLM Coding Plan API key for the zcode provider (from the bigmodel
    * console, same account as the coding plan). Blank falls through to
    * `ZCODE_API_KEY` and then the plugin-owned key file.
    */
-  apiKeyZcode?: string
+  apiKeyZcode: Volatile<string | undefined>
   // probeConsent lived here until automatic detection moved its authorization
   // into the probe-store file (the card's write path cannot reach the settings
   // store). schemastery strips unknown fields, so a stale `probeConsent` in a
   // cordis.patch.yml is ignored rather than rejected.
 }
 
-export const Config: z<Config> = z.object({
-  authFile: z.string().description('WorkBuddy desktop auth file (defaults to the app\'s own location)'),
-  authFileAI: z.string().description('WorkBuddy AI desktop auth file (defaults to the app\'s own location)'),
-  apiKeyZcode: z.string().description('GLM Coding Plan API key (bigmodel console; blank = ZCODE_API_KEY env or ~/.dsh/.zcode-auth.json)'),
-})
+/** Plain configuration values, before schema parsing wraps them in references. */
+export type Options = {
+  [K in keyof Config]?: Config[K] extends Volatile<infer T> ? T : never
+}
 
-/** One variant's settings section: only the fields that card edits. */
-const CN_SECTION: z<Config> = z.object({
-  authFile: z.string().description('WorkBuddy desktop auth file (defaults to the app\'s own location)'),
+export const Config = z.object({
+  authFile: z.string().description('WorkBuddy desktop auth file (defaults to the app\'s own location)').volatile(),
+  authFileAI: z.string().description('WorkBuddy AI desktop auth file (defaults to the app\'s own location)').volatile(),
+  apiKeyZcode: z.string().description('GLM Coding Plan API key (bigmodel console; blank = ZCODE_API_KEY env or ~/.dsh/.zcode-auth.json)').volatile(),
 })
-
-/** The international card's settings section: only its own auth-file path. */
-const AI_SECTION: z<Config> = z.object({
-  authFileAI: z.string().description('WorkBuddy AI desktop auth file (defaults to the app\'s own location)'),
-})
-
-/** The zcode card's settings section: only its API key. */
-const ZCODE_SECTION: z<Config> = z.object({
-  apiKeyZcode: z.string().description('GLM Coding Plan API key (bigmodel console; blank = ZCODE_API_KEY env or ~/.dsh/.zcode-auth.json)'),
-})
-
-/** off-peak 卡无用户可编辑字段（凭据完全跟随 zcode 登录态），装一个空 section
- * 让 provider 目录能挂上命名空间。 */
-const ZCODE_OFFPEAK_SECTION = z.object({}) as unknown as z<Config>
 
 /** 目录拉取失败后的延迟重试：最多再试 2 次、间隔 60s（暂态故障自愈，耗尽即停）。 */
 const CATALOG_REFRESH_RETRIES = 2
@@ -350,9 +343,40 @@ const AUTH_FILE_FIELD_BY_ID = new Map<string, 'authFile' | 'authFileAI'>([
   [AI_VARIANT.id, 'authFileAI'],
 ])
 
-function configuredAuthFile(config: Config, variant: WorkBuddyVariant): string | undefined {
+function configuredAuthFile(values: Options, variant: WorkBuddyVariant): string | undefined {
   const field = AUTH_FILE_FIELD_BY_ID.get(variant.id)
-  return field === undefined ? undefined : config[field]
+  return field === undefined ? undefined : values[field]
+}
+
+/**
+ * Push configuration values into one variant's credential stores (no catalog
+ * I/O — the caller refreshes afterwards). WorkBuddy variants repoint their
+ * desktop auth-file path, zcode repoints its configured API key, off-peak has
+ * no editable fields (its credentials follow the zcode sign-in state).
+ *
+ * Exported for tests: the `loader/volatile-update` path has no Loader in unit
+ * tests, so the store-branching is driven directly here.
+ *
+ * @returns which credential source was pushed, for diagnostics.
+ */
+export function applyVariantConfig(
+  variant: WorkBuddyVariant,
+  stores: {
+    credentialStore?: Pick<WorkBuddyCredentialStore, 'setDesktopPath'>
+    zcodeStore?: Pick<ZcodeCredentialStore, 'setConfiguredKey'>
+  },
+  values: Options,
+): 'authFile' | 'apiKey' | undefined {
+  const field = AUTH_FILE_FIELD_BY_ID.get(variant.id)
+  if (field !== undefined) {
+    stores.credentialStore?.setDesktopPath(values[field])
+    return 'authFile'
+  }
+  if (variant.kind === 'zcode') {
+    stores.zcodeStore?.setConfiguredKey(values.apiKeyZcode)
+    return 'apiKey'
+  }
+  return undefined
 }
 
 /**
@@ -368,7 +392,14 @@ function configuredAuthFile(config: Config, variant: WorkBuddyVariant): string |
 export function apply(ctx: Context, config: Config): void {
   const client = new WorkBuddyUpstreamClient()
   let stopped = false
-  let current = () => config
+  /** Live configuration snapshot: volatile references committed by the Loader
+   * without a remount (read fresh on every use — caching the values would pin
+   * the install-time document); install-time values where no Loader runs. */
+  const current = (): Options => ({
+    authFile: config.authFile.get(),
+    authFileAI: config.authFileAI.get(),
+    apiKeyZcode: config.apiKeyZcode.get(),
+  })
 
   /** Build one variant's stores and catalog; the shim starts below. */
   function createRuntime(variant: WorkBuddyVariant): VariantRuntime {
@@ -418,7 +449,7 @@ export function apply(ctx: Context, config: Config): void {
         lastIdentity: undefined,
       }
     }
-    const configured = configuredAuthFile(config, variant)
+    const configured = configuredAuthFile(current(), variant)
     const credentialStore = new WorkBuddyCredentialStore({
       variant,
       ...configured === undefined ? {} : { desktopPath: configured },
@@ -675,76 +706,34 @@ export function apply(ctx: Context, config: Config): void {
     }
   })
 
-  // The settings sections are what make the providers visible on the Models
-  // settings page (settings.describe joins the provider directory), and they
-  // keep the configured auth-file paths and API keys live across edits.
-  //
-  // DSH 0.1.2 moved the helper from a free function (`installSettingsSection`)
-  // onto the provider service (`settings.installSection`), so the wiring now
-  // has to wait for a settings service to exist — exactly what the inject
-  // below does. Without one the plugin still serves its models; it simply has
-  // no user-editable sections, as before.
-  ctx.inject(['settings'], (settingsCtx: Context) => {
-    const sections = [
-      { ns: WORKBUDDY_SETTINGS_NS, schema: CN_SECTION, field: 'authFile' },
-      { ns: WORKBUDDY_AI_SETTINGS_NS, schema: AI_SECTION, field: 'authFileAI' },
-      { ns: WORKBUDDY_ZCODE_SETTINGS_NS, schema: ZCODE_SECTION, field: 'apiKeyZcode' },
-      // off-peak 卡无编辑字段，只为 provider 目录挂命名空间。
-      { ns: WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS, schema: ZCODE_OFFPEAK_SECTION, field: undefined },
-    ] as const
-    // installSection 的 setSource 每次都会覆盖同一个引用：若所有 section 共享
-    // 一个 `current`，只有最后安装的 section 的 scope 是新鲜的，其余 section
-    // 的 onChange 会读到 base 旧值（authFile / probeConsent 的「改后即时生效」
-    // 因此一直是坏的）。改为按 ns 自存 scope，`current` 合成各 ns 自有字段
-    // 的最新视图。
-    const scopeByNs = new Map<SettingsNamespace, () => Config>()
-    /** 每个 section 拥有的 Config 字段（onChange 与合并视图都以它为准）。 */
-    const fieldsByNs = new Map<SettingsNamespace, ReadonlyArray<keyof Config>>([
-      [WORKBUDDY_SETTINGS_NS, ['authFile']],
-      [WORKBUDDY_AI_SETTINGS_NS, ['authFileAI']],
-      [WORKBUDDY_ZCODE_SETTINGS_NS, ['apiKeyZcode']],
-      [WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS, []],
-    ])
-    const mergedCurrent = (): Config => {
-      const merged: Config = { ...config }
-      const writable = merged as Record<string, unknown>
-      for (const [ns, fields] of fieldsByNs) {
-        const get = scopeByNs.get(ns)
-        if (get === undefined) continue
-        const resolved = get() as Partial<Config>
-        for (const field of fields) writable[field] = resolved[field]
-      }
-      return merged
-    }
-    for (const [index, section] of sections.entries()) {
-      const runtime = runtimes[index]!
-      settingsCtx.settings.installSection(ctx, section.ns, section.schema, config, {
-        setSource(source: () => Config) {
-          scopeByNs.set(section.ns, source)
-          current = mergedCurrent
-        },
-        onChange() {
-          if (section.field === undefined) return
-          const own = scopeByNs.get(section.ns)
-          const next = (own === undefined ? current() : own())[section.field] as string | undefined
-          // WorkBuddy 卡改的是凭据文件路径；zcode 卡改的是 key 本身。
-          if (section.field === 'apiKeyZcode') {
-            runtime.zcodeStore?.setConfiguredKey(next)
-          } else {
-            runtime.credentialStore?.setDesktopPath(next)
-          }
-          // 凭据变化后重拉模型目录：目录只在启动时拉一次的话，晚登录/换
-          // 账号的用户会一直停在旧名单，直到插件重载。拉取失败仅告警，
-          // last-known 目录照常服务。
-          refreshCatalog(runtime, section.field === 'apiKeyZcode' ? 'apiKey changed' : 'authFile changed')
-        },
-      })
+  // This plugin ships its own configuration cards: opt out of the host's
+  // auto-generated settings page (mirroring upstream `dsh-llm-pi-ai`). The
+  // inject waits for a settings service to exist — without one the plugin
+  // still serves its models, as before.
+  ctx.inject(['settings'], (child: Context) => {
+    child.effect(() => child.settings.configure({ auto: false }, ctx.fiber))
+  })
+
+  // DSH 0.1.7 commits profile edits into the volatile references without a
+  // remount and dispatches `loader/volatile-update` to this fiber (values are
+  // already committed when it fires). Re-read the configuration and push it
+  // into every variant's stores, then re-resolve each catalog: an unchanged
+  // variant re-resolves to the same value and its refresh is a cheap identity
+  // check, so no per-field diffing is needed. Without a Loader the
+  // configuration is install-time static and this never fires.
+  ctx.on('loader/volatile-update', () => {
+    if (stopped) return
+    for (const runtime of runtimes) {
+      applyVariantConfig(runtime.variant, runtime, current())
+      // 凭据变化后重拉模型目录：目录只在启动时拉一次的话，晚登录/换
+      // 账号的用户会一直停在旧名单，直到插件重载。拉取失败仅告警，
+      // last-known 目录照常服务。
+      refreshCatalog(runtime, runtime.variant.kind === 'zcode' ? 'apiKey changed' : 'authFile changed')
     }
   })
 
-  /** 从上游拉一次模型目录并写入 catalog；启动、authFile 变更、身份核对共用。
-   * 函数声明（而非 const 箭头）：settings 服务已在场时 inject 回调同步
-   * 执行，onChange 必须引用得到提升后的绑定。
+  /** 从上游拉一次模型目录并写入 catalog；启动、配置变更、身份核对共用。
+   * 函数声明（而非 const 箭头）：`loader/volatile-update` 处理器引用它，
    *
    * 身份语义（与上游 dsh-workbuddy-connect 的 adoptIdentity 同构）：
    * - 未登录 → 隐藏分组（adoptSignedOut），不展示兜底名单；
@@ -955,7 +944,10 @@ export function apply(ctx: Context, config: Config): void {
             releaseDirectory = ctx.llm.registerConfigurableProviders([{
               provider: variant.id,
               displayName: variant.displayName,
-              settingsNs: variant.settingsNs,
+              // DSH 0.1.7: directory entries point at the Loader profile entry
+              // id; without a Loader fall back to the legacy namespace so
+              // bare-Context installs keep a stable, testable identity.
+              settingsNs: ctx.fiber.entry?.options.id ?? variant.settingsNs,
               settingsPath: [],
               declared: false,
             }])

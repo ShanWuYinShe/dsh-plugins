@@ -24,9 +24,10 @@ declare module "@deepseek-ai/cordis" {
        * 失效;升级 DSH 时请核对该签名。 */
       resolve(): { mode: string; workspaceRoot?: string };
     };
-    settings: {
-      register(ns: string, schema: any, options?: any): void;
-    };
+    // DSH 0.1.7 移除了 settings namespace 注册体系：宿主 settings 服务现为
+    // SettingsForms（Loader profile 条目的 Config 表单投影），不再有
+    // register/installSection。本插件不声明 Config schema，卡片经
+    // plugins.bundle.config slot 与 config gateway 读写，此处无需声明。
   }
 }
 

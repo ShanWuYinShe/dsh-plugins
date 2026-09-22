@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.19-alpha.3 (2026-09-22)
+
+### 适配
+
+* 跟进 DSH 宿主 0.1.7-alpha.1：settings 体系重构（`SettingsProvider` →
+  `SettingsForms`，`register` / `installSection` / `get` 全部移除），对照
+  上游 `dsh-llm-pi-ai` 的新契约迁移：
+  - 可编辑字段改 `.volatile()`（`Config` 即 `Volatile` 引用，`.get()` 读
+    取；调用方仍传普通值，由 Cordis 解析包裹）；
+  - 装配期 `installSection` + `setSource`/`onChange` 改为
+    `ctx.on('loader/volatile-update')` 重读并回写各变体凭据存储后重拉目录
+    （凭据写入抽成可单测的 `applyVariantConfig`）；
+  - 自带配置卡片，向 settings 注册 `configure({ auto: false })`，退出宿主
+    自动表单页；
+  - 目录条目的 `settingsNs` 取 Loader profile entry id
+   （`ctx.fiber.entry?.options.id`），无 Loader 时回落旧命名空间常量。
+* 启动目录拉取由两次变为一次（旧装配期 `onChange` 附带的那次随 settings
+  provider 一并消失）；行为不变，仍是失败有限重试（初始 1 次 + 最多 2 次）。
+* cordis `^4.0.2` → `^4.0.3`、schemastery `^3.18.2` → `^3.18.3`
+ （新宿主线的 peer 要求）；新增 `cordis-plugin-loader` 类型依赖
+ （`loader/volatile-update` 事件与 `fiber.entry`）。
+
 ## 0.3.19-alpha.2 (2026-09-20)
 
 ### 优化

@@ -101,10 +101,13 @@ function branchBaseline(ref) {
       if (resolved === null) return JSON.parse(readFileSync(join(ROOT, path), "utf8"));
       return JSON.parse(execFileSync("git", ["show", `${resolved}:${path}`], { cwd: ROOT, encoding: "utf8" }));
     };
-    const manifestPaths = resolved === null ? manifestPaths(ROOT) : branchManifestPaths(resolved);
-    const { baseline, host } = aggregateBaseline(read, ROOT, manifestPaths);
+    // 注意：局部变量不可命名为 manifestPaths——会遮蔽同名 import 并在
+    // resolved === null 分支触发 TDZ ReferenceError，令当前分支恒报
+    // 「分支不可读」（2026-09-22 实测：HEAD 分支基线永远无法读取）。
+    const paths = resolved === null ? manifestPaths(ROOT) : branchManifestPaths(resolved);
+    const { baseline, host } = aggregateBaseline(read, ROOT, paths);
     const mixed = baseline.startsWith("[不一致") || host === "[不一致]";
-    const packageDirs = manifestPaths
+    const packageDirs = paths
       .filter((p) => p.startsWith("packages/") && p.endsWith("/package.json"))
       .map((p) => p.slice("packages/".length, -"/package.json".length));
     return { baseline, host, mixed, unreadable: false, packageDirs };
