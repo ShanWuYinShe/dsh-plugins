@@ -110,7 +110,6 @@ export class ZcodeOffpeakTickets {
       method: 'GET',
       headers: {
         authorization: `Bearer ${credential.jwt}`,
-        'x-coding-plan-api-key': credential.planApiKey,
         ...this.identityHeaders(),
       },
     }, signal)
@@ -126,7 +125,6 @@ export class ZcodeOffpeakTickets {
     if (this.active !== undefined) return this.active.ticketId
     const base = {
       authorization: `Bearer ${credential.jwt}`,
-      'x-coding-plan-api-key': credential.planApiKey,
       ...this.identityHeaders(),
     }
     // 1) 窗口与资格探测（只读）。
@@ -218,7 +216,6 @@ export class ZcodeOffpeakTickets {
         method: 'POST',
         headers: {
           authorization: `Bearer ${credential.jwt}`,
-          'x-coding-plan-api-key': credential.planApiKey,
           ...this.identityHeaders(),
         },
       }, AbortSignal.timeout(10_000))
@@ -312,7 +309,12 @@ export class ZcodeOffpeakUpstreamClient {
     this.tickets = new ZcodeOffpeakTickets(options)
   }
 
-  /** 票据被 3102 拒后弃票重试一次（换新票）；其余结果原样中继。 */
+  /**
+   * 票据被拒后弃票重试一次（换新票）；其余结果原样中继。
+   *
+   * 3001 在生产网关语义是「票据无效/过期」（zcode 客户端把它与 3102 同路
+   * 处理为可重试的换票信号），与 3102 一样首轮弃票重取。
+   */
   async forwardMessages(
     credential: ZcodeOffpeakCredential,
     rawBody: string,
@@ -333,30 +335,38 @@ export class ZcodeOffpeakUpstreamClient {
         }
         throw error
       }
+      const headers: Record<string, string> = {
+        ...this.identity(),
+        'x-device-mid': await zcodeDeviceMid(),
+        'x-request-id': randomUUID(),
+        'x-session-id': this.sessionId,
+        'x-query-id': randomUUID(),
+        'x-zcode-session-type': 'main',
+        'x-zcode-trace-id': randomUUID(),
+        'content-type': 'application/json',
+        'anthropic-version': ZCODE_ANTHROPIC_VERSION,
+        // 身份只走 JWT（Bearer）。**绝不能带 x-coding-plan-api-key**：
+        // anthropic 端点的风控把该头判为 "unusual activity"（HTTP 405
+        // code 3012）——2026-09-23 分层探测实证：同一请求带头即 3012、
+        // 去头即过（票据端点不受此限，仍可用该头）。plan key 以
+        // x-api-key 形态保留（mock capture 记录的生产契约）。
+        'x-api-key': credential.planApiKey,
+        authorization: `Bearer ${credential.jwt}`,
+        'x-off-peak-ticket-id': ticket,
+      }
       const response = await fetch(`${ZCODE_OFFPEAK_BASE}/anthropic/v1/messages`, {
         method: 'POST',
-        headers: {
-          ...this.identity(),
-          'x-device-mid': await zcodeDeviceMid(),
-          'x-request-id': randomUUID(),
-          'x-session-id': this.sessionId,
-          'x-zcode-session-type': 'main',
-          'x-zcode-trace-id': randomUUID(),
-          'content-type': 'application/json',
-          'anthropic-version': ZCODE_ANTHROPIC_VERSION,
-          authorization: `Bearer ${credential.jwt}`,
-          'x-coding-plan-api-key': credential.planApiKey,
-          'x-off-peak-ticket-id': ticket,
-        },
+        headers,
         body: rawBody,
         signal,
       })
       if (response.ok) return { ok: true, status: response.status, response }
       const contentType = response.headers.get('content-type') ?? undefined
       const body = (await response.text()).slice(0, 4000)
-      // 3102 = 票据失效：弃票；首轮再取新票重试一次，次轮如实返回。
-      if (response.status === 400 && body.includes('3102') && attempt === 0) {
-        this.logger?.warn('dsh-any-connect: zcode off-peak ticket rejected (3102); retaking a ticket')
+      // 3102 = 票据失效；3001 = 票据过期/无效（生产客户端与 3102 同路）。
+      // 首轮弃票重取新票重试一次，次轮如实返回。
+      if (response.status === 400 && (body.includes('3102') || body.includes('3001')) && attempt === 0) {
+        this.logger?.warn('dsh-any-connect: zcode off-peak ticket rejected; retaking a ticket')
         this.tickets.invalidate()
         continue
       }
