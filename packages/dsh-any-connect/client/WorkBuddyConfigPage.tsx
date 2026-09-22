@@ -124,11 +124,7 @@ const chipStyle: CSSProperties = {
   background: 'var(--dsw-alias-state-success-subtle, rgba(34, 160, 107, 0.12))',
   color: 'var(--dsw-alias-state-success-primary, #22a06b)',
 }
-const chipNeutralStyle: CSSProperties = {
-  padding: '1px 8px', borderRadius: 999, fontSize: 11, lineHeight: '18px',
-  background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.05))',
-  color: 'var(--dsw-alias-label-tertiary)',
-}
+const metaStyle: CSSProperties = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
 const modelRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }
 const modelNameStyle: CSSProperties = { flex: '1 1 120px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, lineHeight: '20px', color: 'var(--dsw-alias-label-primary)' }
 const modelRateStyle: CSSProperties = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
@@ -233,31 +229,30 @@ function CreditBar({ label, remain, size, t }: {
 }
 
 /** One row of the unified model list. */
-function ModelRow({ row, efforts, notValidating, t }: {
+function ModelRow({ row, efforts, t }: {
   row: WorkBuddyWebModelRow
-  /** The effort levels to display: declared, or automatically detected. */
+  /** The effort levels the model accepts: declared, or automatically detected. */
   efforts: readonly string[] | undefined
-  /** Detection concluded the upstream does not validate the parameter. */
-  notValidating: boolean
   t: WorkBuddyConfigPageInjected['t']
 }): React.ReactNode {
+  // 右侧元信息一行纯文本：倍率 · 窗口 · 档位。检测的否定性结论（上游不
+  // 区分档位）不展示——那是实现细节，不是用户需要知道的事；没有档位可选
+  // 本身就是无声的答案。
+  const meta = [
+    row.free === true ? undefined : row.credits,
+    row.rateUnknown === true ? t('rateUnknown') : undefined,
+    formatTokens(row.contextWindow),
+    efforts !== undefined && efforts.length > 0 ? efforts.join('/') : undefined,
+  ].filter(part => part !== undefined).join(' · ')
   return (
     <div style={modelRowStyle}>
       <span style={modelNameStyle} title={row.name}>{row.name}</span>
       <span style={chipRowStyle}>
-        {row.free === true ? <span style={chipStyle}>{t('freeModel')}</span>
-          : row.credits !== undefined ? <span style={modelRateStyle}>{row.credits}</span>
-          : row.rateUnknown === true ? <span style={modelRateStyle}>{t('rateUnknown')}</span>
-          : null}
+        {row.free === true ? <span style={chipStyle}>{t('freeModel')}</span> : null}
         {row.badges?.map(badge => (
           <span key={badge} style={chipStyle}>{modelBadgeLabel(badge, t)}</span>
         ))}
-        <span style={chipNeutralStyle}>{formatTokens(row.contextWindow)}</span>
-        {efforts !== undefined && efforts.length > 0
-          ? <span style={chipNeutralStyle}>{efforts.join('/')}</span>
-          : notValidating
-            ? <span style={chipNeutralStyle}>{t('probeNotValidating')}</span>
-            : null}
+        {meta !== '' ? <span style={metaStyle}>{meta}</span> : null}
       </span>
     </div>
   )
@@ -529,16 +524,12 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
   ].filter(part => part !== undefined).join(' · ')
 
   /** Efforts shown on one model row: a declared set wins, then a validating
-   * observation (mirrors the adapter's own precedence). */
+   * observation (mirrors the adapter's own precedence). Models whose probe
+   * concluded "upstream ignores the parameter" simply show no levels. */
   const effortsOf = (row: WorkBuddyWebModelRow): readonly string[] | undefined => {
     if (row.efforts !== undefined && row.efforts.length > 0) return row.efforts
     const result = probe?.results.find(entry => entry.id === row.id)
     return result !== undefined && result.validation === 'validating' ? result.efforts : undefined
-  }
-  const notValidatingOf = (row: WorkBuddyWebModelRow): boolean => {
-    if (row.efforts !== undefined && row.efforts.length > 0) return false
-    const result = probe?.results.find(entry => entry.id === row.id)
-    return result?.validation === 'non-validating'
   }
 
   return (
@@ -612,7 +603,6 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                     row={row}
                     t={t}
                     efforts={effortsOf(row)}
-                    notValidating={notValidatingOf(row)}
                   />
                 ))}
               </div>
