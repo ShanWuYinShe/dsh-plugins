@@ -13,23 +13,10 @@ export const WORKBUDDY_STATUS_PATH = '/plugins/dsh-any-connect/status'
  */
 export const WORKBUDDY_AI_STATUS_PATH = '/plugins/dsh-any-connect/ai/status'
 
-/** Plugin-owned probe control endpoint (CN variant). */
 export const WORKBUDDY_PROBE_PATH = '/plugins/dsh-any-connect/probe'
 
 /** Plugin-owned probe control endpoint (international variant). */
 export const WORKBUDDY_AI_PROBE_PATH = '/plugins/dsh-any-connect/ai/probe'
-
-/** Plugin-owned status endpoint consumed by the zcode card. */
-export const ZCODE_STATUS_PATH = '/plugins/dsh-any-connect/zcode/status'
-
-/** Plugin-owned probe control endpoint (zcode; refresh-only in practice). */
-export const ZCODE_PROBE_PATH = '/plugins/dsh-any-connect/zcode/probe'
-
-/** Plugin-owned status endpoint consumed by the zcode off-peak card. */
-export const ZCODE_OFFPEAK_STATUS_PATH = '/plugins/dsh-any-connect/zcode-offpeak/status'
-
-/** Plugin-owned probe control endpoint (zcode off-peak; refresh-only in practice). */
-export const ZCODE_OFFPEAK_PROBE_PATH = '/plugins/dsh-any-connect/zcode-offpeak/probe'
 
 /** One model's recorded probe observation, as the card displays it. */
 export interface WorkBuddyWebProbeModel {
@@ -124,16 +111,6 @@ export interface WorkBuddyWebCredits {
   accounts: readonly WorkBuddyWebCreditAccount[]
 }
 
-/** The off-peak (night-free) window state, as the zcode-offpeak card renders it. */
-export interface WorkBuddyWebOffPeakWindow {
-  /** Whether the relay is taking numbers right now. */
-  canTakeNumber: boolean
-  /** Next take-number instant, epoch **seconds** (upstream's own unit), when given. */
-  nextTakeAtSec?: number
-  /** Why the window state is unavailable, when the probe failed. */
-  error?: string
-}
-
 /**
  * Where the models a card is currently showing came from.
  *
@@ -180,8 +157,6 @@ export type WorkBuddyWebStatus =
     models?: readonly WorkBuddyWebModelRow[]
     /** Where those models came from, and whether the last fetch failed. */
     catalog?: WorkBuddyWebCatalog
-    /** Night-free window state (zcode-offpeak only). */
-    offPeakWindow?: WorkBuddyWebOffPeakWindow
     /** Reasoning-effort probe state and recorded observations. */
     probe?: WorkBuddyWebProbeSection
     /**

@@ -104,7 +104,7 @@ export interface WorkBuddyAdapterOptions {
   displayName?: string
   /**
    * Wire API between pi-ai and the shim. `openai-completions` (default) is
-   * the WorkBuddy shape; `anthropic-messages` is the zcode passthrough.
+   * the WorkBuddy shape.
    * The model `baseUrl` matches: the OpenAI SDK appends `/chat/completions`
    * to `baseURL` (so the shim's `/v1` prefix rides inside baseUrl), while
    * the Anthropic SDK posts to `{baseURL}/v1/messages` (so baseUrl is the

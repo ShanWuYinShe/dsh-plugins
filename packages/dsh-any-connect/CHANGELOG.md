@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0-alpha.0 (2026-09-23)
+
+### 移除
+
+* **整个 ZCode 家族（GLM Coding Plan 直连 + 夜间免费）自本包移除**，插件重新
+  聚焦 WorkBuddy 国内版/国际版两个变体：
+  - 删除 `zcode` / `zcode-offpeak` 两个 provider、对应卡片与 CLI
+    （`--provider zcode` / `--provider zcode-offpeak` 不再可用）；
+  - 删除 `apiKeyZcode` 配置字段、`.zcode-auth.json` 凭据副本与 zcode 桌面端
+    凭据解密逻辑（`zcode-auth` / `zcode-credentials` / `zcode-upstream` /
+    `zcode-signing` / `zcode-offpeak` 五个模块整体删除）；
+  - 上游（智谱）已把夜间免费重构为「服务端派发票据」的闲时任务封闭体系，
+    并对旧式直调施加风控（HTTP 405 code 3012），非官方复刻无法稳定维持，
+    详见 2026-09-23 的排查结论。
+* **破坏性变更**：依赖本包接入 GLM Coding Plan 的用户请改用 zcode CLI 或
+  等待官方开放接入协议。
+
 ## 0.3.19-alpha.4 (2026-09-23)
 
 ### 适配

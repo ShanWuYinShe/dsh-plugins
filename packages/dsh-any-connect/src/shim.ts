@@ -1,19 +1,16 @@
 /**
- * Loopback endpoint. The pi-ai provider points here. Two shapes, one guard
- * set: the WorkBuddy variants get an OpenAI-compatible route whose handler
- * applies the WorkBuddy wire quirks (forced streaming, string `tool_choice`,
- * CLI-shaped headers); the zcode variant gets an Anthropic Messages
- * passthrough that relays bodies verbatim. All of it binds 127.0.0.1 only
+ * Loopback endpoint. The pi-ai provider points here: an OpenAI-compatible
+ * route whose handler applies the WorkBuddy wire quirks (forced streaming,
+ * string `tool_choice`, CLI-shaped headers). All of it binds 127.0.0.1 only
  * and never serves another interface.
  *
  * Inbound hardening: the loopback bind alone is not a trust boundary (any
  * local process or a DNS-rebinding page can reach 127.0.0.1), so every
  * request must carry a loopback Host header, browser-sent Origins must be
  * loopback, POSTs must be application/json, and the request must carry the
- * shim's per-process shared secret — as `Authorization: Bearer` (OpenAI
- * half) or `x-api-key` (Anthropic half). The plugin's own client satisfies
- * these by construction; local attackers cannot read the secret out of the
- * plugin process's memory.
+ * shim's per-process shared secret as `Authorization: Bearer`. The plugin's
+ * own client satisfies these by construction; local attackers cannot read
+ * the secret out of the plugin process's memory.
  *
  * @module dsh-any-connect/shim
  */
@@ -48,34 +45,14 @@ export interface WorkBuddyShim {
   close(): Promise<void>
 }
 
-/** WorkBuddy variant wiring: OpenAI-shaped chat, credential store, quirk prep. */
-export interface WorkBuddyShimKindOptions {
+/** Constructor dependencies. */
+export interface WorkBuddyShimOptions {
   kind: 'workbuddy'
   store: WorkBuddyCredentialStore
   client: Pick<WorkBuddyUpstreamClient, 'chatStream'>
   catalog: WorkBuddyCatalog
   logger?: ShimLogger
 }
-
-/**
- * zcode family wiring: an Anthropic Messages passthrough. Both zcode kinds
- * (direct + off-peak relay) share this shape — the shim treats the credential
- * as an opaque value piped from the resolver into the forwarder, which adds
- * only the kind-specific auth headers. Bodies (and upstream error bodies)
- * relay verbatim.
- */
-export interface ZcodeShimOptions {
-  kind: 'zcode' | 'zcode-offpeak'
-  /** Resolve the upstream credential; rejects when not signed in. */
-  resolveCredential: () => Promise<unknown>
-  /** Relay one request; the resolved credential travels back opaquely. */
-  forwardMessages: (credential: unknown, rawBody: string, signal: AbortSignal) => Promise<import('./zcode-upstream.js').ZcodeChatResult>
-  catalog: WorkBuddyCatalog
-  logger?: ShimLogger
-}
-
-/** Constructor dependencies, discriminated by the provider kind. */
-export type WorkBuddyShimOptions = WorkBuddyShimKindOptions | ZcodeShimOptions
 
 const REQUEST_BODY_LIMIT = 64 * 1024 * 1024
 
@@ -145,11 +122,6 @@ function writeOpenAIError(res: ServerResponse, status: number, kind: string, mes
   writeJson(res, status, { error: { message, type: kind, code: kind } })
 }
 
-/** Anthropic-shaped error for the zcode route; the DSH-side SDK parses these. */
-function writeAnthropicError(res: ServerResponse, status: number, type: string, message: string): void {
-  writeJson(res, status, { type: 'error', error: { type, message } })
-}
-
 /** Read a request body with a size cap; over-limit bodies fail the request. */
 function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -175,21 +147,15 @@ function readBody(req: IncomingMessage): Promise<Buffer> {
  */
 export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShim {
   const logger = options.logger
-  const kind = options.kind
   const catalog = options.catalog
-  // Kind-narrowed dependencies: each route handler touches only its own pair.
-  const workbuddy = options.kind === 'workbuddy'
-    ? { store: options.store, client: options.client }
-    : undefined
-  const zcode = options.kind === 'zcode' || options.kind === 'zcode-offpeak'
-    ? { resolveCredential: options.resolveCredential, forwardMessages: options.forwardMessages }
-    : undefined
+  const store = options.store
+  const client = options.client
 
   // Per-process shared secret. Lives only in memory; the adapter resolves it
   // as the client apiKey — the OpenAI SDK sends it as `Authorization: Bearer
-  // ...`, the Anthropic SDK as `x-api-key`. The shim never forwards it
-  // upstream — the real credential comes from the store. A local attacker
-  // who can hit the port still cannot forge this.
+  // ...`. The shim never forwards it upstream — the real credential comes
+  // from the store. A local attacker who can hit the port still cannot forge
+  // this.
   const SHARED_SECRET = randomBytes(32).toString('base64url')
 
   /** Constant-time check of one presented secret against the shared secret. */
@@ -207,12 +173,6 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     const match = /^Bearer\s+(.+)$/i.exec(header.trim())
     if (match === null) return false
     return secretOk(match[1] as string)
-  }
-
-  /** x-api-key check (the Anthropic half's spelling, zcode only). */
-  function apiKeyOk(req: IncomingMessage): boolean {
-    const header = req.headers['x-api-key']
-    return typeof header === 'string' && header.trim() !== '' && secretOk(header.trim())
   }
 
   const server: Server = createServer((req, res) => {
@@ -236,10 +196,6 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
 
   /** Kind-shaped auth failure so the calling SDK can parse the rejection. */
   function writeUnauthorized(res: ServerResponse): void {
-    if (kind !== 'workbuddy') {
-      writeAnthropicError(res, 401, 'authentication_error', 'missing or invalid request credential')
-      return
-    }
     writeOpenAIError(res, 401, 'unauthorized', 'missing or invalid Authorization bearer')
   }
 
@@ -257,12 +213,12 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         writeOpenAIError(res, 403, 'origin_not_allowed', 'Origin must be a loopback origin')
         return
       }
-      if (!bearerOk(req) && !(kind !== 'workbuddy' && apiKeyOk(req))) {
+      if (!bearerOk(req)) {
         writeUnauthorized(res)
         return
       }
       const url = req.url ?? '/'
-      // 按 pathname 匹配：Anthropic SDK 会带查询串（如 ?beta=true），全等
+      // 按 pathname 匹配：SDK 会带查询串（如 ?beta=true），全等
       // 匹配会把合法请求打成 404。
       const pathname = new URL(url, 'http://127.0.0.1').pathname
       if (req.method === 'GET' && (pathname === '/healthz' || pathname === '/healthz/')) {
@@ -276,17 +232,13 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
             id: model.id,
             object: 'model',
             created: 0,
-            owned_by: kind === 'workbuddy' ? 'workbuddy' : kind,
+            owned_by: 'workbuddy',
           })),
         })
         return
       }
-      if (kind === 'workbuddy' && req.method === 'POST' && (pathname === '/v1/chat/completions' || pathname === '/v1/chat/completions/')) {
+      if (req.method === 'POST' && (pathname === '/v1/chat/completions' || pathname === '/v1/chat/completions/')) {
         await chatCompletions(req, res)
-        return
-      }
-      if ((kind === 'zcode' || kind === 'zcode-offpeak') && req.method === 'POST' && (pathname === '/v1/messages' || pathname === '/v1/messages/')) {
-        await messages(req, res)
         return
       }
       writeOpenAIError(res, 404, 'not_found', `no such route: ${req.method} ${url}`)
@@ -306,7 +258,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     }
     let credential
     try {
-      credential = await workbuddy!.store.resolve()
+      credential = await store.resolve()
     } catch (error: unknown) {
       writeOpenAIError(res, 401, 'not_signed_in', String(error))
       return
@@ -317,7 +269,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
 
     const controller = new AbortController()
     req.on('close', () => controller.abort())
-    const result = await workbuddy!.client.chatStream(credential, prepared, controller.signal)
+    const result = await client.chatStream(credential, prepared, controller.signal)
 
     if (!result.ok) {
       // 客户端已断开（pi-ai 取消生成 / 请求中止）：响应写进已销毁的 socket
@@ -356,55 +308,6 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
       // ——既不把截断伪装成干净收尾,也不让连接悬挂。
       if (!sawDone && res.writable) res.end('data: [DONE]\n\n')
       else if (!res.writableEnded) res.end()
-    })
-    body.pipe(res)
-  }
-
-  /** zcode route: relay the Anthropic Messages request verbatim. The body is
-   * forwarded untouched (no WorkBuddy wire quirks) and the upstream answer —
-   * success or error — goes back as-is, so the DSH-side Anthropic SDK sees
-   * exactly what bigmodel said. */
-  async function messages(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!isJsonContentType(req)) {
-      writeAnthropicError(res, 415, 'invalid_request_error', 'Content-Type must be application/json')
-      return
-    }
-    let credential
-    try {
-      credential = await zcode!.resolveCredential()
-    } catch (error: unknown) {
-      writeAnthropicError(res, 401, 'authentication_error', String(error))
-      return
-    }
-
-    const raw = (await readBody(req)).toString('utf8')
-
-    const controller = new AbortController()
-    req.on('close', () => controller.abort())
-    const result = await zcode!.forwardMessages(credential, raw, controller.signal)
-
-    // 客户端已断开：写已销毁的 socket 只会留下噪音，静默收尾。
-    if (controller.signal.aborted || res.destroyed) return
-
-    if (!result.ok) {
-      res.writeHead(result.status, {
-        'Content-Type': result.contentType ?? 'application/json',
-        'Content-Length': Buffer.byteLength(result.body),
-      })
-      res.end(result.body)
-      return
-    }
-    // 上游的 Content-Type 原样带回：流式请求是 text/event-stream，非流式
-    // 是 application/json——两种都直通。
-    res.writeHead(result.status, {
-      'Content-Type': result.response.headers.get('content-type') ?? 'application/json',
-      'Cache-Control': 'no-cache',
-      'X-Accel-Buffering': 'no',
-    })
-    const body = Readable.fromWeb(result.response.body as Parameters<typeof Readable.fromWeb>[0])
-    body.on('error', (error: unknown) => {
-      logger?.warn('dsh-any-connect: zcode upstream stream failed mid-flight', error)
-      if (!res.writableEnded) res.end()
     })
     body.pipe(res)
   }

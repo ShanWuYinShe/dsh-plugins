@@ -7,11 +7,7 @@ import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import * as WorkBuddy from '../src/index.js'
 
-// 集成测试必须与宿主机真实 zcode 登录态隔离：跟随 zcode 的凭据来源统一
-// 打成「无 zcode 凭据」，登录态只由测试显式给出（配置/env/文件）。
-vi.mock('../src/zcode-credentials.js', () => ({
-  readZcodeClientCredentials: async () => undefined,
-}))
+// 集成测试与宿主机真实登录态隔离，登录态只由测试显式给出（配置/env/文件）。
 
 let context: Context | undefined
 let root: string | undefined
@@ -60,8 +56,6 @@ describe('WorkBuddy Host settings integration', () => {
     for (const [provider, settingsNs] of [
       ['workbuddy', WorkBuddy.WORKBUDDY_SETTINGS_NS],
       ['workbuddy-ai', WorkBuddy.WORKBUDDY_AI_SETTINGS_NS],
-      ['zcode', WorkBuddy.WORKBUDDY_ZCODE_SETTINGS_NS],
-      ['zcode-offpeak', WorkBuddy.WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS],
     ] as const) {
       expect(directory).toContainEqual({
         provider,
@@ -234,86 +228,6 @@ describe('WorkBuddy Host settings integration', () => {
   })
 })
 
-describe('zcode provider (GLM Coding Plan)', () => {
-  it('registers zcode and keeps its group hidden until a key is configured', async () => {
-    // 与 WorkBuddy 变体同一显隐约定：无 key 时分组隐藏，provider 与设置区照常
-    // 注册——key 配置（卡片/env/key 文件）之后无需重新注册。
-    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-zcode-'))
-    vi.stubEnv('DSH_HOME', root)
-    const ctx = new Context()
-    context = ctx
-    await ctx.plugin(LlmRuntime)
-    await ctx.plugin(WorkBuddy, {
-      authFile: join(root, 'no-such-file.info'),
-      authFileAI: join(root, 'no-such-ai-file.info'),
-    })
-    await vi.waitFor(() => {
-      const ids = ctx.llm.listProviders().map(provider => provider.id)
-      expect(ids).toContain('workbuddy')
-      expect(ids).toContain('workbuddy-ai')
-      expect(ids).toContain('zcode')
-      expect(ids).toContain('zcode-offpeak')
-    })
-    expect(ctx.llm.listConfigurableProviders()).toContainEqual({
-      provider: 'zcode',
-      displayName: 'ZCode',
-      settingsNs: 'anyconnect-zcode',
-      settingsPath: [],
-      declared: false,
-    })
-    await vi.waitFor(async () => {
-      expect(await ctx.llm.listModels('zcode')).toEqual([])
-    })
-    const entries = ctx.llm.listConfigurableProviders()
-    expect(entries.map(entry => entry.provider)).toEqual(
-      expect.arrayContaining(['workbuddy', 'workbuddy-ai', 'zcode', 'zcode-offpeak']),
-    )
-    expect(entries.find(entry => entry.provider === 'zcode')).toMatchObject({
-      settingsNs: WorkBuddy.WORKBUDDY_ZCODE_SETTINGS_NS,
-      settingsPath: [],
-    })
-    expect(entries.find(entry => entry.provider === 'zcode-offpeak')).toMatchObject({
-      settingsNs: WorkBuddy.WORKBUDDY_ZCODE_OFFPEAK_SETTINGS_NS,
-      settingsPath: [],
-    })
-  })
-
-  it('serves the GLM roster once a key is configured, and hides it again after the key is cleared', async () => {
-    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-zcode-roster-'))
-    vi.stubEnv('DSH_HOME', root)
-    const options = {
-      authFile: join(root, 'no-such-file.info'),
-      authFileAI: join(root, 'no-such-ai-file.info'),
-      apiKeyZcode: 'plan-key-123456',
-    }
-    const ctx = new Context()
-    context = ctx
-    await ctx.plugin(LlmRuntime)
-    await ctx.plugin(WorkBuddy, options)
-    // WorkBuddy 侧无凭据保持隐藏；zcode 静态名单可见，id 用上游大写拼写。
-    await vi.waitFor(async () => {
-      const ids = (await ctx.llm.listModels('zcode')).map(m => m.id)
-      expect(ids).toContain('GLM-5.3')
-      expect(ids).toContain('GLM-5.3-Flash')
-      expect(ids).toContain('GLM-5.2')
-      expect(ids).toContain('GLM-5-Turbo')
-    })
-    expect(await ctx.llm.listModels('workbuddy')).toEqual([])
-
-    // key 清空 → 分组隐藏。DSH 0.1.7 起配置变更走 Loader（volatile 引用或
-    // 重装）；无 Loader 的测试以重装表达「同一配置项的下一次生效值」。
-    // （env 兜底的优先级链由 zcode.test.ts 的 store 用例覆盖。）
-    await context?.fiber.dispose()
-    const ctx2 = new Context()
-    context = ctx2
-    await ctx2.plugin(LlmRuntime)
-    await ctx2.plugin(WorkBuddy, { ...options, apiKeyZcode: '' })
-    await vi.waitFor(async () => {
-      expect(await ctx2.llm.listModels('zcode')).toEqual([])
-    })
-  })
-})
-
 describe('WorkBuddy international variant', () => {
   it('registers both providers but hides each group independently', async () => {
     // 双分组独立显隐：都不登录时两个分组都隐藏，但 provider 注册与设置区
@@ -383,26 +297,17 @@ describe('WorkBuddy international variant', () => {
 describe('volatile configuration (DSH 0.1.7)', () => {
   it('repoints each variant store from the live values', () => {
     const credentialSet: Array<string | undefined> = []
-    const keySet: Array<string | undefined> = []
     const stores = {
       credentialStore: { setDesktopPath: (path: string | undefined) => { credentialSet.push(path) } },
-      zcodeStore: { setConfiguredKey: (key: string | undefined) => { keySet.push(key) } },
     }
     expect(WorkBuddy.applyVariantConfig(WorkBuddy.CN_VARIANT, stores, { authFile: '/tmp/a.info' })).toBe('authFile')
     expect(credentialSet).toEqual(['/tmp/a.info'])
     expect(WorkBuddy.applyVariantConfig(WorkBuddy.AI_VARIANT, stores, { authFileAI: '/tmp/ai.info' })).toBe('authFile')
     expect(credentialSet).toEqual(['/tmp/a.info', '/tmp/ai.info'])
-    expect(WorkBuddy.applyVariantConfig(WorkBuddy.ZCODE_VARIANT, stores, { apiKeyZcode: 'k' })).toBe('apiKey')
-    expect(keySet).toEqual(['k'])
-    // off-peak 凭据跟随 zcode 登录态：无可编辑字段，不碰任何 store。
-    expect(WorkBuddy.applyVariantConfig(WorkBuddy.ZCODE_OFFPEAK_VARIANT, stores, {})).toBeUndefined()
-    expect(credentialSet).toHaveLength(2)
-    expect(keySet).toHaveLength(1)
   })
 
   it('tolerates absent stores (variant without a live runtime part)', () => {
     expect(() => WorkBuddy.applyVariantConfig(WorkBuddy.CN_VARIANT, {}, { authFile: '/tmp/a.info' })).not.toThrow()
-    expect(() => WorkBuddy.applyVariantConfig(WorkBuddy.ZCODE_VARIANT, {}, {})).not.toThrow()
   })
 
   it('survives a volatile-update with no Loader (install-time values, no crash)', async () => {

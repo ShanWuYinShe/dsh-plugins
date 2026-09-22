@@ -5,11 +5,8 @@ import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { WorkBuddyCredentialStore, workbuddyOwnAuthPath, WORKBUDDY_AUTH_FILE_ENV } from './auth.js'
 import { WorkBuddyUpstreamClient } from './upstream.js'
-import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS, FALLBACK_ZCODE_OFFPEAK_MODELS } from './catalog.js'
-import { ZcodeCredentialStore, maskApiKey, zcodeOwnAuthPath, ZCODE_API_KEY_ENV } from './zcode-auth.js'
-import { resolveZcodeAppVersion, zcodeIdentity, ZcodeUpstreamClient } from './zcode-upstream.js'
-import { ZcodeOffpeakCredentialStore, ZcodeOffpeakUpstreamClient, ZcodeOffpeakUnavailableError } from './zcode-offpeak.js'
-import { CN_VARIANT, variantFor, WORKBUDDY_VARIANTS, ZCODE_OFFPEAK_VARIANT, ZCODE_VARIANT } from './variants.js'
+import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS } from './catalog.js'
+import { CN_VARIANT, variantFor, WORKBUDDY_VARIANTS } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { isHeartbeatProcessAlive, readHostHeartbeat, workbuddyHostHeartbeatPath } from './host-heartbeat.js'
@@ -33,7 +30,7 @@ function printHelp(): void {
     '  doctor   secret-free sign-in and environment diagnostics',
     '  status   sign-in state, remaining WorkBuddy credit, and host-bundle health',
     '  logout   remove the plugin-owned credential copy (the desktop app keeps its sign-in)',
-    '  --provider  which product to inspect: workbuddy, workbuddy-ai, or zcode',
+    '  --provider  which product to inspect: workbuddy or workbuddy-ai',
     '              (defaults to workbuddy)',
     '  --json   emit one secret-free JSON document (doctor/status only)',
     '',
@@ -54,8 +51,6 @@ function makeWorkBuddyStore(variant: WorkBuddyVariant): WorkBuddyCredentialStore
 const FALLBACK_COUNT_BY_ID = new Map<string, number>([
   [CN_VARIANT.id, FALLBACK_WORKBUDDY_MODELS.length],
   [WORKBUDDY_VARIANTS[1]!.id, FALLBACK_WORKBUDDY_AI_MODELS.length],
-  [ZCODE_VARIANT.id, FALLBACK_ZCODE_MODELS.length],
-  [ZCODE_OFFPEAK_VARIANT.id, FALLBACK_ZCODE_OFFPEAK_MODELS.length],
 ])
 
 function fallbackFor(variant: WorkBuddyVariant): number {
@@ -63,8 +58,6 @@ function fallbackFor(variant: WorkBuddyVariant): number {
 }
 
 async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
-  if (variant.kind === 'zcode') return zcodeDoctor(jsonOutput, variant)
-  if (variant.kind === 'zcode-offpeak') return zcodeOffpeakDoctor(jsonOutput, variant)
   const store = makeWorkBuddyStore(variant)
   const status = await store.status()
   const desktopPresent = await store.desktopFilePresent()
@@ -112,143 +105,8 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
   return status.state === 'signed-in' && desktopPresent ? 0 : 1
 }
 
-/** zcode doctor: key presence, source, and a one-request live validation. */
-async function zcodeDoctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
-  const store = new ZcodeCredentialStore()
-  const status = await store.status()
-  const credential = await store.current().catch(() => undefined)
-  const heartbeat = await readHostHeartbeat()
-  const hostAlive = heartbeat !== undefined && isHeartbeatProcessAlive(heartbeat)
-  // Live key check: one tiny messages request. Coding-plan keys bill by
-  // units, and 32 output tokens are negligible — an invalid key is exactly
-  // what doctor exists to catch, so the request is worth its cost.
-  let ping: { ok: boolean; status?: number; message: string } | undefined
-  if (credential !== undefined) {
-    const client = new ZcodeUpstreamClient()
-    try {
-      const result = await client.forwardMessages(
-        credential,
-        JSON.stringify({ model: 'GLM-5.3-Flash', max_tokens: 32, messages: [{ role: 'user', content: 'ping' }] }),
-        AbortSignal.timeout(15_000),
-      )
-      ping = result.ok
-        ? { ok: true, status: result.status, message: 'key accepted' }
-        : { ok: false, status: result.status, message: result.body.slice(0, 200) }
-    } catch (error: unknown) {
-      ping = { ok: false, message: safeMessage(error) }
-    }
-  }
-  const report = {
-    schemaVersion: JSON_SCHEMA_VERSION,
-    package: 'dsh-any-connect',
-    version: ANYCONNECT_VERSION,
-    provider: variant.id,
-    node: process.version,
-    keySource: credential?.source,
-    keyMasked: credential === undefined ? undefined : maskApiKey(credential.accessToken),
-    ownKeyFile: zcodeOwnAuthPath(),
-    hostHeartbeat: {
-      path: workbuddyHostHeartbeatPath(),
-      present: heartbeat !== undefined,
-      ...heartbeat === undefined ? {} : { registeredAt: heartbeat.registeredAt, pid: heartbeat.pid },
-      processAlive: hostAlive,
-    },
-    signIn: status.state,
-    fallbackModels: fallbackFor(variant),
-    ping,
-    hints: [
-      ...credential !== undefined ? [] : [`No GLM Coding Plan API key configured; set it via the plugin settings (apiKeyZcode), ${ZCODE_API_KEY_ENV}, or ${zcodeOwnAuthPath()}.`],
-      ...hostAlive ? [] : ['Host bundle not running in this DSH profile (or the process exited). The browser card and provider are unavailable until DSH starts the plugin.'],
-    ],
-  }
-  if (jsonOutput) {
-    printJson(report)
-  } else {
-    process.stdout.write([
-      `${variant.displayName} Connect ${ANYCONNECT_VERSION} on ${process.version}`,
-      `API key: ${report.keySource === undefined ? 'not configured' : `configured (${report.keySource}; ${report.keyMasked})`}`,
-      `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : heartbeat !== undefined ? 'stale heartbeat (process exited)' : 'not started'}`,
-      `Static fallback models: ${report.fallbackModels}`,
-      ...ping === undefined ? [] : [`Live key check: ${ping.ok ? 'accepted' : `rejected (http ${ping.status ?? '?'}): ${ping.message}`}`],
-      ...report.hints.map(hint => `Hint: ${hint}`),
-      '',
-    ].join('\n'))
-  }
-  return credential !== undefined && (ping === undefined || ping.ok) ? 0 : 1
-}
-
-/** zcode off-peak doctor：JWT 存在性 + 只读的窗口可用性检查（不取号不消费）。 */
-async function zcodeOffpeakDoctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
-  const store = new ZcodeOffpeakCredentialStore()
-  const status = await store.status()
-  const credential = await store.current().catch(() => undefined)
-  const heartbeat = await readHostHeartbeat()
-  const hostAlive = heartbeat !== undefined && isHeartbeatProcessAlive(heartbeat)
-  // 只读可用性探测：不取号、不消费免费额度。
-  let availability: { ok: boolean; message: string } | undefined
-  if (credential !== undefined) {
-    try {
-      const client = new ZcodeOffpeakUpstreamClient({ identityHeaders: () => zcodeIdentity() })
-      const window = await client.tickets.availability(credential, AbortSignal.timeout(20_000))
-      availability = {
-        ok: true,
-        message: window.canTakeNumber
-          ? 'open for tickets'
-          : window.nextTakeAt === undefined
-            ? 'closed (no next-take time given)'
-            : `closed; next take at ${new Date(window.nextTakeAt * 1000).toISOString()}`,
-      }
-    } catch (error: unknown) {
-      availability = {
-        ok: false,
-        message: error instanceof ZcodeOffpeakUnavailableError ? error.message : safeMessage(error),
-      }
-    }
-  }
-  const report = {
-    schemaVersion: JSON_SCHEMA_VERSION,
-    package: 'dsh-any-connect',
-    version: ANYCONNECT_VERSION,
-    provider: variant.id,
-    node: process.version,
-    jwtPresent: credential !== undefined,
-    hostHeartbeat: {
-      path: workbuddyHostHeartbeatPath(),
-      present: heartbeat !== undefined,
-      ...heartbeat === undefined ? {} : { registeredAt: heartbeat.registeredAt, pid: heartbeat.pid },
-      processAlive: hostAlive,
-    },
-    signIn: status.state,
-    ...status.reason === undefined ? {} : { signInReason: status.reason },
-    fallbackModels: fallbackFor(variant),
-    availability,
-    hints: [
-      ...credential !== undefined ? [] : ['Sign in to the zcode desktop app once; this channel follows that session (plan API key + JWT).'],
-      ...hostAlive ? [] : ['Host bundle not running in this DSH profile (or the process exited). The browser card and provider are unavailable until DSH starts the plugin.'],
-    ],
-  }
-  if (jsonOutput) {
-    printJson(report)
-  } else {
-    process.stdout.write([
-      `${variant.displayName} Connect ${ANYCONNECT_VERSION} on ${process.version}`,
-      `zcode session: ${report.jwtPresent ? 'present' : 'missing'} (zcode desktop sign-in)`,
-      `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : heartbeat !== undefined ? 'stale heartbeat (process exited)' : 'not started'}`,
-      `Static fallback models: ${report.fallbackModels}`,
-      ...availability === undefined ? [] : [`Availability: ${availability.ok ? 'open' : `unavailable: ${availability.message}`}`],
-      ...report.hints.map(hint => `Hint: ${hint}`),
-      '',
-    ].join('\n'))
-  }
-  return credential !== undefined ? 0 : 1
-}
-
 async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
-  const store: WorkBuddyCredentialStore | ZcodeCredentialStore | ZcodeOffpeakCredentialStore = variant.kind === 'zcode'
-    ? new ZcodeCredentialStore()
-    : variant.kind === 'zcode-offpeak'
-      ? new ZcodeOffpeakCredentialStore()
-      : makeWorkBuddyStore(variant)
+  const store = makeWorkBuddyStore(variant)
   const authStatus = await store.status()
   const heartbeat = await readHostHeartbeat()
   const hostAlive = heartbeat !== undefined && isHeartbeatProcessAlive(heartbeat)
@@ -260,69 +118,6 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
       process.stdout.write(`${variant.displayName} Connect: signed out\nHost bundle: ${hostState}\n`)
     }
     return 1
-  }
-  // off-peak 无积分账本也无 token 过期概念：报会话态 + 只读的夜间窗口状态。
-  if (variant.kind === 'zcode-offpeak') {
-    const offpeakStore = store as ZcodeOffpeakCredentialStore
-    let windowLine = 'unknown'
-    try {
-      const credential = await offpeakStore.current()
-      if (credential !== undefined) {
-        const client = new ZcodeOffpeakUpstreamClient({ identityHeaders: () => zcodeIdentity() })
-        const window = await client.tickets.availability(credential, AbortSignal.timeout(20_000))
-        windowLine = window.canTakeNumber
-          ? 'open for tickets'
-          : window.nextTakeAt === undefined
-            ? 'closed'
-            : `closed; next take at ${new Date(window.nextTakeAt * 1000).toISOString()}`
-      }
-    } catch (error: unknown) {
-      windowLine = `unavailable (${safeMessage(error)})`
-    }
-    if (jsonOutput) {
-      printJson({
-        schemaVersion: JSON_SCHEMA_VERSION,
-        package: 'dsh-any-connect',
-        version: ANYCONNECT_VERSION,
-        provider: variant.id,
-        status: 'signed-in',
-        offPeakWindow: windowLine,
-        hostBundle: hostState,
-      })
-      return 0
-    }
-    process.stdout.write([
-      `${variant.displayName} Connect: signed in (follows the zcode desktop session)`,
-      `Night-free window: ${windowLine}`,
-      `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : hostState === 'stale' ? 'stale heartbeat (DSH process exited)' : 'not started in this profile'}`,
-      '',
-    ].join('\n'))
-    return 0
-  }
-  // zcode 无积分账本（套餐额度藏在有签名的管理面之后），也不存在 token
-  // 过期——status 只报 key 来源与掩码。
-  if (variant.kind === 'zcode') {
-    const credential = await (store as ZcodeCredentialStore).current()
-    if (jsonOutput) {
-      printJson({
-        schemaVersion: JSON_SCHEMA_VERSION,
-        package: 'dsh-any-connect',
-        version: ANYCONNECT_VERSION,
-        provider: variant.id,
-        status: 'signed-in',
-        keySource: credential?.source,
-        keyMasked: credential === undefined ? undefined : maskApiKey(credential.accessToken),
-        hostBundle: hostState,
-      })
-      return 0
-    }
-    process.stdout.write([
-      `${variant.displayName} Connect: signed in (key from ${credential?.source ?? 'unknown'})`,
-      `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : hostState === 'stale' ? 'stale heartbeat (DSH process exited)' : 'not started in this profile'}`,
-      'Client card: load failures are logged to the browser console only; the host provider is unaffected.',
-      '',
-    ].join('\n'))
-    return 0
   }
   const workbuddyStore = store as WorkBuddyCredentialStore
   let credits: { total: number; error?: string } | undefined
@@ -414,19 +209,6 @@ export async function run(argv: readonly string[]): Promise<number> {
       case 'status':
         return await status(jsonOutput, variant)
       case 'logout': {
-        if (variant.kind === 'zcode') {
-          const zcodeStore = new ZcodeCredentialStore()
-          await zcodeStore.logout()
-          process.stdout.write(`ZCode Connect: removed ${zcodeStore.ownAuthPath()}; a key configured via settings or ${ZCODE_API_KEY_ENV} is untouched\n`)
-          return 0
-        }
-        if (variant.kind === 'zcode-offpeak') {
-          // off-peak 凭据（JWT + plan key）完全跟随 zcode 桌面端登录态，没有
-          // 也不需要自有副本——之前的实现会掉进 WorkBuddy 分支去删一个从不
-          // 存在的文件并声称"已删除"。如实报 no-op，别误导排障方向。
-          process.stdout.write(`${variant.displayName} Connect: nothing to remove; credentials follow the zcode desktop sign-in (log out there, or log out the zcode provider)\n`)
-          return 0
-        }
         const store = makeWorkBuddyStore(variant)
         await store.logout()
         process.stdout.write(`${variant.displayName} Connect: removed ${workbuddyOwnAuthPath(variant.ownFilename)}; the desktop app's sign-in is untouched\n`)

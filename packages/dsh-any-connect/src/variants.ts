@@ -1,31 +1,23 @@
 /**
  * The providers this one plugin serves: the two WorkBuddy desktop apps (CN +
- * international) and the GLM Coding Plan (`zcode`).
+ * international).
  *
- * WorkBuddy halves ported from corrinehu/dsh-workbuddy-connect
- * `src/variants.ts` (MIT), adapted to this package's naming (`anyconnect`
- * settings namespaces, `/plugins/dsh-any-connect` routes). Both products are
- * the same client framework in different regions, and both write their
- * sign-in into the *same* shared `CodeBuddyExtension` auth directory — they
- * differ by file basename, base URL, catalog endpoint, and display identity.
- *
- * The zcode providers are *not* WorkBuddy region flips: their credential is
- * the GLM Coding Plan (followed from the zcode desktop app's own store or a
- * manual key) and their wire is the Anthropic Messages protocol — `zcode`
- * talks to open.bigmodel.cn directly, `zcode-offpeak` rides the night-free
- * relay with a queue ticket. The descriptor carries a `kind` discriminator so
- * the host assembly can pick the credential store, shim routes, and catalog
- * lifecycle per provider while registration itself stays one data-driven loop.
+ * Ported from corrinehu/dsh-workbuddy-connect `src/variants.ts` (MIT),
+ * adapted to this package's naming (`anyconnect` settings namespaces,
+ * `/plugins/dsh-any-connect` routes). Both products are the same client
+ * framework in different regions, and both write their sign-in into the
+ * *same* shared `CodeBuddyExtension` auth directory — they differ by file
+ * basename, base URL, catalog endpoint, and display identity.
  *
  * @module dsh-any-connect/variants
  */
 
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
-import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH, ZCODE_OFFPEAK_PROBE_PATH, ZCODE_OFFPEAK_STATUS_PATH, ZCODE_PROBE_PATH, ZCODE_STATUS_PATH } from './status-paths.js'
+import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from './status-paths.js'
 import type { WorkBuddyRegion } from './upstream.js'
 
 /** Which upstream family a variant talks to; selects the per-kind wiring. */
-export type VariantKind = 'workbuddy' | 'zcode' | 'zcode-offpeak'
+export type VariantKind = 'workbuddy'
 
 /** One provider variant. */
 export interface WorkBuddyVariant {
@@ -52,9 +44,7 @@ export interface WorkBuddyVariant {
    *
    * One per variant: the two WorkBuddy endpoints disagree about rates,
    * windows, and even which models exist for a shared id, so a catalog saved
-   * from one must never be served as the other's. (zcode never writes one —
-   * its roster is static — but keeps the field so per-variant paths stay
-   * disjoint.)
+   * from one must never be served as the other's.
    */
   catalogFilename: string
   /** Settings namespace owning this variant's configuration card. */
@@ -97,30 +87,6 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
     statusPath: WORKBUDDY_AI_STATUS_PATH,
     probePath: WORKBUDDY_AI_PROBE_PATH,
   },
-  {
-    id: 'zcode',
-    kind: 'zcode',
-    displayName: 'ZCode',
-    appName: 'ZCode',
-    ownFilename: '.zcode-auth.json',
-    probeFilename: '.zcode-probe.json',
-    catalogFilename: '.zcode-catalog.json',
-    settingsNs: 'anyconnect-zcode' as SettingsNamespace,
-    statusPath: ZCODE_STATUS_PATH,
-    probePath: ZCODE_PROBE_PATH,
-  },
-  {
-    id: 'zcode-offpeak',
-    kind: 'zcode-offpeak',
-    displayName: 'ZCode 夜间免费',
-    appName: 'ZCode',
-    ownFilename: '.zcode-offpeak-auth.json',
-    probeFilename: '.zcode-offpeak-probe.json',
-    catalogFilename: '.zcode-offpeak-catalog.json',
-    settingsNs: 'anyconnect-zcode-offpeak' as SettingsNamespace,
-    statusPath: ZCODE_OFFPEAK_STATUS_PATH,
-    probePath: ZCODE_OFFPEAK_PROBE_PATH,
-  },
 ]
 
 /** All provider variants, in registration order. */
@@ -131,12 +97,6 @@ export const CN_VARIANT: WorkBuddyVariant = WORKBUDDY_VARIANTS[0]!
 
 /** The international variant. */
 export const AI_VARIANT: WorkBuddyVariant = WORKBUDDY_VARIANTS[1]!
-
-/** The GLM Coding Plan variant. */
-export const ZCODE_VARIANT: WorkBuddyVariant = WORKBUDDY_VARIANTS[2]!
-
-/** The GLM Coding Plan off-peak（夜间免费）variant. */
-export const ZCODE_OFFPEAK_VARIANT: WorkBuddyVariant = WORKBUDDY_VARIANTS[3]!
 
 /** Look up a variant by provider id. */
 export function variantFor(id: string): WorkBuddyVariant | undefined {

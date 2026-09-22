@@ -14,10 +14,10 @@ import type { WorkBuddyCredits } from './upstream.js'
 import { normalizeCredits } from './upstream.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import { WORKBUDDY_STATUS_PATH } from './status-paths.js'
-import type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebOffPeakWindow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
-export { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH, ZCODE_PROBE_PATH, ZCODE_STATUS_PATH } from './status-paths.js'
-export type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebOffPeakWindow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
+export { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from './status-paths.js'
+export type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
 /** Constructor dependencies. */
 export interface WorkBuddyStatusRouteOptions {
@@ -30,7 +30,7 @@ export interface WorkBuddyStatusRouteOptions {
     status(): Promise<WorkBuddyAuthStatus>
     current(): Promise<unknown>
   }
-  /** Live billing answer; absent for providers without a credit ledger (zcode). */
+  /** Live billing answer for the card's credit section. */
   fetchCredits?: (credential: WorkBuddyCredential) => Promise<WorkBuddyCredits>
   /** Resolve the current model catalog for the card's unified model list. */
   models: () => readonly WorkBuddyModelInfo[]
@@ -38,12 +38,6 @@ export interface WorkBuddyStatusRouteOptions {
   catalog: () => WorkBuddyWebCatalog
   /** Resolve the probe section, for the card's detection controls. Omitted hides it. */
   probe?: () => WorkBuddyWebProbeSection
-  /**
-   * Night-free window state for the zcode-offpeak card. The callback is
-   * expected to cache (the status route polls), and may fail — a failure
-   * degrades to an `error` row in the document, never a failed request.
-   */
-  offPeakWindow?: () => Promise<WorkBuddyWebOffPeakWindow>
   /** In-process key authorizing probe control writes; handed to the card. */
   probeKey: string
   /** Route path; one per variant. */
@@ -122,19 +116,9 @@ export async function workBuddyWebStatus(
   })
   const statusWithModels: WorkBuddyWebStatus = { ...status, models }
   try {
-    if (deps.offPeakWindow !== undefined) {
-      statusWithModels.offPeakWindow = await deps.offPeakWindow()
-    }
-  } catch (error: unknown) {
-    statusWithModels.offPeakWindow = { canTakeNumber: false, error: safeMessage(error) }
-  }
-  try {
     if (deps.fetchCredits !== undefined) {
       const credential = await deps.store.current()
       if (credential !== undefined) {
-        // zcode credentials never reach this call — fetchCredits is only
-        // provided for the WorkBuddy variants, whose credential is a full
-        // WorkBuddyCredential.
         const credits = await deps.fetchCredits(credential as WorkBuddyCredential)
         return { ...statusWithModels, credits }
       }

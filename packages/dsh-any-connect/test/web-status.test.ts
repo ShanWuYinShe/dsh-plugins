@@ -185,30 +185,6 @@ describe('workBuddyWebStatus', () => {
       },
     ])
   })
-
-  it('degrades an off-peak window failure to an error row', async () => {
-    const failing = async (): Promise<never> => { throw new Error('ticket server down') }
-    const status = (await workBuddyWebStatus({
-      store: storeWith(CREDENTIAL),
-      models: () => [],
-      catalog: () => ({ source: 'fallback' }),
-      offPeakWindow: failing,
-      probeKey: 'test-key',
-      // 路由注册的必填项；本文件只测状态文档组装，不挂路由。
-      path: '/workbuddy-status-test',
-    }) as WorkBuddySignedInStatus)
-    expect(status.offPeakWindow).toEqual({ canTakeNumber: false, error: 'ticket server down' })
-    const ok = (await workBuddyWebStatus({
-      store: storeWith(CREDENTIAL),
-      models: () => [],
-      catalog: () => ({ source: 'fallback' }),
-      offPeakWindow: async () => ({ canTakeNumber: false, nextTakeAtSec: 1700000000 }),
-      probeKey: 'test-key',
-      // 路由注册的必填项；本文件只测状态文档组装，不挂路由。
-      path: '/workbuddy-status-test',
-    }) as WorkBuddySignedInStatus)
-    expect(ok.offPeakWindow).toEqual({ canTakeNumber: false, nextTakeAtSec: 1700000000 })
-  })
 })
 
 describe('workBuddyWebStatus context', () => {

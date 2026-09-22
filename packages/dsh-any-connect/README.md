@@ -40,11 +40,6 @@ DeepSeek-V4.1-Flash、Kimi-K3、MiniMax-M3、Hy3 等，国际版另有 GPT/Gemin
   模型分组、账号、积分与配置卡片，与国内版互不混用；只装一版就只出现
   一版。从未登录的一版不显示分组（而不是展示点选必错的名单）。
 
-- **ZCode（GLM Coding Plan）**：默认**零配置跟随 zcode 桌面端登录态**（读取
-  其本机凭据存储的 plan key，以完整的 zcode 客户端身份与签名直连），模型
-  走 coding plan 的同一份额度。另有「夜间免费」通道与手动 key 覆盖，详见
-  下方「ZCode（GLM Coding Plan）接入」一节。
-
 ## 安装
 
 > 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段；仓库的 `dsh-v*`
@@ -83,56 +78,12 @@ dsh-any-connect status     # 当前登录态与积分
 dsh-any-connect logout     # 移除本插件的凭据副本（不动桌面 App 的登录）
 ```
 
-默认操作国内版；加 `--provider workbuddy-ai` 操作国际版，`--provider zcode`
-操作 ZCode（GLM Coding Plan）：
+默认操作国内版；加 `--provider workbuddy-ai` 操作国际版：
 
 ```bash
 dsh-any-connect status --provider workbuddy-ai
 dsh-any-connect doctor --provider workbuddy-ai
-dsh-any-connect doctor --provider zcode   # 含一次真实 key 校验（≤32 token）
-dsh-any-connect status --provider zcode
 ```
-
-## ZCode（GLM Coding Plan）接入
-
-把 coding plan 的 GLM 模型（GLM-5.3 / GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo）
-接入 DSH，额度与 zcode CLI 消耗同一份套餐。key 的来源优先级（先者胜）：
-
-1. 插件配置的 `apiKeyZcode` 字段（`cordis.patch.yml` 对应 entry，手动覆盖；DSH
-   0.1.7 起「设置 → 模型」的第三方 provider 表单不再渲染该字段，改走补丁文件）;
-2. `ZCODE_API_KEY` 环境变量；
-3. **跟随 zcode 桌面端登录态（默认路径）**：只读解密 zcode 的本机凭据存储
-   `~/.zcode/v2/credentials.json`，取得 plan key——同一台机器上 zcode 登录
-   一次即可，DSH 侧零配置，zcode 重新登录后自动跟随；
-4. `~/.dsh/.zcode-auth.json`（内容 `{"version":1,"apiKey":"..."}`）。
-
-模型请求以**完整的 zcode 客户端身份**发出（`ZCode/<app 版本>` 等身份头、
-每请求 attribution 头、`X-Client-*` 客户端签名七件套——握手 / Ed25519 /
-8-bit PoW 均按 zcode 3.12.3 的线上行为复刻），经本机 loopback shim 以
-Anthropic Messages 协议直通 `open.bigmodel.cn`。请求体与上游错误体零翻译
-原样中继；签名校验失败时按 zcode 同款语义自愈（重握手一次 → 永久降级
-unsigned）。
-
-### 夜间免费（off-peak 通道）
-
-模型选择器的「ZCode 夜间免费」分组（GLM-5.3 / GLM-5.3-Flash）走 zcode 的
-夜间免费中继：凭 zcode 会话（JWT + plan key）向排队系统取免费票据，带
-`X-Off-Peak-Ticket-ID` 发请求。**能否取号、排队时长、免费额度全部由智谱
-服务端按窗口裁决**——白天/窗口外该分组会如实报「窗口未开」，排队超时会
-给出位置信息。
-
-如实说明：
-
-- **额度**：plan key 调用即按套餐结算，与 zcode CLI 共享同一份额度（加量
-  促销以智谱服务端实际结算为准）。
-- **夜间通道为非官方复刻**：实测曾遇到中继风控拦截（`code 3012`），能否
-  稳定使用取决于智谱风控策略，随时可能失效；直连通道不受其影响。
-- **额度余量不显示**：查询余额的管理面有独立签名防护，插件不复刻；卡片只
-  展示 key 来源与掩码。
-- **凭据读取边界**：跟随 zcode 只以用户本人身份读取本人数据（解密算法为
-  zcode 自实现的确定性本地方案，不涉及系统钥匙串），结果只在内存中，不落
-  盘、不外传。
-- 上游为智谱非官方承诺的第三方接入面，调整可能需要跟随。
 
 ## 配置
 
@@ -140,7 +91,6 @@ unsigned）。
 |---|---|---|
 | `authFile` | 自动探测 | 显式指定 WorkBuddy 桌面凭据文件路径（覆盖环境变量与平台默认探测） |
 | `authFileAI` | 自动探测 | 同上，作用于 WorkBuddy AI（国际版） |
-| `apiKeyZcode` | 空 | GLM Coding Plan API key（bigmodel 控制台创建；空值回落 `ZCODE_API_KEY` env 与 `~/.dsh/.zcode-auth.json`） |
 
 思考档位检测全自动：目录刷新后自动补测未声明档位的模型，无需配置。
 

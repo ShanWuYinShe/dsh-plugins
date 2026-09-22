@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
-import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH, ZCODE_OFFPEAK_PROBE_PATH, ZCODE_OFFPEAK_STATUS_PATH, ZCODE_PROBE_PATH, ZCODE_STATUS_PATH } from '../src/status-paths.js'
-import type { WorkBuddyWebModelRow, WorkBuddyWebOffPeakWindow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
+import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from '../src/status-paths.js'
+import type { WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
 import type { WorkBuddySettingsKey } from './locales.js'
 
 /** Localized copy injected by the browser-plugin registration. */
@@ -44,22 +44,6 @@ const CARD_VARIANTS: readonly WorkBuddyCardVariant[] = [
     titleKey: 'titleAI',
     introKey: 'introAI',
     signedOutHintKey: 'signedOutHintAI',
-  },
-  {
-    id: 'anyconnect-zcode',
-    statusPath: ZCODE_STATUS_PATH,
-    probePath: ZCODE_PROBE_PATH,
-    titleKey: 'titleZcode',
-    introKey: 'introZcode',
-    signedOutHintKey: 'signedOutHintZcode',
-  },
-  {
-    id: 'anyconnect-zcode-offpeak',
-    statusPath: ZCODE_OFFPEAK_STATUS_PATH,
-    probePath: ZCODE_OFFPEAK_PROBE_PATH,
-    titleKey: 'titleZcodeOffpeak',
-    introKey: 'introZcodeOffpeak',
-    signedOutHintKey: 'signedOutHintZcodeOffpeak',
   },
 ]
 
@@ -177,10 +161,6 @@ function formatTokens(value: number): string {
   return new Intl.NumberFormat(undefined).format(value)
 }
 
-function formatTime(ms: number): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ms))
-}
-
 /** Localize an upstream promotional badge label, with an unknown-badge fallback. */
 function modelBadgeLabel(badge: string, t: WorkBuddyConfigPageInjected['t']): string {
   if (badge === '限时免费') return t('badgeLimitedFree')
@@ -266,32 +246,6 @@ function ModelRow({ row, efforts, t }: {
       <span style={{ ...metaCellStyle, color: 'var(--dsw-alias-label-secondary)' }}>
         {efforts !== undefined && efforts.length > 0 ? efforts.join('/') : null}
       </span>
-    </div>
-  )
-}
-
-/** The night-free window line (zcode-offpeak only), with a state dot. */
-function OffPeakWindowRow({ window, t }: {
-  window: WorkBuddyWebOffPeakWindow
-  t: WorkBuddyConfigPageInjected['t']
-}): React.ReactNode {
-  const text = window.error !== undefined
-    ? t('offpeakWindowError', { message: window.error })
-    : window.canTakeNumber
-      ? t('offpeakWindowOpen')
-      : window.nextTakeAtSec !== undefined
-        ? t('offpeakWindowNext', { time: formatTime(window.nextTakeAtSec * 1000) })
-        : t('offpeakWindowClosed')
-  const dot = window.error !== undefined
-    ? dotStyle('error')
-    : window.canTakeNumber
-      ? dotStyle('signed-in')
-      : dotStyle('signed-out')
-  return (
-    <div style={statusLabelStyle}>
-      <span aria-hidden="true" style={dot} />
-      <span style={{ color: 'var(--dsw-alias-label-secondary)', fontWeight: 400 }}>{t('offpeakWindow')}</span>
-      <span>{text}</span>
     </div>
   )
 }
@@ -384,7 +338,7 @@ function VariantsPage({ t }: { t: WorkBuddyConfigPageInjected['t'] }): React.Rea
   }, [fetchOne, applyOne])
 
   // 首个已登录的变体自动展开一次。等全部变体的首拉落定再选——status 路由
-  // 快慢不一（workbuddy 要等上游积分应答，zcode 只读本地文件），按"谁先回
+  // 快慢不一（各 status 路由响应快慢不一），按"谁先回
   // 来"选会展开错误的卡片；落定后按声明顺序取第一个已登录的。
   useEffect(() => {
     if (autoExpandedRef.current) return
@@ -613,8 +567,6 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
           {status.creditsError !== undefined
             ? <p style={{ ...errorStyle, fontSize: 12 }}>{t('creditsError', { message: status.creditsError })}</p>
             : null}
-
-          {status.offPeakWindow !== undefined ? <OffPeakWindowRow window={status.offPeakWindow} t={t} /> : null}
 
           {status.models !== undefined && status.models.length > 0 ? (
             <div style={sectionStyle}>
