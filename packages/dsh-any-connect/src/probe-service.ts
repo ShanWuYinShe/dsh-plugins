@@ -1,14 +1,17 @@
 /**
- * Probe orchestration: the serial queue, the consent gate, and the bridge from
- * an observation to what the adapter may expose.
+ * Probe orchestration: the serial queue, and the bridge from an observation to
+ * what the adapter may expose.
  *
  * Ported from corrinehu/dsh-workbuddy-connect `src/probe-service.ts` (MIT).
  * Kept separate from {@link module:dsh-any-connect/probe} so the protocol
  * stays a pure function of one model's responses, while queueing, persistence,
- * and policy live here. Two structural rules:
+ * and policy live here. Detection runs automatically — every catalog refresh
+ * sweeps the candidates that have no usable observation — under two structural
+ * rules:
  *
  * - one probe at a time (a user's real chat must not contend with a sweep),
- * - nothing at all happens without explicit consent.
+ * - each model is probed only when its catalog row changes (fingerprint) or
+ *   the record expired, so the spend is bounded and one-off.
  *
  * @module dsh-any-connect/probe-service
  */
@@ -30,8 +33,6 @@ export interface WorkBuddyProbeServiceOptions {
   catalog: WorkBuddyCatalog
   credentials: WorkBuddyCredentialStore
   client: WorkBuddyUpstreamClient
-  /** Whether probing is permitted at all; consulted before every sweep. */
-  consent: () => boolean
   /**
    * The account currently in effect, as `uid:enterpriseId`, or `undefined`
    * while signed out.
@@ -47,8 +48,8 @@ export interface WorkBuddyProbeServiceOptions {
 }
 
 /**
- * Serial probe runner. One instance is shared by the manual API and any
- * future automatic trigger, so the two can never overlap.
+ * Serial probe runner. The automatic sweep is the only entry point, so a
+ * sweep can never overlap itself or double-run a model.
  */
 export class WorkBuddyProbeService {
   private readonly options: WorkBuddyProbeServiceOptions
@@ -87,15 +88,9 @@ export class WorkBuddyProbeService {
   /**
    * Probe one model, serially.
    *
-   * The authenticated manual route supplies one-request consent after UI
-   * confirmation. Other callers must pass the configured consent gate.
-   * Manual consent never changes the automatic-probing configuration.
    * Explicit requests bypass historical results, but share an ongoing run.
    */
-  async probe(modelId: string, manualConsent = false): Promise<WorkBuddyProbeStatus> {
-    if (!manualConsent && !this.options.consent()) {
-      return { state: 'unavailable', reason: 'probing is not authorized' }
-    }
+  async probe(modelId: string): Promise<WorkBuddyProbeStatus> {
     const info = this.options.catalog.current().find(model => model.id === modelId)
     if (info === undefined) return { state: 'unavailable', reason: `unknown model: ${modelId}` }
     const account = this.options.account()
@@ -109,14 +104,11 @@ export class WorkBuddyProbeService {
       // or already answered this model.
       const current = this.options.catalog.current().find(model => model.id === modelId)
       if (current === undefined) return { state: 'unavailable', reason: `unknown model: ${modelId}` }
-      if (!manualConsent && !this.options.consent()) {
-        return { state: 'unavailable', reason: 'probing is not authorized' }
-      }
       if (current.reasoning?.supports !== true || (current.reasoning.supportedEfforts?.length ?? 0) > 0) {
         return { state: 'unavailable', reason: 'model does not need detection' }
       }
       const cached = this.recordFor(modelId)
-      if (!manualConsent && cached !== undefined && cached.validation !== 'unknown') {
+      if (cached !== undefined && cached.validation !== 'unknown') {
         return { state: 'ok', validation: cached.validation, efforts: cached.efforts, requests: 0 }
       }
 
@@ -174,10 +166,9 @@ export class WorkBuddyProbeService {
 
   /**
    * Enqueue an automatic probe for every candidate the catalog serves that has
-   * no usable observation yet. A no-op unless detection is authorized; each
-   * model goes through the same serial queue, pending dedup, and account
-   * attribution as a manual probe, so a sweep triggered this way can never
-   * overlap a user's chat traffic or double-run a model.
+   * no usable observation yet. Each model goes through the same serial queue,
+   * pending dedup, and account attribution, so a sweep can never overlap a
+   * user's chat traffic or double-run a model.
    *
    * Called after every catalog refresh (startup, credential change, scheduled
    * refresh), which is when the candidate set can actually change. The catalog
@@ -185,7 +176,6 @@ export class WorkBuddyProbeService {
    * invalidates its old observation and the model becomes a candidate again.
    */
   probeMissingCandidates(): void {
-    if (!this.options.consent()) return
     const candidates = this.options.catalog.current().filter(info =>
       info.reasoning?.supports === true
       && (info.reasoning.supportedEfforts?.length ?? 0) === 0)

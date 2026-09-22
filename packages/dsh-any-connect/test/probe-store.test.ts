@@ -80,24 +80,6 @@ describe('WorkBuddyProbeStore', () => {
     await writeFile(path, '{ not json', 'utf8')
     expect(new WorkBuddyProbeStore({ path, pluginVersion: 'x' }).get('m', 'fp1', 'uid-1:')).toBeUndefined()
   })
-
-  it('persists the automatic-detection consent across instances; clear keeps it', async () => {
-    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-pstore-'))
-    const { path, store } = makeStore()
-    // 旧文档（或全新文件）没有该字段：读作未授权。
-    expect(store.consentEnabled()).toBe(false)
-    store.setConsent(true)
-    const reopened = new WorkBuddyProbeStore({ path, pluginVersion: 'x' })
-    expect(reopened.consentEnabled()).toBe(true)
-    // 清除记录不撤回授权：clear 是"忘掉观察结果"，不是"收回花钱的同意"。
-    store.set('m', record())
-    store.clear()
-    expect(store.consentEnabled()).toBe(true)
-    expect(new WorkBuddyProbeStore({ path, pluginVersion: 'x' }).consentEnabled()).toBe(true)
-    // 关闭同样持久化。
-    store.setConsent(false)
-    expect(new WorkBuddyProbeStore({ path, pluginVersion: 'x' }).consentEnabled()).toBe(false)
-  })
 })
 
 describe('fingerprintModel', () => {

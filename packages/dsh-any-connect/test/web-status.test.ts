@@ -57,7 +57,7 @@ describe('workBuddyWebStatus', () => {
       fetchCredits: fetchCredits as unknown as NonNullable<WorkBuddyStatusRouteOptions['fetchCredits']>,
       models: () => [],
       catalog: () => ({ source: 'fallback' }),
-      probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
+      probe: () => ({ running: false, results: [] }),
       probeKey: 'test-key',
       // 路由注册的必填项；本文件只测状态文档组装，不挂路由。
       path: '/workbuddy-status-test',
@@ -75,7 +75,7 @@ describe('workBuddyWebStatus', () => {
         model({ id: 'free', name: 'Free', contextWindow: 192000, billing: { credits: 'x0.00', badges: ['限时免费'], free: true } }),
       ],
       catalog: () => ({ source: 'live', fetchedAt: 1700000000000 }),
-      probe: () => ({ consent: true, running: false, candidates: ['m'], results: [] }),
+      probe: () => ({ running: false, results: [] }),
       probeKey: 'test-key',
       // 路由注册的必填项；本文件只测状态文档组装，不挂路由。
       path: '/workbuddy-status-test',
@@ -95,7 +95,7 @@ describe('workBuddyWebStatus', () => {
       fetchCredits: clientWith(Promise.resolve({ total: 1, accounts: [] })),
       models: () => [model({ id: 'plain', name: 'Plain', contextWindow: 256000, billing: { credits: 'x1.62', free: false } })],
       catalog: () => ({ source: 'saved', fetchedAt: 1700000000000 }),
-      probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
+      probe: () => ({ running: false, results: [] }),
       probeKey: 'test-key',
       // 路由注册的必填项；本文件只测状态文档组装，不挂路由。
       path: '/workbuddy-status-test',
@@ -113,20 +113,20 @@ describe('workBuddyWebStatus', () => {
       fetchCredits: clientWith(Promise.resolve({ total: 1, accounts: [] })),
       models: () => [],
       catalog: () => ({ source: 'live', fetchedAt: 1700000000000 }),
-      probe: () => ({ consent: true, running: true, candidates: ['m'], results: [] }),
+      probe: () => ({ running: true, results: [] }),
       probeKey: 'test-key',
       // 路由注册的必填项；本文件只测状态文档组装，不挂路由。
       path: '/workbuddy-status-test',
     }) as WorkBuddySignedInStatus)
     expect(live.catalog).toEqual({ source: 'live', fetchedAt: 1700000000000 })
-    expect(live.probe).toEqual({ consent: true, running: true, candidates: ['m'], results: [] })
+    expect(live.probe).toEqual({ running: true, results: [] })
     expect(live.probeKey).toBe('test-key')
     const failed = (await workBuddyWebStatus({
       store: storeWith(CREDENTIAL),
       fetchCredits: clientWith(Promise.resolve({ total: 1, accounts: [] })),
       models: () => [],
       catalog: () => ({ source: 'saved', fetchedAt: 1699999999999, error: 'upstream down' }),
-      probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
+      probe: () => ({ running: false, results: [] }),
       probeKey: 'test-key',
       // 路由注册的必填项；本文件只测状态文档组装，不挂路由。
       path: '/workbuddy-status-test',
@@ -140,7 +140,7 @@ describe('workBuddyWebStatus', () => {
       fetchCredits: clientWith(Promise.reject(new Error('boom'))),
       models: () => [model({ id: 'free', name: 'Free', contextWindow: 192000, billing: { credits: 'x0.00', free: true } })],
       catalog: () => ({ source: 'fallback', error: 'boom' }),
-      probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
+      probe: () => ({ running: false, results: [] }),
       probeKey: 'test-key',
       // 路由注册的必填项；本文件只测状态文档组装，不挂路由。
       path: '/workbuddy-status-test',
@@ -169,7 +169,7 @@ describe('workBuddyWebStatus', () => {
         },
       ],
       catalog: () => ({ source: 'live' }),
-      probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
+      probe: () => ({ running: false, results: [] }),
       probeKey: 'test-key',
       // 路由注册的必填项；本文件只测状态文档组装，不挂路由。
       path: '/workbuddy-status-test',
@@ -225,7 +225,7 @@ describe('workBuddyWebStatus context', () => {
         },
       ],
       catalog: () => ({ source: 'live' }),
-      probe: () => ({ consent: false, running: false, candidates: [], results: [] }),
+      probe: () => ({ running: false, results: [] }),
       probeKey: 'test-key',
       // 路由注册的必填项；本文件只测状态文档组装，不挂路由。
       path: '/workbuddy-status-test',

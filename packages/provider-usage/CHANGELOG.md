@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-alpha.3 (2026-09-23)
+
+### 适配
+
+* 跟进 DSH 宿主 0.1.7-alpha.2：依赖 range 与 `dsh.host` 同步，无代码改动。
+* cordis `^4.0.3` → `^4.0.4`（新宿主线的 peer 要求；peer 解析版本不一致会
+  使 `dsh-settings` 的 Context 模块增强失效）。
+
 ## 0.1.0-alpha.2 (2026-09-22)
 
 ### 适配

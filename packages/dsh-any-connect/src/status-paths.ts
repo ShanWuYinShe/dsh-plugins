@@ -43,12 +43,8 @@ export interface WorkBuddyWebProbeModel {
 
 /** Probe section of the status document. */
 export interface WorkBuddyWebProbeSection {
-  /** Whether the user has authorized probing. */
-  consent: boolean
   /** Whether a sweep is in flight right now. */
   running: boolean
-  /** Models the user could probe by hand (undeclared yet reasoning-capable). */
-  candidates: readonly string[]
   /** Recorded observations. */
   results: readonly WorkBuddyWebProbeModel[]
 }
@@ -56,18 +52,13 @@ export interface WorkBuddyWebProbeSection {
 /** Action requested from the probe control route. */
 export interface WorkBuddyProbeAction {
   /**
-   * `probe` spends credit on one model; `clear` drops recorded observations;
-   * `refresh` re-reads the credential and re-fetches the model catalog;
-   * `set-consent` persists the automatic-detection authorization.
-   *
-   * All four are writes, which is why they share this route's in-process key
-   * and loopback guards rather than the read-only status GET.
+   * `refresh` re-reads the credential and re-fetches the model catalog.
+   * Detection itself is automatic (every catalog refresh sweeps the missing
+   * candidates), so this is the route's only action — still a write that
+   * spends a request against the upstream, which is why it keeps this route's
+   * in-process key and loopback guards rather than the read-only status GET.
    */
-  action: 'probe' | 'clear' | 'refresh' | 'set-consent'
-  /** Target model id; required for `probe`. */
-  model?: string
-  /** New authorization state; required for `set-consent`. */
-  enabled?: boolean
+  action: 'refresh'
 }
 
 /**
@@ -191,7 +182,7 @@ export type WorkBuddyWebStatus =
     catalog?: WorkBuddyWebCatalog
     /** Night-free window state (zcode-offpeak only). */
     offPeakWindow?: WorkBuddyWebOffPeakWindow
-    /** Reasoning-effort probe state, consent, and recorded observations. */
+    /** Reasoning-effort probe state and recorded observations. */
     probe?: WorkBuddyWebProbeSection
     /**
      * In-process key authorizing probe control writes. Handed to the card with

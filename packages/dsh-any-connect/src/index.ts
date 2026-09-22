@@ -476,9 +476,6 @@ export function apply(ctx: Context, config: Config): void {
       catalog,
       credentials: credentialStore,
       client,
-      // 授权持久化在 probe-store 文件（卡片开关经 probe 路由写入）；默认关，
-      // 因为每档检测都发真实请求消耗积分。
-      consent: () => probeStore.consentEnabled(),
       // Observations are per account: the service reads and writes its records
       // against this identity, so one account's detected levels never answer
       // for another's.
@@ -493,7 +490,7 @@ export function apply(ctx: Context, config: Config): void {
   const probeKey = createProbeKey()
 
   /**
-   * Compact probe state for one card: consent, candidates, observations.
+   * Compact probe state for one card: sweep progress and observations.
    *
    * Results read through the *same* judgement the adapter uses, rather than
    * straight from the store: a raw record can be stale in ways the adapter
@@ -503,10 +500,8 @@ export function apply(ctx: Context, config: Config): void {
    */
   function probeSection(runtime: VariantRuntime): WorkBuddyWebProbeSection {
     // 仅 WorkBuddy 变体携带探针服务；status 路由也只对它们启用 probe 字段。
-    // consent 现持久化在 probe-store（卡片开关经 probe 路由写入），不再读
-    // settings config。
     if (runtime.probeService === undefined) {
-      return { consent: false, running: false, candidates: [], results: [] }
+      return { running: false, results: [] }
     }
     const results = runtime.catalog.current().flatMap(info => {
       const record = runtime.probeService!.recordFor(info.id)
@@ -520,11 +515,7 @@ export function apply(ctx: Context, config: Config): void {
       }]
     })
     return {
-      consent: runtime.probeStore!.consentEnabled(),
       running: runtime.probeService.isRunning(),
-      candidates: runtime.catalog.current()
-        .filter(info => info.reasoning?.supports === true && (info.reasoning.supportedEfforts?.length ?? 0) === 0)
-        .map(info => info.id),
       results: newestFirst(results),
     }
   }
@@ -613,23 +604,6 @@ export function apply(ctx: Context, config: Config): void {
       })
       registerWorkBuddyProbeRoute(webCtx, {
         path: runtime.variant.probePath,
-        probe: runtime.variant.kind !== 'workbuddy'
-          ? async () => ({ state: 'unavailable' as const, reason: 'this provider does not support effort detection' })
-          : async modelId => {
-            const result = await runtime.probeService!.probe(modelId, true)
-            return result.state === 'ok'
-              ? { state: 'ok' as const }
-              : { state: 'unavailable' as const, reason: result.reason }
-          },
-        clear: () => { runtime.probeStore?.clear() },
-        setConsent: runtime.variant.kind !== 'workbuddy'
-          ? undefined
-          : enabled => {
-              runtime.probeStore?.setConsent(enabled)
-              // 开启即视为对现有候选的一次授权：立即补齐缺失检测，不用等
-              // 下一次目录刷新。
-              if (enabled) runtime.probeService?.probeMissingCandidates()
-            },
         refresh: async () => {
           if (stopped) return { state: 'failed' as const, reason: 'plugin is stopping' }
           // 先重读凭据：用户按刷新多半因为名单看起来不对，而最常见的

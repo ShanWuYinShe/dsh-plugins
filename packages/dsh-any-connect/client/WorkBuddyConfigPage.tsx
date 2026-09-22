@@ -5,7 +5,7 @@ import type { CSSProperties } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH, ZCODE_OFFPEAK_PROBE_PATH, ZCODE_OFFPEAK_STATUS_PATH, ZCODE_PROBE_PATH, ZCODE_STATUS_PATH } from '../src/status-paths.js'
-import type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebOffPeakWindow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
+import type { WorkBuddyWebModelRow, WorkBuddyWebOffPeakWindow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
 import type { WorkBuddySettingsKey } from './locales.js'
 
 /** Localized copy injected by the browser-plugin registration. */
@@ -82,8 +82,6 @@ export type WorkBuddyConfigPageProps =
 const POLL_INTERVAL_MS = 60_000
 /** POST refresh 后等目录异步落地的宽限：refresh 立即返回，目录在后台拉取。 */
 const REFRESH_SETTLE_MS = 2_000
-/** 两段式确认的复位窗口。 */
-const CONFIRM_RESET_MS = 4_000
 
 const cardStyle: CSSProperties = {
   overflow: 'hidden',
@@ -134,52 +132,7 @@ const chipNeutralStyle: CSSProperties = {
 const modelRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }
 const modelNameStyle: CSSProperties = { flex: '1 1 120px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, lineHeight: '20px', color: 'var(--dsw-alias-label-primary)' }
 const modelRateStyle: CSSProperties = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
-const detectButtonStyle: CSSProperties = {
-  ...buttonStyle,
-  minHeight: 22,
-  padding: '1px 8px',
-  fontSize: 11,
-  borderRadius: 11,
-}
-const linkButtonStyle: CSSProperties = {
-  ...buttonStyle,
-  border: 0,
-  background: 'transparent',
-  color: 'var(--dsw-alias-label-tertiary)',
-  minHeight: 22,
-  padding: '1px 4px',
-  fontSize: 11,
-}
-const detailsToggleStyle: CSSProperties = {
-  ...buttonStyle,
-  border: 0,
-  background: 'transparent',
-  color: 'var(--dsw-alias-label-tertiary)',
-  padding: '2px 0',
-  fontSize: 12,
-}
-const detailsBoxStyle: CSSProperties = {
-  border: '1px dashed var(--dsw-alias-border-l2)',
-  borderRadius: 8,
-  padding: '8px 12px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 6,
-}
 const hintStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
-const checkLabelStyle: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', userSelect: 'none' }
-const checkStyle: CSSProperties = { accentColor: 'var(--dsw-alias-label-primary)', width: 13, height: 13, cursor: 'pointer' }
-const confirmBoxStyle: CSSProperties = {
-  marginTop: 8, padding: '10px 12px', borderRadius: 8,
-  background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.04))',
-}
-const confirmRowStyle: CSSProperties = { display: 'flex', gap: 8, marginTop: 8, justifyContent: 'flex-end' }
-const primaryButtonStyle: CSSProperties = {
-  ...buttonStyle,
-  background: 'var(--dsw-alias-brand-primary, #1677ff)',
-  borderColor: 'transparent',
-  color: '#fff',
-}
 const signedOutRowStyle: CSSProperties = {
   ...cardStyle,
 }
@@ -279,32 +232,13 @@ function CreditBar({ label, remain, size, t }: {
   )
 }
 
-/**
- * One-line catalog provenance: live (just fetched) → saved (this account's
- * last good list, restored after restart/failure) → fallback (compiled in).
- * A stale list must not look like a live one.
- */
-function catalogLine(catalog: WorkBuddyWebCatalog, t: WorkBuddyConfigPageInjected['t']): string {
-  const base = catalog.source === 'live'
-    ? t('catalogLive')
-    : catalog.source === 'saved'
-      ? t('catalogSaved', { time: catalog.fetchedAt === undefined ? '?' : formatTime(catalog.fetchedAt) })
-      : t('catalogFallback')
-  return catalog.error === undefined ? base : `${base} — ${t('catalogError', { message: catalog.error })}`
-}
-
 /** One row of the unified model list. */
-function ModelRow({ row, efforts, notValidating, detecting, pendingDetect, busy, onDetect, t }: {
+function ModelRow({ row, efforts, notValidating, t }: {
   row: WorkBuddyWebModelRow
-  /** The effort levels to display: declared, detected, or none. */
+  /** The effort levels to display: declared, or automatically detected. */
   efforts: readonly string[] | undefined
   /** Detection concluded the upstream does not validate the parameter. */
   notValidating: boolean
-  detecting: boolean
-  pendingDetect: boolean
-  busy: boolean
-  /** Absent for models that cannot be probed (declared, or not a candidate). */
-  onDetect: (() => void) | undefined
   t: WorkBuddyConfigPageInjected['t']
 }): React.ReactNode {
   return (
@@ -323,13 +257,7 @@ function ModelRow({ row, efforts, notValidating, detecting, pendingDetect, busy,
           ? <span style={chipNeutralStyle}>{efforts.join('/')}</span>
           : notValidating
             ? <span style={chipNeutralStyle}>{t('probeNotValidating')}</span>
-            : detecting
-              ? <span style={chipNeutralStyle}>{t('detectingShort')}</span>
-              : onDetect !== undefined
-                ? <button type="button" style={detectButtonStyle} disabled={busy} onClick={onDetect}>
-                    {pendingDetect ? t('detectOneConfirm') : t('detectOne')}
-                  </button>
-                : null}
+            : null}
       </span>
     </div>
   )
@@ -496,9 +424,14 @@ function VariantsPage({ t }: { t: WorkBuddyConfigPageInjected['t'] }): React.Rea
 }
 
 /** Control action posted to the variant's probe route (key travels in a header). */
-type ProbeAction = { action: 'probe'; model: string } | { action: 'clear' } | { action: 'refresh' } | { action: 'set-consent'; enabled: boolean }
+type ProbeAction = { action: 'refresh' }
 
-/** One signed-in variant's card: account, credit, unified model list, detection. */
+/**
+ * One signed-in variant's card: account, credit, unified model list. Detection
+ * of reasoning-effort levels is automatic host-side (a background sweep after
+ * every catalog refresh), so the card only shows its outcome — no detect
+ * buttons, no opt-in switch.
+ */
 function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applyStatus }: {
   t: WorkBuddyConfigPageInjected['t']
   variant: WorkBuddyCardVariant
@@ -511,14 +444,6 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
 }): React.ReactNode {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | undefined>(undefined)
-  const [detailsOpen, setDetailsOpen] = useState(false)
-  // 两段式确认（单个检测的行内按钮 + 批量按钮共用 4s 窗口）。
-  const [pendingDetect, setPendingDetect] = useState<string | undefined>(undefined)
-  const [confirmingAll, setConfirmingAll] = useState(false)
-  // 批量进度与单模型检测中的 id 集合：本地 UI 状态——宿主的 probe.running
-  // 只反映"当前正在跑的一个"，整批进度只能客户端自己数。
-  const [batch, setBatch] = useState<{ total: number; done: number } | undefined>(undefined)
-  const [detectingIds, setDetectingIds] = useState<ReadonlySet<string>>(new Set())
   const mounted = useRef(true)
 
   useEffect(() => {
@@ -590,88 +515,6 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
     void refreshWithCatalog()
   }, [probeKey, status.catalog, refreshWithCatalog])
 
-  const runControl = useCallback(async (action: ProbeAction): Promise<void> => {
-    setBusy(true)
-    try {
-      await control(action)
-    } catch (error: unknown) {
-      if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
-    } finally {
-      await refresh()
-      if (mounted.current) setBusy(false)
-    }
-  }, [control, refresh, t])
-
-  /** One manual probe (two-step confirm is handled by the caller). */
-  const runOneDetect = useCallback(async (modelId: string): Promise<void> => {
-    setBusy(true)
-    setDetectingIds(current => new Set(current).add(modelId))
-    try {
-      await control({ action: 'probe', model: modelId })
-    } catch (error: unknown) {
-      if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
-    } finally {
-      await refresh()
-      if (mounted.current) {
-        setBusy(false)
-        setDetectingIds(current => {
-          const next = new Set(current)
-          next.delete(modelId)
-          return next
-        })
-      }
-    }
-  }, [control, refresh, t])
-
-  /**
-   * Batch-detect every candidate. Requests are issued in parallel while the
-   * host's serial queue runs them one by one — each request resolves as its
-   * model finishes, which is exactly the progress the button counts.
-   */
-  const runBatchDetect = useCallback(async (targets: readonly string[]): Promise<void> => {
-    if (targets.length === 0) return
-    setBusy(true)
-    setBatch({ total: targets.length, done: 0 })
-    setNotice(undefined)
-    await Promise.allSettled(targets.map(async modelId => {
-      try {
-        await control({ action: 'probe', model: modelId })
-      } catch { /* 单个失败由最终刷新后的 results 呈现 */ }
-      if (mounted.current) setBatch(current => current === undefined ? current : { ...current, done: current.done + 1 })
-    }))
-    await refresh()
-    if (mounted.current) {
-      setBatch(undefined)
-      setBusy(false)
-    }
-  }, [control, refresh])
-
-  const detecting = batch !== undefined
-  const probeable = probe !== undefined
-
-  // 4s 确认窗口复位。
-  useEffect(() => {
-    if (!confirmingAll && pendingDetect === undefined) return
-    const timer = window.setTimeout(() => {
-      setConfirmingAll(false)
-      setPendingDetect(undefined)
-    }, CONFIRM_RESET_MS)
-    return () => { window.clearTimeout(timer) }
-  }, [confirmingAll, pendingDetect])
-
-  // sweep 结束（或目录刷新移除了候选）后，残留确认态作废。
-  const candidates = probe?.candidates ?? []
-  useEffect(() => {
-    if (pendingDetect !== undefined && !candidates.includes(pendingDetect)) {
-      setPendingDetect(undefined)
-    }
-  }, [pendingDetect, candidates])
-
-  const detectable = candidates.filter(id => {
-    const result = probe?.results.find(entry => entry.id === id)
-    return result === undefined || result.validation === 'unknown'
-  })
-
   const title = t(variant.titleKey)
   const label = status.nickname === undefined
     ? t('signedInAs', { nickname: '' }).replace(/[:：]\s*$/, '')
@@ -724,7 +567,6 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
               type="button"
               style={buttonStyle}
               disabled={busy}
-              title={t('catalogLive')}
               onClick={() => { void refreshWithCatalog() }}
             >
               {busy ? t('refreshing') : t('refresh')}
@@ -759,113 +601,23 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
 
           {status.models !== undefined && status.models.length > 0 ? (
             <div style={quotaListStyle}>
-              <h3 style={quotaTitleStyle}>{t('modelsCount', { n: status.models.length })}</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {status.models.map(row => {
-                  const isCandidate = probeable && candidates.includes(row.id)
-                  const hasEfforts = effortsOf(row) !== undefined || notValidatingOf(row)
-                  return (
-                    <ModelRow
-                      key={row.id}
-                      row={row}
-                      t={t}
-                      efforts={effortsOf(row)}
-                      notValidating={notValidatingOf(row)}
-                      detecting={detectingIds.has(row.id)}
-                      busy={busy || detecting}
-                      // 已授权（自动检测开）时不走两段式：pending 确认只留给
-                      // 未授权的手动探测，授权态点一次直接跑。
-                      pendingDetect={pendingDetect === row.id && probe?.consent !== true}
-                      onDetect={!isCandidate || hasEfforts ? undefined : () => {
-                        if (probe?.consent === true) {
-                          setPendingDetect(undefined)
-                          void runOneDetect(row.id)
-                          return
-                        }
-                        if (pendingDetect === row.id) {
-                          setPendingDetect(undefined)
-                          void runOneDetect(row.id)
-                        } else {
-                          setPendingDetect(row.id)
-                        }
-                      }}
-                    />
-                  )
-                })}
-              </div>
-            </div>
-          ) : null}
-
-          {probeable ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={rowStyle}>
-                <label style={checkLabelStyle} title={t('autoDetectHint')}>
-                  <input
-                    type="checkbox"
-                    style={checkStyle}
-                    checked={probe?.consent === true}
-                    disabled={busy || detecting}
-                    onChange={e => {
-                      setConfirmingAll(false)
-                      setPendingDetect(undefined)
-                      void runControl({ action: 'set-consent', enabled: e.target.checked })
-                    }}
-                  />
-                  {t('autoDetect')}
-                </label>
-                {batch !== undefined
-                  ? <span style={modelRateStyle}>{t('detecting', { done: batch.done, total: batch.total })}</span>
-                  : detectable.length > 0 ? (
-                    confirmingAll ? (
-                      <button
-                        type="button"
-                        style={{ ...primaryButtonStyle, minHeight: 26, padding: '2px 10px', fontSize: 12, borderRadius: 13 }}
-                        disabled={busy}
-                        onClick={() => { setConfirmingAll(false); void runBatchDetect(detectable) }}
-                      >
-                        {t('detectAllConfirm', { n: detectable.length })}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        style={{ ...buttonStyle, minHeight: 26, padding: '2px 10px', fontSize: 12, borderRadius: 13 }}
-                        disabled={busy}
-                        title={t('autoDetectHint')}
-                        // 已授权时一批直接跑，未授权才进两段式确认。
-                        onClick={() => {
-                          if (probe?.consent === true) void runBatchDetect(detectable)
-                          else setConfirmingAll(true)
-                        }}
-                      >
-                        {t('detectAll', { n: detectable.length })}
-                      </button>
-                    )
-                  ) : null}
+                <h3 style={quotaTitleStyle}>{t('modelsCount', { n: status.models.length })}</h3>
+                {probe?.running === true ? <span style={modelRateStyle}>{t('detectingShort')}</span> : null}
               </div>
-              {probe?.consent === true ? <p style={hintStyle}>{t('autoDetectHint')}</p> : null}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {status.models.map(row => (
+                  <ModelRow
+                    key={row.id}
+                    row={row}
+                    t={t}
+                    efforts={effortsOf(row)}
+                    notValidating={notValidatingOf(row)}
+                  />
+                ))}
+              </div>
             </div>
           ) : null}
-
-          <div>
-            <button type="button" style={detailsToggleStyle} aria-expanded={detailsOpen} onClick={() => { setDetailsOpen(!detailsOpen) }}>
-              {detailsOpen ? '▾' : '▸'} {t('details')}
-            </button>
-            {detailsOpen ? (
-              <div style={detailsBoxStyle}>
-                {status.expiresAt !== undefined
-                  ? <p style={hintStyle}>{t('accessTokenExpires', { time: formatTime(status.expiresAt) })}</p>
-                  : null}
-                {status.catalog !== undefined
-                  ? <p style={hintStyle}>{catalogLine(status.catalog, t)}</p>
-                  : null}
-                {probeable && (probe?.results.length ?? 0) > 0 ? (
-                  <button type="button" style={linkButtonStyle} disabled={busy || detecting} onClick={() => { void runControl({ action: 'clear' }) }}>
-                    {t('clearResults')}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
         </div>
       ) : null}
     </div>

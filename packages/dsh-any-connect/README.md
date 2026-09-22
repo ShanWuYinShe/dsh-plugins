@@ -22,8 +22,8 @@ DeepSeek-V4.1-Flash、Kimi-K3、MiniMax-M3、Hy3 等，国际版另有 GPT/Gemin
 - **思考强度**：按上游每个模型声明的 `supportedEfforts` 提供思考等级选项
   （如 GLM-5.3 支持 low / high / max，未声明档位的模型如 GLM-5.2 默认只有
   单档），在 DSH 模型选择器里即可切换，请求以 `reasoning_effort` 转发。未声明
-  档位的模型可在配置卡片里手动检测（逐行确认，会发少量真实请求）：测出上游真
-  校验的档位即进入选择器，测出"不校验"的模型不再误给档位。
+  档位的模型会在后台自动检测（目录刷新后自动补测，每模型仅少量真实请求）：
+  测出上游真校验的档位即进入选择器，测出"不校验"的模型不再误给档位。
 
 - **限时免费一目了然**：状态卡片会标注当前免费 / 限时免费 / 夜间折扣的模型
   （跟随上游 `credits` 与 `tags` 实时更新）。
@@ -141,7 +141,8 @@ unsigned）。
 | `authFile` | 自动探测 | 显式指定 WorkBuddy 桌面凭据文件路径（覆盖环境变量与平台默认探测） |
 | `authFileAI` | 自动探测 | 同上，作用于 WorkBuddy AI（国际版） |
 | `apiKeyZcode` | 空 | GLM Coding Plan API key（bigmodel 控制台创建；空值回落 `ZCODE_API_KEY` env 与 `~/.dsh/.zcode-auth.json`） |
-| `probeConsent` | false | 授权推理档位检测（检测会发送真实请求，可能消耗积分） |
+
+思考档位检测全自动：目录刷新后自动补测未声明档位的模型，无需配置。
 
 生效顺序（后者覆盖前者）：内置默认值 → bundle patch 的 config →
 profile/home 的 `cordis.patch.yml`（DSH 0.1.7 起第三方 provider 的模型设置表单

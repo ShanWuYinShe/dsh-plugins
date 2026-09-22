@@ -2,8 +2,10 @@
  * Probe control route: the only state-changing endpoint the plugin exposes.
  *
  * Ported from corrinehu/dsh-workbuddy-connect `src/probe-route.ts` (MIT).
- *
- * Two guards, because they stop different things:
+ * Effort detection itself is automatic (the probe service sweeps missing
+ * candidates after every catalog refresh), so the card has exactly one write
+ * to request here: a catalog refresh. Two guards, because they stop different
+ * things:
  *
  * 1. **Loopback Host + Origin**, shared with the status route. This drops
  *    DNS-rebinding pages, whose requests arrive addressed to the attacker's
@@ -13,8 +15,8 @@
  *    process can write `Host: 127.0.0.1` — so a route that spends the user's
  *    credit must prove the caller was told the key.
  *
- * The route never accepts a prompt, a model id outside the live catalog, or a
- * sentinel from the browser: a probe request is assembled entirely host-side.
+ * The route never accepts a prompt, a model id, or a sentinel from the
+ * browser: a probe request is assembled entirely host-side.
  *
  * @module dsh-any-connect/probe-route
  */
@@ -35,27 +37,14 @@ const MAX_BODY_BYTES = 4096
 /** Constructor dependencies. */
 export interface WorkBuddyProbeRouteOptions {
   /**
-   * Run a probe for one model. Resolves to a short status string, never a raw
-   * upstream body.
-   */
-  probe: (modelId: string) => Promise<{ state: string; reason?: string }>
-  /** Drop every recorded observation. */
-  clear: () => void
-  /**
    * Re-read the credential and re-fetch the model catalog for this variant.
    *
    * It lives on this route rather than the status GET because it is a write
    * that spends a request against the upstream: the read-only status route's
    * loopback guard protects against a rebinding *page*, which is not the same
-   * as authorizing an action. Requires the same in-process key as `probe`.
+   * as authorizing an action. Requires the in-process key.
    */
   refresh?: () => Promise<{ state: string; reason?: string }>
-  /**
-   * Persist the automatic-detection authorization. Disabling it here does not
-   * cancel sweeps already in flight (they were individually authorized when
-   * queued); it only stops future automatic triggers.
-   */
-  setConsent?: (enabled: boolean) => void
   /**
    * Route path to mount. Defaults to the CN variant's path so existing callers
    * and tests keep their behaviour; the international variant passes its own.
@@ -89,7 +78,7 @@ async function readBody(req: IncomingMessage): Promise<string | undefined> {
   const chunks: Buffer[] = []
   let total = 0
   for await (const chunk of req) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string)
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Buffer)
     total += buffer.length
     if (total > MAX_BODY_BYTES) return undefined
     chunks.push(buffer)
@@ -107,20 +96,9 @@ function parseAction(text: string): WorkBuddyProbeAction | undefined {
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
   const wrapped = parsed as Record<string, unknown>
-  const action = wrapped['action']
-  if (action === 'clear') return { action: 'clear' }
   // No payload: the variant is already known from the route the request arrived
   // on, so the browser cannot ask this route to refresh a different provider.
-  if (action === 'refresh') return { action: 'refresh' }
-  if (action === 'set-consent') {
-    if (typeof wrapped['enabled'] !== 'boolean') return undefined
-    return { action: 'set-consent', enabled: wrapped['enabled'] }
-  }
-  if (action === 'probe') {
-    const model = wrapped['model']
-    if (typeof model !== 'string' || model.trim() === '') return undefined
-    return { action: 'probe', model: model.trim() }
-  }
+  if (wrapped['action'] === 'refresh') return { action: 'refresh' }
   return undefined
 }
 
@@ -156,29 +134,11 @@ export function workBuddyProbeHandler(
       return
     }
     try {
-      if (action.action === 'clear') {
-        deps.clear()
-        json(res, 200, { state: 'cleared' })
+      if (deps.refresh === undefined) {
+        json(res, 404, { error: 'refresh-not-supported' })
         return
       }
-      if (action.action === 'refresh') {
-        if (deps.refresh === undefined) {
-          json(res, 404, { error: 'refresh-not-supported' })
-          return
-        }
-        json(res, 200, await deps.refresh())
-        return
-      }
-      if (action.action === 'set-consent') {
-        if (deps.setConsent === undefined) {
-          json(res, 404, { error: 'consent-not-supported' })
-          return
-        }
-        deps.setConsent(action.enabled as boolean)
-        json(res, 200, { state: 'ok', enabled: action.enabled })
-        return
-      }
-      json(res, 200, await deps.probe(action.model as string))
+      json(res, 200, await deps.refresh())
     } catch (error: unknown) {
       json(res, 500, { error: error instanceof Error ? error.message : String(error) })
     }
