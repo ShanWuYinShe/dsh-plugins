@@ -97,38 +97,43 @@ const headerStyle: CSSProperties = {
   justifyContent: 'space-between',
   gap: 16,
   border: 0,
-  padding: '13px 14px',
+  padding: '12px 14px',
   background: 'transparent',
   color: 'var(--dsw-alias-label-primary)',
   font: 'inherit',
   textAlign: 'left',
   cursor: 'pointer',
 }
-const headTextStyle: CSSProperties = { display: 'flex', minWidth: 0, flexDirection: 'column', gap: 3 }
+const headTextStyle: CSSProperties = { display: 'flex', minWidth: 0, flexDirection: 'column', gap: 2 }
+const nameRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }
 const nameStyle: CSSProperties = { fontSize: 14, lineHeight: '20px', fontWeight: 600 }
-const descriptionStyle: CSSProperties = { fontSize: 13, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' }
+const summaryStyle: CSSProperties = { paddingLeft: 16, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' }
 const chevronStyle: CSSProperties = { flex: '0 0 auto', fontSize: 18, lineHeight: 1, transition: 'transform 120ms ease' }
-const cardBodyStyle: CSSProperties = { borderTop: '1px solid var(--dsw-alias-border-l2)', padding: '16px 14px 18px', display: 'flex', flexDirection: 'column', gap: 16 }
+const cardBodyStyle: CSSProperties = { borderTop: '1px solid var(--dsw-alias-border-l2)', padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }
+const sectionStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8 }
+const sectionDividerStyle: CSSProperties = { border: 0, borderTop: '1px solid var(--dsw-alias-border-l2)', margin: 0 }
+const sectionHeadStyle: CSSProperties = { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }
+const sectionTitleStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', fontWeight: 600, letterSpacing: '0.02em', color: 'var(--dsw-alias-label-tertiary)' }
+const sectionMetaStyle: CSSProperties = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums' }
 
 const bodyStyle: CSSProperties = { margin: 0, fontSize: 14, lineHeight: '22px', color: 'var(--dsw-alias-label-secondary)' }
-const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }
-const statusStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 9, fontSize: 14, fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }
-const buttonStyle: CSSProperties = { boxSizing: 'border-box', minHeight: 30, padding: '4px 12px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 15, background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', font: 'inherit', fontSize: 13, cursor: 'pointer' }
+const statusRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }
+const statusLabelStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, lineHeight: '20px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }
+const descriptionStyle: CSSProperties = { fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' }
+const buttonStyle: CSSProperties = { boxSizing: 'border-box', minHeight: 26, padding: '3px 10px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, background: 'transparent', color: 'var(--dsw-alias-label-primary)', font: 'inherit', fontSize: 12, lineHeight: '18px', cursor: 'pointer' }
 const errorStyle: CSSProperties = { ...bodyStyle, color: 'var(--dsw-alias-state-error-primary)' }
-const quotaListStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 12 }
-const quotaTitleStyle: CSSProperties = { margin: 0, fontSize: 14, lineHeight: '20px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }
-const quotaLabelStyle: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13, lineHeight: '20px', color: 'var(--dsw-alias-label-secondary)' }
-const chipRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }
+const hintStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
 const chipStyle: CSSProperties = {
-  padding: '1px 8px', borderRadius: 999, fontSize: 11, lineHeight: '18px',
+  padding: '1px 8px', borderRadius: 999, fontSize: 11, lineHeight: '16px',
   background: 'var(--dsw-alias-state-success-subtle, rgba(34, 160, 107, 0.12))',
   color: 'var(--dsw-alias-state-success-primary, #22a06b)',
 }
-const metaStyle: CSSProperties = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
-const modelRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }
-const modelNameStyle: CSSProperties = { flex: '1 1 120px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, lineHeight: '20px', color: 'var(--dsw-alias-label-primary)' }
-const modelRateStyle: CSSProperties = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
-const hintStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
+const modelBadgesStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6 }
+const modelRowStyle: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto auto', gap: '0 10px', alignItems: 'center' }
+const modelNameStyle: CSSProperties = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, lineHeight: '22px', color: 'var(--dsw-alias-label-primary)' }
+const metaCellStyle: CSSProperties = { fontSize: 12, lineHeight: '20px', color: 'var(--dsw-alias-label-tertiary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+const creditLabelStyle: CSSProperties = { flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, lineHeight: '20px', color: 'var(--dsw-alias-label-secondary)' }
+const creditValueStyle: CSSProperties = { flex: '0 0 auto', minWidth: 40, textAlign: 'right', fontSize: 12, lineHeight: '20px', color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums' }
 const signedOutRowStyle: CSSProperties = {
   ...cardStyle,
 }
@@ -183,7 +188,7 @@ function modelBadgeLabel(badge: string, t: WorkBuddyConfigPageInjected['t']): st
   return badge
 }
 
-const progressTrackStyle: CSSProperties = { height: 8, overflow: 'hidden', borderRadius: 999, background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.08))' }
+const progressTrackStyle: CSSProperties = { flex: '1 1 auto', height: 6, overflow: 'hidden', borderRadius: 999, background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.08))' }
 
 function progressFillStyle(percent: number): CSSProperties {
   return {
@@ -194,71 +199,78 @@ function progressFillStyle(percent: number): CSSProperties {
   }
 }
 
-/** One billing package as a labeled progress bar. */
-function CreditBar({ label, remain, size, t }: {
+/**
+ * One billing package on a single line: name, bar, and the remaining share
+ * (an absolute count when the package size is unknown — a full bar would
+ * imply a certainty the upstream did not give). The exact figures live in the
+ * tooltip; repeating them on screen was noise.
+ */
+function CreditBar({ label, remain, size }: {
   label: string
   remain: number
   size: number
-  t: WorkBuddyConfigPageInjected['t']
 }): React.ReactNode {
-  const detail = size > 0 ? t('exactRemaining', { remain: formatNumber(remain), size: formatNumber(size) }) : t('creditPackageUnknownSize', { remain: formatNumber(remain) })
-  const percent = size > 0 ? (remain / size) * 100 : 100
+  const known = size > 0
+  const percent = known ? (remain / size) * 100 : 100
   // remain 理论上可超过 size（上游记账口径不保证一致）：进度条宽度与
   // aria-valuenow 夹到 [0,100]，避免出现 ">100%" 的剩余读数。
   const clamped = Math.max(0, Math.min(100, percent))
-  const display = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(clamped)
+  const display = known
+    ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(clamped)}%`
+    : formatNumber(remain)
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={quotaLabelStyle}>
-        <span>{label}</span>
-        <span>{t('percentRemaining', { percent: display })}</span>
-      </div>
-      <div
-        style={progressTrackStyle}
-        role="progressbar"
-        aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={clamped}
-      >
-        <div style={progressFillStyle(clamped)} />
-      </div>
-      <p style={hintStyle}>{detail}</p>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }} title={known ? `${formatNumber(remain)} / ${formatNumber(size)}` : undefined}>
+      <span style={creditLabelStyle}>{label}</span>
+      {known ? (
+        <div
+          style={progressTrackStyle}
+          role="progressbar"
+          aria-label={label}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={clamped}
+        >
+          <div style={progressFillStyle(clamped)} />
+        </div>
+      ) : null}
+      <span style={creditValueStyle}>{display}</span>
     </div>
   )
 }
 
-/** One row of the unified model list. */
+/**
+ * One row of the unified model list, as a four-column grid: name (which may
+ * shrink), badges, rate, window, efforts. Grid columns are shared by every
+ * row, so the tabular figures line up down the card instead of wavering with
+ * each label's width. Detection's negative conclusion ("upstream ignores the
+ * parameter") renders no efforts cell content — no selectable levels is the
+ * answer itself.
+ */
 function ModelRow({ row, efforts, t }: {
   row: WorkBuddyWebModelRow
   /** The effort levels the model accepts: declared, or automatically detected. */
   efforts: readonly string[] | undefined
   t: WorkBuddyConfigPageInjected['t']
 }): React.ReactNode {
-  // 右侧元信息一行纯文本：倍率 · 窗口 · 档位。检测的否定性结论（上游不
-  // 区分档位）不展示——那是实现细节，不是用户需要知道的事；没有档位可选
-  // 本身就是无声的答案。
-  const meta = [
-    row.free === true ? undefined : row.credits,
-    row.rateUnknown === true ? t('rateUnknown') : undefined,
-    formatTokens(row.contextWindow),
-    efforts !== undefined && efforts.length > 0 ? efforts.join('/') : undefined,
-  ].filter(part => part !== undefined).join(' · ')
   return (
     <div style={modelRowStyle}>
       <span style={modelNameStyle} title={row.name}>{row.name}</span>
-      <span style={chipRowStyle}>
+      <span style={modelBadgesStyle}>
         {row.free === true ? <span style={chipStyle}>{t('freeModel')}</span> : null}
         {row.badges?.map(badge => (
           <span key={badge} style={chipStyle}>{modelBadgeLabel(badge, t)}</span>
         ))}
-        {meta !== '' ? <span style={metaStyle}>{meta}</span> : null}
+      </span>
+      <span style={metaCellStyle}>{row.free === true ? null : row.rateUnknown === true ? t('rateUnknown') : row.credits}</span>
+      <span style={metaCellStyle}>{formatTokens(row.contextWindow)}</span>
+      <span style={{ ...metaCellStyle, color: 'var(--dsw-alias-label-secondary)' }}>
+        {efforts !== undefined && efforts.length > 0 ? efforts.join('/') : null}
       </span>
     </div>
   )
 }
 
-/** The night-free window line (zcode-offpeak only). */
+/** The night-free window line (zcode-offpeak only), with a state dot. */
 function OffPeakWindowRow({ window, t }: {
   window: WorkBuddyWebOffPeakWindow
   t: WorkBuddyConfigPageInjected['t']
@@ -270,7 +282,18 @@ function OffPeakWindowRow({ window, t }: {
       : window.nextTakeAtSec !== undefined
         ? t('offpeakWindowNext', { time: formatTime(window.nextTakeAtSec * 1000) })
         : t('offpeakWindowClosed')
-  return <p style={bodyStyle}>{t('offpeakWindow')}：{text}</p>
+  const dot = window.error !== undefined
+    ? dotStyle('error')
+    : window.canTakeNumber
+      ? dotStyle('signed-in')
+      : dotStyle('signed-out')
+  return (
+    <div style={statusLabelStyle}>
+      <span aria-hidden="true" style={dot} />
+      <span style={{ color: 'var(--dsw-alias-label-secondary)', fontWeight: 400 }}>{t('offpeakWindow')}</span>
+      <span>{text}</span>
+    </div>
+  )
 }
 
 /**
@@ -542,17 +565,20 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
         onClick={onToggle}
       >
         <span style={headTextStyle}>
-          <span style={nameStyle}>{title}</span>
-          <span style={descriptionStyle} title={t(variant.introKey)}>{headerSummary}</span>
+          <span style={nameRowStyle}>
+            <span aria-hidden="true" style={dotStyle('signed-in')} />
+            <span style={nameStyle}>{title}</span>
+          </span>
+          <span style={summaryStyle} title={t(variant.introKey)}>{headerSummary}</span>
         </span>
         <span aria-hidden="true" style={{ ...chevronStyle, transform: open ? 'rotate(180deg)' : 'none' }}>⌄</span>
       </button>
       {open ? (
         <div style={cardBodyStyle}>
-          <div style={rowStyle}>
-            <div style={statusStyle} role="status">
+          <div style={statusRowStyle}>
+            <div style={statusLabelStyle} role="status">
               <span aria-hidden="true" style={dotStyle('signed-in')} />
-              <span>{label}</span>
+              <span>{t('signedIn')}</span>
             </div>
             <button
               type="button"
@@ -566,10 +592,11 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
           {notice !== undefined ? <p style={{ ...errorStyle, fontSize: 12 }} role="alert">{t('refreshFailed', { message: notice })}</p> : null}
 
           {status.credits !== undefined ? (
-            <div style={quotaListStyle}>
-              <div style={rowStyle}>
-                <h3 style={quotaTitleStyle}>{t('creditsHeading')}</h3>
-                <span style={bodyStyle}>{t('creditsTotal', { total: formatNumber(status.credits.total) })}</span>
+            <div style={sectionStyle}>
+              <hr style={sectionDividerStyle} />
+              <div style={sectionHeadStyle}>
+                <h3 style={sectionTitleStyle}>{t('creditsHeading')}</h3>
+                <span style={sectionMetaStyle}>{t('creditsTotal', { total: formatNumber(status.credits.total) })}</span>
               </div>
               {status.credits.accounts
                 .filter(account => account.remain > 0)
@@ -579,7 +606,6 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                     label={account.packageName}
                     remain={account.remain}
                     size={account.size}
-                    t={t}
                   />
                 ))}
             </div>
@@ -591,12 +617,13 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
           {status.offPeakWindow !== undefined ? <OffPeakWindowRow window={status.offPeakWindow} t={t} /> : null}
 
           {status.models !== undefined && status.models.length > 0 ? (
-            <div style={quotaListStyle}>
-              <div style={rowStyle}>
-                <h3 style={quotaTitleStyle}>{t('modelsCount', { n: status.models.length })}</h3>
-                {probe?.running === true ? <span style={modelRateStyle}>{t('detectingShort')}</span> : null}
+            <div style={sectionStyle}>
+              <hr style={sectionDividerStyle} />
+              <div style={sectionHeadStyle}>
+                <h3 style={sectionTitleStyle}>{t('modelsCount', { n: status.models.length })}</h3>
+                {probe?.running === true ? <span style={sectionMetaStyle}>{t('detectingShort')}</span> : null}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
                 {status.models.map(row => (
                   <ModelRow
                     key={row.id}

@@ -15,3 +15,4 @@ packages/*/client/client.cjs
 
 # 工具临时文件(如包管理器 / 编辑器落盘时产生的 _tmp_* 空文件)
 _tmp_*
+*.tgz
