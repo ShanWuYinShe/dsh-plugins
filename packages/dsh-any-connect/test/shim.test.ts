@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { WorkBuddyCredentialStore } from '../src/auth.js'
 import { WorkBuddyCatalog, FALLBACK_WORKBUDDY_MODELS } from '../src/catalog.js'
 import { createWorkBuddyShim, type WorkBuddyShim } from '../src/shim.js'
+import { CN_VARIANT } from '../src/variants.js'
 import type { WorkBuddyChatResult } from '../src/upstream.js'
 
 const CLEANUP: (() => Promise<void>)[] = []
@@ -65,6 +66,7 @@ async function startShim(upstreamResponse: () => WorkBuddyChatResult): Promise<H
     account: { uid: 'uid-1' },
   }))
   const store = new WorkBuddyCredentialStore({
+    variant: CN_VARIANT,
     desktopPath: desktop,
     ownPath: join(dir, 'own.json'),
     refresh: async () => ({ accessToken: 'unused' }),
@@ -369,6 +371,7 @@ describe('WorkBuddy shim', () => {
       account: { uid: 'uid-1' },
     }))
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: desktop,
       ownPath: join(dir, 'own.json'),
       refresh: async () => ({ accessToken: 'unused' }),

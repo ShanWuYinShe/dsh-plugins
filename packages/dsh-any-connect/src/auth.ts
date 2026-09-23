@@ -47,12 +47,11 @@ export interface WorkBuddyAuthStatus {
   reason?: string
 }
 
-/** Constructor options; only {@link refresh} is required. */
+/** Constructor options; {@link refresh} and {@link variant} are required. */
 export interface WorkBuddyStoreOptions {
   /** Product variant served by this store; selects filenames, env var, and
-   * the accepted credential region. Absent means the CN default, so every
-   * existing invocation keeps its behaviour. */
-  variant?: WorkBuddyVariant
+   * the accepted credential region. */
+  variant: WorkBuddyVariant
   /** Explicit desktop auth-file path, overriding env and platform defaults. */
   desktopPath?: string
   /** Explicit plugin-owned copy path, defaulting under `$DSH_HOME`. */
@@ -179,12 +178,6 @@ export function desktopAuthCandidatesFor(variant: WorkBuddyVariant): string[] {
   return defaultDesktopAuthCandidates().map(path => join(dirname(path), variant.desktopFilename!))
 }
 
-/** First platform-default candidate for one variant, for diagnostics. */
-export function defaultDesktopAuthPath(variant?: WorkBuddyVariant): string | undefined {
-  const candidates = variant === undefined ? defaultDesktopAuthCandidates() : desktopAuthCandidatesFor(variant)
-  return candidates[0]
-}
-
 /** Normalize an expiry that may arrive in seconds or milliseconds. */
 function expiryToMs(value: number): number {
   if (value <= 0) return 0
@@ -287,7 +280,7 @@ function isENOENT(error: unknown): boolean {
  * not take down a working session.
  */
 export class WorkBuddyCredentialStore {
-  private readonly variant: WorkBuddyVariant | undefined
+  private readonly variant: WorkBuddyVariant
   private readonly refresh: WorkBuddyStoreOptions['refresh']
   private readonly refreshMarginMs: number
   private readonly ownPath: string
@@ -311,9 +304,7 @@ export class WorkBuddyCredentialStore {
     this.variant = options.variant
     this.refresh = options.refresh
     this.refreshMarginMs = options.refreshMarginMs ?? DEFAULT_REFRESH_MARGIN_MS
-    this.ownPath = options.ownPath ?? (options.variant === undefined
-      ? workbuddyOwnAuthPath()
-      : workbuddyOwnAuthPath(options.variant.ownFilename))
+    this.ownPath = options.ownPath ?? workbuddyOwnAuthPath(options.variant.ownFilename)
     this.desktopPathOverride = options.desktopPath
     this.onWarning = options.onWarning ?? (message => console.warn(message))
   }
@@ -324,7 +315,7 @@ export class WorkBuddyCredentialStore {
    * explicit path is used verbatim; the defaults are a probe order.
    */
   private resolveDesktopCandidates(): string[] {
-    const fromEnv = process.env[this.variant?.env ?? WORKBUDDY_AUTH_FILE_ENV]
+    const fromEnv = process.env[this.variant.env ?? WORKBUDDY_AUTH_FILE_ENV]
     // The settings schema materializes an unset `authFile` as an empty
     // string, and `onChange` hands that string here verbatim. A blank
     // override must fall through to the platform probe order exactly like a
@@ -335,9 +326,7 @@ export class WorkBuddyCredentialStore {
       : undefined
     const explicit = fromConfig ?? (fromEnv !== undefined && fromEnv.trim() !== '' ? fromEnv : undefined)
     if (explicit !== undefined) return [explicit]
-    return this.variant === undefined
-      ? defaultDesktopAuthCandidates()
-      : desktopAuthCandidatesFor(this.variant)
+    return desktopAuthCandidatesFor(this.variant)
   }
 
   private resolveDesktopPath(): string | undefined {
@@ -369,17 +358,15 @@ export class WorkBuddyCredentialStore {
     // misconfigured `authFile` / env var is a realistic mistake, and sending one
     // region's token to the other's endpoint would leak it across products.
     // Naming the file and the expected region is what makes it fixable.
-    if (this.variant !== undefined) {
-      for (const [label, credential] of [['desktop file', desktop], ['plugin copy', own]] as const) {
-        if (credential === undefined) continue
-        const region = regionOf(credential.domain)
-        if (region !== this.variant.region) {
-          throw new RegionMismatchError(
-            `${this.variant.displayName} received a ${region === 'cn' ? 'WorkBuddy (CN)' : 'WorkBuddy AI'} credential`
-            + ` in its ${label} (domain ${JSON.stringify(credential.domain)});`
-            + ` point ${this.variant.env} at the ${this.variant.appName} sign-in, or remove the mismatched file`,
-          )
-        }
+    for (const [label, credential] of [['desktop file', desktop], ['plugin copy', own]] as const) {
+      if (credential === undefined) continue
+      const region = regionOf(credential.domain)
+      if (region !== this.variant.region) {
+        throw new RegionMismatchError(
+          `${this.variant.displayName} received a ${region === 'cn' ? 'WorkBuddy (CN)' : 'WorkBuddy AI'} credential`
+          + ` in its ${label} (domain ${JSON.stringify(credential.domain)});`
+          + ` point ${this.variant.env} at the ${this.variant.appName} sign-in, or remove the mismatched file`,
+        )
       }
     }
     const stored = desktop === undefined

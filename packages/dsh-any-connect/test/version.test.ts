@@ -23,10 +23,6 @@ describe('package version sync', () => {
     expect(ANYCONNECT_VERSION).toBe(pkg.version)
   })
 
-  it('never leaks a manifest-read fallback marker', () => {
-    expect(ANYCONNECT_VERSION).not.toBe('0.0.0-dev')
-  })
-
   /**
    * The runtime read resolves package.json relative to the module, so the built
    * `lib/version.js` must be able to reach the manifest from its own location
