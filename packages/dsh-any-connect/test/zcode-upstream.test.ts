@@ -6,6 +6,7 @@ import {
   ZCodeUpstreamClient,
   decryptZCodeEncryptedKey,
   parseZCodeAuth,
+  prepareAnthropicBody,
   type WorkBuddyCredential,
 } from '../src/index.js'
 import type { ZCodeClientSigner } from '../src/zcode-signer.js'
@@ -97,18 +98,20 @@ describe('ZCode upstream and auth', () => {
       } as unknown as ZCodeClientSigner
 
       const mockFetch = vi.fn(async (url: string, init?: RequestInit) => {
-        expect(url).toBe('https://open.bigmodel.cn/api/paas/v4/chat/completions')
+        expect(url).toBe('https://open.bigmodel.cn/api/anthropic/v1/messages')
         const headers = init?.headers as Record<string, string>
         expect(headers['X-App-Id']).toBe('zcode')
         expect(headers['X-Client-Sig']).toBe('mocksig')
         expect(headers['Content-Type']).toBe('application/json')
         expect(headers['Accept']).toBe('text/event-stream')
+        expect(headers['anthropic-version']).toBe('2023-06-01')
 
         const body = JSON.parse(init?.body as string)
         expect(body.stream).toBe(true)
         expect(body.model).toBe('glm-5.3')
+        expect(body.max_tokens).toBe(8192)
 
-        return new Response('data: {"choices":[{"delta":{"content":"pong"}}]}\n\ndata: [DONE]\n\n', {
+        return new Response('event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"pong"}}\n\n', {
           status: 200,
           headers: { 'Content-Type': 'text/event-stream' },
         })
@@ -154,4 +157,57 @@ describe('ZCode upstream and auth', () => {
       vi.unstubAllGlobals()
     })
   })
+
+  describe('prepareAnthropicBody', () => {
+    it('forces stream: true and provides default max_tokens', () => {
+      const input = JSON.stringify({
+        model: 'glm-5.3-flash',
+        messages: [{ role: 'user', content: 'hello' }],
+      })
+      const output = JSON.parse(prepareAnthropicBody(input))
+      expect(output.stream).toBe(true)
+      expect(output.max_tokens).toBe(8192)
+      expect(output.model).toBe('glm-5.3-flash')
+      expect(output.messages).toEqual([{ role: 'user', content: 'hello' }])
+    })
+
+    it('extracts system and developer messages into top-level system parameter', () => {
+      const input = JSON.stringify({
+        model: 'glm-5.3',
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant.' },
+          { role: 'user', content: 'question' },
+        ],
+      })
+      const output = JSON.parse(prepareAnthropicBody(input))
+      expect(output.system).toBe('You are a helpful assistant.')
+      expect(output.messages).toEqual([{ role: 'user', content: 'question' }])
+    })
+
+    it('converts OpenAI function tools into Anthropic input_schema tools', () => {
+      const input = JSON.stringify({
+        model: 'glm-5.3',
+        messages: [{ role: 'user', content: 'weather' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'get_weather',
+              description: 'weather lookup',
+              parameters: { type: 'object', properties: { loc: { type: 'string' } } },
+            },
+          },
+        ],
+      })
+      const output = JSON.parse(prepareAnthropicBody(input))
+      expect(output.tools).toEqual([
+        {
+          name: 'get_weather',
+          description: 'weather lookup',
+          input_schema: { type: 'object', properties: { loc: { type: 'string' } } },
+        },
+      ])
+    })
+  })
 })
+

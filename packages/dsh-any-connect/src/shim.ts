@@ -122,6 +122,10 @@ function writeOpenAIError(res: ServerResponse, status: number, kind: string, mes
   writeJson(res, status, { error: { message, type: kind, code: kind } })
 }
 
+function writeAnthropicError(res: ServerResponse, status: number, kind: string, message: string): void {
+  writeJson(res, status, { type: 'error', error: { type: kind, message } })
+}
+
 /** Read a request body with a size cap; over-limit bodies fail the request. */
 function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -166,13 +170,24 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     return timingSafeEqual(a, b)
   }
 
-  /** Bearer check (the OpenAI half's spelling). */
-  function bearerOk(req: IncomingMessage): boolean {
+  /** Bearer or x-api-key check (OpenAI and Anthropic headers). */
+  function secretFromRequest(req: IncomingMessage): string | undefined {
     const header = req.headers.authorization
-    if (typeof header !== 'string') return false
-    const match = /^Bearer\s+(.+)$/i.exec(header.trim())
-    if (match === null) return false
-    return secretOk(match[1] as string)
+    if (typeof header === 'string') {
+      const match = /^Bearer\s+(.+)$/i.exec(header.trim())
+      if (match !== null) return match[1]
+    }
+    const xApiKey = req.headers['x-api-key']
+    if (typeof xApiKey === 'string' && xApiKey.trim() !== '') {
+      return xApiKey.trim()
+    }
+    return undefined
+  }
+
+  function authOk(req: IncomingMessage): boolean {
+    const secret = secretFromRequest(req)
+    if (secret === undefined) return false
+    return secretOk(secret)
   }
 
   const server: Server = createServer((req, res) => {
@@ -213,7 +228,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         writeOpenAIError(res, 403, 'origin_not_allowed', 'Origin must be a loopback origin')
         return
       }
-      if (!bearerOk(req)) {
+      if (!authOk(req)) {
         writeUnauthorized(res)
         return
       }
@@ -239,6 +254,10 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
       }
       if (req.method === 'POST' && (pathname === '/v1/chat/completions' || pathname === '/v1/chat/completions/')) {
         await chatCompletions(req, res)
+        return
+      }
+      if (req.method === 'POST' && (pathname === '/v1/messages' || pathname === '/v1/messages/')) {
+        await anthropicMessages(req, res)
         return
       }
       writeOpenAIError(res, 404, 'not_found', `no such route: ${req.method} ${url}`)
@@ -311,6 +330,50 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     })
     body.pipe(res)
   }
+
+  async function anthropicMessages(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!isJsonContentType(req)) {
+      writeAnthropicError(res, 415, 'invalid_request_error', 'Content-Type must be application/json')
+      return
+    }
+    let credential
+    try {
+      credential = await store.resolve()
+    } catch (error: unknown) {
+      writeAnthropicError(res, 401, 'authentication_error', String(error))
+      return
+    }
+
+    const raw = (await readBody(req)).toString('utf8')
+    const controller = new AbortController()
+    req.on('close', () => controller.abort())
+    const result = await client.chatStream(credential, raw, controller.signal)
+
+    if (!result.ok) {
+      if (controller.signal.aborted || res.destroyed) return
+      writeAnthropicError(
+        res,
+        KIND_STATUS[result.kind],
+        result.kind === 'hard_credit' ? 'billing_error' : 'api_error',
+        `${options.kind} upstream ${result.kind} (http ${result.status}): ${result.message.slice(0, 400)}`,
+      )
+      return
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+    const body = Readable.fromWeb(result.response.body as Parameters<typeof Readable.fromWeb>[0])
+    body.on('error', (error: unknown) => {
+      logger?.warn('dsh-any-connect: upstream stream failed mid-flight', error)
+      if (!res.writableEnded) res.end()
+    })
+    body.pipe(res)
+  }
+
 
   return {
     ready,

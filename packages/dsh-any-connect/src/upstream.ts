@@ -545,6 +545,76 @@ export function prepareChatBody(source: string): string {
   return JSON.stringify(obj)
 }
 
+/**
+ * Normalize an Anthropic messages body: force `stream: true`, ensure positive
+ * `max_tokens` (required by Anthropic API), and convert OpenAI-shaped messages
+ * if provided.
+ */
+export function prepareAnthropicBody(source: string): string {
+  let body: unknown
+  try {
+    body = JSON.parse(source)
+  } catch {
+    return source
+  }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return source
+  const obj = body as Record<string, unknown>
+  obj['stream'] = true
+
+  // max_tokens is mandatory on Anthropic /v1/messages
+  if (typeof obj['max_tokens'] !== 'number' || obj['max_tokens'] <= 0) {
+    if (typeof obj['max_completion_tokens'] === 'number' && obj['max_completion_tokens'] > 0) {
+      obj['max_tokens'] = obj['max_completion_tokens']
+    } else {
+      obj['max_tokens'] = 8192
+    }
+  }
+  delete obj['max_completion_tokens']
+
+  // If OpenAI messages format with system/developer role, convert to top-level system
+  if (Array.isArray(obj['messages'])) {
+    const systemParts: string[] = []
+    const filteredMessages: unknown[] = []
+    for (const msg of obj['messages']) {
+      if (typeof msg === 'object' && msg !== null && !Array.isArray(msg)) {
+        const wrapped = msg as Record<string, unknown>
+        if (wrapped['role'] === 'system' || wrapped['role'] === 'developer') {
+          if (typeof wrapped['content'] === 'string') {
+            systemParts.push(wrapped['content'])
+          }
+          continue
+        }
+      }
+      filteredMessages.push(msg)
+    }
+    if (systemParts.length > 0 && typeof obj['system'] !== 'string') {
+      obj['system'] = systemParts.join('\n\n')
+      obj['messages'] = filteredMessages
+    }
+  }
+
+  // If OpenAI tools format with type 'function', convert to Anthropic input_schema
+  if (Array.isArray(obj['tools']) && obj['tools'].length > 0) {
+    obj['tools'] = obj['tools'].map(t => {
+      if (typeof t === 'object' && t !== null && !Array.isArray(t)) {
+        const wt = t as Record<string, unknown>
+        if (wt['type'] === 'function' && typeof wt['function'] === 'object' && wt['function'] !== null) {
+          const fn = wt['function'] as Record<string, unknown>
+          return {
+            name: typeof fn['name'] === 'string' ? fn['name'] : '',
+            description: typeof fn['description'] === 'string' ? fn['description'] : '',
+            input_schema: typeof fn['parameters'] === 'object' && fn['parameters'] !== null ? fn['parameters'] : { type: 'object', properties: {} },
+          }
+        }
+      }
+      return t
+    })
+  }
+
+  return JSON.stringify(obj)
+}
+
+
 /** Rewrite `role: "developer"` messages to `role: "system"` (upstream rejects developer). */
 function normalizeDeveloperRole(obj: Record<string, unknown>): void {
   const messages = obj['messages']
@@ -1017,7 +1087,7 @@ export class ZCodeUpstreamClient {
     this.models = options.models ?? []
   }
 
-  /** POST the BigModel chat endpoint; a successful answer is the raw SSE response. */
+  /** POST the BigModel Anthropic messages endpoint; a successful answer is the raw SSE response. */
   async chatStream(
     credential: WorkBuddyCredential,
     bodyJson: string,
@@ -1031,14 +1101,15 @@ export class ZCodeUpstreamClient {
     let response: Response
     try {
       const zcodeHeaders = await this.signer.buildHeaders({ apiKey: credential.accessToken })
-      response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+      response = await fetch('https://open.bigmodel.cn/api/anthropic/v1/messages', {
         method: 'POST',
         headers: {
           ...zcodeHeaders,
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
+          'anthropic-version': '2023-06-01',
         },
-        body: prepareChatBody(bodyJson),
+        body: prepareAnthropicBody(bodyJson),
         signal: signal === undefined ? headerTimer.signal : AbortSignal.any([headerTimer.signal, signal]),
       })
     } catch (error: unknown) {

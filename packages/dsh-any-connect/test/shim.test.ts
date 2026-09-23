@@ -185,6 +185,63 @@ describe('WorkBuddy shim', () => {
     expect(body.error.message).toContain('积分不足')
   })
 
+  it('streams an Anthropic message on /v1/messages authenticated by x-api-key', async () => {
+    const encoder = new TextEncoder()
+    async function* source() {
+      yield encoder.encode('event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}\n\n')
+    }
+    const harness = await startShim(() => ({
+      ok: true,
+      response: new Response(readableStreamFrom(source()), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    }))
+    const response = await fetch(`${harness.shim.baseUrl()}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': harness.shim.token(),
+      },
+      body: JSON.stringify({
+        model: 'glm-5.3-flash',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: 'hello' }],
+      }),
+    })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/event-stream')
+    const text = await response.text()
+    expect(text).toContain('hello')
+    expect(harness.upstreamBodies).toHaveLength(1)
+  })
+
+  it('maps an upstream credit failure on /v1/messages onto Anthropic error format', async () => {
+    const harness = await startShim(() => ({
+      ok: false,
+      status: 402,
+      kind: 'hard_credit',
+      message: '积分不足',
+    }))
+    const response = await fetch(`${harness.shim.baseUrl()}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': harness.shim.token(),
+      },
+      body: JSON.stringify({
+        model: 'glm-5.3-flash',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: 'hello' }],
+      }),
+    })
+    expect(response.status).toBe(402)
+    const body = await response.json() as { type: string, error: { type: string, message: string } }
+    expect(body.type).toBe('error')
+    expect(body.error.type).toBe('billing_error')
+    expect(body.error.message).toContain('积分不足')
+  })
+
   it('answers unknown routes with 404', async () => {
     const harness = await startShim(() => ({ ok: false, status: 500, kind: 'server', message: 'unused' }))
     const response = await fetch(`${harness.shim.baseUrl()}/v1/nothing`, {
@@ -318,6 +375,24 @@ describe('WorkBuddy shim', () => {
         host: `127.0.0.1:${port}`,
         'content-type': 'application/json',
         authorization: 'Bearer not-the-real-secret',
+      },
+      body: JSON.stringify({ model: 'auto', messages: [] }),
+    })
+    expect(res.status).toBe(401)
+    expect(harness.upstreamBodies).toHaveLength(0)
+  })
+
+  it('rejects a loopback request with a wrong x-api-key', async () => {
+    const harness = await startShim(() => ({ ok: false, status: 500, kind: 'server', message: 'unused' }))
+    const port = Number(new URL(harness.shim.baseUrl()).port)
+    const res = await rawRequest({
+      port,
+      method: 'POST',
+      path: '/v1/messages',
+      headers: {
+        host: `127.0.0.1:${port}`,
+        'content-type': 'application/json',
+        'x-api-key': 'not-the-real-secret',
       },
       body: JSON.stringify({ model: 'auto', messages: [] }),
     })
