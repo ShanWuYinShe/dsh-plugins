@@ -25,9 +25,8 @@
 
 ### 适配
 
-* 跟进 DSH 宿主 0.1.6-alpha.2：TypertCodec 的 `schema` 字段改为惰性
-  `create` 工厂（typert-loader 强制校验 `create()` 存在，旧字段会令插件
-  加载失败），客户端 `$mount` 描述符与 `typert.host` 工件同步迁移；侧栏
+* TypertCodec 改用惰性 `create` 工厂（typert-loader 强制校验 `create()`
+  存在），客户端 `$mount` 描述符与 `typert.host` 工件同步迁移；侧栏
   归档入口不受影响（`sidebar.footer.action` 契约未变）
 
 ## 0.3.14-alpha.1 (2026-09-15)
@@ -58,11 +57,9 @@
   有界）、unarchive 补 `failed` 语义（unenumerable/not-archived/
   not-restorable）、absent 快速路径纳入 exclusive 临界区、二次 rm 异常
   真实上报、失败原因本地化与部分成功如实提示
-* 跟进 DSH 宿主 0.1.6-alpha.1：归档集合移除改调官方新增的
-  `WorkspaceRegistry.unarchiveSession()`，删除此前复用私有写入通道
-  （`enqueueOperation` → `requireState` → `setState`）的 hack。新方法不做
+* 归档集合移除改调官方 `WorkspaceRegistry.unarchiveSession()`。该方法不做
   存在性检查、内部串行化写入，因此「文件仍存在」的 confirm 复核仍由本插件
-  在调用前完成，并与 `deleteArchived` 经 exclusive 互斥；registry 缺失该
+  在调用前完成，并与 `deleteArchived` 经 exclusive 互斥；registry 未提供该
   方法时恢复返回空（列表仍按存在性过滤幽灵 id）
 
 ### Fixes
@@ -112,17 +109,14 @@
 
 ### Changes
 
-* 跟进 DSH 稳定版 0.1.5-rc.2：全部 `@deepseek-ai/dsh-*` 依赖由 `^0.1.5-rc.1`
-  升至 `^0.1.5-rc.2`，`dsh.host` 更新为 `0.1.5-rc.2`（rc.2 与 rc.1 逐包
-  对比源码零差异，纯依赖 range 重发，无适配代码改动）
 * build + typecheck + 全量测试通过，并在隔离测试实例真实验证
 
 ## 0.3.9 (2026-09-10)
 
 ### Fixes
 
-* 修复归档面板恒空：DSH 0.1.3 起 `sessionPersistence.list()` 返回
-  `SessionPersistenceSnapshot[]`（header 在 `.header` 上），旧代码直接读
+* 修复归档面板恒空：`sessionPersistence.list()` 返回
+  `SessionPersistenceSnapshot[]`（header 在 `.header` 上），直接读
   `item.id` 全为 undefined，归档 id 一个也匹配不上，列表永远为空。现按
   快照形状取 header
 * 修复详情/标题读取：持久化契约已移除 `readFrom`，改为 `open(id,'read')`
@@ -145,15 +139,9 @@
   （`dsh-session-title` 纯函数，行为与宿主逐字一致，含 `ignorable`/来源
   语义），替代手写折叠；assistant 消息文本按官方 `SessionEventMap` 从
   `data.message.content` 提取
-* 归档集合移除通道（官方无 unarchive API）显式标注为宿主内部形状依赖
-  （官方 d.ts 上 `enqueueOperation`/`requireState`/`setState` 为 private），
-  运行时探测可用性，形状变化自动降级
-* 跟进 DSH 稳定版 0.1.5-rc.1（合并 alpha 线 0.3.9-alpha.0 ~ alpha.2 的适配
-  内容）：`@deepseek-ai/dsh-typert-protocol` 依赖由 `^0.1.2-rc.1` 升至
-  `^0.1.5-rc.1`，`dsh.host` 更新为 `0.1.5-rc.1`
 * 测试夹具重写为官方契约形状（快照 + 句柄 + 官方事件 data），新增快照形状、
   旧代际文件名、无 locate 降级三组回归用例；build + typecheck + 全量测试
-  在 0.1.5-rc.1 依赖闭包上通过，并在隔离测试实例真实验证
+  通过，并在隔离测试实例真实验证
 
 ## 0.3.8 (2026-09-05)
 
@@ -189,16 +177,7 @@
 
 ### Changes
 
-* alpha 线合并 + 稳定线跟进 DSH 0.1.2-rc.1：`@deepseek-ai/dsh-typert-protocol`
-  由 `^0.1.1-rc.2` 升到 `^0.1.2-rc.1`（合入 alpha 线 0.3.4-alpha.0 /
-  0.3.4-alpha.1 的适配内容，功能与 0.3.3 一致）
-* 已对照 0.1.2-rc.1 全量 diff 官方包（36 个：逐包与 0.1.2-alpha.5 字节对比，
-  除版本号外零差异——rc.1 是纯转正 bump）：面板远程服务的
-  workspaceRegistry（`archivedSessionIds` / `enqueueOperation` /
-  `requireState` / `setState`）与 sessionPersistence（`list` / `locate` /
-  `readFrom`）契约、`session/title` / `user/message` / `assistant/message`
-  事件形状与 alpha.5 适配时一致；全仓 build + typecheck + 162 项测试在
-  rc.1 依赖闭包上通过
+* 功能与 0.3.3 一致（依赖基线同步）
 
 ## 0.3.3 (2026-08-29)
 
@@ -214,18 +193,13 @@
 
 * 支持从源码运行的 DSH：typert-protocol 解析链首插安装闭包共享 fallback
   `$DSH_HOME/profiles/node_modules/<pkg>`，以 realpath 导入保证与 harness 同一
-  模块实例；失败回落原有解析链。已对照 dsh 源码 0.1.2-alpha.1 复核
-  workspaceRegistry / sessionPersistence 契约与事件形状无变化
+  模块实例；失败回落原有解析链
 
 ## 0.3.1 (2026-08-28)
 
 ### Bug Fixes
 
-* 适配 DSH 0.1.1-rc.2：`@deepseek-ai/dsh-typert-protocol` 依赖 range 从
-  `^0.1.0-rc.8` 升到 `^0.1.1-rc.2`（npm semver 的 prerelease 规则下旧 range
-  无法匹配 `0.1.1-rc.2`，新版宿主下面板远程服务会因官方包解析到旧版本而不可用）
-* 已对照 0.1.1-rc.2 复核 workspaceRegistry / sessionPersistence / sessions
-  契约与 `session/title`、`user/message`、`assistant/message` 事件形状：无变化
+* 依赖基线同步，无功能变更
 
 ## 0.3.0 (2026-08-25)
 

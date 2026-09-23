@@ -53,7 +53,7 @@ function assistantEvent(seq: number, time: number, text: string) {
 }
 
 /**
- * 官方契约夹具（dsh 0.1.6-alpha 形状，无旧版分支）：list() 返回
+ * 官方契约夹具：list() 返回
  * SessionPersistenceSnapshot 数组、open() read 句柄读事件流、事件 data
  * 为官方 SessionEventMap 形状（user/message 本体、assistant/message 包装）。
  * 默认带 locate——jsonl 后端的诊断钩子（不在抽象契约上），
@@ -76,7 +76,7 @@ function makeFixture(options: {
     get archivedSessionIds() {
       return registryState.archivedSessionIds;
     },
-    // DSH 0.1.6 官方 unarchiveSession：幂等移除，未归档的 id 直接 resolve。
+    // 官方 unarchiveSession：幂等移除，未归档的 id 直接 resolve。
     unarchiveSession: async (sessionId: string) => {
       registryState.archivedSessionIds = registryState.archivedSessionIds.filter((id) => id !== sessionId);
     },
@@ -99,7 +99,7 @@ function makeFixture(options: {
   let statCalls = 0;
   let listCalls = 0;
   // 官方契约 stat(id):只读该会话元数据;枚举不到(无 header 或文件已删)
-  // 返回 undefined。宿主 0.1.5 起四端点都走它,不再全量 list()。
+  // 返回 undefined。四端点都走 stat 逐 id 定位，不做全量 list()。
   persistenceMock.stat = async (id: string) => {
     statCalls++;
     if (!headers.some((h) => h.id === id) || !fs.existsSync(sessionPath(id))) return void 0;
@@ -434,8 +434,8 @@ describe("session-archive host", () => {
   });
 
   it("官方契约回归:list() 快照形状 + open 句柄下归档列表与详情完整语义(bug 复现用例)", async () => {
-    // 线上故障的直接形状:0.1.3+ list() 返回 {header,...} 快照数组,
-    // 旧代码读 item.id 全为 undefined,归档 id 一个也匹配不上 → 面板恒空。
+    // 回归：list() 返回 {header,...} 快照数组，必须按 header.id 匹配归档
+    // id（误读 item.id 会全为 undefined，归档一个也匹配不上 → 面板恒空）。
     // 夹具即官方契约形状,这里锁 list/count/detail 的完整语义。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-v2-"));
     const f = makeFixture({
@@ -497,7 +497,8 @@ describe("session-archive host", () => {
       headers: [{ id: "g1", cwd: "/proj/a", createdAt: 1000 }],
     });
     // 写旧代际文件名(不带 v 前缀),夹具 locate 会拼 session.jsonl → 命中;
-    // 这里直接覆盖 locate 模拟 0.1.5 行为:永远指向不存在的当前代际名。
+    // 这里直接覆盖 locate，使其永远指向不存在的当前代际名，覆盖“定位落空
+    // 后按目录扫描实际文件”的路径。
     const legacyPath = sessionPath("g1");
     fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
     fs.writeFileSync(

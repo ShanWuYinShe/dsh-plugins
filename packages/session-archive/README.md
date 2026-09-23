@@ -84,7 +84,7 @@ config 字段（`cordis.patch.yml` 或 `~/.dsh/plugins/session-archive/config.js
   （沉降观察窗内体积不再增长即可删）。
 - 首行损坏的孤儿日志被宿主枚举静默跳过：面板既看不到也无法经面板删除（删除
   会因 `unenumerable` 被拒绝），只能手动清理文件。
-- 恢复归档走 DSH 0.1.6 官方的 `WorkspaceRegistry.unarchiveSession()`；未提供该
+- 恢复归档走 DSH 官方的 `WorkspaceRegistry.unarchiveSession()`；未提供该
   方法的宿主上恢复返回空（列表仍按存在性过滤幽灵 id），功能不受影响。
 - 已删除但仍在内存中的归档会话，其条目会一直留在宿主原生「设置 → 已归档会话」
   页，直到宿主重启（宿主没有让内存会话消亡的官方 API）；插件面板自身不受影响，

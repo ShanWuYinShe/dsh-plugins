@@ -10,8 +10,8 @@
  * "transport failure ... HTTP 404"）。
  *
  * codec 使用最小透传 schema（create() 返回 {_zod, parse}）：typert-loader
- * 的 requireStrictCodec 校验 create() 工厂存在（0.1.6-alpha.2 起取代旧
- * schema 字段），网关 decode/encode 走 codec.create().parse() 透传，与
+ * 要求 codec 提供 create() 工厂，网关 decode/encode 走 codec.create().parse()
+ * 透传，与
  * client.tsx 里 $mount 的透传描述符一致。
  */
 

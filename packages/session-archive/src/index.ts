@@ -7,7 +7,7 @@
  *
  * host 端全部逻辑基于官方 service 契约类型（@deepseek-ai/dsh-workspace /
  * dsh-session / dsh-session-persistence / dsh-session-title 的官方 d.ts），
- * 面向 DSH 0.1.6-alpha 宿主线，不保留旧宿主版本兼容：
+ * 面向 DSH 0.1.7-alpha 宿主线：
  *   1. list()       — archivedSessionIds ∩ 逐 id persistence.stat()，
  *                     每条附带标题（官方 foldSessionTitle 折叠，事件流
  *                     分块读取）、目录、创建时间、最后修改时间（文件
@@ -38,12 +38,10 @@
  *                     删除的会话"复活"回侧边栏）；会话数据不动。
  *
  * 归档集合（workspaceRegistry.archivedSessionIds）的移除走官方 API
- * unarchiveSession（DSH 0.1.6 新增；此前只有 archiveSession 方向，本插件
- * 曾复用 registry 私有写入通道 enqueueOperation → requireState → setState，
- * 0.1.6 起已删除该 hack）。官方 unarchiveSession 不做存在性检查、内部串行
+ * unarchiveSession。官方 unarchiveSession 不做存在性检查、内部串行
  * 化写入，因此"文件仍存在"的复核仍由本插件在调用前完成，并与 deleteArchived
- * 经 exclusive 互斥（见下）；若 registry 缺失该方法（旧宿主/残缺 mock），
- * 恢复返回空，归档列表仍以存在性过滤幽灵 id，功能正确。
+ * 经 exclusive 互斥（见下）；registry 未提供该方法（残缺 mock）时恢复
+ * 返回空，归档列表仍以存在性过滤幽灵 id，功能正确。
  *
  * 本文件运行时不依赖任何 dsh 内部包（纯 ESM + ctx.* service + 官方
  * foldSessionTitle 纯函数），可独立安装；官方包仅作为 devDependency 提供
@@ -332,15 +330,14 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
   /**
    * 从归档集合移除若干 id（恢复用；删除不调用——见 deleteArchived），返回实际移除的 id。
    *
-   * 走官方 unarchiveSession（DSH 0.1.6 的公开契约；0.1.5 时代复用私有写入
-   * 通道的 hack 已删除）。官方方法不做存在性检查、幂等（未归档的 id 直接
+   * 走官方 unarchiveSession。官方方法不做存在性检查、幂等（未归档的 id 直接
    * resolve），因此：
    * - confirm 在调用前逐个复核 id 是否仍可恢复（文件仍存在）；未通过复核
    *   的保持原状（仍是 ghost 或正常归档），不能因为请求过就一并抹掉；
    * - confirm → unarchiveSession 段与 deleteArchived 的删除临界区经
    *   exclusive 互斥（见 exclusive）——官方写入串行只挡住其他归档集合
    *   写入者，挡不住不经过它的删除；
-   * - registry 缺失该方法（旧宿主/残缺 mock）时返回空：列表按存在性过滤
+   * - registry 缺失该方法（残缺 mock）时返回空：列表按存在性过滤
    *   幽灵 id，功能仍正确。
    */
   async function removeFromArchiveSet(ids: string[], confirm?: (sessionId: string) => Promise<boolean>): Promise<string[]> {
@@ -365,7 +362,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
   /** 归档会话的文件定位结果。
    * located：拿到物理路径（path + stat）；absent：定位成功且文件确认不存在
    * （ghost，幂等删除）；unknown：后端没有定位钩子（locate 是 jsonl 后端的
-   * 诊断钩子，0.1.3 起不在抽象契约上），既不能确认存在也不能确认缺失。
+   * 诊断钩子，不在抽象契约上），既不能确认存在也不能确认缺失。
    * unknown 与 absent 必须区分：删除语义里 absent 是幂等成功、unknown 是
    * "不能谎报成功也不能删错东西"的失败兜底。 */
   type FileStatus =
@@ -376,8 +373,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
   /**
    * 解析会话目录里的实际日志文件。locate() 只按当前格式版本拼文件名
    * （如 session.v2.jsonl.zstd），而历史上落盘的可能是旧代际名
-   * （session.jsonl / session.v1.jsonl…，0.1.5 的代际解析把 v0 起全部
-   * 视为合法代际）——stat 落空不等于会话不存在。官方布局是"一会话一
+   * （session.jsonl / session.v1.jsonl…等旧代际名）——stat 落空不等于会话不存在。官方布局是"一会话一
    * 目录"，目录路径不随代际变化，因此在 locate 给出的目录里扫描
    * session*.jsonl(.zstd) 取实际文件（多个代际并存时取最新 mtime）。
    * 扫描结果为空才认定文件不存在。
