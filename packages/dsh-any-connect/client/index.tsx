@@ -33,13 +33,10 @@ export const inject = ['slots', 'locale']
  * the `workbuddy` model channel is unaffected, and `dsh-any-connect
  * status` reports host health via the heartbeat file.
  *
- * NOTE: the try/catch boundary of this function is mirrored (duplicated) in
- * `test/client-fallback.test.ts`, because the real client entry imports
- * browser-only DSH packages that cannot load in the Node test environment.
- * That test therefore does not import this function — it replicates its
- * shape. If you change the guarded body or the `console.error` message here,
- * update the mirrored `apply()` in that spec too, or the fallback test will
- * silently diverge from this real implementation.
+ * The guarded boundary itself is covered by the real-entry regression in
+ * `test/bundle.test.ts` ("client apply() 的兜底边界对真实入口成立"): it
+ * imports this module and asserts a throwing slot registration never reaches
+ * the loader.
  */
 export function apply(ctx: ClientContext): void {
   try {

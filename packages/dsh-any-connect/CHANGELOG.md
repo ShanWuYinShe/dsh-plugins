@@ -14,6 +14,20 @@
 * 新增配置卡片的渲染回归测试（jsdom + 真实组件），钉住「不再渲染套餐明细」
   「模型清单默认收起」两条口径；根 devDependencies 补 `react-dom` / `jsdom`。
 
+### 测试
+
+* **删除两份「镜像测试」**（`dsh-any-connect` / `provider-usage` 各一份
+  `client-fallback.test.ts`）：它们在 spec 里手抄一遍 `apply()` 再断言，对真实
+  入口零覆盖——源码改了它们也不会红，只增加维护面。
+* 补上真实入口的兜底回归（`test/bundle.test.ts`）：直接 import 两个包的
+  `client/index.tsx`，让 slot 注册抛错，断言 `apply()` 不把异常抛给宿主
+  loader、且错误在 console 可见（变体验证：把 catch 改回 `throw` 该用例即红）。
+* 顺手清理无判据的用例与死代码：`catalog.test.ts` 删「已登录即可见」「设同值
+  返回 false」两条同义反复用例；`bundle.test.ts` 删未被引用的 reactStub 与
+  「某导出不存在」的墓碑用例。
+* `host-heartbeat` 的回收 PID 用例不再无条件依赖 `ps`：读不到进程启动时刻的
+  环境显式跳过（该环境中心跳按设计降级为仅 PID 存活判定），而不是静默变红。
+
 ## 0.4.0-alpha.0 (2026-09-23)
 
 ### 移除

@@ -72,6 +72,12 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       });
       return problems;
     }
+    // host 必然拒绝的行(invalid/danger/homeAncestor)存在时禁用保存:与其让
+    // 用户点了保存再读一段英文 TypeError,不如按钮禁用+行内原因。判据具名导出，
+    // 保存按钮与单测共用同一条，避免两边各写一份而漂移。
+    function hasBlockingProblems(problems: Array<{ kind: string }>): boolean {
+      return problems.some((p) => p.kind === "invalid" || p.kind === "danger" || p.kind === "homeAncestor");
+    }
     const zh = {
       title: "沙盒额外允许目录（sandbox-extra-roots）",
       summary: "为 workspace-write 沙箱追加可写目录（在官方白名单之外）",
@@ -151,9 +157,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       const dirty = cfg !== null && parsedRoots.join("\n") !== cfgRoots.join("\n");
       // 保存前的即时反馈：哪些行会被 host 拒绝/忽略/去重，不再等保存后才发现。
       const rootProblems = draftText === null ? [] : analyzeRootsText(draftText);
-      // host 必然拒绝的行(invalid/danger/homeAncestor)存在时直接禁用保存:
-      // 与其让用户点了保存再读一段英文 TypeError,不如按钮禁用+行内原因。
-      const hasBlocking = rootProblems.some((p) => p.kind === "invalid" || p.kind === "danger" || p.kind === "homeAncestor");
+      const hasBlocking = hasBlockingProblems(rootProblems);
       const discard = () => {
         setDraftText(cfgRoots.join("\n"));
         setStatus(null);
@@ -315,4 +319,4 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       }, SandboxRootsCard));
     }
 
-    export { apply, inject, analyzeRootsText };
+    export { apply, inject, analyzeRootsText, hasBlockingProblems };

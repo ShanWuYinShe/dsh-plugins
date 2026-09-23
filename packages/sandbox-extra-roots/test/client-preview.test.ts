@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 // 直接导入真实客户端模块（纯函数；模块顶层的 CSS 注入有 document 守卫，
 // React 是唯一运行时依赖）。此前 analyzeRootsText 零覆盖,/private 与
 // 主目录祖先的口径漂移只能在保存失败后才发现。
-import { analyzeRootsText } from "../client/index.tsx";
+import { analyzeRootsText, hasBlockingProblems } from "../client/index.tsx";
 
 function kinds(lines: string): string[] {
   return analyzeRootsText(lines).map((p) => p.kind);
@@ -44,10 +44,16 @@ describe("sandbox-extra-roots client preview", () => {
   });
 
   it("阻塞级问题(invalid/danger/homeAncestor)可被保存按钮识别", () => {
-    // 保存按钮禁用条件与卡片一致:存在 blocking 级行时禁用。
-    const blocking = ["invalid", "danger", "homeAncestor"] as const;
-    const isBlocking = (p: { kind: string }) => (blocking as readonly string[]).includes(p.kind);
-    expect(analyzeRootsText("~\n/etc\n/tmp/ok").some(isBlocking)).toBe(true);
-    expect(analyzeRootsText("/tmp/ok").some(isBlocking)).toBe(false);
+    // 判据是产品里保存按钮真正用的那一个（hasBlockingProblems 被组件与
+    // 本用例共用）。此前这里自造了一份局部谓词，产品改了禁用条件它照样绿。
+    expect(hasBlockingProblems(analyzeRootsText("~\n/etc\n/tmp/ok"))).toBe(true);
+    // 三个 kind 各自都要能挡住保存：只测其中一个，判据里删掉另外两个
+    // （下面的变体验证就是这么发现的）用例仍会绿。
+    expect(hasBlockingProblems(analyzeRootsText("relative/path"))).toBe(true);
+    expect(hasBlockingProblems(analyzeRootsText("/home"))).toBe(true);
+    expect(hasBlockingProblems(analyzeRootsText("/tmp/ok"))).toBe(false);
+    // system/duplicate 只是提示级，不禁用保存。
+    expect(hasBlockingProblems(analyzeRootsText("/etc"))).toBe(false);
+    expect(hasBlockingProblems(analyzeRootsText("/tmp/a\n/tmp/a"))).toBe(false);
   });
 });

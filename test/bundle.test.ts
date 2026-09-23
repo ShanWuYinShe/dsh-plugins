@@ -30,16 +30,6 @@ vi.mock("react", () => ({
   default: undefined,
 }));
 
-const reactStub = {
-  createElement: (...args: any[]) => ({ args }),
-  Fragment: "fragment",
-  useMemo: (fn: any) => fn(),
-  useState: (init: any) => [typeof init === "function" ? init() : init, () => {}],
-  useCallback: (fn: any) => fn,
-  useEffect: () => {},
-  useRef: () => ({ current: null }),
-};
-
 describe("npm bundle metadata", () => {
   for (const name of PACKAGES) {
     const pkgPath = join(ROOT, "packages", name, "package.json");
@@ -188,6 +178,42 @@ describe("client bundles", () => {
     expect(props.archivedCountOf).toBeUndefined();
   });
 
+  it("client apply() 的兜底边界对真实入口成立（slot 注入抛错不穿透）", async () => {
+    // 此前这条判据靠两份「镜像测试」——它们在 spec 里抄一遍 apply() 再断言，
+    // 故对真实入口零覆盖（源码改了它们也不会红）。这里直接 import 真实入口
+    // （本文件的 react vi.mock 已让浏览器专用依赖可在 node 下解析），让注册
+    // 函数抛出异常，断言 apply() 吞掉异常并保留已完成的注册。
+    for (const pkg of ["dsh-any-connect", "provider-usage"]) {
+      const mod = await import(`../packages/${pkg}/client/index.tsx`);
+      const registrations: any[] = [];
+      const errors: unknown[] = [];
+      const errorSpy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => { errors.push(args); });
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const ctx = {
+          slots: {
+            inject: (_slot: string, fn: () => void) => { fn(); },
+            register: (options: any) => {
+              registrations.push(options);
+              // 第二个注册抛错：模拟 DSH 客户端契约变更（slot 改名/key 变化）。
+              if (registrations.length === 1) throw new Error("keyed slot requires options.key");
+            },
+          },
+          locale: Object.assign(() => () => "", { bind: () => () => "", register: () => () => {} }),
+          effect: (fn: () => void) => { fn(); },
+          remote: { $mount: async () => {} },
+          get: () => ({}),
+        };
+        expect(() => mod.apply(ctx as any), `${pkg}: apply 不得把异常抛给宿主 loader`).not.toThrow();
+        expect(errors.length, `${pkg}: 失败必须在 console.error 里可见`).toBe(1);
+        expect(String(errors[0])).toContain(pkg === "dsh-any-connect" ? "client card failed to load" : "client pill failed to load");
+      } finally {
+        errorSpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+    }
+  });
+
   it("provider-usage 额度 pill 挂载 composer dock（注册 + inject 两条取数路径）", async () => {
     // provider-usage 的 client 入口同样只运行时依赖 react 与包内文件（dsh
     // 客户端包全是 type-only 导入），可在此直接 import 真实源码做挂载冒烟。
@@ -228,16 +254,6 @@ describe("client bundles", () => {
     expect(typeof seated.load).toBe("function");
     seated.load();
     expect(directoryLoad).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("settings namespace 注册（DSH 0.1.7 已移除）", () => {
-  it("sandbox-extra-roots 不再导出注册函数", async () => {
-    // DSH 0.1.7 移除了 settings namespace 注册体系（`settings.register`
-    // 不复存在）：卡片可见性改由 Loader profile entry 与
-    // `plugins.bundle.config` slot 决定，旧的注册 helper 已删除。
-    const sbNS = await import("../packages/sandbox-extra-roots/src/index.js");
-    expect("registerSettingsNamespace" in sbNS).toBe(false);
   });
 });
 

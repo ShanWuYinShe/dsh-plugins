@@ -6,9 +6,8 @@
  * plugins" banner — the same defense the sibling packages use, because a
  * purely cosmetic pill must never be able to break the chat page.
  *
- * NOTE: the try/catch shape here is mirrored in `test/client-fallback.test.ts`,
- * which cannot import this module (it pulls in browser-only DSH packages).
- * Change the guarded body and that spec together.
+ * The guarded boundary itself is covered by the real-entry regression in
+ * `test/bundle.test.ts` ("client apply() 的兜底边界对真实入口成立").
  *
  * @module provider-usage-client
  */
