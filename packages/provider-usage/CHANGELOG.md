@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.0-alpha.4 (2026-09-24)
+
+### 新增
+
+* **底部额度弹窗支持点击外部自动收起与 Escape 快捷关闭**：监听全局 `pointerdown`
+  事件与 `Escape` 键，点击弹窗外任意区域即收起浮层，无需再次点击底部触发 pill。
+* **主流模型提供商额度查询支持扩充**：
+  - 新增 SiliconFlow（硅基流动，`/v1/user/info` 读取总额度、可用额度与充值额度）；
+  - 新增 BigModel（智谱开放平台，优先查询 Coding Plan 配额，降级读取订阅清单）；
+  - 新增 MiniMax（`/v1/token_plan/remains` 支持 5 小时滚动区间与周区间 Token 统计）；
+  - 新增 OpenAI / OneAPI / NewAPI（`/dashboard/billing/subscription` 与 `/usage`
+    自动计算剩余额度或读取 `total_available`）。
+* **提供商别名规范化与 BaseURL 域名启发式识别**：支持 `kimi`、`silicon`、`zhipu`、
+  `oneapi` 等别名；对未注册的自定义渠道，自动根据解析出的 `baseURL` 域名匹配对应查询器。
+* **UI 交互与视觉优化**：展开带有平滑缩放滑移动效与背景虚化；额度进度条提供三色阶
+  阶梯告警（充裕为品牌蓝，低于 20% 警告黄，低于 5% 警示红）；适配非数值订阅状态展示。
+
 ## 0.1.0-alpha.3 (2026-09-23)
 
 ### 适配

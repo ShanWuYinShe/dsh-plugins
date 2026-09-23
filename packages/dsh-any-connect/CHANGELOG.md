@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0-alpha.2 (2026-09-24)
+
+### 新增
+
+* **支持 ZCode 桌面客户端凭据自动发现与 Client Request Signing V4 协议**：
+  自动读取并 AES-256-GCM 解密 `~/.zcode/v2/credentials.json`，完成与 BigModel
+  服务端的 Ed25519 签名握手与 8-bit Proof-of-Work 计算，无缝集成 Coding Plan
+  150% 额度与每日 23:00~09:00 GLM-5.3-Flash 免费专属特权通道。
+* **接入 Anthropic Messages 协议**：将 ZCode 渠道转发端点切换至智谱
+  `/api/anthropic/v1/messages`，解决 OpenAI 兼容端点无法消耗 Coding Plan
+  额度而报错 1113 credit 余额不足的问题。
+* **修正 GLM-5.3 / GLM-5.3-Flash 模型窗口规格**：对齐智谱官方与 ZCode 内置配置，
+  上下文窗口上限设为 1,000,000 (1M)，单次输出最大 token 设为 128,000 (128K)。
+* **设置页新增专属 Coding Plan 订阅状态展示**：废除模糊无意义的“当前积分: 1”，
+  改用正式的 Coding Plan 订阅卡片，直观显示有效状态、到期时间与专属特权标签。
+
 ## 0.4.0-alpha.1 (2026-09-23)
 
 ### 优化
