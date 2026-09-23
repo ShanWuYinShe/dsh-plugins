@@ -92,7 +92,8 @@ export class ProviderUsageRegistry extends Service {
    * @param provider - provider route key the querier answers for.
    * @param querier - the query itself.
    * @param displayName - human-readable provider name for the snapshot.
-   * @returns disposer that withdraws this querier.
+   * @returns disposer that withdraws this querier, unless a newer registration
+   * has already replaced it (the provider's cache entry is dropped either way).
    */
   register(provider: string, querier: ProviderUsageQuerier, displayName?: string): () => void {
     if (provider === '') throw new TypeError('provider-usage: a querier needs a provider route key')

@@ -150,14 +150,36 @@ describe('ProviderUsageRegistry', () => {
     expect(snapshot?.windows[0]?.id).toBe('new')
   })
 
-  it('withdraws only its own registration on dispose', async () => {
+  it('keeps the live querier when a replaced registration is disposed', async () => {
     const { registry } = makeRegistry()
-    registry.register('acme', fixedQuerier([]))
-    const disposeStale = registry.register('acme', fixedQuerier([]))
-    // A reload replaced the first registration before its disposer ran; the
-    // stale disposer must not darken the live querier.
+    const stale = fixedQuerier([{ id: 'old', label: 'old', remain: 1, unit: 'credits' }])
+    const live = fixedQuerier([{ id: 'new', label: 'new', remain: 2, unit: 'credits' }])
+    const disposeStale = registry.register('acme', stale)
+    registry.register('acme', live)
+
+    // The first registration was replaced before its disposer ran: disposing
+    // it must not darken the live querier.
     disposeStale()
+
+    expect(registry.has('acme')).toBe(true)
+    expect(registry.providers()).toEqual(['acme'])
+    const snapshot = await registry.snapshot('acme')
+    expect(snapshot?.windows[0]?.id).toBe('new')
+    expect(live).toHaveBeenCalledTimes(1)
+    expect(stale).not.toHaveBeenCalled()
+  })
+
+  it('withdraws its own registration on dispose', async () => {
+    const { registry } = makeRegistry()
+    const querier = fixedQuerier([{ id: 'a', label: 'A', remain: 1, unit: 'credits' }])
+    const dispose = registry.register('acme', querier)
+    expect(registry.has('acme')).toBe(true)
+
+    dispose()
+
     expect(registry.has('acme')).toBe(false)
+    expect(registry.providers()).toEqual([])
+    expect(await registry.snapshot('acme')).toBeUndefined()
   })
 
   it('rejects an empty provider key and a non-function querier', () => {
@@ -199,6 +221,8 @@ describe('safeMessage', () => {
     expect(message).not.toContain('eyJhbGciOi')
     expect(message).not.toContain('sk-0123456789abcdef')
     expect(message).toContain('[redacted]')
+    expect(message).toContain('access_token=[redacted]')
+    expect(message).not.toContain('zzz')
   })
 
   it('caps a pathological message', () => {
