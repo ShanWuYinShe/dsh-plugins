@@ -96,8 +96,8 @@ export const FALLBACK_ZCODE_MODELS: readonly WorkBuddyModelInfo[] = [
   {
     id: 'glm-5.3',
     name: 'GLM-5.3',
-    contextWindow: 128000,
-    maxTokens: 8192,
+    contextWindow: 1000000,
+    maxTokens: 128000,
     supportsImages: true,
     reasoning: {
       supports: true,
@@ -115,8 +115,8 @@ export const FALLBACK_ZCODE_MODELS: readonly WorkBuddyModelInfo[] = [
   {
     id: 'glm-5.3-flash',
     name: 'GLM-5.3-Flash',
-    contextWindow: 128000,
-    maxTokens: 8192,
+    contextWindow: 1000000,
+    maxTokens: 128000,
     supportsImages: true,
     reasoning: {
       supports: true,

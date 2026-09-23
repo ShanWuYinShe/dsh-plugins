@@ -52,7 +52,11 @@ describe('ZCode upstream and auth', () => {
       const client = new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
       const models = await client.fetchModels(dummyCredential)
       expect(models.map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+      expect(models.find(m => m.id === 'glm-5.3')?.contextWindow).toBe(1000000)
+      expect(models.find(m => m.id === 'glm-5.3')?.maxTokens).toBe(128000)
       expect(models.find(m => m.id === 'glm-5.3')?.billing?.badges).toContain('150% 额度')
+      expect(models.find(m => m.id === 'glm-5.3-flash')?.contextWindow).toBe(1000000)
+      expect(models.find(m => m.id === 'glm-5.3-flash')?.maxTokens).toBe(128000)
       expect(models.find(m => m.id === 'glm-5.3-flash')?.billing?.badges).toContain('夜间免费')
     })
 
