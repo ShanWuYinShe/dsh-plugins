@@ -25,18 +25,10 @@ vi.mock("react", () => ({
   useCallback: (fn: any) => fn,
   useEffect: () => {},
   useRef: () => ({ current: null }),
+  // provider-usage 的 ProviderUsagePill 导入（仅模块求值期解构，本套件不渲染组件）
+  useSyncExternalStore: () => null,
   default: undefined,
 }));
-
-const reactStub = {
-  createElement: (...args: any[]) => ({ args }),
-  Fragment: "fragment",
-  useMemo: (fn: any) => fn(),
-  useState: (init: any) => [typeof init === "function" ? init() : init, () => {}],
-  useCallback: (fn: any) => fn,
-  useEffect: () => {},
-  useRef: () => ({ current: null }),
-};
 
 describe("npm bundle metadata", () => {
   for (const name of PACKAGES) {
@@ -92,14 +84,16 @@ describe("client bundles", () => {
     set: async (partial: any) => ({ ok: true, value: partial }),
   };
 
-  it("配置类包 settings.plugin.item 注册带 key", async () => {
+  it("配置类包 plugins.bundle.config 注册带包名 key", async () => {
     const cases: Array<[string, string]> = [
-      ["sandbox-extra-roots", "sandbox-extra-roots-config"],
+      ["sandbox-extra-roots", "@chaoset/sandbox-extra-roots"],
     ];
     for (const [pkg, key] of cases) {
-      // 宿主 settings 只接受 ^[a-z][a-z0-9-]*$，驼峰 key 会在注册时抛
-      // TypeError 且被静默吞掉（卡片从此不可见）——在此锁死合法性。
-      expect(key).toMatch(/^[a-z][a-z0-9-]*$/);
+      // plugins.bundle.config 按 npm 包名 dispatch（package.json 的 name，
+      // 亦即 cordis.patch.yml 的 name）；key 与包名不一致时配置表单不会
+      // 出现在本插件的 Plugins 页——在此锁死对应关系。
+      const pkgJson = JSON.parse(readFileSync(join(ROOT, "packages", pkg, "package.json"), "utf8"));
+      expect(key).toBe(pkgJson.name);
       const mod = await import(`../packages/${pkg}/client/index.tsx`);
       const registrations: Array<{ options: any }> = [];
       const ctx = {
@@ -114,7 +108,7 @@ describe("client bundles", () => {
           typeof svc === "string" && svc.startsWith("remote.") ? configServiceStub : {},
       };
       await mod.apply(ctx as any);
-      const item = registrations.find((r) => r.options.name === "settings.plugin.item");
+      const item = registrations.find((r) => r.options.name === "plugins.bundle.config");
       expect(item?.options.key).toBe(key);
     }
   });
@@ -183,12 +177,83 @@ describe("client bundles", () => {
     expect(props.subscribeArchived).toBeUndefined();
     expect(props.archivedCountOf).toBeUndefined();
   });
-});
 
-describe("settings namespace 注册（宿主 rc.7+ 设置页可见性）", () => {
-  it("sandbox-extra-roots 导出注册函数", async () => {
-    const sbNS = await import("../packages/sandbox-extra-roots/src/index.js");
-    expect(typeof sbNS.registerSettingsNamespace).toBe("function");
+  it("client apply() 的兜底边界对真实入口成立（slot 注入抛错不穿透）", async () => {
+    // 此前这条判据靠两份「镜像测试」——它们在 spec 里抄一遍 apply() 再断言，
+    // 故对真实入口零覆盖（源码改了它们也不会红）。这里直接 import 真实入口
+    // （本文件的 react vi.mock 已让浏览器专用依赖可在 node 下解析），让注册
+    // 函数抛出异常，断言 apply() 吞掉异常并保留已完成的注册。
+    for (const pkg of ["dsh-any-connect", "provider-usage"]) {
+      const mod = await import(`../packages/${pkg}/client/index.tsx`);
+      const registrations: any[] = [];
+      const errors: unknown[] = [];
+      const errorSpy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => { errors.push(args); });
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const ctx = {
+          slots: {
+            inject: (_slot: string, fn: () => void) => { fn(); },
+            register: (options: any) => {
+              registrations.push(options);
+              // 第二个注册抛错：模拟 DSH 客户端契约变更（slot 改名/key 变化）。
+              if (registrations.length === 1) throw new Error("keyed slot requires options.key");
+            },
+          },
+          locale: Object.assign(() => () => "", { bind: () => () => "", register: () => () => {} }),
+          effect: (fn: () => void) => { fn(); },
+          remote: { $mount: async () => {} },
+          get: () => ({}),
+        };
+        expect(() => mod.apply(ctx as any), `${pkg}: apply 不得把异常抛给宿主 loader`).not.toThrow();
+        expect(errors.length, `${pkg}: 失败必须在 console.error 里可见`).toBe(1);
+        expect(String(errors[0])).toContain(pkg === "dsh-any-connect" ? "client card failed to load" : "client pill failed to load");
+      } finally {
+        errorSpy.mockRestore();
+        warnSpy.mockRestore();
+      }
+    }
+  });
+
+  it("provider-usage 额度 pill 挂载 composer dock（注册 + inject 两条取数路径）", async () => {
+    // provider-usage 的 client 入口同样只运行时依赖 react 与包内文件（dsh
+    // 客户端包全是 type-only 导入），可在此直接 import 真实源码做挂载冒烟。
+    const mod = await import("../packages/provider-usage/client/index.tsx");
+    const registrations: Array<{ options: any; component?: any }> = [];
+    // modelDirectories 桩：验证有 session 时 inject 解析出的目录与 lazy load 接线。
+    const directoryStub = { subscribe: () => () => {}, getSnapshot: () => ({}) };
+    const directoryLoad = vi.fn(() => Promise.resolve());
+    const ctx = {
+      slots: {
+        inject: (_slot: string, fn: () => void) => { fn(); },
+        register: (options: any, component?: any) => registrations.push({ options, component }),
+      },
+      locale: Object.assign(() => () => "", { bind: () => () => "", register: () => () => {} }),
+      effect: (fn: () => void) => { fn(); },
+      remote: { $mount: async () => {} },
+      get: (svc: string) =>
+        svc === "modelDirectories"
+          ? { directoryFor: () => ({ store: directoryStub, load: directoryLoad }) }
+          : {},
+    };
+    await mod.apply(ctx as any);
+    const dock = registrations.find((r) => r.options.name === "conversation.composer.dock");
+    expect(dock !== undefined && dock.options.id === "provider-usage").toBe(true);
+    expect(dock!.options.order).toBe(10);
+    // 注册必须携带 pill 组件本体（register 的第二参），缺了 slot 出口无物可渲染。
+    expect(typeof dock!.component).toBe("function");
+    // 无 session（dock 注入器未交付 session）→ 只回译写函数，不解析模型目录。
+    const bare = dock!.options.inject();
+    expect(typeof bare.t).toBe("function");
+    expect(bare.directory).toBeUndefined();
+    expect(bare.load).toBeUndefined();
+    expect(directoryLoad).not.toHaveBeenCalled();
+    // 有 session → 额度目录接线：directory 即 modelDirectories 的 store，
+    // load 包装目录的 lazy load（供 pill 挂载时拉取目录）。
+    const seated = dock!.options.inject("session-1");
+    expect(seated.directory).toBe(directoryStub);
+    expect(typeof seated.load).toBe("function");
+    seated.load();
+    expect(directoryLoad).toHaveBeenCalledTimes(1);
   });
 });
 

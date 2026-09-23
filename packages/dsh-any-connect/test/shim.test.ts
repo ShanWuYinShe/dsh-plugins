@@ -4,11 +4,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WorkBuddyCredentialStore } from '../src/auth.js'
-import { WorkBuddyCatalog } from '../src/catalog.js'
+import { WorkBuddyCatalog, FALLBACK_WORKBUDDY_MODELS } from '../src/catalog.js'
 import { createWorkBuddyShim, type WorkBuddyShim } from '../src/shim.js'
+import { CN_VARIANT } from '../src/variants.js'
 import type { WorkBuddyChatResult } from '../src/upstream.js'
 
 const CLEANUP: (() => Promise<void>)[] = []
+
+// ReadableStream.from 运行时可用（Node ≥ 20.6），TS 的 ES2022/DOM 类型库尚未
+// 收录该静态方法，这里按实际签名断言（仅类型层面，运行时行为不变）。
+const readableStreamFrom = (ReadableStream as unknown as {
+  from: (source: AsyncIterable<Uint8Array>) => ReadableStream<Uint8Array>
+}).from
 
 afterEach(async () => {
   await Promise.all(CLEANUP.splice(0).map(clean => clean()))
@@ -59,6 +66,7 @@ async function startShim(upstreamResponse: () => WorkBuddyChatResult): Promise<H
     account: { uid: 'uid-1' },
   }))
   const store = new WorkBuddyCredentialStore({
+    variant: CN_VARIANT,
     desktopPath: desktop,
     ownPath: join(dir, 'own.json'),
     refresh: async () => ({ accessToken: 'unused' }),
@@ -70,6 +78,7 @@ async function startShim(upstreamResponse: () => WorkBuddyChatResult): Promise<H
     upstreamResponse,
   }
   harness.shim = createWorkBuddyShim({
+    kind: 'workbuddy',
     store,
     catalog: new WorkBuddyCatalog(),
     client: {
@@ -95,8 +104,13 @@ describe('WorkBuddy shim', () => {
     const ids = body.data.map(model => model.id)
     expect(ids).toContain('auto')
     expect(ids).toContain('deepseek-v4-pro')
-    // The fallback roster tracks the live `cli` agent's 15 models.
-    expect(ids.length).toBe(15)
+    // The fallback roster tracks the live `cli` agent's models (16 as of the
+    // 2026-09-15 re-verification against desktop 5.5.6). Asserted by identity
+    // rather than by count so a roster refresh does not fail this test.
+    expect(ids.length).toBe(FALLBACK_WORKBUDDY_MODELS.length)
+    expect(ids).toContain('deepseek-v4.1-flash')
+    expect(ids).toContain('kimi-k2.8-preview')
+    expect(ids).not.toContain('deepseek-v4-flash')
     expect(ids).toContain('hy4-preview')
     expect(ids).toContain('glm-5.3')
   })
@@ -168,6 +182,63 @@ describe('WorkBuddy shim', () => {
     expect(response.status).toBe(402)
     const body = await response.json() as { error: { type: string, message: string } }
     expect(body.error.type).toBe('hard_credit')
+    expect(body.error.message).toContain('积分不足')
+  })
+
+  it('streams an Anthropic message on /v1/messages authenticated by x-api-key', async () => {
+    const encoder = new TextEncoder()
+    async function* source() {
+      yield encoder.encode('event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}\n\n')
+    }
+    const harness = await startShim(() => ({
+      ok: true,
+      response: new Response(readableStreamFrom(source()), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    }))
+    const response = await fetch(`${harness.shim.baseUrl()}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': harness.shim.token(),
+      },
+      body: JSON.stringify({
+        model: 'glm-5.3-flash',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: 'hello' }],
+      }),
+    })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/event-stream')
+    const text = await response.text()
+    expect(text).toContain('hello')
+    expect(harness.upstreamBodies).toHaveLength(1)
+  })
+
+  it('maps an upstream credit failure on /v1/messages onto Anthropic error format', async () => {
+    const harness = await startShim(() => ({
+      ok: false,
+      status: 402,
+      kind: 'hard_credit',
+      message: '积分不足',
+    }))
+    const response = await fetch(`${harness.shim.baseUrl()}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': harness.shim.token(),
+      },
+      body: JSON.stringify({
+        model: 'glm-5.3-flash',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: 'hello' }],
+      }),
+    })
+    expect(response.status).toBe(402)
+    const body = await response.json() as { type: string, error: { type: string, message: string } }
+    expect(body.type).toBe('error')
+    expect(body.error.type).toBe('billing_error')
     expect(body.error.message).toContain('积分不足')
   })
 
@@ -311,22 +382,46 @@ describe('WorkBuddy shim', () => {
     expect(harness.upstreamBodies).toHaveLength(0)
   })
 
+  it('rejects a loopback request with a wrong x-api-key', async () => {
+    const harness = await startShim(() => ({ ok: false, status: 500, kind: 'server', message: 'unused' }))
+    const port = Number(new URL(harness.shim.baseUrl()).port)
+    const res = await rawRequest({
+      port,
+      method: 'POST',
+      path: '/v1/messages',
+      headers: {
+        host: `127.0.0.1:${port}`,
+        'content-type': 'application/json',
+        'x-api-key': 'not-the-real-secret',
+      },
+      body: JSON.stringify({ model: 'auto', messages: [] }),
+    })
+    expect(res.status).toBe(401)
+    expect(harness.upstreamBodies).toHaveLength(0)
+  })
+
   it('detects [DONE] split across stream chunks (no duplicate marker on mid-flight error)', async () => {
     // 标记恰好跨 chunk 分割时,单块扫描会漏检 sawDone,流中途出错就会再补
     // 一个 [DONE](客户端看到重复标记,截断被伪装成干净收尾)。
+    //
+    // 用 async generator 造流,**不要**用 `start` + `setTimeout(error)`:
+    // 后者与消费赛跑——慢机器上 error 先于排队块被消费,正文丢失,断言
+    // `toContain('你好')` 随机失败(2026-09-15 CI 抖动即此因)。生成器只在
+    // 消费方请求下一块时才推进,因此三块必然依次送达,`throw` 随后把流
+    // 置错——事件顺序确定为 data×N → error。
     const encoder = new TextEncoder()
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"你好"}}]}\n\n'))
-        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"!"}}]}\n\ndata: [DON'))
-        controller.enqueue(encoder.encode('E]\n\n'))
-        // 延迟 error:同步 error 会让尚未开始消费的排队块丢失。
-        setTimeout(() => controller.error(new Error('upstream reset mid-flight')), 20)
-      },
-    })
+    const chunks = [
+      'data: {"choices":[{"delta":{"content":"你好"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"!"}}]}\n\ndata: [DON',
+      'E]\n\n',
+    ]
+    async function* source() {
+      for (const chunk of chunks) yield encoder.encode(chunk)
+      throw new Error('upstream reset mid-flight')
+    }
     const harness = await startShim(() => ({
       ok: true,
-      response: new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+      response: new Response(readableStreamFrom(source()), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
     }))
     const response = await fetch(`${harness.shim.baseUrl()}/v1/chat/completions`, {
       method: 'POST',
@@ -351,12 +446,14 @@ describe('WorkBuddy shim', () => {
       account: { uid: 'uid-1' },
     }))
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: desktop,
       ownPath: join(dir, 'own.json'),
       refresh: async () => ({ accessToken: 'unused' }),
     })
     let entered = false
     const shim = createWorkBuddyShim({
+      kind: 'workbuddy',
       store,
       catalog: new WorkBuddyCatalog(),
       client: {
@@ -392,7 +489,7 @@ describe('WorkBuddy shim', () => {
           setTimeout(resolve, 80)
         }
       }, 10)
-      CLEANUP.push(() => clearInterval(abortOnceEntered))
+      CLEANUP.push(async () => clearInterval(abortOnceEntered))
     })
     expect(entered).toBe(true)
   })

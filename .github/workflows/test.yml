@@ -1,8 +1,22 @@
 name: Test
 
-# PR 校验：推送 main / alpha 的测试由发布工作流顺带完成，这里只补 PR 这一环
-# （此前对 main/alpha 的 PR 不会触发任何测试）。
+# 测试链路：分支推送只跑测试、永远不发布（发版只由 tag 推送触发，见
+# publish.yml）；PR 同样跑测试。tag 推送的测试由 publish.yml 顺带完成，
+# 这里不监听 tags，避免双跑。
 on:
+  push:
+    branches:
+      - main
+      - alpha
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'bun.lock'
+      - 'scripts/**'
+      - 'test/**'
+      - 'vitest.config.ts'
+      - 'tsconfig*.json'
+      - '.github/workflows/*'
   pull_request:
     branches:
       - main
@@ -10,13 +24,14 @@ on:
     paths:
       - 'packages/**'
       - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - '.npmrc'
+      - 'bun.lock'
       - 'scripts/**'
+      - 'test/**'
+      - 'vitest.config.ts'
+      - 'tsconfig*.json'
       - '.github/workflows/*'
 
-# 同一 PR 连续推送时取消旧的测试，只跑最新代码。
+# 同一 ref 连续推送时取消旧的测试，只跑最新代码。
 concurrency:
   group: test-${{ github.ref }}
   cancel-in-progress: true
@@ -28,17 +43,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+      # bun 是唯一的包管理器入口：install / test / pack 全走 bun。
+      # bun 版本从根 package.json 的 packageManager 字段读取，单一来源。
+      # bun-version-file 支持 package.json：2026-09-22 查证 oven-sh/setup-bun
+      # 的 action.yml 与 v2 tag 源码（读 packageManager 的 bun@<版本>，回退
+      # engines.bun）。
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
 
+      # setup-node 只提供 node 二进制（scripts/*.mjs 直接用 node 调用），
+      # 不再做任何包管理器的缓存。
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: bun install --frozen-lockfile
 
       - name: Build and test
-        run: pnpm run test:ci
+        run: bun run test:ci

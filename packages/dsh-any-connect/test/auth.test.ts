@@ -9,6 +9,7 @@ import {
   WORKBUDDY_AUTH_FILE_ENV,
   type WorkBuddyCredential,
 } from '../src/auth.js'
+import { AI_VARIANT, CN_VARIANT } from '../src/variants.js'
 
 // node:os's ESM namespace rejects vi.spyOn (non-configurable), so homedir is
 // mocked at the module level; unset state falls through to the real one.
@@ -93,6 +94,7 @@ describe('WorkBuddyCredentialStore', () => {
     await writeFile(desktop, nestedDoc(Date.now() + 3600_000))
     let refreshes = 0
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: desktop,
       ownPath: join(dir, 'own.json'),
       refresh: async () => {
@@ -112,6 +114,7 @@ describe('WorkBuddyCredentialStore', () => {
     await writeFile(desktop, nestedDoc(Date.now() - 1000))
     let refreshes = 0
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: desktop,
       ownPath: own,
       refresh: async () => {
@@ -135,6 +138,7 @@ describe('WorkBuddyCredentialStore', () => {
     const desktop = join(dir, 'workbuddy-desktop.info')
     await writeFile(desktop, nestedDoc(Date.now() + 60_000))
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: desktop,
       ownPath: join(dir, 'own.json'),
       refreshMarginMs: 5 * 60_000,
@@ -155,6 +159,7 @@ describe('WorkBuddyCredentialStore', () => {
     await writeFile(desktop, nestedDoc(Date.now() - 1000))
     let refreshes = 0
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: desktop,
       ownPath: join(dir, 'own.json'),
       refresh: async () => {
@@ -183,6 +188,7 @@ describe('WorkBuddyCredentialStore', () => {
     const dir = await mkdtemp(join(tmpdir(), 'wb-store-'))
     CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: join(dir, 'missing.info'),
       ownPath: join(dir, 'own.json'),
       refresh: async credential => ({ accessToken: credential.accessToken }),
@@ -205,6 +211,7 @@ describe('WorkBuddyCredentialStore', () => {
     const warnings: string[] = []
     let refreshes = 0
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: desktop,
       ownPath: own,
       onWarning: message => warnings.push(message),
@@ -230,6 +237,7 @@ describe('WorkBuddyCredentialStore', () => {
     await writeFile(desktop, nestedDoc(Date.now() - 1000))
     let refreshes = 0
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: desktop,
       ownPath: join(dir, 'own.json'),
       refresh: async () => {
@@ -251,6 +259,7 @@ describe('WorkBuddyCredentialStore', () => {
     await writeFile(desktop, nestedDoc(Date.now() - 1000))
     let refreshes = 0
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: desktop,
       ownPath: join(dir, 'own.json'),
       refresh: async () => {
@@ -274,6 +283,7 @@ describe('WorkBuddyCredentialStore', () => {
     await writeFile(desktop, nestedDoc(Date.now() + 240_000))
     let refreshes = 0
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: desktop,
       ownPath: join(dir, 'own.json'),
       refresh: async () => {
@@ -301,6 +311,7 @@ describe('WorkBuddyCredentialStore', () => {
       account: { uid: 'uid-b', nickname: 'B' },
     }))
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: first,
       ownPath: join(dir, 'own.json'),
       refresh: async credential => ({ accessToken: credential.accessToken }),
@@ -318,6 +329,7 @@ describe('WorkBuddyCredentialStore', () => {
     const dir = await mkdtemp(join(tmpdir(), 'wb-store-'))
     CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
     const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
       desktopPath: join(dir, 'explicit.info'),
       ownPath: join(dir, 'own.json'),
       refresh: async credential => ({ accessToken: credential.accessToken }),
@@ -378,6 +390,7 @@ describe('Windows default desktop path probing', () => {
     await writeFile(local, windowsDoc('at-local'))
     await asWindows(home, async () => {
       const store = new WorkBuddyCredentialStore({
+        variant: CN_VARIANT,
         ownPath: join(home, 'own.json'),
         refresh: async credential => ({ accessToken: credential.accessToken }),
       })
@@ -392,6 +405,7 @@ describe('Windows default desktop path probing', () => {
     await writeFile(roaming, windowsDoc('at-roaming'))
     await asWindows(home, async () => {
       const store = new WorkBuddyCredentialStore({
+        variant: CN_VARIANT,
         ownPath: join(home, 'own.json'),
         refresh: async credential => ({ accessToken: credential.accessToken }),
       })
@@ -408,6 +422,7 @@ describe('Windows default desktop path probing', () => {
     await writeFile(roaming, windowsDoc('at-roaming'))
     await asWindows(home, async () => {
       const store = new WorkBuddyCredentialStore({
+        variant: CN_VARIANT,
         ownPath: join(home, 'own.json'),
         refresh: async credential => ({ accessToken: credential.accessToken }),
       })
@@ -419,6 +434,7 @@ describe('Windows default desktop path probing', () => {
     const { home, local, roaming } = await fakeWindowsHome()
     await asWindows(home, async () => {
       const store = new WorkBuddyCredentialStore({
+        variant: CN_VARIANT,
         ownPath: join(home, 'own.json'),
         refresh: async credential => ({ accessToken: credential.accessToken }),
       })
@@ -437,6 +453,7 @@ describe('Windows default desktop path probing', () => {
     await writeFile(explicit, windowsDoc('at-explicit'))
     await asWindows(home, async () => {
       const store = new WorkBuddyCredentialStore({
+        variant: CN_VARIANT,
         desktopPath: explicit,
         ownPath: join(home, 'own.json'),
         refresh: async credential => ({ accessToken: credential.accessToken }),
@@ -502,6 +519,7 @@ describe('WSL default desktop path probing', () => {
 
     await asWsl({ home: '/home/linux-alice', env: { USERPROFILE: windowsProfile } }, async () => {
       const store = new WorkBuddyCredentialStore({
+        variant: CN_VARIANT,
         ownPath: join(root, 'own.json'),
         refresh: async credential => ({ accessToken: credential.accessToken }),
       })
@@ -524,4 +542,49 @@ describe('WSL default desktop path probing', () => {
       ])
     })
   })
+})
+
+describe('WorkBuddyCredentialStore variants', () => {
+  function aiDoc(expiresAt: number): string {
+    return JSON.stringify({
+      auth: { accessToken: 'ai-at', refreshToken: 'ai-rt', expiresAt, domain: 'www.workbuddy.ai' },
+      account: { uid: 'ai-uid', nickname: 'AI 用户' },
+    })
+  }
+
+  it('serves the AI desktop file from a variant store', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'wb-store-ai-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const desktop = join(dir, 'workbuddy-desktop-ai.info')
+    await writeFile(desktop, aiDoc(Date.now() + 3600_000))
+    const store = new WorkBuddyCredentialStore({
+      variant: AI_VARIANT,
+      desktopPath: desktop,
+      ownPath: join(dir, 'own-ai.json'),
+      refresh: async () => ({ accessToken: 'new' }),
+    })
+    await expect(store.resolve()).resolves.toMatchObject({ accessToken: 'ai-at', source: 'desktop' })
+  })
+
+  it('refuses a CN credential in the AI variant with a fixable error', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'wb-store-region-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const desktop = join(dir, 'workbuddy-desktop-ai.info')
+    await writeFile(desktop, nestedDoc(Date.now() + 3600_000))
+    const { AI_VARIANT } = await import('../src/variants.js')
+    const { RegionMismatchError } = await import('../src/auth.js')
+    const store = new WorkBuddyCredentialStore({
+      variant: AI_VARIANT,
+      desktopPath: desktop,
+      ownPath: join(dir, 'own-ai.json'),
+      refresh: async () => ({ accessToken: 'new' }),
+    })
+    await expect(store.current()).rejects.toBeInstanceOf(RegionMismatchError)
+    await expect(store.current()).rejects.toThrow('WORKBUDDY_AI_AUTH_FILE')
+    // status() reports signed-out with the reason rather than throwing.
+    const status = await store.status()
+    expect(status.state).toBe('signed-out')
+    expect(status.reason).toContain('WORKBUDDY_AI_AUTH_FILE')
+  })
+
 })

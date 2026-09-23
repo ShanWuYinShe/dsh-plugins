@@ -5,10 +5,11 @@ declare module "@deepseek-ai/cordis" {
     sandbox: {
       [key: string]: any;
       [key: symbol]: any;
-      /** 官方 dsh-sandbox-local 的 confine(argv, policy) 同步返回包装结果
-       * ({ argv, enforcement, ... }),并非 Promise。confine 包装按同步消费
-       * (wrapped.argv 立即取用);宿主若异步化此处需同步改造。 */
-      confine?: (...args: any[]) => { argv: string[]; [key: string]: any };
+      /** 宿主契约：dsh-sandbox-local 的 confine(argv, policy, signal?)
+       * 是异步实现，返回 Promise；宿主 terminal-bash 以
+       * `await sandbox.confine(argv, {...}, signal)` 调用。本插件的包装与之
+       * 对齐同样是 async，并把 signal 透传给原实现。 */
+      confine?: (argv: string[], policy: any, signal?: AbortSignal) => Promise<{ argv: string[]; [key: string]: any }>;
     };
     fs: {
       [key: string]: any;
@@ -22,9 +23,9 @@ declare module "@deepseek-ai/cordis" {
        * 失效;升级 DSH 时请核对该签名。 */
       resolve(): { mode: string; workspaceRoot?: string };
     };
-    settings: {
-      register(ns: string, schema: any, options?: any): void;
-    };
+    // 宿主 settings 服务为 SettingsForms（Loader profile 条目的 Config
+    // 表单投影）。本插件不声明 Config schema，卡片经
+    // plugins.bundle.config slot 与 config gateway 读写，此处无需声明。
   }
 }
 

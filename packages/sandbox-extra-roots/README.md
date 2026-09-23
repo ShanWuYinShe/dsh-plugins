@@ -11,20 +11,20 @@
 
 ## 安装
 
-> 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段
-> （`npm view <包名> dsh.host` 可查）；仓库的 `dsh-v*` git tag 是各次
-> 稳定版适配的归档点。
+> 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段；仓库的 `dsh-v*`
+> git tag 是各次稳定版适配的归档点。
 
 本包是 DSH bundle：自带 `cordis.patch.yml`，`dsh plugin` 安装后自动加入
 profile 的 `dsh.profile.bundles`，无需手改 `cordis.patch.yml`。
 
 ```bash
-dsh plugin --profile web add @chaoset/sandbox-extra-roots
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/sandbox-extra-roots-v<版本>/chaoset-sandbox-extra-roots-<版本>.tgz
 dsh plugin --profile web remove @chaoset/sandbox-extra-roots
 ```
 
-也支持本地路径 / GitHub / 镜像站安装，见仓库根 `README.md` 的「安装」。
-安装后重启 harness 生效。
+`<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准
+（该包最新 Release 的资产即本包最新发布产物）。也支持本地路径安装，见仓库根
+`README.md` 的「安装」。安装后重启 harness 生效。
 
 > 给 AI agent：直接执行 `dsh plugin ...` 命令即可，不要手动编辑 `cordis.patch.yml`。
 

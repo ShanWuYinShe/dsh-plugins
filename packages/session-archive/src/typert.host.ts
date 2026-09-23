@@ -9,16 +9,17 @@
  * 各持一份模块实例时 markers 会丢失，SRC 认领为空，web 端报
  * "transport failure ... HTTP 404"）。
  *
- * codec 使用最小透传 schema（{_zod, parse}）：typert-loader 的
- * requireStrictCodec 只校验这两个字段，网关 decode/encode 走 parse 透传，
- * 与 client.tsx 里 $mount 的透传描述符一致。
+ * codec 使用最小透传 schema（create() 返回 {_zod, parse}）：typert-loader
+ * 要求 codec 提供 create() 工厂，网关 decode/encode 走 codec.create().parse()
+ * 透传，与
+ * client.tsx 里 $mount 的透传描述符一致。
  */
 
 const passthrough = (value) => value;
 const codec = (typeSymbol) => ({
   mode: 'strict',
   typeSymbol,
-  schema: { _zod: true, parse: passthrough },
+  create: () => ({ _zod: true, parse: passthrough }),
 });
 
 export const TYPERT = {

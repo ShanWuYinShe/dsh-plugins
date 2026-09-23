@@ -1,16 +1,16 @@
 /**
- * Loopback OpenAI-compatible endpoint. The pi-ai provider points here; the
- * shim applies the WorkBuddy wire quirks (forced streaming, string
- * `tool_choice`, CLI-shaped headers) and forwards to the real upstream.
- * It binds 127.0.0.1 only and never serves another interface.
+ * Loopback endpoint. The pi-ai provider points here: an OpenAI-compatible
+ * route whose handler applies the WorkBuddy wire quirks (forced streaming,
+ * string `tool_choice`, CLI-shaped headers). All of it binds 127.0.0.1 only
+ * and never serves another interface.
  *
  * Inbound hardening: the loopback bind alone is not a trust boundary (any
  * local process or a DNS-rebinding page can reach 127.0.0.1), so every
  * request must carry a loopback Host header, browser-sent Origins must be
- * loopback, chat POSTs must be application/json, and the Authorization
- * header must carry the shim's per-process shared secret. The plugin's
- * own client satisfies all four by construction; local attackers cannot
- * read the secret out of the plugin process's memory.
+ * loopback, POSTs must be application/json, and the request must carry the
+ * shim's per-process shared secret as `Authorization: Bearer`. The plugin's
+ * own client satisfies these by construction; local attackers cannot read
+ * the secret out of the plugin process's memory.
  *
  * @module dsh-any-connect/shim
  */
@@ -47,7 +47,8 @@ export interface WorkBuddyShim {
 
 /** Constructor dependencies. */
 export interface WorkBuddyShimOptions {
-  store: WorkBuddyCredentialStore
+  kind: 'workbuddy' | 'zcode'
+  store: Pick<WorkBuddyCredentialStore, 'resolve'>
   client: Pick<WorkBuddyUpstreamClient, 'chatStream'>
   catalog: WorkBuddyCatalog
   logger?: ShimLogger
@@ -121,6 +122,10 @@ function writeOpenAIError(res: ServerResponse, status: number, kind: string, mes
   writeJson(res, status, { error: { message, type: kind, code: kind } })
 }
 
+function writeAnthropicError(res: ServerResponse, status: number, kind: string, message: string): void {
+  writeJson(res, status, { type: 'error', error: { type: kind, message } })
+}
+
 /** Read a request body with a size cap; over-limit bodies fail the request. */
 function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -145,27 +150,44 @@ function readBody(req: IncomingMessage): Promise<Buffer> {
  * is the boundary, and the upstream credential comes from the store alone.
  */
 export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShim {
-  const { store, client, catalog } = options
   const logger = options.logger
+  const catalog = options.catalog
+  const store = options.store
+  const client = options.client
 
   // Per-process shared secret. Lives only in memory; the adapter resolves it
-  // as the OpenAI apiKey, which pi-ai sends as `Authorization: Bearer ...`.
-  // The shim never forwards it upstream — the real credential comes from the
-  // store. A local attacker who can hit the port still cannot forge this.
+  // as the client apiKey — the OpenAI SDK sends it as `Authorization: Bearer
+  // ...`. The shim never forwards it upstream — the real credential comes
+  // from the store. A local attacker who can hit the port still cannot forge
+  // this.
   const SHARED_SECRET = randomBytes(32).toString('base64url')
 
-  /** Constant-time bearer check; absent or mismatched bearers are rejected. */
-  function bearerOk(req: IncomingMessage): boolean {
-    const header = req.headers.authorization
-    if (typeof header !== 'string') return false
-    const match = /^Bearer\s+(.+)$/i.exec(header.trim())
-    if (match === null) return false
-    const presented = match[1] as string
-    const expected = SHARED_SECRET
+  /** Constant-time check of one presented secret against the shared secret. */
+  function secretOk(presented: string): boolean {
     const a = Buffer.from(presented)
-    const b = Buffer.from(expected)
+    const b = Buffer.from(SHARED_SECRET)
     if (a.length !== b.length) return false
     return timingSafeEqual(a, b)
+  }
+
+  /** Bearer or x-api-key check (OpenAI and Anthropic headers). */
+  function secretFromRequest(req: IncomingMessage): string | undefined {
+    const header = req.headers.authorization
+    if (typeof header === 'string') {
+      const match = /^Bearer\s+(.+)$/i.exec(header.trim())
+      if (match !== null) return match[1]
+    }
+    const xApiKey = req.headers['x-api-key']
+    if (typeof xApiKey === 'string' && xApiKey.trim() !== '') {
+      return xApiKey.trim()
+    }
+    return undefined
+  }
+
+  function authOk(req: IncomingMessage): boolean {
+    const secret = secretFromRequest(req)
+    if (secret === undefined) return false
+    return secretOk(secret)
   }
 
   const server: Server = createServer((req, res) => {
@@ -187,6 +209,11 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     return `http://127.0.0.1:${address.port}`
   }
 
+  /** Kind-shaped auth failure so the calling SDK can parse the rejection. */
+  function writeUnauthorized(res: ServerResponse): void {
+    writeOpenAIError(res, 401, 'unauthorized', 'missing or invalid Authorization bearer')
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
       // Inbound hardening: every request must name the loopback host, and
@@ -201,29 +228,36 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         writeOpenAIError(res, 403, 'origin_not_allowed', 'Origin must be a loopback origin')
         return
       }
-      if (!bearerOk(req)) {
-        writeOpenAIError(res, 401, 'unauthorized', 'missing or invalid Authorization bearer')
+      if (!authOk(req)) {
+        writeUnauthorized(res)
         return
       }
       const url = req.url ?? '/'
-      if (req.method === 'GET' && (url === '/healthz' || url === '/healthz/')) {
+      // 按 pathname 匹配：SDK 会带查询串（如 ?beta=true），全等
+      // 匹配会把合法请求打成 404。
+      const pathname = new URL(url, 'http://127.0.0.1').pathname
+      if (req.method === 'GET' && (pathname === '/healthz' || pathname === '/healthz/')) {
         writeJson(res, 200, { ok: true })
         return
       }
-      if (req.method === 'GET' && (url === '/v1/models' || url === '/v1/models/')) {
+      if (req.method === 'GET' && (pathname === '/v1/models' || pathname === '/v1/models/')) {
         writeJson(res, 200, {
           object: 'list',
           data: catalog.current().map(model => ({
             id: model.id,
             object: 'model',
             created: 0,
-            owned_by: 'workbuddy',
+            owned_by: options.kind,
           })),
         })
         return
       }
-      if (req.method === 'POST' && (url === '/v1/chat/completions' || url === '/v1/chat/completions/')) {
+      if (req.method === 'POST' && (pathname === '/v1/chat/completions' || pathname === '/v1/chat/completions/')) {
         await chatCompletions(req, res)
+        return
+      }
+      if (req.method === 'POST' && (pathname === '/v1/messages' || pathname === '/v1/messages/')) {
+        await anthropicMessages(req, res)
         return
       }
       writeOpenAIError(res, 404, 'not_found', `no such route: ${req.method} ${url}`)
@@ -264,7 +298,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         res,
         KIND_STATUS[result.kind],
         result.kind,
-        `workbuddy upstream ${result.kind} (http ${result.status}): ${result.message.slice(0, 400)}`,
+        `${options.kind} upstream ${result.kind} (http ${result.status}): ${result.message.slice(0, 400)}`,
       )
       return
     }
@@ -296,6 +330,50 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     })
     body.pipe(res)
   }
+
+  async function anthropicMessages(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!isJsonContentType(req)) {
+      writeAnthropicError(res, 415, 'invalid_request_error', 'Content-Type must be application/json')
+      return
+    }
+    let credential
+    try {
+      credential = await store.resolve()
+    } catch (error: unknown) {
+      writeAnthropicError(res, 401, 'authentication_error', String(error))
+      return
+    }
+
+    const raw = (await readBody(req)).toString('utf8')
+    const controller = new AbortController()
+    req.on('close', () => controller.abort())
+    const result = await client.chatStream(credential, raw, controller.signal)
+
+    if (!result.ok) {
+      if (controller.signal.aborted || res.destroyed) return
+      writeAnthropicError(
+        res,
+        KIND_STATUS[result.kind],
+        result.kind === 'hard_credit' ? 'billing_error' : 'api_error',
+        `${options.kind} upstream ${result.kind} (http ${result.status}): ${result.message.slice(0, 400)}`,
+      )
+      return
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+    const body = Readable.fromWeb(result.response.body as Parameters<typeof Readable.fromWeb>[0])
+    body.on('error', (error: unknown) => {
+      logger?.warn('dsh-any-connect: upstream stream failed mid-flight', error)
+      if (!res.writableEnded) res.end()
+    })
+    body.pipe(res)
+  }
+
 
   return {
     ready,

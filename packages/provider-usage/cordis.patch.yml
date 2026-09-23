@@ -1,0 +1,15 @@
+# @chaoset/provider-usage bundle patch
+#
+# Installed automatically by:
+#   dsh plugin --profile <name> add @chaoset/provider-usage
+#
+# This patch inserts the host plugin row. The web client part (the composer-dock
+# usage pill) activates automatically once the bundle is installed.
+#
+# The plugin takes no configuration: which providers can be answered is decided
+# by which queriers are registered, and the built-ins need no input.
+
+- insert:
+    - id: provider-usage
+      name: '@chaoset/provider-usage'
+      config: {}

@@ -14,15 +14,15 @@
 
 ## 安装
 
-> 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段
-> （`npm view <包名> dsh.host` 可查）；仓库的 `dsh-v*` git tag 是各次
-> 稳定版适配的归档点。
+> 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段；仓库的 `dsh-v*`
+> git tag 是各次稳定版适配的归档点。
 
 ```bash
-dsh plugin --profile web add @chaoset/session-archive
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v<版本>/chaoset-session-archive-<版本>.tgz
 dsh plugin --profile web remove @chaoset/session-archive
 ```
 
+`<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。
 重启 web profile 后，侧边栏底部出现「归档」入口。其他安装来源见仓库根
 `README.md` 的「安装」。
 
@@ -38,7 +38,10 @@ dsh plugin --profile web remove @chaoset/session-archive
 - **删除**：live 会话拒绝；每个会话删除持久化文件与会话目录。删除后**保留**
   该会话在归档集合中的占位 id——否则仍挂在内存中的会话会因「不再归档」立刻
   重新出现在侧边栏（效果等同恢复）；列表按文件存在性过滤，面板与侧边栏都不再
-  显示该会话。宿主内部形状变化时自动降级为「仅删文件」，功能不受影响。
+  显示该会话。删除后面板会刷新会话列表，已不在内存的会话随即从宿主「设置 →
+  已归档会话」页消失；仍在内存中的会话（宿主无让内存会话消亡的官方 API）要等
+  宿主重启，面板会明确提示。宿主内部形状变化时自动降级为「仅删文件」，功能
+  不受影响。
 
 ## Remote API（`ctx.remote.sessionArchive`）
 
@@ -47,7 +50,7 @@ dsh plugin --profile web remove @chaoset/session-archive
 | `list()` | — | `{ items: ArchiveRow[] }` |
 | `count()` | — | `{ count }`（存在性过滤后的归档数量，徽标轮询轻端点） |
 | `detail(sessionId)` | 会话 id | `{ sessionId, header, title, messageCount, totalMessageCount, truncated, messages, live }` |
-| `delete(sessionIds[])` | id 数组 | `{ deleted, failed, removedFromArchive }` |
+| `delete(sessionIds[])` | id 数组 | `{ deleted, failed, removedFromArchive, needsRestart }` |
 | `unarchive(sessionIds[])` | id 数组 | `{ restored, failed, removedFromArchive }` |
 
 > `delete` 与 `unarchive` 共用 `failed[].reason` 词表：`not-archived`（非归档
@@ -60,6 +63,10 @@ dsh plugin --profile web remove @chaoset/session-archive
 > `delete` 的 `removedFromArchive` 恒为 0（删除保留归档占位 id，见上）；
 > `unarchive` 的为实际从归档集合移除的 id 数。`restored` 之外的每个请求 id
 > 都会在 `failed` 里给出原因。
+>
+> `delete` 的 `needsRestart` 列出「文件已删、但内存会话仍在」的 id：这些条目
+> 在宿主重启前仍会出现在原生「设置 → 已归档会话」页（内存会话没有官方消亡
+> API）。已不在内存的会话不出现在其中——它们随面板的会话列表刷新即时消失。
 
 `ArchiveRow`：`{ sessionId, title, cwd, createdAt, updatedAt, size, live }`。
 
@@ -77,5 +84,8 @@ config 字段（`cordis.patch.yml` 或 `~/.dsh/plugins/session-archive/config.js
   （沉降观察窗内体积不再增长即可删）。
 - 首行损坏的孤儿日志被宿主枚举静默跳过：面板既看不到也无法经面板删除（删除
   会因 `unenumerable` 被拒绝），只能手动清理文件。
-- 无官方 unarchive API，恢复归档通过 registry 写入通道实现；若未来 DSH 提供
-  官方 API，插件会切换过去（行为不变）。
+- 恢复归档走 DSH 官方的 `WorkspaceRegistry.unarchiveSession()`；未提供该
+  方法的宿主上恢复返回空（列表仍按存在性过滤幽灵 id），功能不受影响。
+- 已删除但仍在内存中的归档会话，其条目会一直留在宿主原生「设置 → 已归档会话」
+  页，直到宿主重启（宿主没有让内存会话消亡的官方 API）；插件面板自身不受影响，
+  删除时会明确提示。

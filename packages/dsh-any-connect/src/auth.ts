@@ -8,12 +8,16 @@
  * @module dsh-any-connect/auth
  */
 
+import crypto from 'node:crypto'
+import os from 'node:os'
 import { readFile, rm, stat } from 'node:fs/promises'
 import { homedir, release } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { regionOf } from './upstream.js'
 import type { WorkBuddyRefreshOutcome } from './upstream.js'
+import type { WorkBuddyVariant } from './variants.js'
 
 /** Normalized WorkBuddy credential, timestamps in epoch milliseconds. */
 export interface WorkBuddyCredential {
@@ -37,10 +41,19 @@ export interface WorkBuddyAuthStatus {
   nickname?: string
   domain?: string
   source?: 'desktop' | 'dsh'
+  /**
+   * Why no credential is usable, when that is diagnosable rather than simply
+   * "nobody signed in" — a region mismatch being the case that matters.
+   * Present only on `signed-out`, and never a substitute for fixing the file.
+   */
+  reason?: string
 }
 
-/** Constructor options; only {@link refresh} is required. */
+/** Constructor options; {@link refresh} and {@link variant} are required. */
 export interface WorkBuddyStoreOptions {
+  /** Product variant served by this store; selects filenames, env var, and
+   * the accepted credential region. */
+  variant: WorkBuddyVariant
   /** Explicit desktop auth-file path, overriding env and platform defaults. */
   desktopPath?: string
   /** Explicit plugin-owned copy path, defaulting under `$DSH_HOME`. */
@@ -53,6 +66,11 @@ export interface WorkBuddyStoreOptions {
    * successful refresh); defaults to `console.warn`. */
   onWarning?: (message: string) => void
 }
+
+/** A credential belonging to the other product was refused. Callers treat it
+ * as signed-out (hiding the group) rather than retrying: no retry will fix a
+ * wrong-region file. */
+export class RegionMismatchError extends Error {}
 
 /** Basename of the plugin-owned credential copy inside the Harness home. */
 export const WORKBUDDY_AUTH_FILENAME = '.workbuddy-auth.json'
@@ -85,11 +103,14 @@ interface OwnDocument {
 }
 
 /** Plugin-owned copy path inside the Harness home. */
-export function workbuddyOwnAuthPath(): string {
-  return join(resolveDshHome(), WORKBUDDY_AUTH_FILENAME)
+export function workbuddyOwnAuthPath(filename: string = WORKBUDDY_AUTH_FILENAME): string {
+  return join(resolveDshHome(), filename)
 }
 
-const DESKTOP_AUTH_RELATIVE_PATH = ['CodeBuddyExtension', 'Data', 'Public', 'auth', 'workbuddy-desktop.info'] as const
+/** Directory portion of the desktop auth path, shared by both products. */
+const DESKTOP_AUTH_DIR_PARTS = ['CodeBuddyExtension', 'Data', 'Public', 'auth'] as const
+
+const DESKTOP_AUTH_RELATIVE_PATH = [...DESKTOP_AUTH_DIR_PARTS, 'workbuddy-desktop.info'] as const
 
 /** Whether this Linux process is running inside Windows Subsystem for Linux. */
 function isWsl(): boolean {
@@ -145,6 +166,85 @@ export function defaultDesktopAuthCandidates(): string[] {
     return isWsl() ? [...wslDesktopAuthCandidates(home), linux] : [linux]
   }
   return []
+}
+
+/**
+ * Platform-default candidates for one variant, in probe order.
+ */
+export function desktopAuthCandidatesFor(variant: WorkBuddyVariant): string[] {
+  if (variant.kind === 'zcode') {
+    const home = homedir()
+    return [join(home, '.zcode', 'v2', 'credentials.json')]
+  }
+  return defaultDesktopAuthCandidates().map(path => join(dirname(path), variant.desktopFilename!))
+}
+
+/** Decrypt enc:v1:<iv>.<tag>.<cipher> encrypted values from ~/.zcode/v2/credentials.json */
+export function decryptZCodeEncryptedKey(encStr: string): string {
+  if (!encStr.startsWith('enc:v1:')) return encStr
+  let username = 'unknown'
+  try {
+    username = os.userInfo().username
+  } catch {}
+  const fallbackSecret = `zcode-credential-fallback:${os.platform()}:${os.homedir()}:${username}`
+  const secret = process.env.ZCODE_CREDENTIAL_SECRET || fallbackSecret
+  const aesKey = crypto.createHash('sha256').update(secret).digest()
+  const parts = encStr.slice('enc:v1:'.length).split('.')
+  if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
+    throw new Error('Invalid ZCode enc:v1 credential format')
+  }
+  const [ivB64, tagB64, cipherB64] = parts
+  const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, Buffer.from(ivB64, 'base64url'))
+  decipher.setAuthTag(Buffer.from(tagB64, 'base64url'))
+  return Buffer.concat([decipher.update(Buffer.from(cipherB64, 'base64url')), decipher.final()]).toString('utf8')
+}
+
+/**
+ * Parse a ZCode credentials.json document into a WorkBuddyCredential representation.
+ */
+export function parseZCodeAuth(text: string): WorkBuddyCredential | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
+  const data = parsed as Record<string, unknown>
+
+  let apiKeyRaw: string | undefined
+  let uid = ''
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value === 'string' && key.includes('coding-plan') && key.endsWith(':api-key')) {
+      apiKeyRaw = value
+      const match = /account:([^:]+):api-key/.exec(key)
+      if (match) uid = match[1]!
+      break
+    }
+  }
+
+  if (!apiKeyRaw && typeof data['apiKey'] === 'string') {
+    apiKeyRaw = data['apiKey']
+  }
+
+  if (!apiKeyRaw) return undefined
+
+  let decryptedKey: string
+  try {
+    decryptedKey = decryptZCodeEncryptedKey(apiKeyRaw)
+  } catch {
+    return undefined
+  }
+
+  return {
+    accessToken: decryptedKey,
+    refreshToken: '',
+    expiresAtMs: Date.parse('2099-12-31T23:59:59.000Z'),
+    domain: 'bigmodel.cn',
+    uid,
+    nickname: 'ZCode User',
+    source: 'desktop',
+  }
 }
 
 /** Normalize an expiry that may arrive in seconds or milliseconds. */
@@ -249,6 +349,7 @@ function isENOENT(error: unknown): boolean {
  * not take down a working session.
  */
 export class WorkBuddyCredentialStore {
+  private readonly variant: WorkBuddyVariant
   private readonly refresh: WorkBuddyStoreOptions['refresh']
   private readonly refreshMarginMs: number
   private readonly ownPath: string
@@ -269,9 +370,10 @@ export class WorkBuddyCredentialStore {
   private lastRefreshFailureMs = 0
 
   constructor(options: WorkBuddyStoreOptions) {
+    this.variant = options.variant
     this.refresh = options.refresh
     this.refreshMarginMs = options.refreshMarginMs ?? DEFAULT_REFRESH_MARGIN_MS
-    this.ownPath = options.ownPath ?? workbuddyOwnAuthPath()
+    this.ownPath = options.ownPath ?? workbuddyOwnAuthPath(options.variant.ownFilename)
     this.desktopPathOverride = options.desktopPath
     this.onWarning = options.onWarning ?? (message => console.warn(message))
   }
@@ -282,7 +384,7 @@ export class WorkBuddyCredentialStore {
    * explicit path is used verbatim; the defaults are a probe order.
    */
   private resolveDesktopCandidates(): string[] {
-    const fromEnv = process.env[WORKBUDDY_AUTH_FILE_ENV]
+    const fromEnv = process.env[this.variant.env ?? WORKBUDDY_AUTH_FILE_ENV]
     // The settings schema materializes an unset `authFile` as an empty
     // string, and `onChange` hands that string here verbatim. A blank
     // override must fall through to the platform probe order exactly like a
@@ -293,7 +395,7 @@ export class WorkBuddyCredentialStore {
       : undefined
     const explicit = fromConfig ?? (fromEnv !== undefined && fromEnv.trim() !== '' ? fromEnv : undefined)
     if (explicit !== undefined) return [explicit]
-    return defaultDesktopAuthCandidates()
+    return desktopAuthCandidatesFor(this.variant)
   }
 
   private resolveDesktopPath(): string | undefined {
@@ -320,6 +422,24 @@ export class WorkBuddyCredentialStore {
   /** Read the freshest stored credential without refreshing anything. */
   async current(): Promise<WorkBuddyCredential | undefined> {
     const [desktop, own] = await Promise.all([this.readDesktop(), this.readOwn()])
+    // A credential belonging to the other product is refused rather than used:
+    // the two apps share one auth directory and differ only by filename, so a
+    // misconfigured `authFile` / env var is a realistic mistake, and sending one
+    // region's token to the other's endpoint would leak it across products.
+    // Naming the file and the expected region is what makes it fixable.
+    if (this.variant.region !== undefined) {
+      for (const [label, credential] of [['desktop file', desktop], ['plugin copy', own]] as const) {
+        if (credential === undefined) continue
+        const region = regionOf(credential.domain)
+        if (region !== this.variant.region) {
+          throw new RegionMismatchError(
+            `${this.variant.displayName} received a ${region === 'cn' ? 'WorkBuddy (CN)' : 'WorkBuddy AI'} credential`
+            + ` in its ${label} (domain ${JSON.stringify(credential.domain)});`
+            + ` point ${this.variant.env} at the ${this.variant.appName} sign-in, or remove the mismatched file`,
+          )
+        }
+      }
+    }
     const stored = desktop === undefined
       ? own
       : own === undefined ? desktop : (own.expiresAtMs > desktop.expiresAtMs ? own : desktop)
@@ -341,9 +461,10 @@ export class WorkBuddyCredentialStore {
     if (credential === undefined) {
       const candidates = this.resolveDesktopCandidates()
       const desktop = candidates.length > 0 ? candidates.join(' or ') : '(no desktop path on this platform)'
+      const app = this.variant.appName
       throw new Error(
-        `workbuddy: no signed-in WorkBuddy account found; sign in once in the WorkBuddy desktop app`
-        + ` (expected ${desktop} or WORKBUDDY_AUTH_FILE), or refresh an existing session`,
+        `${this.variant.id}: no signed-in ${app} account found; sign in once in the ${app} desktop app`
+        + ` (expected ${desktop} or ${this.variant.env ?? WORKBUDDY_AUTH_FILE_ENV}), or refresh an existing session`,
       )
     }
     if (!this.needsRefresh(credential)) return credential
@@ -383,7 +504,10 @@ export class WorkBuddyCredentialStore {
         ...credential.domain === '' ? {} : { domain: credential.domain },
         source: credential.source,
       }
-    } catch {
+    } catch (error: unknown) {
+      // A refused credential (wrong region) is a report, not a plain
+      // signed-out: the card renders the reason in place of the generic hint.
+      if (error instanceof RegionMismatchError) return { state: 'signed-out', reason: error.message }
       return { state: 'signed-out' }
     }
   }
@@ -398,6 +522,7 @@ export class WorkBuddyCredentialStore {
   }
 
   private needsRefresh(credential: WorkBuddyCredential): boolean {
+    if (this.variant.kind === 'zcode') return false
     if (credential.expiresAtMs <= 0) return true
     return Date.now() + this.refreshMarginMs >= credential.expiresAtMs
   }
@@ -470,7 +595,11 @@ export class WorkBuddyCredentialStore {
   private async readDesktop(): Promise<WorkBuddyCredential | undefined> {
     for (const desktopPath of this.resolveDesktopCandidates()) {
       try {
-        return parseWorkBuddyAuth(await readFile(desktopPath, 'utf8'))
+        const text = await readFile(desktopPath, 'utf8')
+        if (this.variant.kind === 'zcode') {
+          return parseZCodeAuth(text)
+        }
+        return parseWorkBuddyAuth(text)
       } catch (error: unknown) {
         if (!isENOENT(error)) throw error
       }

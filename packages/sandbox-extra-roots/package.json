@@ -1,6 +1,6 @@
 {
   "name": "@chaoset/sandbox-extra-roots",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "description": "DSH host plugin: extra writable roots for the workspace-write sandbox (Seatbelt/bwrap/Landlock profiles and the fs fence)",
   "type": "module",
   "license": "MIT",
@@ -23,7 +23,7 @@
     "./package.json": "./package.json"
   },
   "dsh": {
-    "host": "0.1.5-rc.2",
+    "host": "0.1.7-rc.1",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -37,17 +37,17 @@
     }
   },
   "dependencies": {
-    "@deepseek-ai/dsh-sandbox": "^0.1.5-rc.2"
+    "@deepseek-ai/dsh-sandbox": "^0.1.7-rc.1"
   },
   "optionalDependencies": {
-    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.7-rc.1",
     "@deepseek-ai/node-addon-landlock-run": "^0.1.1"
   },
   "scripts": {
     "build": "node ../../scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node ../../scripts/build.mjs && vitest run",
-    "prepublishOnly": "pnpm run test"
+    "prepublishOnly": "bun run test"
   },
   "repository": {
     "type": "git",
@@ -58,7 +58,7 @@
     "access": "public"
   },
   "bugs": {
-    "url": "https://github.com/winliyou/dsh-plugins/issues"
+    "url": "https://github.com/ShanWuYinShe/dsh-plugins/issues"
   },
-  "homepage": "https://github.com/winliyou/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme"
+  "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme"
 }

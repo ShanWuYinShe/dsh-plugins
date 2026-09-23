@@ -9,22 +9,39 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import type { WorkBuddyCredentialStore } from './auth.js'
-import type { WorkBuddyUpstreamClient } from './upstream.js'
+import type { WorkBuddyAuthStatus, WorkBuddyCredential } from './auth.js'
+import type { WorkBuddyCredits } from './upstream.js'
 import { normalizeCredits } from './upstream.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import { WORKBUDDY_STATUS_PATH } from './status-paths.js'
-import type { WorkBuddyWebModelBadge, WorkBuddyWebStatus } from './status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
-export { WORKBUDDY_STATUS_PATH } from './status-paths.js'
-export type { WorkBuddyWebStatus } from './status-paths.js'
+export { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from './status-paths.js'
+export type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
 /** Constructor dependencies. */
 export interface WorkBuddyStatusRouteOptions {
-  store: WorkBuddyCredentialStore
-  client: Pick<WorkBuddyUpstreamClient, 'fetchCredits'>
-  /** Resolve the current model catalog for free/badge display. */
+  /**
+   * Structural minimum both credential stores satisfy: sign-in summary for
+   * the document, and the current credential (opaque; only consumed when
+   * {@link fetchCredits} is provided, which is WorkBuddy-only).
+   */
+  store: {
+    status(): Promise<WorkBuddyAuthStatus>
+    current(): Promise<unknown>
+  }
+  /** Live billing answer for the card's credit section. */
+  fetchCredits?: (credential: WorkBuddyCredential) => Promise<WorkBuddyCredits>
+  /** Resolve the current model catalog for the card's unified model list. */
   models: () => readonly WorkBuddyModelInfo[]
+  /** Resolve where the served models came from, for the card's catalog line. */
+  catalog: () => WorkBuddyWebCatalog
+  /** Resolve the probe section, for the card's detection controls. Omitted hides it. */
+  probe?: () => WorkBuddyWebProbeSection
+  /** In-process key authorizing probe control writes; handed to the card. */
+  probeKey: string
+  /** Route path; one per variant. */
+  path: string
 }
 
 /** Redact token-like content before it crosses to the browser. */
@@ -63,41 +80,48 @@ export async function workBuddyWebStatus(
   deps: WorkBuddyStatusRouteOptions,
 ): Promise<WorkBuddyWebStatus> {
   const authStatus = await deps.store.status()
-  if (authStatus.state !== 'signed-in') return { status: 'signed-out' }
+  if (authStatus.state !== 'signed-in') {
+    return authStatus.reason === undefined ? { status: 'signed-out' } : { status: 'signed-out', reason: authStatus.reason }
+  }
   const status: WorkBuddyWebStatus = {
     status: 'signed-in',
     ...authStatus.nickname === undefined ? {} : { nickname: authStatus.nickname },
     ...authStatus.domain === undefined || authStatus.domain === '' ? {} : { domain: authStatus.domain },
     ...authStatus.source === undefined ? {} : { source: authStatus.source },
     ...authStatus.expiresAtMs === undefined ? {} : { expiresAt: authStatus.expiresAtMs },
+    catalog: deps.catalog(),
+    ...deps.probe === undefined ? {} : { probe: deps.probe() },
+    probeKey: deps.probeKey,
   }
-  // Model billing facts ride the signed-in document so the card can show which
-  // models are free or on a promo, without touching the Models picker. The
-  // rate is normalized here (not in the card) so both halves agree on one
-  // display form; the card additionally localizes it.
-  const models = deps.models()
-  const modelsField: readonly WorkBuddyWebModelBadge[] = models
-    .filter(model => model.billing?.free === true || (model.billing?.badges?.length ?? 0) > 0)
-    .map(model => {
-      // A free model's card row already carries the 免费 chip; the
-      // "x0.00 credits per message" line under it would be pure noise.
-      const rate = model.billing?.free === true ? undefined : normalizeCredits(model.billing?.credits)
-      return {
-        id: model.id,
-        name: model.name,
-        ...model.billing?.free === true ? { free: true as const } : {},
-        ...model.billing?.badges !== undefined && model.billing.badges.length > 0 ? { badges: model.billing.badges } : {},
-        ...rate === undefined ? {} : { credits: rate },
-      }
-    })
-  const statusWithModels: WorkBuddyWebStatus = modelsField.length > 0
-    ? { ...status, models: modelsField }
-    : status
+  // One unified row per served model: display name, working window, billing
+  // facts, declared efforts, and the larger selectable windows. The rate is
+  // normalized here (not in the card) so both halves agree on one display
+  // form; the card additionally localizes badge labels.
+  const models: readonly WorkBuddyWebModelRow[] = deps.models().map(model => {
+    const rate = model.billing?.free === true ? undefined : normalizeCredits(model.billing?.credits)
+    const efforts = model.reasoning?.supportedEfforts
+    return {
+      id: model.id,
+      name: model.name,
+      contextWindow: model.contextWindow,
+      largerWindows: [...(model.supportedContextWindows ?? [])]
+        .filter(windows => windows > model.contextWindow)
+        .sort((a, b) => a - b),
+      ...model.billing?.free === true ? { free: true as const } : {},
+      ...model.billing?.badges !== undefined && model.billing.badges.length > 0 ? { badges: model.billing.badges } : {},
+      ...rate === undefined ? {} : { credits: rate },
+      ...model.billing?.rateUnknown === true ? { rateUnknown: true as const } : {},
+      ...efforts === undefined || efforts.length === 0 ? {} : { efforts: [...efforts] },
+    }
+  })
+  const statusWithModels: WorkBuddyWebStatus = { ...status, models }
   try {
-    const credential = await deps.store.current()
-    if (credential !== undefined) {
-      const credits = await deps.client.fetchCredits(credential)
-      return { ...statusWithModels, credits }
+    if (deps.fetchCredits !== undefined) {
+      const credential = await deps.store.current()
+      if (credential !== undefined) {
+        const credits = await deps.fetchCredits(credential as WorkBuddyCredential)
+        return { ...statusWithModels, credits }
+      }
     }
   } catch (error: unknown) {
     return { ...statusWithModels, creditsError: safeMessage(error) }
@@ -110,7 +134,7 @@ export function registerWorkBuddyStatusRoute(ctx: Context, deps: WorkBuddyStatus
   ctx.effect(() => {
     const dispose = ctx.webServer.register({
       kind: 'exact',
-      path: WORKBUDDY_STATUS_PATH,
+      path: deps.path,
       handler: async (req: IncomingMessage, res: ServerResponse) => {
         if (req.method !== 'GET') {
           json(res, 405, { error: 'method not allowed' })

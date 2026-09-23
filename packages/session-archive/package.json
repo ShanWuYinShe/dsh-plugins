@@ -1,6 +1,6 @@
 {
   "name": "@chaoset/session-archive",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "description": "DSH plugin: browse archived sessions, inspect their content, batch-restore or permanently delete them with multi-select",
   "engines": {
     "node": ">=22.19.0"
@@ -23,7 +23,7 @@
     "./package.json": "./package.json"
   },
   "dsh": {
-    "host": "0.1.5-rc.2",
+    "host": "0.1.7-rc.1",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -37,20 +37,20 @@
     }
   },
   "optionalDependencies": {
-    "@deepseek-ai/dsh-typert-protocol": "^0.1.5-rc.2"
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.7-rc.1"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-scope": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-session": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-persistence": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-session-title": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-workspace": "^0.1.5-rc.2"
+    "@deepseek-ai/dsh-scope": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-session": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-session-persistence": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-session-title": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-workspace": "^0.1.7-rc.1"
   },
   "scripts": {
     "build": "node ../../scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node ../../scripts/build.mjs && vitest run",
-    "prepublishOnly": "pnpm run test"
+    "prepublishOnly": "bun run test"
   },
   "repository": {
     "type": "git",
@@ -61,7 +61,7 @@
     "access": "public"
   },
   "bugs": {
-    "url": "https://github.com/winliyou/dsh-plugins/issues"
+    "url": "https://github.com/ShanWuYinShe/dsh-plugins/issues"
   },
-  "homepage": "https://github.com/winliyou/dsh-plugins/tree/main/packages/session-archive#readme"
+  "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme"
 }

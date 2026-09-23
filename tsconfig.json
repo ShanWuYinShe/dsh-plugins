@@ -12,6 +12,6 @@
     "types": ["node", "react"],
     "typeRoots": ["./node_modules/@types"]
   },
-  "include": ["packages/*/src/**/*.ts", "test/**/*.ts"],
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "test/**/*.ts"],
   "exclude": ["packages/*/src/**/*.tsx"]
 }

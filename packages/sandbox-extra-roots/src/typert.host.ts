@@ -11,7 +11,10 @@ const passthrough = (value) => value;
 const codec = (typeSymbol) => ({
   mode: 'strict',
   typeSymbol,
-  schema: { _zod: true, parse: passthrough },
+  // TypertCodec 使用惰性 create 工厂（typert-loader 校验 create() 存在，
+  // 网关 decode/encode 调
+  // codec.create().parse()），透传对象无状态，每次返回同一实例即可。
+  create: () => ({ _zod: true, parse: passthrough }),
 });
 
 export const TYPERT = {

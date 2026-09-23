@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
+import type { Context } from "@deepseek-ai/cordis";
 import { createArchiveHost } from "../src/index.js";
 
 const prevHome = process.env.HOME;
@@ -52,7 +53,7 @@ function assistantEvent(seq: number, time: number, text: string) {
 }
 
 /**
- * 官方契约夹具（dsh 0.1.5-alpha 形状，无旧版分支）：list() 返回
+ * 官方契约夹具：list() 返回
  * SessionPersistenceSnapshot 数组、open() read 句柄读事件流、事件 data
  * 为官方 SessionEventMap 形状（user/message 本体、assistant/message 包装）。
  * 默认带 locate——jsonl 后端的诊断钩子（不在抽象契约上），
@@ -69,15 +70,16 @@ function makeFixture(options: {
     archivedSessionIds: [...(options.archived ?? [])],
   };
   const archiveRegistry = {
-    // 官方契约是 getter(读内部 state),setState 后必须读到新数组——
-    // 静态属性会在 setState 后与 state 脱钩,host 的 archivedSet() 快照
-    // 永远是旧集合(delete↔unarchive 互斥的锁内复验会因此失效)。
+    // 官方契约是 getter(读内部 state),unarchiveSession 后必须读到新数组——
+    // 静态属性会在移除后与 state 脱钩,host 的 archivedSet() 快照
+    // 永远是旧集合(delete↔unarchive 互斥的复验会因此失效)。
     get archivedSessionIds() {
       return registryState.archivedSessionIds;
     },
-    enqueueOperation: async (operation: () => unknown) => { await operation(); },
-    requireState: () => registryState,
-    setState: (next: Record<string, unknown>) => { Object.assign(registryState, next); },
+    // 官方 unarchiveSession：幂等移除，未归档的 id 直接 resolve。
+    unarchiveSession: async (sessionId: string) => {
+      registryState.archivedSessionIds = registryState.archivedSessionIds.filter((id) => id !== sessionId);
+    },
   };
   const withLocate = options.withLocate ?? true;
   const headers = options.headers ?? [];
@@ -97,7 +99,7 @@ function makeFixture(options: {
   let statCalls = 0;
   let listCalls = 0;
   // 官方契约 stat(id):只读该会话元数据;枚举不到(无 header 或文件已删)
-  // 返回 undefined。宿主 0.1.5 起四端点都走它,不再全量 list()。
+  // 返回 undefined。四端点都走 stat 逐 id 定位，不做全量 list()。
   persistenceMock.stat = async (id: string) => {
     statCalls++;
     if (!headers.some((h) => h.id === id) || !fs.existsSync(sessionPath(id))) return void 0;
@@ -128,12 +130,13 @@ function makeFixture(options: {
       close: async () => {},
     };
   };
+  // 刻意的部分桩：只实现被测路径用到的服务面，单点断言为完整 Context。
   const ctx = {
     workspaceRegistry: archiveRegistry,
     sessionPersistence: persistenceMock,
     sessions: { get: (id: string) => sessions.get(id) },
-  };
-  return { ctx, registryState, headers, sessions, eventReads: () => eventReads, statCalls: () => statCalls, listCalls: () => listCalls };
+  } as unknown as Context;
+  return { ctx, registryState, headers, sessions, persistenceMock, eventReads: () => eventReads, statCalls: () => statCalls, listCalls: () => listCalls };
 }
 
 const baseCfg = { detailMaxMessages: 50, messagePreviewChars: 500, titleReadConcurrency: 2 };
@@ -180,8 +183,8 @@ describe("session-archive host", () => {
     // 未截断:messageCount 与 totalMessageCount 一致,truncated 为 false。
     const full = await archiveHost.detail("s1");
     expect(full.title === "第一个归档会话" && full.messages.length === 2
-      && full.messages[0].role === "user"
-      && full.messages[1].text.includes("可以帮你")).toBe(true);
+      && full.messages[0]!.role === "user"
+      && full.messages[1]!.text.includes("可以帮你")).toBe(true);
     expect(full.messageCount === 2 && full.totalMessageCount === 2 && full.truncated === false).toBe(true);
     expect(full.live === false).toBe(true);
 
@@ -196,7 +199,7 @@ describe("session-archive host", () => {
     ]);
     const truncatedDetail = await cappedHost.detail("s2");
     expect(truncatedDetail.messages.length === 2
-      && truncatedDetail.messages[0].text === "一" && truncatedDetail.messages[1].text === "二").toBe(true);
+      && truncatedDetail.messages[0]!.text === "一" && truncatedDetail.messages[1]!.text === "二").toBe(true);
     expect(truncatedDetail.messageCount === 2
       && truncatedDetail.totalMessageCount === 4
       && truncatedDetail.truncated === true).toBe(true);
@@ -230,7 +233,7 @@ describe("session-archive host", () => {
     // deleteArchived:未归档的会话(即使文件存在、不在内存)必须拒绝且不动文件。
     const delForeign = await archiveHost.deleteArchived(["live-unarchived"]);
     expect(delForeign.deleted.length === 0
-      && delForeign.failed[0].reason === "not-archived"
+      && delForeign.failed[0]!.reason === "not-archived"
       && fs.existsSync(sessionPath("live-unarchived"))).toBe(true);
 
     // detail:同样只对归档成员开放。
@@ -275,6 +278,9 @@ describe("session-archive host", () => {
     expect(!fs.existsSync(sessionPath("s-del"))).toBe(true);
     expect(fs.existsSync(sessionPath("s-busy")) && fs.existsSync(sessionPath("foreign"))).toBe(true);
     expect(mixed.removedFromArchive === 0).toBe(true);
+    // s-del 是冷文件(不在内存):needsRestart 为空,客户端刷新会话列表后
+    // 原生"设置 → 已归档会话"页即时消失。
+    expect(mixed.needsRestart).toEqual([]);
     clearInterval(appender);
 
     // 静默会话回归(线上误报用例):在内存(tab 恢复)、mtime 被宿主批量落盘/
@@ -284,12 +290,15 @@ describe("session-archive host", () => {
     expect(quiet.deleted.includes("s-quiet")
       && quiet.failed.length === 0
       && !fs.existsSync(sessionPath("s-quiet"))).toBe(true);
+    // s-quiet 文件已删但内存会话仍在:ghost 保留 + 内存摘要仍在 → 原生页在
+    // 宿主重启前仍会显示,如实返回 needsRestart 供客户端提示用户。
+    expect(quiet.needsRestart).toEqual(["s-quiet"]);
 
     // 损坏首行的孤儿文件:枚举不到但文件确实存在 → 拒绝并保留文件,不谎报成功。
     const orphanResult = await archiveHost.deleteArchived(["orphan"]);
     expect(orphanResult.deleted.length === 0
       && orphanResult.failed.length === 1
-      && orphanResult.failed[0].reason === "unenumerable"
+      && orphanResult.failed[0]!.reason === "unenumerable"
       && fs.existsSync(sessionPath("orphan"))).toBe(true);
 
     // 真 ghost(从未有文件):cwd 未知时 locate 只能探缺省目录,既探不到真实
@@ -298,8 +307,8 @@ describe("session-archive host", () => {
     const ghostResult = await archiveHost.deleteArchived(["s-ghost"]);
     expect(ghostResult.deleted.length === 0
       && ghostResult.failed.length === 1
-      && ghostResult.failed[0].sessionId === "s-ghost"
-      && ghostResult.failed[0].reason === "unenumerable"
+      && ghostResult.failed[0]!.sessionId === "s-ghost"
+      && ghostResult.failed[0]!.reason === "unenumerable"
       && f.registryState.archivedSessionIds.includes("s-ghost")).toBe(true);
 
     // 不在内存即冷文件:即使 mtime 新鲜(写入方已随会话停止消失)也直接删,
@@ -309,6 +318,8 @@ describe("session-archive host", () => {
     expect(delBusy.deleted.includes("s-busy")
       && !fs.existsSync(sessionPath("s-busy"))
       && !fs.existsSync(path.join(saRoot, "--proj--", "s-busy"))).toBe(true);
+    // 内存已清空的冷删除:needsRestart 为空,原生页刷新即消失。
+    expect(delBusy.needsRestart).toEqual([]);
     expect(f.registryState.archivedSessionIds.includes("s-busy")).toBe(true);
     expect(!(await archiveHost.list()).items.some((i) => i.sessionId === "s-busy")).toBe(true);
   });
@@ -327,8 +338,8 @@ describe("session-archive host", () => {
     const hashDir = path.join(saRoot, "--proj--", "deadbeef");
     fs.mkdirSync(hashDir, { recursive: true });
     fs.writeFileSync(path.join(hashDir, "session.jsonl"), "[]");
-    const realLocate = f1.ctx.sessionPersistence.locate;
-    f1.ctx.sessionPersistence.locate = (meta: { id: string }) =>
+    const realLocate = f1.persistenceMock.locate;
+    f1.persistenceMock.locate = (meta: { id: string }) =>
       meta.id === "s-x" ? { kind: "jsonl", path: path.join(hashDir, "session.jsonl") } : realLocate(meta);
     const out1 = await archiveHost1.deleteArchived(["s-x"]);
     expect(out1.deleted.includes("s-x")).toBe(true);
@@ -378,7 +389,7 @@ describe("session-archive host", () => {
     const degraded = createArchiveHost({
       ...f.ctx,
       workspaceRegistry: { archivedSessionIds: ["u1", "u-ghost"] },
-    }, baseCfg);
+    } as unknown as Context, baseCfg);
     const degList = await degraded.list();
     expect(degList.items.length === 1 && degList.items[0].sessionId === "u1").toBe(true);
     const degUn = await degraded.unarchive(["u1"]);
@@ -418,13 +429,13 @@ describe("session-archive host", () => {
     clearInterval(writer);
     expect(repeated.deleted.length === 0
       && repeated.failed.length === 1
-      && repeated.failed[0].sessionId === "r2"
-      && repeated.failed[0].reason === "reappeared").toBe(true);
+      && repeated.failed[0]!.sessionId === "r2"
+      && repeated.failed[0]!.reason === "reappeared").toBe(true);
   });
 
   it("官方契约回归:list() 快照形状 + open 句柄下归档列表与详情完整语义(bug 复现用例)", async () => {
-    // 线上故障的直接形状:0.1.3+ list() 返回 {header,...} 快照数组,
-    // 旧代码读 item.id 全为 undefined,归档 id 一个也匹配不上 → 面板恒空。
+    // 回归：list() 返回 {header,...} 快照数组，必须按 header.id 匹配归档
+    // id（误读 item.id 会全为 undefined，归档一个也匹配不上 → 面板恒空）。
     // 夹具即官方契约形状,这里锁 list/count/detail 的完整语义。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-v2-"));
     const f = makeFixture({
@@ -447,8 +458,8 @@ describe("session-archive host", () => {
     // 官方事件 data 形状:user/message 本体、assistant/message 包装(message.content)。
     const detail = await archiveHost.detail("v1");
     expect(detail.title === "快照形状" && detail.messages.length === 2
-      && detail.messages[0].role === "user" && detail.messages[0].text === "内容"
-      && detail.messages[1].role === "assistant" && detail.messages[1].text === "回复").toBe(true);
+      && detail.messages[0]!.role === "user" && detail.messages[0]!.text === "内容"
+      && detail.messages[1]!.role === "assistant" && detail.messages[1]!.text === "回复").toBe(true);
   });
 
   it("无 locate 的宿主后端:列表/详情可用(文件信息降级),删除按不可定位处理", async () => {
@@ -486,7 +497,8 @@ describe("session-archive host", () => {
       headers: [{ id: "g1", cwd: "/proj/a", createdAt: 1000 }],
     });
     // 写旧代际文件名(不带 v 前缀),夹具 locate 会拼 session.jsonl → 命中;
-    // 这里直接覆盖 locate 模拟 0.1.5 行为:永远指向不存在的当前代际名。
+    // 这里直接覆盖 locate，使其永远指向不存在的当前代际名，覆盖“定位落空
+    // 后按目录扫描实际文件”的路径。
     const legacyPath = sessionPath("g1");
     fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
     fs.writeFileSync(
@@ -497,7 +509,7 @@ describe("session-archive host", () => {
     // g1(模拟宿主 list 能枚举历史代际),真实内容在 session.v1.jsonl 上。
     fs.writeFileSync(legacyPath, "[]");
     const currentGeneration = path.join(path.dirname(legacyPath), "session.v2.jsonl");
-    f.ctx.sessionPersistence.locate = () => ({ kind: "jsonl", path: currentGeneration });
+    f.persistenceMock.locate = () => ({ kind: "jsonl", path: currentGeneration });
 
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
 
@@ -527,15 +539,15 @@ describe("session-archive host", () => {
       headers: [{ id: "e1", cwd: "/proj/a", createdAt: 1000 }],
     });
     writeSession("e1", []);
-    f.ctx.sessionPersistence.locate = () => {
+    f.persistenceMock.locate = () => {
       throw new Error("backend contract drift");
     };
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const del = await archiveHost.deleteArchived(["e1"]);
     expect(del.deleted.length === 0
       && del.failed.length === 1
-      && del.failed[0].sessionId === "e1"
-      && del.failed[0].reason === "unlocatable"
+      && del.failed[0]!.sessionId === "e1"
+      && del.failed[0]!.reason === "unlocatable"
       && fs.existsSync(sessionPath("e1"))).toBe(true);
     // 恢复同样谨慎拒绝(unknown ≠ located)。
     const un = await archiveHost.unarchive(["e1"]);
@@ -545,7 +557,7 @@ describe("session-archive host", () => {
   it("delete ↔ unarchive 互斥:并发时不出现「文件删除且归档标记移除」的错位", async () => {
     // 变体 A:删除先进临界区(在内存 + mtime 新鲜 → 300ms 沉降窗口),恢复
     // 排队等到删除完成后 confirm → absent → 拒绝恢复。没有互斥时 confirm
-    // 可在沉降窗口内探到 located,setState 会把 id 移出集合——文件没了、
+    // 可在沉降窗口内探到 located,unarchiveSession 会把 id 移出集合——文件没了、
     // 归档标记也没了,内存会话重回侧边栏。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-mx1-"));
     const f = makeFixture({
@@ -581,7 +593,7 @@ describe("session-archive host", () => {
     expect(un2.restored.includes("m2")).toBe(true);
     expect(del2.deleted.length === 0
       && del2.failed.length === 1
-      && del2.failed[0].reason === "not-archived"
+      && del2.failed[0]!.reason === "not-archived"
       && fs.existsSync(sessionPath("m2"))).toBe(true);
   });
 
@@ -599,7 +611,7 @@ describe("session-archive host", () => {
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const detail = await archiveHost.detail("d1");
     expect(detail.messages.length === 1
-      && detail.messages[0].text === "正常消息").toBe(true);
+      && detail.messages[0]!.text === "正常消息").toBe(true);
   });
 
   it("标题/详情分块读取:>块长的事件流不重不漏,标题(块首)与尾部消息都可达", async () => {

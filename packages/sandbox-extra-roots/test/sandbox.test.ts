@@ -32,18 +32,24 @@ function sbpl(roots: string[]): string {
 }
 
 function makeSandboxMock() {
-  return {
-    confine(argv: string[], policy: any) {
+  // 镜像当前宿主：confine 是异步实现，第三参数为 AbortSignal。
+  const mock: any = {
+    lastSignal: undefined as any,
+    async confine(argv: string[], policy: any, signal?: any) {
+      mock.lastSignal = signal;
       const roots = writableRoots(policy);
       return { argv: ["sandbox-exec", "-p", sbpl(roots), "--", ...argv], enforcement: "full", denialSignatures: [], runnerFailureRules: [] };
     },
   };
+  return mock;
 }
 
 function makeFsMock() {
   return {
     async resolve(displayPath: string) { return { targetKey: displayPath }; },
-    async checkedTarget(target: any) {
+    // 标注官方契约返回形状：未包装的桩只会 throw，推断成 Promise<never>
+    // 会让 apply 包装后的 await 结果失去 targetKey 类型。
+    async checkedTarget(target: any): Promise<{ targetKey: string }> {
       throw Object.assign(new Error("FS_SANDBOX_DENIED"), { code: "FS_SANDBOX_DENIED" });
     },
   };
@@ -94,8 +100,8 @@ describe("sandbox-extra-roots host (Seatbelt)", () => {
     rmSync(EXTRA, { recursive: true, force: true });
   });
 
-  it("seatbelt 额外目录+官方根", () => {
-    const out = sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+  it("seatbelt 额外目录+官方根", async () => {
+    const out = await sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
     expect(out.argv[2]).toContain('(subpath "' + canonicalPath(EXTRA) + '")');
     expect(out.argv[2]).toContain('(subpath "/ws")');
   });
@@ -109,10 +115,17 @@ describe("sandbox-extra-roots host (Seatbelt)", () => {
     await expect(fsMock.checkedTarget({ displayPath: "/tmp/other/bar" })).rejects.toThrow("FS_SANDBOX_DENIED");
   });
 
-  it("remote set 热更新", () => {
+  it("remote set 热更新", async () => {
     ctx.gateway.set({ extraWritableRoots: ["/tmp/hot"] });
-    const out2 = sandboxMock.confine(["x"], { mode: "workspace-write", workspaceRoot: WS });
+    const out2 = await sandboxMock.confine(["x"], { mode: "workspace-write", workspaceRoot: WS });
     expect(out2.argv[2].includes('(subpath "/tmp/hot")')).toBe(true);
+  });
+
+  it("confine 异步化：包装返回 Promise 并把 signal 透传给原实现", async () => {
+    const signal = new AbortController().signal;
+    const out = await sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS }, signal);
+    expect(out.argv[0]).toBe("sandbox-exec");
+    expect(sandboxMock.lastSignal).toBe(signal);
   });
 
   it("remote 拒绝相对路径", () => {
@@ -129,14 +142,14 @@ describe("sandbox-extra-roots host (bwrap)", () => {
     process.env.DSH_HOME = fakeHome2;
     try {
       const bwrapMock = {
-        confine(argv: string[], policy: any) {
+        async confine(argv: string[], policy: any) {
           return { argv: ["bwrap", "--ro-bind", "/", "/", "--", ...argv], enforcement: "full", denialSignatures: [], runnerFailureRules: [] };
         },
       };
       const fsMock = makeFsMock();
       const ctx = makeCtx(bwrapMock, fsMock);
       await apply(ctx, { extraWritableRoots: [missingExtra, existingExtra] });
-      const bwrapOut = bwrapMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+      const bwrapOut = await bwrapMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
       const bindArgs = bwrapOut.argv.slice(0, bwrapOut.argv.indexOf("--"));
       const canonicalExistingExtra = canonicalPath(existingExtra);
       const canonicalMissingExtra = canonicalPath(missingExtra);
@@ -171,11 +184,11 @@ describe("sandbox-extra-roots 运行期符号链接重定向(逃逸防护)", () 
     try {
       await apply(ctx, { extraWritableRoots: [root] });
       // 配置期目录真实存在,正常授予(前置确认,排除假阳性)
-      expect(sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS }).argv[2])
+      expect((await sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS })).argv[2])
         .toContain(`(subpath "${canonicalPath(root)}")`);
 
       swapToSymlink(root, "/");
-      const out = sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+      const out = await sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
       expect(out.argv[2]).not.toContain('(subpath "/")');
       // fs 侧同样不得放行(指向 / 后全盘都会命中该根)
       await expect(fsMock.checkedTarget({ displayPath: "/etc/hosts" })).rejects.toThrow("FS_SANDBOX_DENIED");
@@ -194,7 +207,7 @@ describe("sandbox-extra-roots 运行期符号链接重定向(逃逸防护)", () 
     try {
       await apply(ctx, { extraWritableRoots: [root] });
       swapToSymlink(root, fakeHome);
-      const out = sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+      const out = await sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
       expect(out.argv[2]).not.toContain(`(subpath "${canonicalPath(fakeHome)}")`);
       await expect(fsMock.checkedTarget({ displayPath: fakeHome + "/secret" })).rejects.toThrow("FS_SANDBOX_DENIED");
     } finally {
@@ -215,7 +228,7 @@ describe("sandbox-extra-roots 运行期符号链接重定向(逃逸防护)", () 
     try {
       await apply(ctx, { extraWritableRoots: [root] });
       swapToSymlink(root, "/");
-      const out = bwrapMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+      const out = await bwrapMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
       const bindArgs = out.argv.slice(0, out.argv.indexOf("--"));
       // 不出现 "--bind / /"
       expect(bindArgs).not.toContain("--bind");
@@ -251,7 +264,7 @@ describe("sandbox-extra-roots 危险根校验", () => {
     expect(() => ctx.gateway.set({ extraWritableRoots: [nested] })).not.toThrow();
     // 授予确实生效(不是被静默丢弃):confine 里的拼写是 canonicalPath 的
     // 产物,断言用同一函数取值,跨平台对齐。
-    const out = sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+    const out = await sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
     expect(out.argv[2]).toContain('(subpath "' + canonicalPath(nested) + '")');
   });
 
@@ -263,7 +276,7 @@ describe("sandbox-extra-roots 危险根校验", () => {
     // /private 本身不在系统目录名单上,但它是 /private/etc 等 canonical
     // 系统目录的词法祖先,授予它等价于授予系统目录 → filter 剔除。
     await apply(ctx, { extraWritableRoots: ["/private"] });
-    const out = sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+    const out = await sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
     expect(out.argv[2]).not.toContain('(subpath "/private")');
   });
 
@@ -272,7 +285,7 @@ describe("sandbox-extra-roots 危险根校验", () => {
     const fsMock = makeFsMock();
     const ctx = makeCtx(sandboxMock, fsMock);
     await apply(ctx, { extraWritableRoots: ["/etc", "/usr"] });
-    const out = sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+    const out = await sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
     for (const spelling of ["/etc", "/usr", "/private/etc", "/private/usr"]) {
       expect(out.argv[2]).not.toContain('(subpath "' + spelling + '")');
     }
@@ -288,7 +301,7 @@ describe("sandbox-extra-roots 危险根校验", () => {
     const fsMock = makeFsMock();
     const ctx = makeCtx(sandboxMock, fsMock);
     await apply(ctx, { extraWritableRoots: [filePath] });
-    const out = sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS });
+    const out = await sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS });
     expect(out.argv[2]).toContain('(subpath "' + canonicalPath(filePath) + '")'); // Seatbelt 不受限
     await expect(fsMock.checkedTarget({ displayPath: filePath })).rejects.toThrow("FS_SANDBOX_DENIED"); // fs 侧过滤
   });
@@ -308,7 +321,7 @@ describe("sandbox-extra-roots 卸载/重装回路", () => {
       await apply(ctx, { extraWritableRoots: [EXTRA] });
       expect(sandboxMock.confine).not.toBe(origConfine);
       expect(fsMock.checkedTarget).not.toBe(origCheckedTarget);
-      const out = sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS });
+      const out = await sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS });
       expect(out.argv[2]).toContain(`(subpath "${canonicalExtra}")`);
       await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/f" })).resolves.toMatchObject({ targetKey: EXTRA + "/f" });
 
@@ -322,7 +335,7 @@ describe("sandbox-extra-roots 卸载/重装回路", () => {
       await apply(ctx, { extraWritableRoots: [EXTRA] });
       expect(sandboxMock.confine).not.toBe(origConfine);
       expect(fsMock.checkedTarget).not.toBe(origCheckedTarget);
-      const out2 = sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS });
+      const out2 = await sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS });
       expect(out2.argv[2]).toContain(`(subpath "${canonicalExtra}")`);
       await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/f" })).resolves.toMatchObject({ targetKey: EXTRA + "/f" });
       ctx.disposeAll();
@@ -341,7 +354,7 @@ describe("sandbox-extra-roots 漂移自检 fail-closed", () => {
     // 丢掉(fail-open)。现在必须保持官方 argv 原样,告警注明 bash 侧失效。
     mkdirSync(EXTRA, { recursive: true });
     const driftedMock = {
-      confine(argv: string[], policy: any) {
+      async confine(argv: string[], policy: any) {
         const roots = writableRoots(policy);
         // 模拟宿主升级后官方模板新增了限制项。
         return { argv: ["sandbox-exec", "-p", sbpl(roots) + " (deny network*)", "--", ...argv], enforcement: "full", denialSignatures: [], runnerFailureRules: [] };
@@ -353,7 +366,7 @@ describe("sandbox-extra-roots 漂移自检 fail-closed", () => {
     ctx.logger.warn = (message: string) => warnings.push(message);
     try {
       await apply(ctx, { extraWritableRoots: [EXTRA] });
-      const out = driftedMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+      const out = await driftedMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
       // 官方 argv 原样保留:官方新增的限制项还在,额外根没有被注入。
       expect(out.argv[2]).toContain("(deny network*)");
       expect(out.argv[2]).not.toContain('(subpath "' + canonicalPath(EXTRA) + '")');

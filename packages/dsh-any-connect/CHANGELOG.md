@@ -1,41 +1,332 @@
 # Changelog
 
-## 0.3.17 (2026-09-14)
+## 0.4.0 (2026-09-24)
+
+### 新增
+
+* **适配 DSH 宿主 0.1.7-rc.1 稳定线**：依赖范围与 `dsh.host` 对齐 `^0.1.7-rc.1`。
+* **支持 ZCode 桌面客户端凭据自动发现与 Client Request Signing V4 协议**：
+  自动读取并 AES-256-GCM 解密 `~/.zcode/v2/credentials.json`，完成与 BigModel
+  服务端的 Ed25519 签名握手与 8-bit Proof-of-Work 计算，无缝集成 Coding Plan
+  150% 额度与每日 23:00~09:00 GLM-5.3-Flash 免费专属特权通道。
+* **接入 Anthropic Messages 协议**：将 ZCode 渠道转发端点切换至智谱
+  `/api/anthropic/v1/messages`，确保 Coding Plan 额度与免费配额正确生效。
+* **修正 GLM-5.3 / GLM-5.3-Flash 模型窗口规格**：对齐智谱官方与 ZCode 内置配置，
+  上下文窗口上限设为 1,000,000 (1M)，单次输出最大 token 设为 128,000 (128K)。
+* **设置页新增专属 Coding Plan 订阅状态展示**：直观显示 Coding Plan 有效状态、到期时间与专属特权标签。
+* **推理思考档位自动探测**：在启动、登录态变化与目录刷新时全自动后台探测模型思考档位并缓存。
+
+### 优化
+
+* **配置卡片视觉去噪与布局精简**：卡片展开后常看信息（当前积分与订阅状态）清晰聚焦，套餐进度条与模型列表默认收起。
+* 构建工具链由 pnpm 统一切换至 Bun。
+
+## 0.4.0-alpha.2 (2026-09-24)
+
+### 新增
+
+* **支持 ZCode 桌面客户端凭据自动发现与 Client Request Signing V4 协议**：
+  自动读取并 AES-256-GCM 解密 `~/.zcode/v2/credentials.json`，完成与 BigModel
+  服务端的 Ed25519 签名握手与 8-bit Proof-of-Work 计算，无缝集成 Coding Plan
+  150% 额度与每日 23:00~09:00 GLM-5.3-Flash 免费专属特权通道。
+* **接入 Anthropic Messages 协议**：将 ZCode 渠道转发端点切换至智谱
+  `/api/anthropic/v1/messages`，解决 OpenAI 兼容端点无法消耗 Coding Plan
+  额度而报错 1113 credit 余额不足的问题。
+* **修正 GLM-5.3 / GLM-5.3-Flash 模型窗口规格**：对齐智谱官方与 ZCode 内置配置，
+  上下文窗口上限设为 1,000,000 (1M)，单次输出最大 token 设为 128,000 (128K)。
+* **设置页新增专属 Coding Plan 订阅状态展示**：废除模糊无意义的“当前积分: 1”，
+  改用正式的 Coding Plan 订阅卡片，直观显示有效状态、到期时间与专属特权标签。
+
+## 0.4.0-alpha.1 (2026-09-23)
+
+### 优化
+
+* **配置卡片去噪：积分明细不再渲染，模型清单默认收起**。卡片展开后只留
+  一行「当前积分 + 刷新」，账号身份回到卡头摘要（不再在卡体重复一遍）；
+  此前占据整屏的套餐进度条（多条同名套餐各一行）是积分的**构成**，不是
+  用户查询的目标，整块删除；模型清单一并收进卡体的折叠开关，需要时点开。
+  常看信息（当前积分）在收起态即可读到，展开后无需滚动。
+* 「合计 N」改称「当前积分 N」：该数字是上游积分接口的当前剩余总量，不是
+  套餐份额之和，旧说法容易被读成"总额度"。
+* 新增配置卡片的渲染回归测试（jsdom + 真实组件），钉住「不再渲染套餐明细」
+  「模型清单默认收起」两条口径；根 devDependencies 补 `react-dom` / `jsdom`。
+
+### 测试
+
+* **删除两份「镜像测试」**（`dsh-any-connect` / `provider-usage` 各一份
+  `client-fallback.test.ts`）：它们在 spec 里手抄一遍 `apply()` 再断言，对真实
+  入口零覆盖——源码改了它们也不会红，只增加维护面。
+* 补上真实入口的兜底回归（`test/bundle.test.ts`）：直接 import 两个包的
+  `client/index.tsx`，让 slot 注册抛错，断言 `apply()` 不把异常抛给宿主
+  loader、且错误在 console 可见（变体验证：把 catch 改回 `throw` 该用例即红）。
+* 顺手清理无判据的用例与死代码：`catalog.test.ts` 删「已登录即可见」「设同值
+  返回 false」两条同义反复用例；`bundle.test.ts` 删未被引用的 reactStub 与
+  「某导出不存在」的墓碑用例。
+* `host-heartbeat` 的回收 PID 用例不再无条件依赖 `ps`：读不到进程启动时刻的
+  环境显式跳过（该环境中心跳按设计降级为仅 PID 存活判定），而不是静默变红。
+
+## 0.4.0-alpha.0 (2026-09-23)
+
+### 移除
+
+* **整个 ZCode 家族（GLM Coding Plan 直连 + 夜间免费）自本包移除**，插件重新
+  聚焦 WorkBuddy 国内版/国际版两个变体：
+  - 删除 `zcode` / `zcode-offpeak` 两个 provider、对应卡片与 CLI
+    （`--provider zcode` / `--provider zcode-offpeak` 不再可用）；
+  - 删除 `apiKeyZcode` 配置字段、`.zcode-auth.json` 凭据副本与 zcode 桌面端
+    凭据解密逻辑（`zcode-auth` / `zcode-credentials` / `zcode-upstream` /
+    `zcode-signing` / `zcode-offpeak` 五个模块整体删除）；
+  - 上游（智谱）已把夜间免费重构为「服务端派发票据」的闲时任务封闭体系，
+    并对旧式直调施加风控（HTTP 405 code 3012），非官方复刻无法稳定维持，
+    详见 2026-09-23 的排查结论。
+* **破坏性变更**：依赖本包接入 GLM Coding Plan 的用户请改用 zcode CLI 或
+  等待官方开放接入协议。
+
+## 0.3.19-alpha.4 (2026-09-23)
+
+### 适配
+
+* 跟进 DSH 宿主 0.1.7-alpha.2（无宿主契约变化，纯依赖基线跟进）。
+* cordis `^4.0.3` → `^4.0.4`、schemastery `^3.18.3` → `^3.18.4`、
+  cordis-plugin-loader `^1.0.4` → `^1.0.5`（新宿主线的 peer 要求）。peer
+  解析版本与宿主不一致时 bun 会解析出两份 cordis 物理副本，`dsh-settings`
+  的 `Context.settings` 模块增强落在另一份上，插件侧 `settings` 属性消失
+  （本次 typecheck 实际破点）。
+
+### 优化
+
+* 思考档位检测全自动化：移除「自动检测」开关、单模型/批量检测按钮与两段式
+  确认。目录刷新后自动补测未声明档位的候选（沿用串行队列、账号归属、目录
+  指纹失效重测与 TTL 保护）；自动检测进行中卡片仅显示低调的「检测中…」提示。
+  consent 门、probe-store 的授权持久化与 probe 控制路由的 `probe` / `clear`
+  / `set-consent` action 一并移除（旧客户端发这些 action 得到 400；路由保留
+  `refresh` 与既有的 loopback + 进程内 key 护栏）。
+* 配置卡片瘦身：移除「详细信息」折叠区（令牌过期时间、模型目录来源、清除
+  检测结果）——用户不关心的实现细节；保留账号身份、积分进度、夜间窗口与
+  模型列表（含免费/倍率/促销/上下文窗口/档位标签）。
+* 模型行去噪：删除「不校验档位」标签（检测的否定性结论是实现细节，不是
+  用户需要知道的事——没有档位可选本身就是无声的答案）；右侧元信息从灰底
+  chip 堆改为一行纯文本（倍率 · 窗口 · 档位），只保留免费/促销类值得强调的
+  彩色徽章，大幅降低视觉噪音。
+* 卡片视觉与布局重排：积分套餐由三行（标签/进度条/明细）压缩为单行
+  （名称 + 进度条 + 剩余百分比，精确数字进 tooltip）；模型列表改 grid 列
+  布局，倍率/窗口/档位以等宽数字跨行对齐；区块标题统一为小号灰字风格
+  （「剩余积分」「模型 · 16」），区块间加淡分隔线；卡头加在线状态点、展开
+  后状态行不再重复昵称；刷新按钮与夜间窗口状态行同步收敛为轻量样式。
+
+## 0.3.19-alpha.3 (2026-09-22)
+
+### 适配
+
+* 跟进 DSH 宿主 0.1.7-alpha.1：settings 体系重构（`SettingsProvider` →
+  `SettingsForms`，`register` / `installSection` / `get` 全部移除），对照
+  上游 `dsh-llm-pi-ai` 的新契约迁移：
+  - 可编辑字段改 `.volatile()`（`Config` 即 `Volatile` 引用，`.get()` 读
+    取；调用方仍传普通值，由 Cordis 解析包裹）；
+  - 装配期 `installSection` + `setSource`/`onChange` 改为
+    `ctx.on('loader/volatile-update')` 重读并回写各变体凭据存储后重拉目录
+    （凭据写入抽成可单测的 `applyVariantConfig`）；
+  - 自带配置卡片，向 settings 注册 `configure({ auto: false })`，退出宿主
+    自动表单页；
+  - 目录条目的 `settingsNs` 取 Loader profile entry id
+   （`ctx.fiber.entry?.options.id`），无 Loader 时回落旧命名空间常量。
+* 启动目录拉取由两次变为一次（旧装配期 `onChange` 附带的那次随 settings
+  provider 一并消失）；行为不变，仍是失败有限重试（初始 1 次 + 最多 2 次）。
+* cordis `^4.0.2` → `^4.0.3`、schemastery `^3.18.2` → `^3.18.3`
+ （新宿主线的 peer 要求）；新增 `cordis-plugin-loader` 类型依赖
+ （`loader/volatile-update` 事件与 `fiber.entry`）。
+
+## 0.3.19-alpha.2 (2026-09-20)
+
+### 优化
+
+* 配置页按零操作原则自动化：目录非 live（saved/fallback/上次失败）时卡片
+  展开即后台自动重拉一次，不用再按刷新；失败只进行内提示，不循环打扰
+* 已登录卡头第二行改为实时摘要（身份 · 积分合计 · 模型数），常见查询不用
+  点开展示；静态产品介绍退到 hover tooltip，不丢失
+* 已授权自动检测时，单模型/批量检测一次点击直接执行；两段式确认只留给
+  未授权的手动探测
+
+## 0.3.19-alpha.1 (2026-09-20)
+
+### 修复
+
+* `dsh-any-connect logout --provider zcode-offpeak` 误导输出：off-peak 凭据
+  完全跟随 zcode 桌面端登录态、没有自有副本，之前的实现掉进 WorkBuddy
+  分支去删一个从不存在的文件并声称 "removed"——改为如实报 no-op 并提示
+  正确的登出方式
+
+## 0.3.19-alpha.0 (2026-09-20)
+
+### Features
+
+* **设置页重构**：按登录态分组渲染——已登录渠道显示完整卡片（首个默认
+  展开），未登录渠道折叠为一行低调条目（点开看诊断原因），全部未登录时
+  顶部给出总引导；不再把从未使用的渠道以整卡形式铺满页面
+* **统一模型列表**：每个模型一行聚合显示名称、积分倍率、免费/促销徽章、
+  上下文窗口与思考档位（声明档位优先，其次检测结果），不再分散在三个
+  区块；zcode 系静态目录的档位与窗口同样入列
+* **模型信息全自动化**：目录每小时自动重拉一次（上游促销上下线、倍率与
+  声明档位调整、新模型不再依赖手动"刷新模型"；启动拉取失败的暂态故障
+  也随下一周期自愈）；status 文档的 `models`/`context` 两字段合并为单一
+  全量 `models` 行结构（新增声明档位 `efforts`），卡片零拼接渲染
+* **思考档位自动检测**：授权开关从 settings 配置（`probeConsent`）迁移到
+  探针记录文件持久化（旧配置字段被忽略，需在卡片上重新开启一次）；开启
+  后启动与每次目录刷新发现的新候选自动检测，卡片上另有「检测全部候选」
+  一键批量（一次确认、宿主串行队列执行、实时进度）；「刷新」按钮合并
+  原「刷新 + 重新拉取目录」两个动作
+* 夜间免费（zcode-offpeak）卡片新增实时窗口状态（开放取号 / 下次开抢
+  时间 / 关闭），宿主侧 60s TTL 缓存避免轮询打爆票据系统
+
+### 修复
+
+* live 目录的免费标记误判：上游免费拼写为 `x0.00 credits`（带单位后缀）
+  时 free 判定漏判，免费模型在卡片上显示为付费倍率——判定改为对归一化
+  倍率进行
+
+## 0.3.18-alpha.8 (2026-09-19)
+
+### Features
+
+* 新增 ZCode（GLM Coding Plan）provider：把 coding plan 的 GLM-5.3 /
+  GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo 接入 DSH，额度与 zcode CLI 消耗
+  同一份套餐。**零配置跟随 zcode 桌面端登录态**（只读解密其本机凭据存储，
+  以用户本人身份读取本人数据；不涉及系统钥匙串），也可手动覆盖
+  （设置卡 `apiKeyZcode` → `ZCODE_API_KEY` env → `~/.dsh/.zcode-auth.json`）
+* 请求以完整 zcode 客户端身份发出（`ZCode/<app 版本>` 身份头、每请求
+  attribution 头、`x-api-key` + `Authorization: Bearer` 双鉴权头、设备 id
+  跟随 zcode 注册值），客户端签名七件套按 zcode 3.12.3 线上行为复刻
+  （握手换 Ed25519 私钥、8-bit PoW），401 签名拒绝按同款语义自愈
+  （重握手一次 → 永久 unsigned）；模型对话经本机 loopback shim 以
+  Anthropic Messages 协议直通 open.bigmodel.cn，请求体与上游错误体零翻译
+  原样中继
+* 新增实验性「ZCode 夜间免费」（zcode-offpeak）provider：凭 zcode 会话向
+  排队系统取免费票据（availability → take → poll → active 复用 →
+  settle/retake 状态机），带 `X-Off-Peak-Ticket-ID` 走夜间中继（GLM-5.3 /
+  GLM-5.3-Flash）。窗口与排队完全由服务端裁决；实测该中继存在传输层
+  反滥用风控（code 3012，请求语义与头已与官方客户端对齐仍被拦），通道
+  保留、失败模式如实报错，恢复可用性取决于智谱风控策略，不承诺
+* provider 额度查询（provider-usage 集成）仅对 WorkBuddy 系 provider 注册：
+  zcode 套餐余量在有签名的管理面之后不可查，zcode 系凭据打 credits 端点
+  必然失败
+
+### 修复
+
+* settings 多 section 装配 bug：`installSection` 每次覆盖共享的 config
+  source 引用，导致非最后安装的 section（authFile、probeConsent）改动后
+  的即时生效从未真正生效——改为按 namespace 自存 scope + 按 section
+  字段归属合并的合成视图
+* shim 路由按 pathname 匹配：Anthropic SDK 请求带 `?beta=true` 查询串，
+  此前的 URL 全等匹配会把合法请求打成 404（zcode provider 因此完全不可用）
+
+## 0.3.18-alpha.7 (2026-09-19)
+
+### Features
+
+* 向 `@chaoset/provider-usage` 注册 WorkBuddy 额度查询器：本插件拥有 `workbuddy` /
+  `workbuddy-ai` 路由并已持有读取桌面 App 登录态的凭据存储，因此由本包回答「还剩
+  多少额度」——provider-usage 刻意不内置 WorkBuddy 查询器（只有本包知道该 App 的
+  计费接口）
+* 展开口径为「每个仍有余额的计费包一行」：真实账号会累积数十个已用尽/已过期的赠送包，
+  与卡片一致地过滤 `remain > 0`，只保留尚可用度的包，避免把有用的两三行淹没
+* 服务通过 `ctx.inject(['providerUsage'])` + `ctx.get` 结构化读取，**不新增安装期
+  依赖**：未安装 provider-usage 时回调不触发，模型通道完全不受影响
+
+## 0.3.18-alpha.6 (2026-09-17)
+
+### 适配
+
+* 配置卡片改由 `plugins.bundle.config` 承接（keyed by 包名）。
+  WorkBuddy 两张卡片现显示在本插件的 Plugins 页（描述与组件列表之间），
+  展开交互与内容不变；非 page 视图按契约防御性返回一句话 intro。编译期
+  契约依赖为 `dsh-client-ui-plugin-manager`
+  （import type 引入 slot 声明，零运行时依赖）
+
+## 0.3.18-alpha.5 (2026-09-15)
+
+### Features
+
+* 上下文窗口展示：配置卡片新增"上下文窗口"区，列出每个在服模型的实际
+  请求预算；上游声明了可选更大窗口的模型（如国际版 hy4-preview、
+  deepseek-v4.1-flash、gpt-6-astra、kimi-k2.8-preview 的 1M 档）额外标注
+  可选项。只展示不选择——把上限当作工作预算会虚报可用量（桌面端的档位
+  选择器是客户端政策，目录里没有对应参数）
+
+## 0.3.18-alpha.4 (2026-09-15)
+
+### Features
+
+* 推理档位手动检测：卡片新增检测区（候选名单、逐行确认、进行中标识、
+  结果徽章、清除），每次检测前行内确认（会发少量真实请求、可能消耗积分）。
+  方法为 baseline→sentinel→逐档三步：先证链路可用，再以不可能存在的随机值
+  判定上游是否真校验该参数（接受一切的模型直接判 non-validating，不产生
+  误报），最后逐档确认。声明档位永远优先，检测结果只补未声明的行
+* 检测到的档位直接进入模型选择器：validating 结论的档位可选中，`off` 永不
+  经检测授予。记录按账号绑定、带目录指纹（名单变化即失效）与 14 天 TTL，
+  账号切换自动清除
+* 探针控制路由（写操作双守卫：回环 Host+Origin 与进程内随机 key）：检测、
+  清除、手动重拉目录。卡片头部新增"重新拉取目录"按钮
+* CLI 仍可用 `doctor`/`status` 查看登录与积分；检测入口目前仅 Web/Desktop
+  卡片提供
+
+## 0.3.18-alpha.3 (2026-09-15)
+
+### Features
+
+* 国际版（WorkBuddy AI）第二个 provider `workbuddy-ai`：独立模型分组、
+  独立账号/积分/卡片，与国内版互不混用；装哪个 App 出哪个分组。两版同属
+  同一客户端框架、共用凭据目录，仅文件名/端点/展示不同，故实现为数据驱动
+  的 variant 描述符而非分支逻辑
+* 国际版目录走 App 文档 `/v3/config`（`WorkBuddyAI/<版本>` UA，无空格；
+  版本按 已装 App → 已保存 → 内置常量 逐级降级）：含 `modelPromotions`
+  与对象式 `contextWindow`，工作窗口取 `defaultLength`
+* 促销按读取时生效：生效中 factor-0 显示免费 + 徽章；过期后原价不可恢复，
+  显示"价格未知 — 刷新后更新"而非继续免费。兜底名单中促销依赖的两行
+  （hy3、deepseek-v4.1-flash）直接标未知
+* 国际版 chat 自动前置空 system 消息（网关硬性要求，缺失即 400/11128）；
+  CLI UA 经实测可直达模型路由，chat 暂不换 UA 以缩小影响面
+* 跨产品凭据拒绝：AI 侧读到 CN 凭据（配错文件）即抛可操作的
+  RegionMismatchError，按 signed-out 隐藏分组，原因直达卡片与 doctor
+* CLI 增加 `--provider workbuddy-ai`（默认仍是国内版）；AI 兜底名单 20 个
+  （含 Auto/Fast 等虚拟别名与 GPT/Gemini 行，均为 2026-09-15 实测值）
+
+## 0.3.18-alpha.2 (2026-09-15)
 
 ### Fixes
 
-* 设置卡片补上加载态：状态路由返回前要串行读凭据文件并打一次上游 billing
-  接口，首屏往返可达数秒，期间已登录用户看到的是灰点「未登录」加引导登录
-  的提示（locale 里的 `loading` 词条一直存在但从未被使用）。现在首拉期间
-  显示「正在读取账号…」，响应形状异常（中间代理返回非 JSON 的 200）不再
-  直接 `setStatus(undefined)` 打崩渲染树
-* 拉取失败保留 last-good 数据并继续轮询：一次瞬态失败此前把整个状态替换
-  成 error 态，已展示的积分/账号全部消失，且轮询以「非 signed-in 即停」
-  门控后永不自动恢复；现在已有数据时错误降级为一条提示（`refreshFailed`），
-  轮询在展开期间无条件进行——「后来才登录」的用户也不再永远停在未登录态
-* 模型目录启动拉取改走 `store.resolve()`（按需刷新过期 token 并落盘）：
-  此前用不刷新的 `current()`，离屏很久后启动时 access token 已过期，
-  `fetchModels` 必 401，费率与促销徽章一直停在 fallback 快照；并在失败后
-  增加有限次延迟重试（60s 间隔至多 2 次，插件卸载即停），未登录仍静默
-  保留 fallback 目录
-* token 已过期时刷新失败退避不再被绕过：节流窗口此前只对未过期 token
-  生效，刷新端点故障 + token 过期的组合下每条聊天请求都串行等一次刷新
-  超时；现在窗口内失败同样快速失败（`lastRefreshFailureMs`），30s 后自动
-  再试
-* `chatStream` 的 fetch 抛错路径（用户取消/传输错误/头超时）补 `clearTimeout`：
-  此前每次失败泄漏一枚 30s 头超时定时器挂住事件循环
-* 进度条与 aria-valuenow 夹到 [0,100]（上游记账口径不保证 remain ≤ size）；
-  500 响应体附带的脱敏诊断现在拼进失败原因便于排障
+* 模型列表来源可见 + 无凭据时隐藏分组（对齐上游行为）：状态文档新增
+  `catalog` 字段（`live` 刚拉到 / `saved` 本账号上次成功 / `fallback`
+  内置，附 `fetchedAt` 与 `error`），卡片在模型优惠下方展示一行来源；
+  从未登录且无自留副本时分组隐藏（空目录），不再展示点选必错的兜底名单
+* 成功拉取的目录按账号（`uid:enterpriseId`）落盘
+  `$DSH_HOME/.workbuddy-catalog.json`：重启或拉取失败时优先服务该账号的
+  已保存名单，而非编译期快照；账号切换即时换上新账号的已知名单
+* 新增 60s 身份核对（与卡片轮询同频，稳态零上游请求）：启动后在桌面端
+  登录/登出最多延迟一拍即现形，无需重启插件
 
-### Tests
+## 0.3.18-alpha.1 (2026-09-15)
 
-* 新增 2 用例：过期 token 刷新失败退避（窗口内快速失败、窗口过后再试）、
-  目录拉取失败重试且耗尽即停（installSection 安装即触发 onChange 的链路
-  一并覆盖）
-* build + typecheck + 全量测试通过，并在隔离测试实例真实验证（真实登录态
-  下账号/积分/进度条渲染正常，控制台零报错）
+### Fixes
 
-## 0.3.16 (2026-09-12)
+* 兜底模型清单按 2026-09-15 实测刷新（桌面端 5.5.6 / 内置 CLI 2.137.1）：
+  `deepseek-v4-flash` 已被 `deepseek-v4.1-flash` 取代（x0.17 → x0.03，
+  128k 输出）、新增 `kimi-k2.8-preview`（x0.77，可关思考、low/high/max 三
+  档），共 15 → 16 个，与接口返回的 `cli` 名单逐项一致。附带实证：服务端
+  对 `User-Agent` 中的 CLI 版本号不作校验（2.63.2 与 2.137.1 返回同一份
+  目录），硬编码 UA 无需改动
+
+## 0.3.18-alpha.0 (2026-09-15)
+
+### Fixes
+
+* 同步稳定线 0.3.17 的全仓审查修复：设置卡片加载态（首拉期间不再误报
+  未登录）、非 JSON 200 不打崩渲染树、刷新失败保留 last-good 并继续轮询、
+  目录启动拉取改 `resolve()`（过期 token 自动刷新）+ 失败延迟重试、刷新
+  退避不再被绕过、chatStream 抛错路径补 `clearTimeout`、进度条无障碍与
+  500 诊断拼入失败原因
+* 依赖基线同步，本包无代码改动。行为注意：宿主图片管线超预算抛
+  `IMAGE_OFFLOAD_REQUIRED`（不再静默裁剪）；本包图片预算走 `PiAiAdapter`
+  profile 默认路径，超大图片请求的失败/重试语义跟随宿主
 
 ### Fixes
 
@@ -82,21 +373,14 @@
 
 ### Changes
 
-* 跟进 DSH 稳定版 0.1.5-rc.2：全部 `@deepseek-ai/dsh-*` 依赖由 `^0.1.5-rc.1`
-  升至 `^0.1.5-rc.2`，`dsh.host` 更新为 `0.1.5-rc.2`（rc.2 与 rc.1 逐包
-  对比源码零差异，纯依赖 range 重发，无适配代码改动）
 * build + typecheck + 全量测试通过，并在隔离测试实例真实验证
 
 ## 0.3.13 (2026-09-10)
 
 ### Changes
 
-* 跟进 DSH 稳定版 0.1.5-rc.1（合并 alpha 线 0.3.13-alpha.0 ~ alpha.1 的适配
-  内容）：全部 `@deepseek-ai/dsh-*` 依赖由 `^0.1.2-rc.1` 升至 `^0.1.5-rc.1`，
-  `dsh.host` 更新为 `0.1.5-rc.1`
-* 适配 0.1.5 起的 provider 契约：`ResolvedPiAiProviderProfile` 新增必填的
-  `modelErrors`（解析失败模型的诊断），本插件补传空 Map（catalog 只含已成功
-  解析的模型，与宿主自身缺省一致），否则 typecheck 不过
+* provider 契约要求补传 `modelErrors`（解析失败模型的诊断）：本插件
+  catalog 只含已成功解析的模型，传空 Map（与宿主自身缺省一致）
 * 对齐上游 `@deepseek-ai/dsh-llm-pi-ai` 依赖更新：`@earendil-works/pi-ai`
   由 `^0.84.2` 升级为 `^0.85.1`，消除类型冲突
 * build + typecheck + 全量测试通过，并在隔离测试实例真实验证
@@ -146,22 +430,7 @@
 
 ### Changes
 
-* alpha 线合并 + 稳定线跟进 DSH 0.1.2-rc.1：`@deepseek-ai/dsh-*` 依赖线由
-  `^0.1.1-rc.2` 升到 `^0.1.2-rc.1`，并合入 alpha 线的 0.1.2 宿主适配（功能
-  与 0.3.7 一致，不含新功能）
-* 0.1.2 线破坏性 API 适配（自 alpha 线合入）：上游移除了
-  `settingsNamespace()`——命名空间现为普通字符串（`'anyconnect'`，附
-  `SettingsNamespace` 类型标注）；`installSettingsSection()` 自由函数改为
-  provider 服务上的 `settings.installSection()`，经
-  `ctx.inject(['settings'], …)` 延迟装配；client 的 `ClientContext` 改由
-  `@deepseek-ai/cordis` 引入并补 `dsh-client-ui-renderer` 副作用导入；
-  上游在 0.1.2 线删除了 `dsh-client-runtime` 包（止于 `0.1.1-rc.2`），本包
-  依赖同步移除
-* 已对照 0.1.2-rc.1 全量 diff 官方包（36 个：逐包与 0.1.2-alpha.5 字节对比，
-  除版本号外零差异——rc.1 是纯转正 bump）：settings / llm / llm-pi-ai /
-  client-ui-settings-plugins / client-ui-slots / attachment 各契约面与
-  alpha.5 适配时一致，运行时逻辑无需调整；全仓 build + typecheck + 162 项
-  测试在 rc.1 依赖闭包上通过
+* 功能与 0.3.7 一致（依赖基线同步）
 
 ## 0.3.7 (2026-09-03)
 
@@ -174,7 +443,6 @@
 * 移除设置 → 通用设置中的 WorkBuddy 剩余积分行（设置 → 插件的卡片已有
   完整额度展示）
 
-与 alpha 线的 0.3.8-alpha.0 内容对应（宿主依赖线不同：本版锁 `^0.1.1-rc.2`）。
 
 ## 0.3.6 (2026-09-03)
 
@@ -185,7 +453,6 @@
   行自绘标签与数值（WorkBuddy 剩余积分 · 43），未登录或无数据时不渲染；
   详情（分包进度条、模型优惠）保持在设置 → 插件的卡片
 
-与 alpha 线的 0.3.7-alpha.0 内容对应（宿主依赖线不同：本版锁 `^0.1.1-rc.2`）。
 
 ## 0.3.5 (2026-09-03)
 
@@ -199,7 +466,6 @@
 * 模型下拉框不再显示模型介绍文案：倍率只随模型名显示
   （`GLM-5.2 · x0.79`），description 不再携带内容，消除费率重复
 
-与 alpha 线的 0.3.6-alpha.0 内容对应（宿主依赖线不同：本版锁 `^0.1.1-rc.2`）。
 
 ## 0.3.4 (2026-09-03)
 
@@ -210,7 +476,6 @@
 * 模型费率去重：倍率只保留在模型名后缀（`GLM-5.2 · x0.79`），模型描述不再
   重复展示倍率，改为携带上游的模型文案（按登录区域取中/英文）
 
-与 alpha 线的 0.3.5-alpha.0 内容对应（宿主依赖线不同：本版锁 `^0.1.1-rc.2`）。
 
 ## 0.3.3 (2026-09-03)
 
@@ -222,7 +487,6 @@
   因此没有账号与额度内容）。空串/纯空白覆盖现在回退到平台默认探测顺序，
   与空环境变量的既有行为一致
 
-与 alpha 线的 0.3.4-alpha.0 内容对应（宿主依赖线不同：本版锁 `^0.1.1-rc.2`）。
 
 ## 0.3.2 (2026-09-02)
 
@@ -235,7 +499,6 @@
   促销模型的倍率行保持不变
 * 静态兜底模型目录对照 2026-09-02 线上数据复核：15/15 完全一致
 
-与 alpha 线的 0.3.2-alpha.1 内容对应（宿主依赖线不同：本版锁 `^0.1.1-rc.2`）。
 
 ## 0.3.1 (2026-09-02)
 
@@ -273,5 +536,4 @@ dsh-plugins monorepo，标识改为 @chaoset/dsh-any-connect（插件名
 
 ### Notes
 
-* 本包锁 dsh 0.1.1-rc.2 稳定线依赖；适配 dsh alpha 的版本在 alpha 分支维护
 * 基于 upstream 的 LICENSE 为 MIT；README 顶部声明了来源与致谢

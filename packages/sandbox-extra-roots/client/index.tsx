@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol";
 
-var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:10px;min-width:0;overflow:hidden}.ser_card[data-open=true]{border-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-shadow-lv1)}.ser_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:10px;align-items:center;gap:12px;padding:12px 14px;display:flex}.ser_header:hover,.ser_card[data-open=true]>.ser_header{background:var(--dsw-alias-interactive-bg-hover)}.ser_title{flex:1;min-width:0;font-size:14px;font-weight:600;line-height:20px}.ser_badge{white-space:nowrap;background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 10%,transparent);color:var(--dsw-alias-state-success-primary);border-radius:999px;padding:1px 8px;font-size:11px;font-weight:500;line-height:16px}.ser_body{border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-module-platform);padding:10px 14px 12px}.ser_field{flex-direction:column;gap:4px;padding:8px 0;display:flex}.ser_label{font-size:12px;font-weight:500;line-height:18px}.ser_textarea{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);font:inherit;color:var(--dsw-alias-label-primary);border-radius:6px;padding:6px 10px;font-size:12px;line-height:18px;resize:vertical;min-height:120px;font-family:var(--ds-font-family-code,monospace)}.ser_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:11px;line-height:16px}.ser_footer{border-top:1px solid var(--dsw-alias-border-l2);justify-content:flex-end;align-items:center;gap:8px;padding:8px 0 2px;display:flex}.ser_save{font:inherit;cursor:pointer;border:1px solid transparent;border-radius:6px;padding:4px 14px;font-size:12px;line-height:18px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3)}.ser_save:disabled{opacity:.4;cursor:default}.ser_discard{font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l1);background:0 0;color:var(--dsw-alias-label-secondary,#666);border-radius:6px;padding:4px 14px;font-size:12px;line-height:18px}.ser_discard:disabled{opacity:.4;cursor:default}.ser_status{flex:1;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px}.ser_warn{color:var(--dsw-alias-state-warn-primary)}.ser_error{color:var(--dsw-alias-state-error-primary)}.ser_spin{flex:none;width:10px;height:10px;border:1.5px solid var(--dsw-alias-border-l2);border-top-color:var(--dsw-alias-label-secondary);border-radius:50%;animation:ser-spin .8s linear infinite}@keyframes ser-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.ser_spin{animation:none}}";
+var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:12px;min-width:0;overflow:hidden;transition:border-color .15s ease,box-shadow .15s ease}.ser_card[data-open=true]{border-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-shadow-lv1)}.ser_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:12px 14px;display:flex;transition:background-color .15s ease}.ser_header:hover,.ser_card[data-open=true]>.ser_header{background:var(--dsw-alias-interactive-bg-hover)}.ser_title{flex:1;min-width:0;font-size:14px;font-weight:600;line-height:20px}.ser_badge{white-space:nowrap;background:color-mix(in srgb,var(--dsw-alias-state-warning-primary,#faad14) 14%,transparent);color:var(--dsw-alias-state-warning-primary,#faad14);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;line-height:16px}.ser_body{border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-module-platform);padding:12px 14px 14px}.ser_field{flex-direction:column;gap:6px;padding:8px 0;display:flex}.ser_label{font-size:12px;font-weight:500;line-height:18px}.ser_textarea{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:8px 12px;font-size:12px;line-height:18px;resize:vertical;min-height:120px;font-family:var(--ds-font-family-code,monospace);transition:border-color .15s ease,box-shadow .15s ease}.ser_textarea:focus{outline:none;border-color:var(--dsw-alias-brand-primary,#1677ff);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary,#1677ff) 20%,transparent)}.ser_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:11px;line-height:16px}.ser_footer{border-top:1px solid var(--dsw-alias-border-l2);justify-content:flex-end;align-items:center;gap:8px;padding:10px 0 2px;display:flex}.ser_save{font:inherit;cursor:pointer;border:1px solid transparent;border-radius:6px;padding:5px 16px;font-size:12px;font-weight:500;line-height:18px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3);transition:all .15s ease}.ser_save:hover:not(:disabled){filter:brightness(1.1)}.ser_save:disabled{opacity:.4;cursor:default}.ser_discard{font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l1);background:0 0;color:var(--dsw-alias-label-secondary,#666);border-radius:6px;padding:5px 16px;font-size:12px;line-height:18px;transition:all .15s ease}.ser_discard:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.ser_discard:disabled{opacity:.4;cursor:default}.ser_status{flex:1;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px}.ser_warn{color:var(--dsw-alias-state-warn-primary)}.ser_error{color:var(--dsw-alias-state-error-primary)}.ser_spin{flex:none;width:10px;height:10px;border:1.5px solid var(--dsw-alias-border-l2);border-top-color:var(--dsw-alias-label-secondary);border-radius:50%;animation:ser-spin .8s linear infinite}@keyframes ser-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.ser_spin{animation:none}}";
 
     var tagId = "@chaoset/sandbox-extra-roots/client.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=\"" + tagId + "\"]") === null) {
@@ -72,8 +72,15 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       });
       return problems;
     }
+    // host 必然拒绝的行(invalid/danger/homeAncestor)存在时禁用保存:与其让
+    // 用户点了保存再读一段英文 TypeError,不如按钮禁用+行内原因。判据具名导出，
+    // 保存按钮与单测共用同一条，避免两边各写一份而漂移。
+    function hasBlockingProblems(problems: Array<{ kind: string }>): boolean {
+      return problems.some((p) => p.kind === "invalid" || p.kind === "danger" || p.kind === "homeAncestor");
+    }
     const zh = {
       title: "沙盒额外允许目录（sandbox-extra-roots）",
+      summary: "为 workspace-write 沙箱追加可写目录（在官方白名单之外）",
       hint: "workspace-write 模式下，除官方白名单（工作区根 + /tmp + 平台临时目录）外额外允许写入的目录。每行一个绝对路径，支持 ~ 表示用户主目录。",
       unsaved: "有未保存的修改",
       discard: "放弃修改",
@@ -93,6 +100,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
     };
     const en = {
       title: "Extra sandbox roots (sandbox-extra-roots)",
+      summary: "Extra writable roots for the workspace-write sandbox, beyond the official allow-list",
       hint: "Extra writable roots under workspace-write mode, on top of the official allow-list (workspace root + /tmp + platform temp dirs). One absolute path per line; ~ expands to your home directory.",
       unsaved: "Unsaved changes",
       discard: "Discard",
@@ -112,6 +120,14 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
     };
 
     function SandboxRootsCard(props: any) {
+      // plugins.bundle.config 契约只 dispatch page 视图；防御性处理其余取值，
+      // 一句话 summary 不读配置、不发请求。view 判断留在无 hooks 的外层，
+      // 内层表单组件的 hooks 顺序不受影响。
+      if (props.view !== "page") return props.t("summary");
+      return React.createElement(SandboxRootsForm, props);
+    }
+
+    function SandboxRootsForm(props: any) {
       const t = props.t;
       const [open, setOpen] = React.useState(false);
       const [cfg, setCfg] = React.useState<any>(null);
@@ -141,9 +157,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       const dirty = cfg !== null && parsedRoots.join("\n") !== cfgRoots.join("\n");
       // 保存前的即时反馈：哪些行会被 host 拒绝/忽略/去重，不再等保存后才发现。
       const rootProblems = draftText === null ? [] : analyzeRootsText(draftText);
-      // host 必然拒绝的行(invalid/danger/homeAncestor)存在时直接禁用保存:
-      // 与其让用户点了保存再读一段英文 TypeError,不如按钮禁用+行内原因。
-      const hasBlocking = rootProblems.some((p) => p.kind === "invalid" || p.kind === "danger" || p.kind === "homeAncestor");
+      const hasBlocking = hasBlockingProblems(rootProblems);
       const discard = () => {
         setDraftText(cfgRoots.join("\n"));
         setStatus(null);
@@ -162,7 +176,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       };
 
       return React.createElement(
-        "li",
+        "div",
         { className: "ser_card", "data-open": open },
         React.createElement(
           "button",
@@ -250,7 +264,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
           method: "get",
           invocation: { kind: "direct" },
           parameters: [],
-          result: { mode: "strict", typeSymbol: "sandboxExtraRootsConfig/get:result", schema: passthroughSchema }
+          result: { mode: "strict", typeSymbol: "sandboxExtraRootsConfig/get:result", create: () => passthroughSchema }
         },
         {
           id: "@chaoset/sandbox-extra-roots#sandboxExtraRootsConfig/set",
@@ -262,9 +276,9 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
             name: "partial",
             wire: "partial",
             source: "json",
-            codec: { mode: "strict", typeSymbol: "sandboxExtraRootsConfig/set:partial", schema: passthroughSchema }
+            codec: { mode: "strict", typeSymbol: "sandboxExtraRootsConfig/set:partial", create: () => passthroughSchema }
           }],
-          result: { mode: "strict", typeSymbol: "sandboxExtraRootsConfig/set:result", schema: passthroughSchema }
+          result: { mode: "strict", typeSymbol: "sandboxExtraRootsConfig/set:result", create: () => passthroughSchema }
         }
       ]
     };
@@ -294,17 +308,15 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
         if (!result.ok) throw new Error(`sandboxExtraRootsConfig.set failed: ${result.error.code}: ${result.error.message}`);
         return result.value;
       });
-      ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
-        name: "settings.plugin.item",
-        // keyed slot：key 为卡片编辑的设置 namespace（与 host 侧
-        // registerSettingsNamespace 的 ns 一致，须匹配宿主 ^[a-z][a-z0-9-]*$），
-        // 设置页按 key 与宿主 describe 的 namespace 配对渲染。
-        key: "sandbox-extra-roots-config",
-        id: "sandbox-extra-roots",
-        order: 40,
+      ctx.slots.inject("plugins.bundle.config", () => ctx.slots.register({
+        name: "plugins.bundle.config",
+        // keyed slot：key 为 bundle 的 npm 包名（plugins.bundle.config 契约，
+        // 与 package.json "name" / cordis.patch.yml 的 name 一致），配置表单
+        // 显示在本插件 Plugins 页（描述与 rows 之间）。
+        key: "@chaoset/sandbox-extra-roots",
         locale: NS,
         inject: () => ({ getConfig, setConfig })
       }, SandboxRootsCard));
     }
 
-    export { apply, inject, analyzeRootsText };
+    export { apply, inject, analyzeRootsText, hasBlockingProblems };

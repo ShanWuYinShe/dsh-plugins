@@ -7,6 +7,7 @@ DSH（DeepSeek Harness）host 层全局插件的 monorepo：
 | [`@chaoset/sandbox-extra-roots`](packages/sandbox-extra-roots/) | 沙盒额外允许写入目录（Seatbelt/bwrap/Landlock + fs fence） |
 | [`@chaoset/session-archive`](packages/session-archive/) | 归档会话管理：浏览、批量恢复或彻底删除归档会话 |
 | [`@chaoset/dsh-any-connect`](packages/dsh-any-connect/) | 接入 WorkBuddy 桌面 App 的模型到 DSH（零配置 + 思考强度/费率显示；源自 corrinehu/dsh-workbuddy-connect 的独立分支） |
+| [`@chaoset/provider-usage`](packages/provider-usage/) | 对话区底栏显示当前 provider 的剩余额度；通用查询器注册机制，任何 provider 插件都能接入 |
 
 每个包都提供：
 
@@ -22,38 +23,42 @@ DSH（DeepSeek Harness）host 层全局插件的 monorepo：
 推荐用 DSH 自带的 `dsh plugin`：它会调用 pnpm 安装依赖，并把声明了 `dsh.bundle`
 的包加入 `dsh.profile.bundles`，随后 DSH 应用包内 `cordis.patch.yml` 完成插件注册。
 
+本仓库通过 **GitHub Releases 分发**：CI 随每次发布把每个包打包成标准 npm
+tarball，挂在对应 Release（tag 名 `<目录>-v<版本>`）的资产里；`dsh plugin add`
+直接装 tarball URL，公开仓库无需任何认证：
+
 ```bash
-# 从 npm 安装（三个包一起，正式线 = latest dist-tag）
-dsh plugin --profile web add @chaoset/sandbox-extra-roots
-dsh plugin --profile web add @chaoset/session-archive
-dsh plugin --profile web add @chaoset/dsh-any-connect
+# 安装（<版本> 以 Releases 页最新为准：https://github.com/ShanWuYinShe/dsh-plugins/releases，
+# 资产名 = 包名去 @ 换 -，即 chaoset-<目录>-<版本>.tgz）
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v<版本>/chaoset-provider-usage-<版本>.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v<版本>/chaoset-session-archive-<版本>.tgz
 
-# 预发布线（适配 dsh 预发布版本，发布在对应 dist-tag，npm tag 语法）
-dsh plugin --profile web add @chaoset/sandbox-extra-roots@alpha
+# 例如 provider-usage@0.1.0-alpha.0：
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v0.1.0-alpha.0/chaoset-provider-usage-0.1.0-alpha.0.tgz
 
-# 从本地源码安装（包名换成 monorepo 子包的绝对路径）
+# 预发布线 Release 带 prerelease 标记（版本号带 -alpha / -rc 后缀），
+# 适配 dsh 预发布版本；无后缀的正式 Release 适配 dsh 稳定线。
+
+# 从本地源码安装（换成本仓库 monorepo 子包的绝对路径，符号链接即装）
 dsh plugin --profile web add /absolute/path/to/dsh-plugins/packages/session-archive
 
 # 卸载
-dsh plugin --profile web remove @chaoset/sandbox-extra-roots
+dsh plugin --profile web remove @chaoset/provider-usage
 dsh plugin --profile web remove @chaoset/session-archive
-dsh plugin --profile web remove @chaoset/dsh-any-connect
 ```
 
-其他来源：
-
-- **GitHub**：`dsh plugin --profile web add github:owner/repo` 或 Release tarball 的
-  URL（Release 由 CI 随每次发布按 `<目录>-v<版本>` 自动创建）。本仓库是
-  monorepo，子包没有独立仓库，请优先用 npm 包名或本地路径安装。
-- **镜像站**：`dsh plugin --profile web add @chaoset/session-archive --registry=https://registry.npmmirror.com`（或设置 `npm_config_registry`）。
+查各包已发布版本：`gh release list --repo ShanWuYinShe/dsh-plugins` 或直接看
+Releases 页；某个包版本适配哪个 dsh 见该 Release 说明或包 `dsh.host` 字段。
 
 安装后**重启 harness** 生效（或等待 DSH 对配置层变更的响应）。
 
-### 安装排障（两个已知坑）
+### 历史说明：npm
 
-- **刚发布的版本装不上 / 装到旧版**：若环境配置了镜像源（如
-  `registry.npmmirror.com`），新发布的版本可能尚未同步；显式指定官方源
-  安装：`dsh plugin --profile web add @chaoset/dsh-any-connect --registry=https://registry.npmjs.org`。
+本仓库的包早期（2026-09 前）曾发布到 npm（`@chaoset/*`），那些版本已全部标记
+废弃并停止更新；npm 上的旧版本不再维护，请一律按上面的 GitHub Release 方式安装。
+
+### 安装排障（已知坑）
+
 - **pnpm 供应链策略拦下安装**：pnpm v11 默认拦截依赖的构建脚本并启用
   发布满 24 小时才可安装的策略。`dsh plugin add` 首次执行可能报
   `pnpm failed`——到 profile 目录（`$DSH_HOME/profiles/<name>`）的
@@ -75,7 +80,7 @@ dsh plugin --profile web remove @chaoset/dsh-any-connect
    `corepack enable pnpm`）。
 2. 确定目标 profile（默认 `web`，也可能是 `tui` / `headless` / 自定义；
    `dsh --profile web --help` 可验证）。
-3. 按上面的命令安装；包未发布时用本地路径。
+3. 按上面的命令安装（版本号从 Releases 页获取）；开发验证时用本地路径。
 4. 验证：`dsh plugin --profile web list`，或
    `dsh --profile web --dump-config | grep chaoset`。
 5. 重启 DSH。
@@ -89,23 +94,23 @@ DSH 从源码仓库运行（不全局安装 `dsh` 与 `@deepseek-ai/*`）时，�
 
 ## 开发
 
-`@deepseek-ai/*` 内部包来自公共 registry，作为根部 `devDependencies` 由 pnpm 安装
-（workspace 声明在 `pnpm-workspace.yaml`，pnpm 版本由根 `package.json` 的
-`packageManager` 字段锁定，Corepack 会自动匹配）：
+`@deepseek-ai/*` 内部包来自公共 registry，作为根部 `devDependencies` 由 bun 安装
+（workspace 声明在根 `package.json` 的 `workspaces` 字段，bun 版本由
+`packageManager` 字段锁定）：
 
 ```bash
-pnpm install       # 安装依赖
-pnpm run build     # 全仓构建：每包 tsc 编译 src/ → lib/，esbuild 打包 client
-pnpm run typecheck # tsc --noEmit（host + client 两套 tsconfig）
-pnpm run test      # vitest 回归（host 插件 / config-store / 上游客户端等）
-pnpm run test:ci   # build + typecheck + test（发布前验证）
+bun install        # 安装依赖
+bun run build      # 全仓构建：每包 tsc 编译 src/ → lib/，esbuild 打包 client
+bun run typecheck  # tsc --noEmit（host + client 两套 tsconfig）
+bun run test       # vitest 回归（host 插件 / config-store / 上游客户端等）
+bun run test:ci    # build + typecheck + test（发布前验证）
 ```
 
 ## 版本管理与发布
 
-- **想知道某个包版本适配哪个 dsh**：`npm view @chaoset/<包名>@<版本> dsh.host`，
-  或看该包 README 安装节。
-- 发布线：npm `latest` 适配 dsh 稳定线，`@alpha` / `@rc` dist-tag 适配 dsh
-  预发布线（版本后缀自动决定 dist-tag）。
+- **想知道某个包版本适配哪个 dsh**：看对应 Release 的说明，或该包 tarball 内
+  `package.json` 的 `dsh.host` 字段。
+- 发布线：正式 Release（无后缀版本号）适配 dsh 稳定线；prerelease Release
+  （`-alpha.N` / `-rc.N`）适配 dsh 预发布线。
 - 分支模型、版本号规则、宿主升级适配与发布流程的完整约定见
   [RELEASING.md](RELEASING.md)。

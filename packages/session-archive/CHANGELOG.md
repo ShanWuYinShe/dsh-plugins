@@ -1,45 +1,81 @@
 # Changelog
 
-## 0.3.13 (2026-09-14)
+## 0.3.14 (2026-09-24)
+
+### 优化
+
+* **浮层视觉质感升级**：侧边栏归档管理浮层引入高级毛玻璃模糊（`backdrop-filter: blur(12px)`）与进阶立体阴影，优化列表项 hover 动效。
+* **健壮性修复**：增强 unarchive 抛错时的异常兜底，防止会话状态丢失。
+* **适配 DSH 宿主 0.1.7-rc.1 稳定线**：依赖范围与 `dsh.host` 对齐 `^0.1.7-rc.1`。
+
+## 0.3.14-alpha.6 (2026-09-24)
+
+### 优化
+
+* 侧边栏浮层卡片应用进阶立体阴影与 `backdrop-filter: blur(12px)` 高级毛玻璃材质。
+* 列表项与操作按钮增强 hover 交互微动效与边框反馈。
+
+## 0.3.14-alpha.5 (2026-09-23)
+
+### 适配
+
+* 跟进 DSH 宿主 0.1.7-alpha.2：依赖 range 与 `dsh.host` 同步，无代码改动。
+
+## 0.3.14-alpha.4 (2026-09-22)
+
+### 适配
+
+* 跟进 DSH 宿主 0.1.7-alpha.1：依赖 range 与 `dsh.host` 同步，无代码改动。
+
+## 0.3.14-alpha.3 (2026-09-20)
+
+### 修复
+
+* unarchive 的 confirm 复核路径补上意外异常的兜底：confirm 抛错时该会话
+  id 此前既不进 restored 也不进 failed（违反"restored 之外的每个请求 id
+  都必须有下落"的自约定），现一律如实计入 failed('not-restorable')。
+  fileInfo 自身全路径兜底，该分支当前不可达，纯防御性收口
+
+## 0.3.14-alpha.2 (2026-09-17)
+
+### 适配
+
+* TypertCodec 改用惰性 `create` 工厂（typert-loader 强制校验 `create()`
+  存在），客户端 `$mount` 描述符与 `typert.host` 工件同步迁移；侧栏
+  归档入口不受影响（`sidebar.footer.action` 契约未变）
+
+## 0.3.14-alpha.1 (2026-09-15)
 
 ### Fixes
 
-* 面板性能：`list`/`count`/`delete`/`unarchive` 四端点不再全量枚举实例上
-  的所有持久化会话，改走官方契约的逐 id `stat(id)`（只读目标会话的元数据
-  头，宿主缺 `stat` 时回退全量 `list`）。`count` 是每 5 秒每标签页的徽标
-  轮询端点，实例积累数千历史会话时此前等于持续全树扫
-* 标题与详情读取分块化（`read(offset, length)` 官方契约，块长 200 事件）：
-  此前 `read(0)` 一次性物化整条事件流，大日志下峰值内存 O(整条日志) 且同步
-  JSON.parse 集中在宿主事件循环上；分块后峰值 O(块)，语义不变（标题仍取
-  最后一个 `session/title` 事件，经官方 `foldSessionTitle` 折叠）
-* 恢复（unarchive）补齐与删除对称的 `failed` 语义：ghost（文件已删/枚举
-  不到）、非归档成员、confirm 复核淘汰（`not-restorable`）的 id 不再静默
-  丢弃——客户端此前把「已恢复 0 个」当成功样式展示，选 5 个只恢复 3 个
-  也没有任何失败说明
-* 删除的 absent 快速路径纳入 exclusive 临界区：宿主「写临时文件 + rename」
-  格式迁移的瞬间目录扫描可能扫空，此前直接报幂等删除成功而文件实际可能
-  随迁移回来；现在锁内重扫，发现文件在则转常规删除流
-* 删除复验的第二次 rm 失败不再吞异常误标为 `reappeared`（EPERM/EBUSY 的
-  真实原因现在原样上报）；`settleStat`/复验只把 ENOENT 视为「文件已消失」，
-  EACCES 等错误按仍在处理并以真实错误计入 failed，不再谎报 deleted
-* `detail` 的 `totalMessageCount` 计数口径在截断线两侧统一：空文本消息
-  （纯工具调用）此前在截断线前不计、超线后计入
-* 客户端失败原因本地化：`unenumerable`/`unlocatable`/`reappeared`/
-  `not-archived`/`not-restorable` 此前以英文原样上屏；部分成功时同时如实
-  显示成功计数（warn 样式），整单失败才用 error 样式；busy 提示从「请先
-  停止会话」（归档会话无流可停）改为「仍在生成落盘，请稍后重试」
-* README 三处与实现对齐：列表不再声称恒为 false 的「运行状态」；`busy`
-  语义更新为「内存存在且沉降观察窗内体积仍在增长」；限制一节补充首行损坏
-  孤儿日志面板不可见也不可删的说明
+* 修复删除的归档会话仍出现在宿主原生「设置 → 已归档会话」页：该页按
+  「归档集合 ∩ 会话摘要（`session.list`，含内存 live 会话）」渲染，而删除
+  为防内存会话重回侧边栏**保留**了归档集合里的 ghost id，于是已彻底删除的
+  条目在宿主重启前一直被列出。现按内存状态区分处理：
+  - 删除后在客户端主动刷新会话列表（`sessions.refresh()`，**惰性解析**服务
+    ——实测插件 apply 早于 sessions 挂载，apply 期间 `ctx.get("sessions")`
+    可能是 undefined），cold 会话（不在内存）即时从原生页消失；
+  - 内存会话无官方消亡 API，仍只能随宿主重启消失，`delete` 返回新增
+    `needsRestart` 如实列出这类 id，面板提示「其中 N 个会话仍在内存中，
+    设置 → 已归档会话的条目将在宿主重启后消失」，不再让用户以为删除没生效
+* 新增 3 条 `needsRestart` 断言（冷删除为空、内存会话命中、内存清空后为空）；
+  build + typecheck + 全量测试通过，并在隔离实例真实验证：不重载页面删除
+  两个 cold 归档会话后，原生「已归档会话」页由 3 条即时降为 1 条（仅剩内存
+  会话）；删除内存会话时面板正确显示重启提示
 
-### Tests
+## 0.3.14-alpha.0 (2026-09-15)
 
-* 新增 3 用例（分块读取跨块完整性、unarchive failed 覆盖全部未恢复 id、
-  count/list 走逐 id stat 不打全量 list）；夹具 `read` 按官方契约支持
-  `offset/length`、补 `stat`
-* build + typecheck + 全量测试通过，并在隔离测试实例真实验证
+### Fixes
 
-## 0.3.12 (2026-09-12)
+* 同步稳定线 0.3.13 的全仓审查修复：count/list/delete/unarchive 改逐 id
+  `stat()`（不再全量枚举）、标题/详情事件流分块读取（块长 200，峰值内存
+  有界）、unarchive 补 `failed` 语义（unenumerable/not-archived/
+  not-restorable）、absent 快速路径纳入 exclusive 临界区、二次 rm 异常
+  真实上报、失败原因本地化与部分成功如实提示
+* 归档集合移除改调官方 `WorkspaceRegistry.unarchiveSession()`。该方法不做
+  存在性检查、内部串行化写入，因此「文件仍存在」的 confirm 复核仍由本插件
+  在调用前完成，并与 `deleteArchived` 经 exclusive 互斥；registry 未提供该
+  方法时恢复返回空（列表仍按存在性过滤幽灵 id）
 
 ### Fixes
 
@@ -88,17 +124,14 @@
 
 ### Changes
 
-* 跟进 DSH 稳定版 0.1.5-rc.2：全部 `@deepseek-ai/dsh-*` 依赖由 `^0.1.5-rc.1`
-  升至 `^0.1.5-rc.2`，`dsh.host` 更新为 `0.1.5-rc.2`（rc.2 与 rc.1 逐包
-  对比源码零差异，纯依赖 range 重发，无适配代码改动）
 * build + typecheck + 全量测试通过，并在隔离测试实例真实验证
 
 ## 0.3.9 (2026-09-10)
 
 ### Fixes
 
-* 修复归档面板恒空：DSH 0.1.3 起 `sessionPersistence.list()` 返回
-  `SessionPersistenceSnapshot[]`（header 在 `.header` 上），旧代码直接读
+* 修复归档面板恒空：`sessionPersistence.list()` 返回
+  `SessionPersistenceSnapshot[]`（header 在 `.header` 上），直接读
   `item.id` 全为 undefined，归档 id 一个也匹配不上，列表永远为空。现按
   快照形状取 header
 * 修复详情/标题读取：持久化契约已移除 `readFrom`，改为 `open(id,'read')`
@@ -121,15 +154,9 @@
   （`dsh-session-title` 纯函数，行为与宿主逐字一致，含 `ignorable`/来源
   语义），替代手写折叠；assistant 消息文本按官方 `SessionEventMap` 从
   `data.message.content` 提取
-* 归档集合移除通道（官方无 unarchive API）显式标注为宿主内部形状依赖
-  （官方 d.ts 上 `enqueueOperation`/`requireState`/`setState` 为 private），
-  运行时探测可用性，形状变化自动降级
-* 跟进 DSH 稳定版 0.1.5-rc.1（合并 alpha 线 0.3.9-alpha.0 ~ alpha.2 的适配
-  内容）：`@deepseek-ai/dsh-typert-protocol` 依赖由 `^0.1.2-rc.1` 升至
-  `^0.1.5-rc.1`，`dsh.host` 更新为 `0.1.5-rc.1`
 * 测试夹具重写为官方契约形状（快照 + 句柄 + 官方事件 data），新增快照形状、
   旧代际文件名、无 locate 降级三组回归用例；build + typecheck + 全量测试
-  在 0.1.5-rc.1 依赖闭包上通过，并在隔离测试实例真实验证
+  通过，并在隔离测试实例真实验证
 
 ## 0.3.8 (2026-09-05)
 
@@ -165,16 +192,7 @@
 
 ### Changes
 
-* alpha 线合并 + 稳定线跟进 DSH 0.1.2-rc.1：`@deepseek-ai/dsh-typert-protocol`
-  由 `^0.1.1-rc.2` 升到 `^0.1.2-rc.1`（合入 alpha 线 0.3.4-alpha.0 /
-  0.3.4-alpha.1 的适配内容，功能与 0.3.3 一致）
-* 已对照 0.1.2-rc.1 全量 diff 官方包（36 个：逐包与 0.1.2-alpha.5 字节对比，
-  除版本号外零差异——rc.1 是纯转正 bump）：面板远程服务的
-  workspaceRegistry（`archivedSessionIds` / `enqueueOperation` /
-  `requireState` / `setState`）与 sessionPersistence（`list` / `locate` /
-  `readFrom`）契约、`session/title` / `user/message` / `assistant/message`
-  事件形状与 alpha.5 适配时一致；全仓 build + typecheck + 162 项测试在
-  rc.1 依赖闭包上通过
+* 功能与 0.3.3 一致（依赖基线同步）
 
 ## 0.3.3 (2026-08-29)
 
@@ -190,18 +208,13 @@
 
 * 支持从源码运行的 DSH：typert-protocol 解析链首插安装闭包共享 fallback
   `$DSH_HOME/profiles/node_modules/<pkg>`，以 realpath 导入保证与 harness 同一
-  模块实例；失败回落原有解析链。已对照 dsh 源码 0.1.2-alpha.1 复核
-  workspaceRegistry / sessionPersistence 契约与事件形状无变化
+  模块实例；失败回落原有解析链
 
 ## 0.3.1 (2026-08-28)
 
 ### Bug Fixes
 
-* 适配 DSH 0.1.1-rc.2：`@deepseek-ai/dsh-typert-protocol` 依赖 range 从
-  `^0.1.0-rc.8` 升到 `^0.1.1-rc.2`（npm semver 的 prerelease 规则下旧 range
-  无法匹配 `0.1.1-rc.2`，新版宿主下面板远程服务会因官方包解析到旧版本而不可用）
-* 已对照 0.1.1-rc.2 复核 workspaceRegistry / sessionPersistence / sessions
-  契约与 `session/title`、`user/message`、`assistant/message` 事件形状：无变化
+* 依赖基线同步，无功能变更
 
 ## 0.3.0 (2026-08-25)
 

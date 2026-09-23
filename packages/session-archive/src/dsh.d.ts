@@ -4,8 +4,8 @@
  * workspaceRegistry / sessions 三包均有），这里只需让插件编译期看到它们：
  * 本文件 import 各官方包触发其模块增强，并把官方契约导出为插件内部别名。
  *
- * 不手写任何方法形状：宿主契约漂移（如 0.1.2→0.1.3 的 list() 快照化、
- * readFrom 移除）由官方 d.ts 直接体现在 typecheck，而不是运行时才炸。
+ * 不手写任何方法形状：宿主契约漂移由官方 d.ts 直接体现在 typecheck，
+ * 而不是运行时才炸。
  */
 import '@deepseek-ai/dsh-session-persistence';
 import '@deepseek-ai/dsh-workspace';
@@ -31,7 +31,7 @@ export type {
 
 /**
  * jsonl 后端的 `locate` 诊断钩子：按会话头返回当前代际工件路径。它不在
- * `SessionPersistence` 抽象契约上（0.1.3 起从基类移除），删除/恢复的物理
+ * `SessionPersistence` 抽象契约上，删除/恢复的物理
  * 定位运行时探测它，缺失时降级为「不可定位」而非失败。
  */
 export interface LocatableSessionPersistence {

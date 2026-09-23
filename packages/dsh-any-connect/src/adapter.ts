@@ -9,6 +9,7 @@
 import { createProvider } from '@earendil-works/pi-ai'
 import type { Api, AuthContext, CredentialStore, Model, ModelThinkingLevel, Provider, ThinkingLevelMap } from '@earendil-works/pi-ai'
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy'
+import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy'
 import { resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { LlmModelInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
@@ -16,6 +17,7 @@ import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import type { WorkBuddyCredentialStore } from './auth.js'
 import type { WorkBuddyCatalog, WorkBuddyModelInfo } from './catalog.js'
+import type { WorkBuddyProbeRecord } from './probe-store.js'
 import type { WorkBuddyShim } from './shim.js'
 import { normalizeCredits } from './upstream.js'
 
@@ -26,8 +28,8 @@ export const WORKBUDDY_PROVIDER = 'workbuddy'
 export const WORKBUDDY_STREAM_IDLE_TIMEOUT_MS = 300_000
 
 /**
- * Image-request budgets at the dsh-llm-pi-ai defaults; the profile type made
- * them required in 0.1.1-rc.2. They bound requests to models whose catalog
+ * Image-request budgets at the dsh-llm-pi-ai defaults; the profile type
+ * requires them. They bound requests to models whose catalog
  * entry declares `supportsImages`; text-only models never receive images.
  */
 const REQUEST_IMAGE_BUDGETS = {
@@ -40,7 +42,7 @@ const REQUEST_IMAGE_BUDGETS = {
  * Inert pi-ai auth plane. The workbuddy route authenticates only through the
  * shim shared secret resolved per request by `resolveApiKey`, so pi-ai's own
  * credential lifecycle and ambient discovery must never manufacture a
- * credential for it. `PiAiAdapterOptions.auth` is required since 0.1.1-rc.2;
+ * credential for it. `PiAiAdapterOptions.auth` is required;
  * every ambient question here answers "nothing stored, nothing set".
  */
 const INERT_AUTH: { credentials: CredentialStore; authContext: AuthContext } = {
@@ -94,8 +96,23 @@ function withRate(name: string, info: WorkBuddyModelInfo): string {
 /** Constructor dependencies. */
 export interface WorkBuddyAdapterOptions {
   shim: WorkBuddyShim
-  store: WorkBuddyCredentialStore
+  /** Unused since the shim took over credential resolution; kept optional for callers. */
+  store?: WorkBuddyCredentialStore
   catalog: WorkBuddyCatalog
+  /** Provider id and display name; default to the CN `workbuddy` route. */
+  providerId?: string
+  displayName?: string
+  /**
+   * Wire API between pi-ai and the shim. `openai-completions` (default) is
+   * the WorkBuddy shape.
+   * The model `baseUrl` matches: the OpenAI SDK appends `/chat/completions`
+   * to `baseURL` (so the shim's `/v1` prefix rides inside baseUrl), while
+   * the Anthropic SDK posts to `{baseURL}/v1/messages` (so baseUrl is the
+   * shim root).
+   */
+  api?: 'openai-completions' | 'anthropic-messages'
+  /** Probe observation consulted for undeclared models; a declared set always wins. */
+  recordFor?: (modelId: string) => Pick<WorkBuddyProbeRecord, 'validation' | 'efforts'> | undefined
   /** Resolve the durable attachment service at request time, when present. */
   resolveAttachments?: () => AttachmentStore | undefined
 }
@@ -110,23 +127,26 @@ export interface WorkBuddyAdapter {
  * `thinkingLevelMap` (every level pinned to its wire spelling or `null` for
  * unsupported), mirroring `dsh-llm-pi-ai`'s own `resolveModelReasoning`.
  *
- * Per-model handling:
+ * Three sources, strictly ordered:
  * - A model that declares explicit `supportedEfforts` offers exactly those —
  *   the declaration is authoritative and per-model (e.g. `glm-5.3` is
- *   low/high/xhigh while `glm-5.3-flash` is low/high/max).
+ *   low/high/max while `glm-5.2` declares none). An observation
+ *   never widens or narrows a declared set.
  * - A model that declares none (the older `{effort, summary}` shape) offers
- *   only its `defaultEffort`. The upstream accepts any effort string on the
- *   wire without validating it (an invalid `"banana"` returns 200 just like
- *   everything else), and for these rows the value demonstrably does not
- *   change behavior — a `minimal` and a `max` probe on `glm-5.2` produced
- *   statistically indistinguishable reasoning volume. Offering a selectable
- *   ladder there would advertise control the upstream ignores; the single
- *   default level reflects what the model actually runs at.
+ *   its default effort — unless a probe observation verified which spellings
+ *   the upstream actually accepts, in which case exactly those are offered.
+ *   The upstream accepts any effort string on the wire without validating it
+ *   (an invalid `"banana"` returns 200 just like everything else on several
+ *   rows), and for these rows an unverified value demonstrably does not change
+ *   behavior — offering a selectable ladder there would advertise control the
+ *   upstream ignores.
  * - `off` is offered only when the model explicitly reports thinking can be
- *   disabled (`canDisableThinking === true`); older rows leave it unsupported,
- *   since the upstream rejects `off` on several of them.
+ *   disabled (`canDisableThinking === true`); probing never grants `off`.
  */
-export function reasoningFields(info: WorkBuddyModelInfo): { reasoning: boolean; thinkingLevelMap?: ThinkingLevelMap } {
+export function reasoningFields(
+  info: WorkBuddyModelInfo,
+  observed?: Pick<WorkBuddyProbeRecord, 'validation' | 'efforts'>,
+): { reasoning: boolean; thinkingLevelMap?: ThinkingLevelMap } {
   const reasoning = info.reasoning
   if (reasoning === undefined || reasoning.supports !== true) {
     // Not a reasoning model: pi-ai reads a falsy `reasoning` as "off only".
@@ -135,9 +155,19 @@ export function reasoningFields(info: WorkBuddyModelInfo): { reasoning: boolean;
   const declared = reasoning.supportedEfforts !== undefined && reasoning.supportedEfforts.length > 0
     ? reasoning.supportedEfforts
     : undefined
-  const efforts: readonly string[] = declared ?? [reasoning.defaultEffort ?? 'high']
+  // Only a validating observation may supply a set, and only for rows the
+  // upstream left undeclared. A `non-validating` observation deliberately
+  // yields nothing: the upstream accepts values that cannot exist, so every
+  // per-level acceptance it produced would be a false positive.
+  const observedSet = observed?.validation === 'validating' && observed.efforts.length > 0
+    ? observed.efforts
+    : undefined
+  const efforts: readonly string[] = declared ?? observedSet ?? [reasoning.defaultEffort ?? 'high']
   const map: Record<ModelThinkingLevel, string | null> = {
-    off: reasoning.canDisableThinking === true ? 'off' : null,
+    // Probing never grants `off`; only an explicit declaration on a declared
+    // set does — disabling thinking is a separate capability, and the
+    // per-model acceptance of `off` cannot be inferred from the row's shape.
+    off: reasoning.canDisableThinking === true && declared !== undefined && declared.length > 0 ? 'off' : null,
     minimal: efforts.includes('minimal') ? 'minimal' : null,
     low: efforts.includes('low') ? 'low' : null,
     medium: efforts.includes('medium') ? 'medium' : null,
@@ -149,15 +179,21 @@ export function reasoningFields(info: WorkBuddyModelInfo): { reasoning: boolean;
 }
 
 /** Build one pi-ai model descriptor pointing at the loopback shim. */
-function toPiModel(info: WorkBuddyModelInfo, baseUrl: string): Model<Api> {
+function toPiModel(
+  info: WorkBuddyModelInfo,
+  baseUrl: string,
+  providerId: string,
+  api: 'openai-completions' | 'anthropic-messages',
+  observe?: (modelId: string) => Pick<WorkBuddyProbeRecord, 'validation' | 'efforts'> | undefined,
+): Model<Api> {
   return {
     id: info.id,
     name: info.name,
-    api: 'openai-completions',
-    provider: WORKBUDDY_PROVIDER,
+    api,
+    provider: providerId,
     baseUrl,
     input: info.supportsImages === true ? ['text', 'image'] : ['text'],
-    ...reasoningFields(info),
+    ...reasoningFields(info, observe?.(info.id)),
     cost: NO_COST,
     contextWindow: info.contextWindow,
     maxTokens: info.maxTokens,
@@ -170,18 +206,22 @@ function toPiModel(info: WorkBuddyModelInfo, baseUrl: string): Model<Api> {
  * ephemeral port applies from the first snapshot after startup.
  */
 export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBuddyAdapter {
-  const { shim, store, catalog, resolveAttachments } = options
+  const { shim, catalog, resolveAttachments } = options
+  const providerId = options.providerId ?? WORKBUDDY_PROVIDER
+  const displayName = options.displayName ?? 'WorkBuddy'
+  const api = options.api ?? 'openai-completions'
 
   const buildModels = (): Model<Api>[] => {
-    // The OpenAI SDK pi-ai drives appends `/chat/completions` to baseURL,
-    // so the shim's routes line up with the `/v1` prefix in place.
-    const baseUrl = `${shim.baseUrl()}/v1`
-    return catalog.current().map(info => toPiModel(info, baseUrl))
+    // The OpenAI SDK pi-ai drives appends `/chat/completions` to baseURL, so
+    // the shim's routes line up with the `/v1` prefix in place; the Anthropic
+    // SDK posts to `{baseURL}/v1/messages`, so its baseUrl is the shim root.
+    const baseUrl = api === 'anthropic-messages' ? shim.baseUrl() : `${shim.baseUrl()}/v1`
+    return catalog.current().map(info => toPiModel(info, baseUrl, providerId, api, options.recordFor))
   }
 
   const base = createProvider({
-    id: WORKBUDDY_PROVIDER,
-    name: 'WorkBuddy',
+    id: providerId,
+    name: displayName,
     auth: {
       apiKey: {
         name: 'WorkBuddy OAuth bearer token',
@@ -194,7 +234,7 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
       },
     },
     models: buildModels(),
-    api: openAICompletionsApi(),
+    api: api === 'anthropic-messages' ? anthropicMessagesApi() : openAICompletionsApi(),
   })
 
   // `getModels` is delegated to a live read (the reuse-catalog pattern from
@@ -203,19 +243,19 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
   const provider: Provider = { ...base, getModels: () => buildModels() }
 
   const profile: ResolvedPiAiProviderProfile = {
-    provider: WORKBUDDY_PROVIDER,
-    displayName: 'WorkBuddy',
+    provider: providerId,
+    displayName,
     streamIdleTimeoutMs: WORKBUDDY_STREAM_IDLE_TIMEOUT_MS,
     retryPolicy: resolveRetryPolicy(undefined, 'dsh-any-connect retryPolicy'),
     configuredMaxTokens: new Map(),
-    // 解析失败模型的诊断（0.1.5 起必填）：本插件的 catalog 只含已成功解析
+    // 解析失败模型的诊断：本插件的 catalog 只含已成功解析
     // 的模型，无可保留的诊断，与宿主自身缺省一致传空 Map。
     modelErrors: new Map(),
     ...REQUEST_IMAGE_BUDGETS,
     piProvider: provider,
   }
 
-  const profiles = new Map<string, ResolvedPiAiProviderProfile>([[WORKBUDDY_PROVIDER, profile]])
+  const profiles = new Map<string, ResolvedPiAiProviderProfile>([[providerId, profile]])
 
   const adapter = new WorkBuddyPiAiAdapter(catalog, {
     profiles: () => profiles,

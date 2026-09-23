@@ -5,23 +5,9 @@ import { setTimeout as realSleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import SettingsProvider from '@deepseek-ai/dsh-settings'
-import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import * as WorkBuddy from '../src/index.js'
 
-class MemorySettings extends SettingsProvider {
-  readonly writable = true
-  private storedDocument: Record<string, unknown> = {}
-
-  protected load(): Promise<Record<string, unknown>> {
-    return Promise.resolve(structuredClone(this.storedDocument))
-  }
-
-  protected persist(ns: SettingsNamespace, section: Record<string, unknown>): Promise<void> {
-    this.storedDocument[ns] = structuredClone(section)
-    return Promise.resolve()
-  }
-}
+// 集成测试与宿主机真实登录态隔离，登录态只由测试显式给出（配置/env/文件）。
 
 let context: Context | undefined
 let root: string | undefined
@@ -36,14 +22,20 @@ afterEach(async () => {
 })
 
 describe('WorkBuddy Host settings integration', () => {
-  it('exposes the provider directory entry, the settings section, and the fallback model list', async () => {
+  it('registers the provider and settings section, but hides the model group while signed out', async () => {
+    // 无凭据行为（与上游 dsh-workbuddy-connect 一致）：从未登录、也没有插件
+    // 自留副本时，模型分组不再显示——此前会展示一份内置兜底名单，但那些模型
+    // 选了必然报错。provider 注册与设置区不受影响，登录后无需重新注册。
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-settings-'))
     vi.stubEnv('DSH_HOME', root)
     const ctx = new Context()
     context = ctx
     await ctx.plugin(LlmRuntime)
-    await ctx.plugin(MemorySettings)
-    await ctx.plugin(WorkBuddy, {})
+    // Point the desktop probe at a path that cannot exist: the test must be
+    // hermetic (CI runners may carry a real signed-in desktop file, which
+    // would flip this case to signed-in). An explicit authFile overrides the
+    // platform defaults to this single path.
+    await ctx.plugin(WorkBuddy, { authFile: join(root, 'no-such-file.info'), authFileAI: join(root, 'no-such-ai-file.info') })
 
     // Registration rides on the loopback shim's listening event.
     await vi.waitFor(() => {
@@ -57,11 +49,56 @@ describe('WorkBuddy Host settings integration', () => {
       declared: false,
     })
 
-    // The section is what the Models settings page joins on to render a card.
-    const descriptor = ctx.settings.describe().find(entry => entry.ns === WorkBuddy.WORKBUDDY_SETTINGS_NS)
-    expect(descriptor).toBeDefined()
+    // The directory entries are what the Models settings page joins on to
+    // render a card. Without a Loader the settingsNs falls back to the
+    // legacy namespace constants.
+    const directory = ctx.llm.listConfigurableProviders()
+    for (const [provider, settingsNs] of [
+      ['workbuddy', WorkBuddy.WORKBUDDY_SETTINGS_NS],
+      ['workbuddy-ai', WorkBuddy.WORKBUDDY_AI_SETTINGS_NS],
+    ] as const) {
+      expect(directory).toContainEqual({
+        provider,
+        displayName: expect.any(String),
+        settingsNs,
+        settingsPath: [],
+        declared: false,
+      })
+    }
 
-    const models = await ctx.llm.listModels('workbuddy')
+    // No credential anywhere: the group is hidden (empty), not fallback-filled.
+    await vi.waitFor(async () => {
+      expect(await ctx.llm.listModels('workbuddy')).toEqual([])
+    })
+  })
+
+  it('serves the fallback model list once signed in (fetch failing)', async () => {
+    // 已登录但上游拉取失败：分组可见，服务内置兜底名单（上一个用例的反面）。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-fallback-'))
+    vi.stubEnv('DSH_HOME', root)
+    const desktop = join(root, 'workbuddy-desktop.info')
+    await writeFile(desktop, JSON.stringify({
+      auth: { accessToken: 'at', refreshToken: 'rt', expiresAt: Date.now() + 3600_000, domain: 'www.codebuddy.cn' },
+      account: { uid: 'uid-1', nickname: '昵称' },
+    }))
+    const spy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+      .mockImplementation(async () => { throw new Error('upstream down') })
+    try {
+      const ctx = new Context()
+      context = ctx
+      await ctx.plugin(LlmRuntime)
+        await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+      await vi.waitFor(() => {
+        expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
+      })
+      let models = await ctx.llm.listModels('workbuddy')
+      if (models.length === 0) {
+        // 启动拉取是异步的：等 fallback 落定（身份已确认、fetch 已失败）。
+        await vi.waitFor(async () => {
+          models = await ctx.llm.listModels('workbuddy')
+          expect(models.length).toBeGreaterThan(0)
+        })
+      }
     expect(models.map(model => model.id)).toContain('auto')
     expect(models.map(model => model.id)).toContain('deepseek-v4-pro')
     // The fallback catalog tracks the live `cli` roster, including the newer
@@ -86,11 +123,55 @@ describe('WorkBuddy Host settings integration', () => {
     const modalities = new Map(models.map(model => [model.id, model.inputModalities]))
     expect(modalities.get('auto')).toContain('image')
     expect(modalities.get('glm-5.1')).toEqual(['text'])
+    } finally {
+      spy.mockRestore()
+    }
+  })
 
-    // A settings write validates against the schema and persists.
-    await ctx.settings.update(WorkBuddy.WORKBUDDY_SETTINGS_NS, { authFile: '/tmp/other-workbuddy.info' })
-    const updated = ctx.settings.describe().find(entry => entry.ns === WorkBuddy.WORKBUDDY_SETTINGS_NS)
-    expect((updated?.value as Record<string, unknown>)['authFile']).toBe('/tmp/other-workbuddy.info')
+  it('serves the saved catalog after a restart when the fetch keeps failing', async () => {
+    // saved 优先于 fallback：一次成功拉取落盘后，即使重启且上游持续失败，
+    // 该账号看到的仍是"自己实际被服务过"的名单，而非编译期快照。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-saved-'))
+    vi.stubEnv('DSH_HOME', root)
+    const desktop = join(root, 'workbuddy-desktop.info')
+    await writeFile(desktop, JSON.stringify({
+      auth: { accessToken: 'at', refreshToken: 'rt', expiresAt: Date.now() + 3600_000, domain: 'www.codebuddy.cn' },
+      account: { uid: 'uid-1', nickname: '昵称' },
+    }))
+    const savedRow = { id: 'saved-only', name: 'Saved Only', contextWindow: 100, maxTokens: 10, supportsImages: false }
+    // 第一程：拉取成功 → 落盘。
+    const okSpy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+      .mockImplementation(async () => [savedRow])
+    const ctx1 = new Context()
+    try {
+      await ctx1.plugin(LlmRuntime)
+      await ctx1.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+      await vi.waitFor(async () => {
+        expect((await ctx1.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
+      })
+      // set 先于 save 落盘：等文件出现再"重启"，否则第二程读不到 saved。
+      const { existsSync } = await import('node:fs')
+      await vi.waitFor(() => {
+        expect(existsSync(join(root as string, '.workbuddy-catalog.json'))).toBe(true)
+      })
+    } finally {
+      okSpy.mockRestore()
+      await ctx1.fiber.dispose()
+    }
+    // 第二程（重启）：拉取持续失败 → 服务 saved，不回落 fallback。
+    const failSpy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+      .mockImplementation(async () => { throw new Error('upstream down') })
+    try {
+      const ctx = new Context()
+      context = ctx
+      await ctx.plugin(LlmRuntime)
+        await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+      await vi.waitFor(async () => {
+        expect((await ctx.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
+      })
+    } finally {
+      failSpy.mockRestore()
+    }
   })
 
   it('retries the model catalog refresh after failures, then stops', async () => {
@@ -114,35 +195,138 @@ describe('WorkBuddy Host settings integration', () => {
     const ctx = new Context()
     context = ctx
     await ctx.plugin(LlmRuntime)
-    await ctx.plugin(MemorySettings)
 
-    // 假时钟从插件安装前开启:installSection 安装即触发一次 onChange 拉取,
-    // shim 就绪后再来一次启动拉取——两条失败链各自带重试。
+    // 假时钟从插件安装前开启。配置是 volatile 引用，启动只有 shim 就绪后
+    // 的一次拉取：单条失败链带重试。
     vi.useFakeTimers()
     try {
-      await ctx.plugin(WorkBuddy, { authFile: desktop })
+      await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       // waitFor 在假时钟下自动按 50ms 推进(上限 1s,远够不到 60s 重试点),
-      // 等两条链的首次失败都落地。
-      await vi.waitFor(() => { expect(calls).toBe(2) })
+      // 等首次失败落地。
+      await vi.waitFor(() => { expect(calls).toBe(1) })
       // 假时钟推进只负责触发重试定时器;重试回调里的 fs 读取走真实 I/O,
       // 用真实时钟小步等待其收敛(Date 已被假时钟接管,不读钟)。
       const waitForReal = async (expected: number): Promise<void> => {
         for (let i = 0; i < 200 && calls < expected; i += 1) await realSleep(10)
         expect(calls).toBe(expected)
       }
-      // 第一次重试:两条链各 +1。
+      // 第一次重试。
       await vi.advanceTimersByTimeAsync(60_000)
-      await waitForReal(4)
-      // 第二次重试(每链最后一次)。
+      await waitForReal(2)
+      // 第二次重试(最后一次)。
       await vi.advanceTimersByTimeAsync(60_000)
-      await waitForReal(6)
-      // 重试耗尽(每链初始 1 次 + 最多 2 次),不再发起。
+      await waitForReal(3)
+      // 重试耗尽(初始 1 次 + 最多 2 次),不再发起。
       await vi.advanceTimersByTimeAsync(180_000)
       for (let i = 0; i < 20; i += 1) await realSleep(10)
-      expect(calls).toBe(6)
+      expect(calls).toBe(3)
     } finally {
       vi.useRealTimers()
       spy.mockRestore()
     }
+  })
+})
+
+describe('WorkBuddy international variant', () => {
+  it('registers both providers but hides each group independently', async () => {
+    // 双分组独立显隐：都不登录时两个分组都隐藏，但 provider 注册与设置区
+    // 都在——登录任一一侧都无需重新注册。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-dual-'))
+    vi.stubEnv('DSH_HOME', root)
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(WorkBuddy, {
+      authFile: join(root, 'no-such-file.info'),
+      authFileAI: join(root, 'no-such-ai-file.info'),
+    })
+    await vi.waitFor(() => {
+      const ids = ctx.llm.listProviders().map(provider => provider.id)
+      expect(ids).toContain('workbuddy')
+      expect(ids).toContain('workbuddy-ai')
+    })
+    await vi.waitFor(async () => {
+      expect(await ctx.llm.listModels('workbuddy')).toEqual([])
+      expect(await ctx.llm.listModels('workbuddy-ai')).toEqual([])
+    })
+    const entries = ctx.llm.listConfigurableProviders()
+    expect(entries.find(entry => entry.provider === 'workbuddy')).toMatchObject({
+      settingsNs: WorkBuddy.WORKBUDDY_SETTINGS_NS,
+      settingsPath: [],
+    })
+    expect(entries.find(entry => entry.provider === 'workbuddy-ai')).toMatchObject({
+      settingsNs: WorkBuddy.WORKBUDDY_AI_SETTINGS_NS,
+      settingsPath: [],
+    })
+  })
+
+  it('serves the AI fallback roster when only the AI side is signed in', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-ai-'))
+    vi.stubEnv('DSH_HOME', root)
+    const desktopAI = join(root, 'workbuddy-desktop-ai.info')
+    await writeFile(desktopAI, JSON.stringify({
+      auth: { accessToken: 'ai-at', refreshToken: 'ai-rt', expiresAt: Date.now() + 3600_000, domain: 'www.workbuddy.ai' },
+      account: { uid: 'ai-uid', nickname: 'AI 用户' },
+    }))
+    const spy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+      .mockImplementation(async () => { throw new Error('upstream down') })
+    try {
+      const ctx = new Context()
+      context = ctx
+      await ctx.plugin(LlmRuntime)
+        await ctx.plugin(WorkBuddy, {
+        authFile: join(root, 'no-such-file.info'),
+        authFileAI: desktopAI,
+      })
+      await vi.waitFor(async () => {
+        const ids = (await ctx.llm.listModels('workbuddy-ai')).map(m => m.id)
+        expect(ids).toContain('default-model')
+        expect(ids).toContain('gpt-5.6-luna')
+      })
+      // CN 侧无凭据：保持隐藏；AI 名单里没有 CN 专属 id。
+      expect(await ctx.llm.listModels('workbuddy')).toEqual([])
+      const aiIds = (await ctx.llm.listModels('workbuddy-ai')).map(m => m.id)
+      expect(aiIds).not.toContain('auto')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
+
+describe('volatile configuration (DSH 0.1.7)', () => {
+  it('repoints each variant store from the live values', () => {
+    const credentialSet: Array<string | undefined> = []
+    const stores = {
+      credentialStore: { setDesktopPath: (path: string | undefined) => { credentialSet.push(path) } },
+    }
+    expect(WorkBuddy.applyVariantConfig(WorkBuddy.CN_VARIANT, stores, { authFile: '/tmp/a.info' })).toBe('authFile')
+    expect(credentialSet).toEqual(['/tmp/a.info'])
+    expect(WorkBuddy.applyVariantConfig(WorkBuddy.AI_VARIANT, stores, { authFileAI: '/tmp/ai.info' })).toBe('authFile')
+    expect(credentialSet).toEqual(['/tmp/a.info', '/tmp/ai.info'])
+  })
+
+  it('tolerates absent stores (variant without a live runtime part)', () => {
+    expect(() => WorkBuddy.applyVariantConfig(WorkBuddy.CN_VARIANT, {}, { authFile: '/tmp/a.info' })).not.toThrow()
+  })
+
+  it('survives a volatile-update with no Loader (install-time values, no crash)', async () => {
+    // 无 Loader 时配置静态：事件只重读安装值并重走 refresh（此处无凭据，
+    // 即 adoptSignedOut），不断言目录变化，只证明接线不抛错。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-volatile-'))
+    vi.stubEnv('DSH_HOME', root)
+    const ctx = new Context()
+    context = ctx
+    await ctx.plugin(LlmRuntime)
+    const fiber = await ctx.plugin(WorkBuddy, {
+      authFile: join(root, 'no-such-file.info'),
+      authFileAI: join(root, 'no-such-ai-file.info'),
+    })
+    await vi.waitFor(() => {
+      expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
+    })
+    expect(() => fiber.ctx.emit('loader/volatile-update', [])).not.toThrow()
+    await vi.waitFor(async () => {
+      expect(await ctx.llm.listModels('workbuddy')).toEqual([])
+    })
   })
 })

@@ -23,10 +23,6 @@ describe('package version sync', () => {
     expect(ANYCONNECT_VERSION).toBe(pkg.version)
   })
 
-  it('never leaks a manifest-read fallback marker', () => {
-    expect(ANYCONNECT_VERSION).not.toBe('0.0.0-dev')
-  })
-
   /**
    * The runtime read resolves package.json relative to the module, so the built
    * `lib/version.js` must be able to reach the manifest from its own location
@@ -34,9 +30,7 @@ describe('package version sync', () => {
    * from silently degrading the published CLI to the '0.0.0-dev' fallback.
    * Skipped on a fresh clone before the first build.
    */
-  it('built lib/ artifact resolves the manifest version', async () => {
-    const libDir = new URL('../lib/', import.meta.url)
-    if (!existsSync(libDir)) return
+  it.skipIf(!existsSync(new URL('../lib/', import.meta.url)))('built lib/ artifact resolves the manifest version', async () => {
     const pkg = JSON.parse(
       readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
     ) as { version: string }

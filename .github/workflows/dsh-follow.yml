@@ -2,9 +2,9 @@ name: DSH follow status
 
 # 宿主跟随核对（RELEASING.md「宿主跟随规则」）：main ↔ dsh 最新 rc（本仓
 # 把 dsh 的最新 rc 视为其正式版），alpha ↔ 高于它的进行中 -alpha 线。
-# 判定读 npm 的**版本列表**而非 dist-tag：同一条 rc 迭代多版时只有首版
-# 可能拿到 latest（实测 latest 指 0.1.5-rc.1 而更新的 0.1.5-rc.2 在 next），
-# 拿 dist-tag 当目标会把已跟到最新 rc 的 main 误报成超前。
+# 判定读 npm 的**版本列表**而非 dist-tag：同一条 rc 迭代多版时可能只有首版
+# 拿到 latest（2026-09-15 曾实测 latest 指 0.1.5-rc.1、更新的 0.1.5-rc.2 在
+# next），拿 dist-tag 当目标会把已跟到最新 rc 的 main 误报成超前。
 # 落后或形态漂移时发 GitHub Actions warning annotation。刻意非阻塞
 # （永远 exit 0）：这是提醒，不是门禁——发布门禁仍由 publish.yml 全权负责。
 on:
@@ -34,13 +34,10 @@ jobs:
           # 脚本要 git show 另一条分支的 package.json
           fetch-depth: 0
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
           node-version: 24
 
-      - name: Compare branch baselines with dsh dist-tags
+      - name: Compare branch baselines with dsh published versions
         run: node scripts/dsh-follow-status.mjs --ci

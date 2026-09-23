@@ -46,14 +46,6 @@ try {
   console.warn("sandbox-extra-roots: settings gateway unavailable: " + ((error as Error)?.message ?? String(error)));
 }
 
-// 宿主 settings 体系的 schema 库（dsh-settings 0.1.0-rc.7+ 用 schemastery）。
-// DSH profile 的 hoisted node_modules 直接解析；仓库测试环境无此包时为
-// null，settings namespace 注册段静默跳过（fail-safe）。
-let Schema: any = null;
-try {
-  ({ default: Schema } = await import("@deepseek-ai/schemastery"));
-} catch {}
-
 export const name = "sandbox-extra-roots";
 
 export const inject = ["sandbox", "fs", "sandboxPolicy"];
@@ -153,34 +145,6 @@ function getLandlockExec(): Promise<string | null> | null {
     .then((landlock) => landlock.launcherPath())
     .catch(() => null);
   return landlockExecPromise;
-}
-
-/** 把配置 namespace 注册进宿主 settings 体系（dsh-settings 0.1.0-rc.7+）。
- * 设置页 describe() 只枚举 settings.register 注册过的 namespace；本插件
- * 的卡片读写不经过宿主 settings 文档，注册只为让卡片出现在设置页。
- * options.base 必传当前生效配置快照：宿主 resolve = schema(mergeLayers(base,
- * section))，schema 无默认值时 base 缺失会让 describe() 的 value 为
- * undefined，而设置页 wire 校验要求 value 非空（invalid_type: nonoptional），
- * 一项失败会拖垮整个设置页。
- * fail-safe（schema 库/服务缺失静默跳过）+ 幂等（重复注册忽略）。
- * 导出以便测试注入 Schema stub。 */
-export function registerSettingsNamespace(ctx: any, ns: string, schemaLib: any, buildSchema: (z: any) => any, options: any): boolean {
-  if (schemaLib === null || schemaLib === undefined) return false;
-  if (ctx === null || typeof ctx !== "object" || typeof ctx.inject !== "function") return false;
-  try {
-    ctx.inject(["settings"], (settingsCtx: any) => {
-      try {
-        settingsCtx.settings.register(ns, buildSchema(schemaLib), options);
-      } catch (error) {
-        const message = String((error as Error)?.message ?? String(error));
-        if (!message.includes("already registered")) throw error;
-      }
-    });
-    return true;
-  } catch (error) {
-    try { ctx.logger?.warn?.(`sandbox-extra-roots: settings namespace registration skipped: ${(error as Error)?.message ?? String(error)}`); } catch {}
-    return false;
-  }
 }
 
 export async function apply(ctx: Context, config?: any): Promise<void> {
@@ -397,8 +361,12 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
           sandboxState.warned.add(key);
           ctx.logger?.warn?.(`sandbox-extra-roots: ${message}`);
         };
-        const installedConfine = function confineWithExtraRoots(this: any, argv: any, policy: any) {
-          const wrapped = originalConfine.call(this, argv, policy);
+        // confine 是异步实现（SandboxProvider.confine 返回 Promise，
+        // terminal-bash 以 await + signal 调用）：包装必须同样是
+        // async 并把 signal 透传给原实现，否则 wrapped 是 Promise、
+        // wrapped.argv 为 undefined，每次 bash 执行都抛 TypeError。
+        const installedConfine = async function confineWithExtraRoots(this: any, argv: any, policy: any, signal?: any) {
+          const wrapped = await originalConfine.call(this, argv, policy, signal);
           if (policy?.mode !== "workspace-write") return wrapped;
           if (sandboxState.extraRoots.length === 0) return wrapped;
           // 每次调用重新 canonical 化(与官方 writableRoots 对 workspaceRoot
@@ -560,18 +528,10 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
         ctx.logger?.warn?.(`sandbox-extra-roots: settings gateway failed (core sandbox extension unaffected): ${(error as Error)?.message ?? String(error)}`);
       }
     }
-    try {
-      // 注册进宿主 settings 体系(可见性)：设置页用 settings.describe() 枚举
-      // registrations，未注册的 namespace 即使卡片带正确的 key 也不渲染。
-      // 卡片的实际读写仍走 config gateway(config.json 权威、热更新)。
-      // namespace 必须匹配宿主 ^[a-z][a-z0-9-]*$——驼峰会被 register() 抛
-      // TypeError、inject 回调失败被静默吞掉，设置页遂不渲染卡片。
-      registerSettingsNamespace(ctx, "sandbox-extra-roots-config", Schema, (z) => z.object({
-        extraWritableRoots: z.array(z.string()).default([]),
-      }), { base: cfg });
-    } catch (error) {
-      ctx.logger?.warn?.(`sandbox-extra-roots: settings namespace registration failed (core sandbox extension unaffected): ${(error as Error)?.message ?? String(error)}`);
-    }
+    // DSH 0.1.7 移除了 settings namespace 注册体系（`settings.register`
+    // 不复存在）：卡片可见性改由 Loader profile entry 与
+    // `plugins.bundle.config` slot 决定，卡片读写仍走上面的 config gateway。
+    // 此处不再做任何 settings 服务调用。
   } catch (error) {
     ctx.logger?.warn?.(`sandbox-extra-roots: init failed: ${(error as Error)?.message ?? String(error)}`);
   }

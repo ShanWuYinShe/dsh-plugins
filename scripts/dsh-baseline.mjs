@@ -1,7 +1,7 @@
 // 输出当前分支的 dsh 依赖基线（全部 @deepseek-ai/dsh-* range 的共同
-// `^<版本>` 锚点，如 `0.1.2-rc.1`）。publish.yml 在 main 流水成功后用
-// 它打 `dsh-v<基线>` 归档 tag（表示"该提交 = 对 dsh 此稳定版的已验证
-// 适配"）；`pnpm run dsh-status` 的判定逻辑见 dsh-follow-status.mjs。
+// `^<版本>` 锚点，如 `0.1.2-rc.1`）。`dsh-v<基线>` 归档 tag（表示"该提交 =
+// 对 dsh 此稳定版的已验证适配"）由用户手工打，CI 绝不自动创建；
+// `bun run dsh-status` 的判定逻辑见 dsh-follow-status.mjs。
 //
 // 严格模式：任何非 `^<版本>` 形态的 dsh 依赖、基线不一致、dsh.host 缺失
 // 或不一致都 exit 1——发布归档的 tag 不允许带糊的状态。
