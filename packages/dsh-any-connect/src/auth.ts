@@ -239,7 +239,7 @@ export function parseZCodeAuth(text: string): WorkBuddyCredential | undefined {
   return {
     accessToken: decryptedKey,
     refreshToken: '',
-    expiresAtMs: Number.MAX_SAFE_INTEGER,
+    expiresAtMs: Date.parse('2099-12-31T23:59:59.000Z'),
     domain: 'bigmodel.cn',
     uid,
     nickname: 'ZCode User',

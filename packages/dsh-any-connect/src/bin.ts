@@ -131,7 +131,14 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
   } catch (error: unknown) {
     credits = { total: 0, error: safeMessage(error) }
   }
-  const expiresAt = authStatus.expiresAtMs !== undefined ? new Date(authStatus.expiresAtMs).toISOString() : undefined
+  let expiresAt: string | undefined
+  if (authStatus.expiresAtMs !== undefined && Number.isFinite(authStatus.expiresAtMs)) {
+    try {
+      expiresAt = new Date(authStatus.expiresAtMs).toISOString()
+    } catch {
+      expiresAt = undefined
+    }
+  }
   if (jsonOutput) {
     printJson({
       schemaVersion: JSON_SCHEMA_VERSION,
