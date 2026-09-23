@@ -11,20 +11,20 @@ import z from '@deepseek-ai/schemastery'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-attachment'
 import { RegionMismatchError, WorkBuddyCredentialStore } from './auth.js'
-import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, WorkBuddyCatalog } from './catalog.js'
+import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS, WorkBuddyCatalog } from './catalog.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import { WorkBuddyCatalogStore, credentialIdentity, workbuddyCatalogPath } from './catalog-store.js'
 import { createWorkBuddyAdapter, WORKBUDDY_PROVIDER } from './adapter.js'
 import { createWorkBuddyShim } from './shim.js'
 import type { WorkBuddyShim } from './shim.js'
-import { WorkBuddyUpstreamClient, chatBase } from './upstream.js'
+import { WorkBuddyUpstreamClient, ZCodeUpstreamClient, chatBase } from './upstream.js'
 import type { WorkBuddyCredential } from './auth.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebProbeSection } from './status-paths.js'
 import { WorkBuddyProbeService } from './probe-service.js'
 import { newestFirst, workbuddyProbePath, WorkBuddyProbeStore } from './probe-store.js'
 import { createProbeKey, registerWorkBuddyProbeRoute } from './probe-route.js'
 import { ANYCONNECT_VERSION } from './version.js'
-import { AI_VARIANT, CN_VARIANT, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS } from './variants.js'
+import { AI_VARIANT, CN_VARIANT, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { registerWorkBuddyStatusRoute } from './web-status.js'
 import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
@@ -34,6 +34,7 @@ export { createWorkBuddyShim, type WorkBuddyShim } from './shim.js'
 export {
   FALLBACK_WORKBUDDY_AI_MODELS,
   FALLBACK_WORKBUDDY_MODELS,
+  FALLBACK_ZCODE_MODELS,
   WorkBuddyCatalog,
   type WorkBuddyModelInfo,
 } from './catalog.js'
@@ -45,9 +46,11 @@ export {
   type SavedWorkBuddyCatalog,
 } from './catalog-store.js'
 export {
+  decryptZCodeEncryptedKey,
   defaultDesktopAuthCandidates,
   desktopAuthCandidatesFor,
   parseWorkBuddyAuth,
+  parseZCodeAuth,
   RegionMismatchError,
   WORKBUDDY_AUTH_FILE_ENV,
   WORKBUDDY_AUTH_FILENAME,
@@ -62,6 +65,7 @@ export {
   PROVIDER_VARIANTS,
   variantFor,
   WORKBUDDY_VARIANTS,
+  ZCODE_VARIANT,
   type VariantKind,
   type WorkBuddyVariant,
 } from './variants.js'
@@ -116,6 +120,7 @@ export {
   prepareInternationalChatBody,
   regionOf,
   WorkBuddyUpstreamClient,
+  ZCodeUpstreamClient,
   type UpstreamErrorKind,
   type WorkBuddyChatResult,
   type WorkBuddyCredits,
@@ -125,7 +130,14 @@ export {
   type WorkBuddyPromotion,
   type WorkBuddyRefreshOutcome,
   type WorkBuddyUpstreamModel,
+  type ZCodeUpstreamClientOptions,
 } from './upstream.js'
+export {
+  parseZCodeApiKey,
+  solveClientRequestProofOfWork,
+  ZCodeClientSigner,
+  type ZCodeParsedKey,
+} from './zcode-signer.js'
 export {
   WORKBUDDY_HOST_HEARTBEAT_FILENAME,
   clearHostHeartbeat,
@@ -155,6 +167,9 @@ export const WORKBUDDY_SETTINGS_NS = 'anyconnect' as SettingsNamespace
 /** Fallback settings namespace owning the international variant's card. */
 export const WORKBUDDY_AI_SETTINGS_NS = 'anyconnect-ai' as SettingsNamespace
 
+/** Fallback settings namespace owning the ZCode variant's card. */
+export const ZCODE_SETTINGS_NS = 'anyconnect-zcode' as SettingsNamespace
+
 /** Plugin configuration: live volatile references committed by the Loader.
  *
  * Editable fields are declared `.volatile()` and read with `.get()`, which
@@ -168,6 +183,8 @@ export interface Config {
   authFile: Volatile<string | undefined>
   /** Explicit WorkBuddy AI desktop auth-file path, overriding env and platform defaults. */
   authFileAI: Volatile<string | undefined>
+  /** Explicit ZCode desktop auth-file path, overriding env and platform defaults. */
+  authFileZCode: Volatile<string | undefined>
   // schemastery strips unknown fields, so a stale field in a
   // cordis.patch.yml is ignored rather than rejected.
 }
@@ -180,6 +197,7 @@ export type Options = {
 export const Config = z.object({
   authFile: z.string().description('WorkBuddy desktop auth file (defaults to the app\'s own location)').volatile(),
   authFileAI: z.string().description('WorkBuddy AI desktop auth file (defaults to the app\'s own location)').volatile(),
+  authFileZCode: z.string().description('ZCode desktop auth file (defaults to the app\'s own location)').volatile(),
 })
 
 /** 目录拉取失败后的延迟重试：最多再试 2 次、间隔 60s（暂态故障自愈，耗尽即停）。 */
@@ -227,7 +245,7 @@ interface VariantRuntime {
   /** 上次发布过目录的账号（`uid:enterpriseId`），或 undefined。 */
   lastIdentity: string | undefined
   /** WorkBuddy-only parts: live catalog lifecycle, refresh, probe. */
-  client?: WorkBuddyUpstreamClient
+  client?: WorkBuddyUpstreamClient | ZCodeUpstreamClient
   credentialStore?: WorkBuddyCredentialStore
   catalogStore?: WorkBuddyCatalogStore
   probeStore?: WorkBuddyProbeStore
@@ -269,6 +287,7 @@ interface ProviderUsageRegistryLike {
 const FALLBACK_BY_ID = new Map<string, readonly WorkBuddyModelInfo[]>([
   [CN_VARIANT.id, FALLBACK_WORKBUDDY_MODELS],
   [AI_VARIANT.id, FALLBACK_WORKBUDDY_AI_MODELS],
+  [ZCODE_VARIANT.id, FALLBACK_ZCODE_MODELS],
 ])
 
 function fallbackFor(variant: WorkBuddyVariant): readonly WorkBuddyModelInfo[] {
@@ -276,9 +295,10 @@ function fallbackFor(variant: WorkBuddyVariant): readonly WorkBuddyModelInfo[] {
 }
 
 /** The auth-file config field a WorkBuddy variant edits, if it has one. */
-const AUTH_FILE_FIELD_BY_ID = new Map<string, 'authFile' | 'authFileAI'>([
+const AUTH_FILE_FIELD_BY_ID = new Map<string, 'authFile' | 'authFileAI' | 'authFileZCode'>([
   [CN_VARIANT.id, 'authFile'],
   [AI_VARIANT.id, 'authFileAI'],
+  [ZCODE_VARIANT.id, 'authFileZCode'],
 ])
 
 function configuredAuthFile(values: Options, variant: WorkBuddyVariant): string | undefined {
@@ -330,6 +350,7 @@ export function apply(ctx: Context, config: Config): void {
   const current = (): Options => ({
     authFile: config.authFile.get(),
     authFileAI: config.authFileAI.get(),
+    authFileZCode: config.authFileZCode.get(),
   })
 
   /** Build one variant's stores and catalog; the shim starts below. */
@@ -340,6 +361,30 @@ export function apply(ctx: Context, config: Config): void {
     // whose models could only fail.
     catalog.setVisible(false)
     const configured = configuredAuthFile(current(), variant)
+
+    if (variant.kind === 'zcode') {
+      const zcodeClient = new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
+      const credentialStore = new WorkBuddyCredentialStore({
+        variant,
+        ...configured === undefined ? {} : { desktopPath: configured },
+        refresh: credential => zcodeClient.refreshToken(credential),
+        onWarning: message => ctx.logger?.warn?.(message),
+      })
+      const catalogStore = new WorkBuddyCatalogStore({ path: workbuddyCatalogPath(variant.catalogFilename) })
+      const shim = createWorkBuddyShim({ kind: 'zcode', store: credentialStore, client: zcodeClient, catalog, logger: ctx.logger })
+      const runtime: VariantRuntime = {
+        variant, store: credentialStore, catalog, shim,
+        client: zcodeClient, credentialStore, catalogStore,
+        probeStore: undefined,
+        probeService: undefined,
+        catalogSource: 'fallback',
+        catalogFetchedAtMs: undefined,
+        catalogError: undefined,
+        lastIdentity: undefined,
+      }
+      return runtime
+    }
+
     const credentialStore = new WorkBuddyCredentialStore({
       variant,
       ...configured === undefined ? {} : { desktopPath: configured },
@@ -374,7 +419,7 @@ export function apply(ctx: Context, config: Config): void {
     return runtime
   }
 
-  const runtimes = WORKBUDDY_VARIANTS.map(createRuntime)
+  const runtimes = PROVIDER_VARIANTS.map(createRuntime)
 
   /** Per-process key authorizing probe control writes; handed to the cards. */
   const probeKey = createProbeKey()
@@ -493,7 +538,7 @@ export function apply(ctx: Context, config: Config): void {
         async context => {
           const credential = await runtime.store.resolve() as WorkBuddyCredential
           if (context.signal?.aborted === true) throw context.signal.reason ?? new Error('aborted')
-          const credits = await client.fetchCredits(credential)
+          const credits = await (runtime.client ?? client).fetchCredits(credential)
           return {
             provider: runtime.variant.id,
             displayName: runtime.variant.displayName,
@@ -606,7 +651,7 @@ export function apply(ctx: Context, config: Config): void {
           runtime.probeService?.probeMissingCandidates()
         }
         const generation = runtime.lastIdentity
-        const models = await client.fetchModels(credential as Parameters<WorkBuddyUpstreamClient['fetchModels']>[0])
+        const models = await (runtime.client ?? client).fetchModels(credential as Parameters<WorkBuddyUpstreamClient['fetchModels']>[0])
         if (stopped) return
         // 拉取中账号又变了（切换/登出）：迟到响应直接丢弃，不覆盖新身份。
         if (generation !== runtime.lastIdentity) return
@@ -617,7 +662,7 @@ export function apply(ctx: Context, config: Config): void {
         runtime.catalogError = undefined
         await catalogStore!.save({
           account: identity,
-          source: chatBase(credential as unknown as Parameters<typeof chatBase>[0]),
+          source: variant.kind === 'zcode' ? 'https://open.bigmodel.cn' : chatBase(credential as unknown as Parameters<typeof chatBase>[0]),
           fetchedAtMs: runtime.catalogFetchedAtMs,
           models: [...models],
         })
@@ -712,7 +757,7 @@ export function apply(ctx: Context, config: Config): void {
             providerId: variant.id,
             displayName: variant.displayName,
             store: runtime.credentialStore!,
-            recordFor: modelId => runtime.probeService!.recordFor(modelId),
+            recordFor: modelId => runtime.probeService?.recordFor(modelId),
             resolveAttachments: () => ctx.get('attachments'),
           })
 

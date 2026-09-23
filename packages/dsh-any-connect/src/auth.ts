@@ -8,6 +8,8 @@
  * @module dsh-any-connect/auth
  */
 
+import crypto from 'node:crypto'
+import os from 'node:os'
 import { readFile, rm, stat } from 'node:fs/promises'
 import { homedir, release } from 'node:os'
 import { basename, dirname, join } from 'node:path'
@@ -167,15 +169,82 @@ export function defaultDesktopAuthCandidates(): string[] {
 }
 
 /**
- * Platform-default candidates for one variant, in probe order: the CN probe
- * order with the basename swapped for the variant's file. Both apps share the
- * auth directory and differ only by filename, so every platform branch is
- * reused rather than reimplemented.
+ * Platform-default candidates for one variant, in probe order.
  */
 export function desktopAuthCandidatesFor(variant: WorkBuddyVariant): string[] {
-  // desktopFilename is WorkBuddy-only by construction: only WorkBuddy
-  // variants ever reach the shared auth-directory probe order.
+  if (variant.kind === 'zcode') {
+    const home = homedir()
+    return [join(home, '.zcode', 'v2', 'credentials.json')]
+  }
   return defaultDesktopAuthCandidates().map(path => join(dirname(path), variant.desktopFilename!))
+}
+
+/** Decrypt enc:v1:<iv>.<tag>.<cipher> encrypted values from ~/.zcode/v2/credentials.json */
+export function decryptZCodeEncryptedKey(encStr: string): string {
+  if (!encStr.startsWith('enc:v1:')) return encStr
+  let username = 'unknown'
+  try {
+    username = os.userInfo().username
+  } catch {}
+  const fallbackSecret = `zcode-credential-fallback:${os.platform()}:${os.homedir()}:${username}`
+  const secret = process.env.ZCODE_CREDENTIAL_SECRET || fallbackSecret
+  const aesKey = crypto.createHash('sha256').update(secret).digest()
+  const parts = encStr.slice('enc:v1:'.length).split('.')
+  if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
+    throw new Error('Invalid ZCode enc:v1 credential format')
+  }
+  const [ivB64, tagB64, cipherB64] = parts
+  const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, Buffer.from(ivB64, 'base64url'))
+  decipher.setAuthTag(Buffer.from(tagB64, 'base64url'))
+  return Buffer.concat([decipher.update(Buffer.from(cipherB64, 'base64url')), decipher.final()]).toString('utf8')
+}
+
+/**
+ * Parse a ZCode credentials.json document into a WorkBuddyCredential representation.
+ */
+export function parseZCodeAuth(text: string): WorkBuddyCredential | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
+  const data = parsed as Record<string, unknown>
+
+  let apiKeyRaw: string | undefined
+  let uid = ''
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value === 'string' && key.includes('coding-plan') && key.endsWith(':api-key')) {
+      apiKeyRaw = value
+      const match = /account:([^:]+):api-key/.exec(key)
+      if (match) uid = match[1]!
+      break
+    }
+  }
+
+  if (!apiKeyRaw && typeof data['apiKey'] === 'string') {
+    apiKeyRaw = data['apiKey']
+  }
+
+  if (!apiKeyRaw) return undefined
+
+  let decryptedKey: string
+  try {
+    decryptedKey = decryptZCodeEncryptedKey(apiKeyRaw)
+  } catch {
+    return undefined
+  }
+
+  return {
+    accessToken: decryptedKey,
+    refreshToken: '',
+    expiresAtMs: Number.MAX_SAFE_INTEGER,
+    domain: 'bigmodel.cn',
+    uid,
+    nickname: 'ZCode User',
+    source: 'desktop',
+  }
 }
 
 /** Normalize an expiry that may arrive in seconds or milliseconds. */
@@ -390,9 +459,10 @@ export class WorkBuddyCredentialStore {
     if (credential === undefined) {
       const candidates = this.resolveDesktopCandidates()
       const desktop = candidates.length > 0 ? candidates.join(' or ') : '(no desktop path on this platform)'
+      const app = this.variant.appName
       throw new Error(
-        `workbuddy: no signed-in WorkBuddy account found; sign in once in the WorkBuddy desktop app`
-        + ` (expected ${desktop} or WORKBUDDY_AUTH_FILE), or refresh an existing session`,
+        `${this.variant.id}: no signed-in ${app} account found; sign in once in the ${app} desktop app`
+        + ` (expected ${desktop} or ${this.variant.env ?? WORKBUDDY_AUTH_FILE_ENV}), or refresh an existing session`,
       )
     }
     if (!this.needsRefresh(credential)) return credential
@@ -450,6 +520,7 @@ export class WorkBuddyCredentialStore {
   }
 
   private needsRefresh(credential: WorkBuddyCredential): boolean {
+    if (this.variant.kind === 'zcode') return false
     if (credential.expiresAtMs <= 0) return true
     return Date.now() + this.refreshMarginMs >= credential.expiresAtMs
   }
@@ -522,7 +593,11 @@ export class WorkBuddyCredentialStore {
   private async readDesktop(): Promise<WorkBuddyCredential | undefined> {
     for (const desktopPath of this.resolveDesktopCandidates()) {
       try {
-        return parseWorkBuddyAuth(await readFile(desktopPath, 'utf8'))
+        const text = await readFile(desktopPath, 'utf8')
+        if (this.variant.kind === 'zcode') {
+          return parseZCodeAuth(text)
+        }
+        return parseWorkBuddyAuth(text)
       } catch (error: unknown) {
         if (!isENOENT(error)) throw error
       }

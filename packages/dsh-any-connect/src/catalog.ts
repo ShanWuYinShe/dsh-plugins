@@ -89,6 +89,50 @@ export const FALLBACK_WORKBUDDY_AI_MODELS: readonly WorkBuddyModelInfo[] = [
   { id: 'kimi-k2.8-preview', name: 'Kimi-K2.8-Preview', contextWindow: 300000, maxTokens: 32000, supportsImages: true, reasoning: { supports: true, onlyReasoning: true, supportedEfforts: ['low', 'high', 'max'], defaultEffort: 'high', canDisableThinking: true }, billing: { credits: 'x0.77', free: false } },
 ]
 
+/**
+ * Static models provided by ZCode for Coding Plan subscribers.
+ */
+export const FALLBACK_ZCODE_MODELS: readonly WorkBuddyModelInfo[] = [
+  {
+    id: 'glm-5.3',
+    name: 'GLM-5.3',
+    contextWindow: 128000,
+    maxTokens: 8192,
+    supportsImages: true,
+    reasoning: {
+      supports: true,
+      onlyReasoning: true,
+      supportedEfforts: ['low', 'high', 'max'],
+      defaultEffort: 'high',
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x1.00',
+      badges: ['150% 额度'],
+      free: false,
+    },
+  },
+  {
+    id: 'glm-5.3-flash',
+    name: 'GLM-5.3-Flash',
+    contextWindow: 128000,
+    maxTokens: 8192,
+    supportsImages: true,
+    reasoning: {
+      supports: true,
+      onlyReasoning: true,
+      supportedEfforts: ['low', 'high', 'max'],
+      defaultEffort: 'high',
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x0.00',
+      badges: ['夜间免费', '150% 额度'],
+      free: true,
+    },
+  },
+]
+
 
 /** Mutable catalog shared by the shim's `/v1/models` and the adapter.
  *

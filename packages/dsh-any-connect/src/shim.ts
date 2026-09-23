@@ -47,8 +47,8 @@ export interface WorkBuddyShim {
 
 /** Constructor dependencies. */
 export interface WorkBuddyShimOptions {
-  kind: 'workbuddy'
-  store: WorkBuddyCredentialStore
+  kind: 'workbuddy' | 'zcode'
+  store: Pick<WorkBuddyCredentialStore, 'resolve'>
   client: Pick<WorkBuddyUpstreamClient, 'chatStream'>
   catalog: WorkBuddyCatalog
   logger?: ShimLogger
@@ -232,7 +232,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
             id: model.id,
             object: 'model',
             created: 0,
-            owned_by: 'workbuddy',
+            owned_by: options.kind,
           })),
         })
         return
@@ -279,7 +279,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         res,
         KIND_STATUS[result.kind],
         result.kind,
-        `workbuddy upstream ${result.kind} (http ${result.status}): ${result.message.slice(0, 400)}`,
+        `${options.kind} upstream ${result.kind} (http ${result.status}): ${result.message.slice(0, 400)}`,
       )
       return
     }

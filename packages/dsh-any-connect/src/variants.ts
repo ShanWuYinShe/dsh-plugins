@@ -13,11 +13,18 @@
  */
 
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
-import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from './status-paths.js'
+import {
+  WORKBUDDY_AI_PROBE_PATH,
+  WORKBUDDY_AI_STATUS_PATH,
+  WORKBUDDY_PROBE_PATH,
+  WORKBUDDY_STATUS_PATH,
+  ZCODE_PROBE_PATH,
+  ZCODE_STATUS_PATH,
+} from './status-paths.js'
 import type { WorkBuddyRegion } from './upstream.js'
 
 /** Which upstream family a variant talks to; selects the per-kind wiring. */
-export type VariantKind = 'workbuddy'
+export type VariantKind = 'workbuddy' | 'zcode'
 
 /** One provider variant. */
 export interface WorkBuddyVariant {
@@ -31,9 +38,9 @@ export interface WorkBuddyVariant {
   appName: string
   /** Which upstream region this variant's credentials must belong to. WorkBuddy only. */
   region?: WorkBuddyRegion
-  /** Env var overriding the desktop auth-file location. WorkBuddy only. */
+  /** Env var overriding the desktop auth-file location. */
   env?: string
-  /** Basename of the desktop app's own auth file in the shared auth directory. WorkBuddy only. */
+  /** Basename of the desktop app's own auth file in the shared auth directory. */
   desktopFilename?: string
   /** Basename of the plugin-owned credential copy under `$DSH_HOME`. */
   ownFilename: string
@@ -42,9 +49,8 @@ export interface WorkBuddyVariant {
   /**
    * Basename of the plugin-owned saved-catalog file under `$DSH_HOME`.
    *
-   * One per variant: the two WorkBuddy endpoints disagree about rates,
-   * windows, and even which models exist for a shared id, so a catalog saved
-   * from one must never be served as the other's.
+   * One per variant: different endpoints disagree about rates,
+   * windows, and which models exist for a shared id.
    */
   catalogFilename: string
   /** Settings namespace owning this variant's configuration card. */
@@ -89,8 +95,27 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
   },
 ]
 
+/** ZCode provider variant. */
+export const ZCODE_VARIANT: WorkBuddyVariant = {
+  id: 'zcode',
+  kind: 'zcode',
+  displayName: 'ZCode',
+  appName: 'ZCode',
+  env: 'ZCODE_AUTH_FILE',
+  desktopFilename: 'credentials.json',
+  ownFilename: '.zcode-auth.json',
+  probeFilename: '.zcode-probe.json',
+  catalogFilename: '.zcode-catalog.json',
+  settingsNs: 'anyconnect-zcode' as SettingsNamespace,
+  statusPath: ZCODE_STATUS_PATH,
+  probePath: ZCODE_PROBE_PATH,
+}
+
 /** All provider variants, in registration order. */
-export const PROVIDER_VARIANTS = WORKBUDDY_VARIANTS
+export const PROVIDER_VARIANTS: readonly WorkBuddyVariant[] = [
+  ...WORKBUDDY_VARIANTS,
+  ZCODE_VARIANT,
+]
 
 /** The CN variant; the plugin's long-standing default and compatibility anchor. */
 export const CN_VARIANT: WorkBuddyVariant = WORKBUDDY_VARIANTS[0]!
@@ -100,5 +125,5 @@ export const AI_VARIANT: WorkBuddyVariant = WORKBUDDY_VARIANTS[1]!
 
 /** Look up a variant by provider id. */
 export function variantFor(id: string): WorkBuddyVariant | undefined {
-  return WORKBUDDY_VARIANTS.find(variant => variant.id === id)
+  return PROVIDER_VARIANTS.find(variant => variant.id === id)
 }

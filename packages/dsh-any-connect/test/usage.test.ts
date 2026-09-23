@@ -124,9 +124,10 @@ describe('WorkBuddy usage querier', () => {
   it('registers a querier for each variant it serves', async () => {
     const { registry } = await boot({ signedIn: false })
     await vi.waitFor(() => {
-      expect(registry.registered.map(entry => entry.provider).sort()).toEqual(['workbuddy', 'workbuddy-ai'])
+      expect(registry.registered.map(entry => entry.provider).sort()).toEqual(['workbuddy', 'workbuddy-ai', 'zcode'])
     })
     expect(registry.registered.find(entry => entry.provider === 'workbuddy')?.displayName).toBe('WorkBuddy')
+    expect(registry.registered.find(entry => entry.provider === 'zcode')?.displayName).toBe('ZCode')
   })
 
   it('reports one window per billing package that still has credit', async () => {

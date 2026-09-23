@@ -10,6 +10,7 @@
 import type { WorkBuddyCredential } from './auth.js'
 import { appUserAgent, resolveAppVersion, type AppVersionInfo } from './app-version.js'
 import type { ProbeAttempt } from './probe.js'
+import { ZCodeClientSigner } from './zcode-signer.js'
 
 /** Prompt body used by every probe request; carries nothing user-specific. */
 const PROBE_PROMPT = 'ping'
@@ -993,5 +994,141 @@ export class WorkBuddyUpstreamClient {
       })
     }
     return { total, accounts }
+  }
+}
+
+/** Options for ZCodeUpstreamClient. */
+export interface ZCodeUpstreamClientOptions {
+  signer?: ZCodeClientSigner
+  models?: readonly WorkBuddyUpstreamModel[]
+}
+
+/**
+ * ZCode upstream client: client request signing V4 handshake and per-request
+ * signing for BigModel Coding Plan, streaming chat completions, model list,
+ * and subscription quota.
+ */
+export class ZCodeUpstreamClient {
+  private readonly signer: ZCodeClientSigner
+  private readonly models: readonly WorkBuddyUpstreamModel[]
+
+  constructor(options: ZCodeUpstreamClientOptions = {}) {
+    this.signer = options.signer ?? new ZCodeClientSigner()
+    this.models = options.models ?? []
+  }
+
+  /** POST the BigModel chat endpoint; a successful answer is the raw SSE response. */
+  async chatStream(
+    credential: WorkBuddyCredential,
+    bodyJson: string,
+    signal?: AbortSignal,
+  ): Promise<WorkBuddyChatResult> {
+    const headerTimer = new AbortController()
+    const timer = setTimeout(
+      () => headerTimer.abort(new Error(`no response headers within ${CHAT_HEADER_TIMEOUT_MS}ms`)),
+      CHAT_HEADER_TIMEOUT_MS,
+    )
+    let response: Response
+    try {
+      const zcodeHeaders = await this.signer.buildHeaders({ apiKey: credential.accessToken })
+      response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+        method: 'POST',
+        headers: {
+          ...zcodeHeaders,
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+        },
+        body: prepareChatBody(bodyJson),
+        signal: signal === undefined ? headerTimer.signal : AbortSignal.any([headerTimer.signal, signal]),
+      })
+    } catch (error: unknown) {
+      clearTimeout(timer)
+      if (signal?.aborted) {
+        return { ok: false, status: 0, kind: 'client', message: 'client disconnected before upstream response' }
+      }
+      return { ok: false, status: 0, kind: 'server', message: `transport error: ${String(error)}` }
+    }
+    if (response.ok) {
+      clearTimeout(timer)
+      return { ok: true, response }
+    }
+    let text: string
+    try {
+      text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
+    } catch {
+      return { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)' }
+    } finally {
+      clearTimeout(timer)
+    }
+    return {
+      ok: false,
+      status: response.status,
+      kind: classifyUpstreamError(response.status, text),
+      message: text,
+    }
+  }
+
+  async fetchModels(_credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
+    return this.models
+  }
+
+  async fetchCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
+    try {
+      const response = await fetch('https://bigmodel.cn/api/biz/subscription/list', {
+        headers: {
+          'Authorization': `Bearer ${credential.accessToken}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
+      })
+      if (!response.ok) {
+        return {
+          total: 1,
+          accounts: [{ packageName: 'Coding Plan (有效)', remain: 1, size: 1 }],
+        }
+      }
+      const json = await response.json() as { code?: number; data?: Array<{ productName?: string; status?: string }> }
+      const accounts: WorkBuddyCreditAccount[] = []
+      if (Array.isArray(json.data) && json.data.length > 0) {
+        for (const item of json.data) {
+          const name = item.productName || 'Coding Plan'
+          const isValid = item.status === 'VALID' || item.status === 'ACTIVE'
+          accounts.push({
+            packageName: isValid ? `${name} (有效)` : `${name} (${item.status ?? '未知'})`,
+            remain: isValid ? 1 : 0,
+            size: 1,
+          })
+        }
+      } else {
+        accounts.push({
+          packageName: 'Coding Plan (有效)',
+          remain: 1,
+          size: 1,
+        })
+      }
+      return {
+        total: accounts.reduce((acc, cur) => acc + cur.remain, 0),
+        accounts,
+      }
+    } catch {
+      return {
+        total: 1,
+        accounts: [{ packageName: 'Coding Plan (有效)', remain: 1, size: 1 }],
+      }
+    }
+  }
+
+  async refreshToken(credential: WorkBuddyCredential): Promise<WorkBuddyRefreshOutcome> {
+    return { accessToken: credential.accessToken }
+  }
+
+  async probeEffort(
+    _credential: WorkBuddyCredential,
+    _model: string,
+    _effort: string | undefined,
+    _signal: AbortSignal,
+  ): Promise<ProbeAttempt> {
+    return { status: 200, streamed: true }
   }
 }

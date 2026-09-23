@@ -18,6 +18,12 @@ export const WORKBUDDY_PROBE_PATH = '/plugins/dsh-any-connect/probe'
 /** Plugin-owned probe control endpoint (international variant). */
 export const WORKBUDDY_AI_PROBE_PATH = '/plugins/dsh-any-connect/ai/probe'
 
+/** ZCode variant status route. */
+export const ZCODE_STATUS_PATH = '/plugins/dsh-any-connect/zcode/status'
+
+/** ZCode variant probe route. */
+export const ZCODE_PROBE_PATH = '/plugins/dsh-any-connect/zcode/probe'
+
 /** One model's recorded probe observation, as the card displays it. */
 export interface WorkBuddyWebProbeModel {
   id: string
