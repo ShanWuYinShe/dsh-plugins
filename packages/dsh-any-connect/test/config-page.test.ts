@@ -56,12 +56,14 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
-  // 两个变体各拉一次 status：国内版返回已登录文档，国际版返回未登录。
-  vi.stubGlobal('fetch', vi.fn(async (input: unknown) => ({
-    ok: true,
-    status: 200,
-    json: async () => String(input).includes('/ai/') ? { status: 'signed-out' } : STATUS_DOC,
-  })))
+  // 各变体拉取 status：默认国内版返回已登录文档，国际版与 ZCode 返回未登录。
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+    const url = String(input)
+    if (url.includes('/ai/') || url.includes('/zcode/')) {
+      return { ok: true, status: 200, json: async () => ({ status: 'signed-out' }) }
+    }
+    return { ok: true, status: 200, json: async () => STATUS_DOC }
+  }))
 })
 
 afterEach(async () => {
@@ -145,5 +147,35 @@ describe('WorkBuddy 配置卡片', () => {
     expect(text()).toContain('积分查询失败：boom')
     // 积分读不到时卡体不编造数字。
     expect(text()).not.toContain('当前积分 591')
+  })
+
+  it('ZCode 卡片渲染 Coding Plan 订阅状态与特权标签而不是模糊的积分', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      const url = String(input)
+      if (url.includes('/zcode/status')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: 'signed-in',
+            nickname: 'zcode-tester',
+            credits: {
+              total: 1,
+              accounts: [
+                { packageName: 'GLM Coding Pro (有效)', remain: 1, size: 1, expiredAt: '2026-10-21T00:00:00.000Z' },
+              ],
+            },
+            models: [],
+          }),
+        }
+      }
+      return { ok: true, status: 200, json: async () => ({ status: 'signed-out' }) }
+    }))
+    await mount()
+    const content = text()
+    expect(content).toContain('GLM Coding Pro · 有效')
+    expect(content).toContain('150% 专属额度')
+    expect(content).toContain('夜间 23:00~09:00 免费')
+    expect(content).not.toContain('当前积分 1')
   })
 })

@@ -193,4 +193,17 @@ describe('createProviderResolver', () => {
     value = 'sk-new'
     expect((await resolve('deepseek', signal)).apiKey).toBe('sk-new')
   })
+
+  it('resolves provider via canonical alias when entry uses canonical name', async () => {
+    const ctx = fakeCtx({
+      entries: [entry('moonshot', 'llm-moonshot')],
+      sections: { 'llm-moonshot': { apiKeyEnv: 'MOONSHOT_API_KEY', baseURL: 'https://api.moonshot.cn' } },
+      credentials: { MOONSHOT_API_KEY: 'sk-kimi' },
+    })
+    const resolve = createProviderResolver(ctx)
+    expect(await resolve('kimi', signal)).toEqual({
+      baseURL: 'https://api.moonshot.cn',
+      apiKey: 'sk-kimi',
+    })
+  })
 })

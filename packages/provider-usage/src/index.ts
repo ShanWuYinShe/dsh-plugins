@@ -43,9 +43,23 @@ export const inject: string[] = []
 
 export { ProviderUsageRegistry, DEFAULT_CACHE_TTL_MS, DEFAULT_QUERY_TIMEOUT_MS, safeMessage } from './registry.js'
 export type { ProviderUsageRegistryOptions } from './registry.js'
-export { createProviderResolver } from './resolve.js'
+export {
+  CANONICAL_ALIASES,
+  createProviderResolver,
+  inferProviderFromBaseUrl,
+  normalizeProviderKey,
+} from './resolve.js'
 export type { ResolvedProvider } from './resolve.js'
-export { BUILTIN_USAGE_QUERIERS, deepseekUsage, moonshotUsage, openrouterUsage } from './providers.js'
+export {
+  BUILTIN_USAGE_QUERIERS,
+  bigmodelUsage,
+  deepseekUsage,
+  minimaxUsage,
+  moonshotUsage,
+  openaiUsage,
+  openrouterUsage,
+  siliconflowUsage,
+} from './providers.js'
 export {
   providerUsageHandler,
   registerProviderUsageRoute,

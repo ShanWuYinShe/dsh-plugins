@@ -55,6 +55,31 @@ const POLL_INTERVAL_MS = 60_000
 /** One provider answer as the route serializes it: a snapshot, or a not-queried marker. */
 type RouteAnswer = UsageSnapshot | { provider: string; queried: false }
 
+const PU_STYLE_ID = '@chaoset/provider-usage/pill.css'
+if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css="${PU_STYLE_ID}"]`) === null) {
+  const styleEl = document.createElement('style')
+  styleEl.dataset.pluginCss = PU_STYLE_ID
+  styleEl.textContent = `
+@keyframes pu-panel-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.pu-pill-btn {
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.pu-pill-btn:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.04)) !important;
+}
+.pu-pill-panel {
+  animation: pu-panel-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pu-pill-panel { animation: none; }
+}
+`
+  document.head.appendChild(styleEl)
+}
+
 const rootStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -69,7 +94,7 @@ const pillStyle: CSSProperties = {
   alignItems: 'center',
   gap: 6,
   maxWidth: '100%',
-  padding: '1px 8px',
+  padding: '2px 8px',
   border: 0,
   borderRadius: 999,
   background: 'transparent',
@@ -88,19 +113,24 @@ const dotStyle: CSSProperties = {
   flex: '0 0 auto',
   borderRadius: '50%',
   background: 'var(--dsw-alias-label-dimmed, #9aa0a6)',
+  transition: 'background-color 0.2s ease',
 }
 const panelStyle: CSSProperties = {
   position: 'absolute',
   bottom: 'calc(100% + 8px)',
   left: 0,
-  zIndex: 20,
-  width: 280,
-  padding: '10px 12px',
-  border: '0.5px solid var(--dsw-alias-border-l1)',
-  borderRadius: 10,
-  background: 'var(--dsw-specific-tip, var(--dsw-alias-bg-layer-1))',
-  boxShadow: '0 6px 20px rgba(0, 0, 0, 0.12)',
+  zIndex: 30,
+  minWidth: 260,
+  maxWidth: 320,
+  maxHeight: 380,
+  overflowY: 'auto',
+  padding: '12px 14px',
+  border: '1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1))',
+  borderRadius: 12,
+  background: 'var(--dsw-specific-tip, var(--dsw-alias-bg-layer-1, #ffffff))',
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.06)',
   color: 'var(--dsw-alias-label-primary)',
+  backdropFilter: 'blur(10px)',
 }
 const panelTitleStyle: CSSProperties = { margin: '0 0 8px', fontSize: 13, fontWeight: 600, lineHeight: '20px' }
 const windowRowStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 0' }
@@ -111,12 +141,30 @@ const noteStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', 
 const errorStyle: CSSProperties = { ...noteStyle, color: 'var(--dsw-alias-state-error-primary)' }
 
 function fillStyle(percent: number): CSSProperties {
+  const color = percent <= 5
+    ? 'var(--dsw-alias-state-error-primary, #ff4d4f)'
+    : percent <= 20
+      ? 'var(--dsw-alias-state-warning-primary, #faad14)'
+      : 'var(--dsw-alias-brand-primary, #1677ff)'
   return {
     width: `${Math.max(0, Math.min(100, percent))}%`,
     height: '100%',
     borderRadius: 'inherit',
-    background: 'var(--dsw-alias-brand-primary, #1677ff)',
+    background: color,
+    transition: 'width 0.3s ease',
   }
+}
+
+function getDotColor(snapshot?: UsageSnapshot, queried?: boolean): string {
+  if (!queried || snapshot === undefined) return 'var(--dsw-alias-label-dimmed, #9aa0a6)'
+  if (snapshot.error && snapshot.windows.length === 0) return 'var(--dsw-alias-state-error-primary, #ff4d4f)'
+  const first = snapshot.windows[0]
+  if (first?.remain !== undefined && first.limit !== undefined && first.limit > 0) {
+    const pct = (first.remain / first.limit) * 100
+    if (pct <= 5) return 'var(--dsw-alias-state-error-primary, #ff4d4f)'
+    if (pct <= 20) return 'var(--dsw-alias-state-warning-primary, #faad14)'
+  }
+  return 'var(--dsw-alias-state-success-primary, #52c41a)'
 }
 
 /** Group digits; a fractional balance keeps up to two decimals. */
@@ -143,7 +191,9 @@ function WindowRow({ window, t }: { window: UsageWindow; t: ProviderUsageInjecte
     <div style={windowRowStyle}>
       <div style={windowHeadStyle}>
         <span style={labelStyle}>{window.label}</span>
-        <span>{formatAmount(remain)} {window.unit}</span>
+        <span style={{ fontWeight: 500 }}>
+          {window.remain === undefined ? window.unit : `${formatAmount(remain)} ${window.unit}`}
+        </span>
       </div>
       {hasLimit ? <div style={trackStyle}><div style={fillStyle(percent)} /></div> : null}
       <span style={windowMetaStyle}>
@@ -190,11 +240,33 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const mounted = useRef(true)
+  const rootRef = useRef<HTMLSpanElement>(null)
 
   useEffect(() => {
     mounted.current = true
     return () => { mounted.current = false }
   }, [])
+
+  // Click-outside and Escape key dismissal
+  useEffect(() => {
+    if (!open) return
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [open])
 
   const refresh = useCallback(async (signal?: AbortSignal): Promise<void> => {
     if (provider === undefined || provider === '') return
@@ -255,24 +327,30 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
         ? t('failed')
         : snapshot!.windows.length === 0
           ? t('noWindows')
-          : `${formatAmount(snapshot!.windows[0]!.remain ?? 0)} ${snapshot!.windows[0]!.unit} ${t('remaining')}${snapshot!.windows.length > 1 ? ` +${snapshot!.windows.length - 1}` : ''}`
+          : snapshot!.windows[0]!.remain === undefined
+            ? `${snapshot!.windows[0]!.label}: ${snapshot!.windows[0]!.unit}${snapshot!.windows.length > 1 ? ` +${snapshot!.windows.length - 1}` : ''}`
+            : `${formatAmount(snapshot!.windows[0]!.remain ?? 0)} ${snapshot!.windows[0]!.unit} ${t('remaining')}${snapshot!.windows.length > 1 ? ` +${snapshot!.windows.length - 1}` : ''}`
 
   return (
-    <span style={{ ...rootStyle, position: 'relative' }}>
+    <span ref={rootRef} style={{ ...rootStyle, position: 'relative' }}>
       <button
         type="button"
-        style={pillStyle}
+        className="pu-pill-btn"
+        style={{
+          ...pillStyle,
+          background: open ? 'var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.05))' : 'transparent',
+        }}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={headline}
         onClick={() => { setOpen(!open) }}
       >
-        <span aria-hidden="true" style={dotStyle} />
+        <span aria-hidden="true" style={{ ...dotStyle, background: getDotColor(snapshot, queried) }} />
         <span style={labelStyle}>{provider}</span>
         <span style={labelStyle}>{headline}</span>
       </button>
       {open ? (
-        <span style={panelStyle} role="dialog" aria-label={t('providerUsageTitle')}>
+        <span className="pu-pill-panel" style={panelStyle} role="dialog" aria-label={t('providerUsageTitle')}>
           <p style={panelTitleStyle}>{provider}{snapshot?.plan === undefined ? null : ` · ${t('plan')} ${snapshot.plan}`}</p>
           {busy ? <p style={noteStyle}>{t('refreshing')}</p> : null}
           {!queried

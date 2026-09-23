@@ -15,6 +15,7 @@
 
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
+import { inferProviderFromBaseUrl, normalizeProviderKey } from './resolve.js'
 import type { ProviderUsageQuerier, UsageSnapshot } from './types.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -118,7 +119,7 @@ export class ProviderUsageRegistry extends Service {
 
   /** Whether one provider route has a querier. */
   has(provider: string): boolean {
-    return this.registrations.has(provider)
+    return this.registrations.has(provider) || this.registrations.has(normalizeProviderKey(provider))
   }
 
   /**
@@ -135,8 +136,31 @@ export class ProviderUsageRegistry extends Service {
    */
   async snapshot(provider: string): Promise<UsageSnapshot | undefined> {
     const registration = this.registrations.get(provider)
-    if (registration === undefined) return undefined
+      ?? this.registrations.get(normalizeProviderKey(provider))
+    if (registration !== undefined) {
+      return this.snapshotWithRegistration(provider, registration)
+    }
 
+    // Heuristic fallback: if provider has no direct or alias registration,
+    // resolve its baseURL and infer the querier (e.g. for custom providers like "my-silicon").
+    try {
+      const controller = new AbortController()
+      const resolved = await this.resolveProvider(provider, controller.signal)
+      const inferred = inferProviderFromBaseUrl(resolved.baseURL)
+      if (inferred !== undefined) {
+        const inferredReg = this.registrations.get(inferred)
+        if (inferredReg !== undefined) {
+          return this.snapshotWithRegistration(provider, inferredReg)
+        }
+      }
+    } catch {
+      // Resolution failed
+    }
+
+    return undefined
+  }
+
+  private async snapshotWithRegistration(provider: string, registration: Registration): Promise<UsageSnapshot> {
     const cached = this.cache.get(provider)
     const now = this.now()
     if (cached !== undefined && cached.expiresAt > now) return cached.snapshot

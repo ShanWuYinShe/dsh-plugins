@@ -540,24 +540,32 @@ export function apply(ctx: Context, config: Config): void {
           const credential = await runtime.store.resolve() as WorkBuddyCredential
           if (context.signal?.aborted === true) throw context.signal.reason ?? new Error('aborted')
           const credits = await (runtime.client ?? client).fetchCredits(credential)
+          const isZCode = runtime.variant.kind === 'zcode'
           return {
             provider: runtime.variant.id,
             displayName: runtime.variant.displayName,
-            // One window per *live* billing package: these are monthly
-            // (occasionally half-yearly) cycles, and only the per-package rows
-            // say which one is about to run dry. Zero-remain packages are
-            // dropped for the same reason the card drops them — a real account
-            // accumulates dozens of drained and expired grants, and listing
-            // them would bury the two that still have credit.
-            windows: credits.accounts
-              .filter(account => account.remain > 0)
-              .map((account, index) => ({
-                id: `package-${String(index)}`,
-                label: account.packageName,
-                remain: account.remain,
-                unit: 'credits',
-                ...account.size > 0 ? { limit: account.size } : {},
-              })),
+            plan: isZCode ? 'Coding Plan' : undefined,
+            // One window per live billing package. For ZCode, represent the
+            // subscription state (package name + active status) rather than
+            // an arbitrary credit count.
+            windows: isZCode
+              ? credits.accounts
+                  .filter(account => account.remain > 0)
+                  .map((account, index) => ({
+                    id: `zcode-plan-${String(index)}`,
+                    label: account.packageName.replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, ''),
+                    unit: '有效',
+                    ...account.expiredAt ? { resetsAt: account.expiredAt } : {},
+                  }))
+              : credits.accounts
+                  .filter(account => account.remain > 0)
+                  .map((account, index) => ({
+                    id: `package-${String(index)}`,
+                    label: account.packageName,
+                    remain: account.remain,
+                    unit: 'credits',
+                    ...account.size > 0 ? { limit: account.size } : {},
+                  })),
             fetchedAt: Date.now(),
           }
         },

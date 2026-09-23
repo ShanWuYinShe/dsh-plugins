@@ -13,7 +13,7 @@ var css = [
   // 的 .trigger / .rail）逐字对齐：同样的 calc(+4px) 宽度、42px 高、负外边距、
   // 非对称内边距、12px 圆角与同一 hover 变量——保证归档入口的 hover 命中
   // 面积与视觉节奏和设置入口完全一致（收起态同为 36×36 圆形）。
-  ".sa_badge{box-sizing:border-box;cursor:pointer;width:calc(100% + 4px);height:42px;color:var(--dsw-alias-label-primary);background:0 0;border:none;border-radius:12px;flex:none;align-items:center;gap:8px;margin:4px -2px;padding:0 10px 0 8px;font-family:inherit;font-size:14px;line-height:22px;display:flex;overflow:hidden}",
+  ".sa_badge{box-sizing:border-box;cursor:pointer;width:calc(100% + 4px);height:42px;color:var(--dsw-alias-label-primary);background:0 0;border:none;border-radius:12px;flex:none;align-items:center;gap:8px;margin:4px -2px;padding:0 10px 0 8px;font-family:inherit;font-size:14px;line-height:22px;display:flex;overflow:hidden;transition:background-color .15s ease}",
   ".sa_badge:hover{background:var(--dsw-alias-interactive-bg-hover)}",
   ".sa_badgeIcon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:var(--dsw-alias-label-primary)}",
   ".sa_badgeIcon svg{width:16px;height:16px;display:block}",
@@ -24,7 +24,7 @@ var css = [
   ".sa_badge--collapsed .sa_badgeIcon,.sa_badge--collapsed .sa_badgeIcon svg{width:18px;height:18px}",
   // z-index 30：仅高于侧边栏内容层、低于宿主模态遮罩（如设置面板 overlay），
   // 与"从侧边栏弹出的浮层"层级预期一致；调整前先核对宿主浮层层级表。
-  ".sa_panel{z-index:30;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);width:440px;max-width:calc(100vw - 24px);max-height:62vh;box-shadow:var(--dsw-shadow-lv2);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border-radius:12px;flex-direction:column;display:flex;position:fixed;bottom:128px;left:12px;overflow:hidden}",
+  ".sa_panel{z-index:30;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);width:440px;max-width:calc(100vw - 24px);max-height:62vh;box-shadow:0 12px 32px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border-radius:12px;flex-direction:column;display:flex;position:fixed;bottom:128px;left:12px;overflow:hidden}",
   // 入场动画：150ms 淡入 + 轻微上移（退出直接卸载，不做退场动画）；
   // 系统开启「减少动态效果」时完全禁用。
   "@media (prefers-reduced-motion:no-preference){.sa_panel{animation:sa-panel-in .15s ease-out}}",
@@ -43,8 +43,8 @@ var css = [
   ".sa_check:disabled{cursor:default;opacity:.45}",
   ".sa_toolLabel{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;user-select:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px}",
   ".sa_count{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;flex:1}",
-  ".sa_action{font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:3px 10px;font-size:12px;line-height:18px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary)}",
-  ".sa_action:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}",
+  ".sa_action{font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;padding:3px 10px;font-size:12px;line-height:18px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);transition:all .15s ease}",
+  ".sa_action:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l1)}",
   ".sa_action:disabled{opacity:.4;cursor:default}",
   ".sa_actionDanger{border-color:transparent;background:var(--dsw-alias-state-error-primary);color:#fff}",
   ".sa_actionDanger:hover:not(:disabled){background:var(--dsw-alias-state-error-primary)}",
@@ -58,7 +58,8 @@ var css = [
   // 提示级通知（如「请先勾选会话」）不该与错误同色：用 warn 色区分严重度。
   ".sa_warn{color:var(--dsw-alias-state-warn-primary);margin:8px 0;font-size:12px;line-height:18px}",
   ".sa_rows{flex-direction:column;gap:8px;margin:0;padding:0;list-style:none;display:flex}",
-  ".sa_row{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);border-radius:12px;flex-direction:column;gap:6px;padding:8px 10px;display:flex}",
+  ".sa_row{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);border-radius:12px;flex-direction:column;gap:6px;padding:8px 10px;display:flex;transition:border-color .15s ease,box-shadow .15s ease}",
+  ".sa_row:hover{border-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-shadow-lv1)}",
   ".sa_rowHead{align-items:center;gap:8px;display:flex}",
   ".sa_rowTitle{background:none;border:none;padding:0;text-align:left;font:inherit;min-width:0;color:var(--dsw-alias-label-primary);text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:13px;font-weight:500;line-height:20px;overflow:hidden;cursor:pointer}",
   ".sa_rowTitle:hover{text-decoration:underline}",

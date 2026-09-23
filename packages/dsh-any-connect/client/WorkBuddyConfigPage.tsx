@@ -144,9 +144,43 @@ const chipStyle: CSSProperties = {
   color: 'var(--dsw-alias-state-success-primary, #22a06b)',
 }
 const modelBadgesStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6 }
-const modelRowStyle: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto auto', gap: '0 10px', alignItems: 'center' }
+const modelRowStyle: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto auto', gap: '0 10px', alignItems: 'center', padding: '4px 6px', borderRadius: 6 }
 const modelNameStyle: CSSProperties = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, lineHeight: '22px', color: 'var(--dsw-alias-label-primary)' }
 const metaCellStyle: CSSProperties = { fontSize: 12, lineHeight: '20px', color: 'var(--dsw-alias-label-tertiary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+
+const planCardStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  padding: '12px 14px',
+  borderRadius: 8,
+  background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.03))',
+  border: '1px solid var(--dsw-alias-border-l2)',
+}
+const planTitleRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }
+const planNameStyle: CSSProperties = { fontSize: 13, lineHeight: '20px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }
+const planBadgeRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }
+const privilegeChipStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '2px 8px',
+  borderRadius: 999,
+  fontSize: 11,
+  lineHeight: '16px',
+  fontWeight: 500,
+  background: 'color-mix(in srgb, var(--dsw-alias-brand-primary, #1677ff) 12%, transparent)',
+  color: 'var(--dsw-alias-brand-primary, #1677ff)',
+  border: '1px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #1677ff) 20%, transparent)',
+}
+const planMetaStyle: CSSProperties = { fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)' }
+
+function formatExpiry(iso?: string): string {
+  if (iso === undefined || iso === '') return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(d)
+}
 const signedOutRowStyle: CSSProperties = {
   ...cardStyle,
 }
@@ -473,14 +507,25 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
     ? t('signedInAs', { nickname: '' }).replace(/[:：]\s*$/, '')
     : t('signedInAs', { nickname: status.nickname })
 
-  // 卡头摘要：已登录身份 + 当前积分，收起态下也要一眼看到。模型数不进来
-  // （卡体里已有折叠开关），静态产品介绍退到 title tooltip，不丢失。
-  // 「合计」在此指当前剩余总量（上游积分接口的 total），不是套餐份额，
-  // 所以就用「当前积分」的说法。
-  const headerSummary = [
-    label,
-    status.credits !== undefined ? t('creditsTotal', { total: formatNumber(status.credits.total) }) : undefined,
-  ].filter(part => part !== undefined).join(' · ')
+  const isZCode = variant.id === 'anyconnect-zcode'
+  const zcodePlan = isZCode && status.credits?.accounts !== undefined
+    ? (status.credits.accounts.find(a => a.remain > 0) ?? status.credits.accounts[0])
+    : undefined
+  const zcodePlanName = zcodePlan ? zcodePlan.packageName.replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, '') : undefined
+  const isPlanActive = zcodePlan !== undefined && zcodePlan.remain > 0
+
+  // 卡头摘要：已登录身份 + 当前积分/套餐状态，收起态下也要一眼看到。
+  const headerSummary = isZCode
+    ? [
+        label,
+        zcodePlanName !== undefined
+          ? `${zcodePlanName} · ${t(isPlanActive ? 'codingPlanActive' : 'codingPlanExpired')}`
+          : (status.credits !== undefined ? t('codingPlanActive') : undefined),
+      ].filter(part => part !== undefined).join(' · ')
+    : [
+        label,
+        status.credits !== undefined ? t('creditsTotal', { total: formatNumber(status.credits.total) }) : undefined,
+      ].filter(part => part !== undefined).join(' · ')
 
   /** Efforts shown on one model row: a declared set wins, then a validating
    * observation (mirrors the adapter's own precedence). Models whose probe
@@ -511,25 +556,58 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
       </button>
       {open ? (
         <div style={cardBodyStyle}>
-          {/* 卡体只回答一个问题：现在还剩多少积分。账号身份在卡头摘要里，
-              积分由哪些套餐构成（进度条明细）是实现细节——两者都不再重复。 */}
-          <hr style={dividerStyle} />
-          <div style={summaryRowStyle}>
-            <span style={summaryLabelStyle}>{t('creditsLabel')}</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={summaryValueStyle} title={status.domain}>
-                {status.credits !== undefined ? formatNumber(status.credits.total) : '—'}
-              </span>
-              <button
-                type="button"
-                style={buttonStyle}
-                disabled={busy}
-                onClick={() => { void refreshWithCatalog() }}
-              >
-                {busy ? t('refreshing') : t('refresh')}
-              </button>
-            </span>
-          </div>
+          {isZCode ? (
+            <>
+              <hr style={dividerStyle} />
+              <div style={planCardStyle}>
+                <div style={planTitleRowStyle}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <span style={planNameStyle}>{zcodePlanName ?? t('codingPlanLabel')}</span>
+                    <span style={isPlanActive ? chipStyle : { ...chipStyle, background: 'rgba(0,0,0,0.06)', color: 'var(--dsw-alias-label-tertiary)' }}>
+                      {t(isPlanActive ? 'codingPlanActive' : 'codingPlanExpired')}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    style={buttonStyle}
+                    disabled={busy}
+                    onClick={() => { void refreshWithCatalog() }}
+                  >
+                    {busy ? t('refreshing') : t('refresh')}
+                  </button>
+                </div>
+                <div style={planBadgeRowStyle}>
+                  <span style={privilegeChipStyle}>⚡ {t('codingPlanExtraQuota')}</span>
+                  <span style={privilegeChipStyle}>🌙 {t('codingPlanNightFree')}</span>
+                </div>
+                {zcodePlan?.expiredAt ? (
+                  <span style={planMetaStyle}>
+                    {t('codingPlanExpiresAt', { date: formatExpiry(zcodePlan.expiredAt) })}
+                  </span>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <>
+              <hr style={dividerStyle} />
+              <div style={summaryRowStyle}>
+                <span style={summaryLabelStyle}>{t('creditsLabel')}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={summaryValueStyle} title={status.domain}>
+                    {status.credits !== undefined ? formatNumber(status.credits.total) : '—'}
+                  </span>
+                  <button
+                    type="button"
+                    style={buttonStyle}
+                    disabled={busy}
+                    onClick={() => { void refreshWithCatalog() }}
+                  >
+                    {busy ? t('refreshing') : t('refresh')}
+                  </button>
+                </span>
+              </div>
+            </>
+          )}
           {notice !== undefined ? <p style={{ ...errorStyle, fontSize: 12 }} role="alert">{t('refreshFailed', { message: notice })}</p> : null}
           {status.creditsError !== undefined
             ? <p style={{ ...errorStyle, fontSize: 12 }}>{t('creditsError', { message: status.creditsError })}</p>

@@ -58,6 +58,52 @@ function profileOf(section: unknown, path: readonly string[]): Record<string, un
     : undefined
 }
 
+/** Known provider route aliases normalized to their canonical provider keys. */
+export const CANONICAL_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+  kimi: 'moonshot',
+  moonshot: 'moonshot',
+  silicon: 'siliconflow',
+  siliconflow: 'siliconflow',
+  siliconcloud: 'siliconflow',
+  zhipu: 'bigmodel',
+  zhipuai: 'bigmodel',
+  bigmodel: 'bigmodel',
+  glm: 'bigmodel',
+  minimax: 'minimax',
+  minimaxi: 'minimax',
+  openrouter: 'openrouter',
+  deepseek: 'deepseek',
+  oneapi: 'openai',
+  newapi: 'openai',
+  doneapi: 'openai',
+  openai: 'openai',
+})
+
+/** Normalize provider names (stripping punctuation, lowering case, applying aliases). */
+export function normalizeProviderKey(key: string): string {
+  const clean = key.toLowerCase().replace(/[-_\s]/gu, '')
+  return CANONICAL_ALIASES[clean] ?? key.toLowerCase()
+}
+
+/** Infer canonical provider ID from a configured baseURL hostname. */
+export function inferProviderFromBaseUrl(baseURL?: string): string | undefined {
+  if (baseURL === undefined || baseURL === '') return undefined
+  try {
+    const url = new URL(baseURL)
+    const host = url.hostname.toLowerCase()
+    if (host.includes('deepseek.com')) return 'deepseek'
+    if (host.includes('siliconflow.cn') || host.includes('siliconflow.com')) return 'siliconflow'
+    if (host.includes('moonshot.cn')) return 'moonshot'
+    if (host.includes('bigmodel.cn') || host.includes('z.ai')) return 'bigmodel'
+    if (host.includes('minimax.io') || host.includes('minimaxi.com') || host.includes('minimax.chat')) return 'minimax'
+    if (host.includes('openrouter.ai')) return 'openrouter'
+    if (host.includes('oneapi') || host.includes('newapi') || host.includes('doneapi') || host.includes('openai.com')) return 'openai'
+  } catch {
+    // baseURL was not a valid URL
+  }
+  return undefined
+}
+
 /**
  * Build the resolver the registry calls before each query.
  *
@@ -74,7 +120,10 @@ export function createProviderResolver(ctx: Context): (provider: string, signal:
     const llm = ctx.get('llm')
     if (llm === undefined) return {}
 
-    const entry = llm.listConfigurableProviders().find(candidate => candidate.provider === provider)
+    const candidates = llm.listConfigurableProviders()
+    const normalized = normalizeProviderKey(provider)
+    const entry = candidates.find(candidate => candidate.provider === provider)
+      ?? candidates.find(candidate => normalizeProviderKey(candidate.provider) === normalized)
     if (entry === undefined) return {}
 
     // DSH 0.1.7 removed the namespace section read (`settings.get(ns)`): the

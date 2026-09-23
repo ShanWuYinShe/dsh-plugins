@@ -109,6 +109,7 @@ export interface WorkBuddyWebCreditAccount {
   packageName: string
   remain: number
   size: number
+  expiredAt?: string
 }
 
 /** Aggregated credit answer rendered by the plugin card. */

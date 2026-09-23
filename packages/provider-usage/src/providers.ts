@@ -184,6 +184,243 @@ export const moonshotUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, sig
 }
 
 /**
+ * SiliconFlow's prepaid account balance.
+ *
+ * `GET {base}/v1/user/info` returns `data.totalBalance`, `data.balance`, and `data.chargeBalance`.
+ */
+export const siliconflowUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
+  if (apiKey === undefined) return { provider: 'siliconflow', windows: [], fetchedAt: Date.now() }
+  const root = trimBase(baseURL ?? 'https://api.siliconflow.cn')
+  const body = await getJson(`${root}/v1/user/info`, { authorization: `Bearer ${apiKey}` }, signal)
+  const data = rec(body['data'])
+  const windows: UsageWindow[] = []
+  const total = num(data['totalBalance'])
+  if (total !== undefined) {
+    windows.push({ id: 'total', label: 'Total balance', remain: total, unit: 'cny' })
+  }
+  const balance = num(data['balance'])
+  if (balance !== undefined && balance !== total) {
+    windows.push({ id: 'balance', label: 'Available balance', remain: balance, unit: 'cny' })
+  }
+  const charge = num(data['chargeBalance'])
+  if (charge !== undefined && charge > 0 && charge !== total) {
+    windows.push({ id: 'charge', label: 'Recharge balance', remain: charge, unit: 'cny' })
+  }
+  return {
+    provider: 'siliconflow',
+    windows,
+    fetchedAt: Date.now(),
+    ...windows.length === 0 ? { error: 'the user info endpoint reported no usable balance' } : {},
+  }
+}
+
+/**
+ * BigModel (Zhipu AI) Coding Plan and subscription quota.
+ *
+ * First checks `GET {base}/api/monitor/usage/quota/limit`, which returns rolling
+ * 5-hour and weekly limits. If unavailable or empty, falls back to
+ * `GET https://bigmodel.cn/api/biz/subscription/list`.
+ */
+export const bigmodelUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
+  if (apiKey === undefined) return { provider: 'bigmodel', windows: [], fetchedAt: Date.now() }
+  const root = trimBase(baseURL ?? 'https://open.bigmodel.cn')
+  const headers = { authorization: apiKey.startsWith('Bearer ') ? apiKey : `Bearer ${apiKey}` }
+  const windows: UsageWindow[] = []
+  let plan: string | undefined
+
+  try {
+    const body = await getJson(`${root}/api/monitor/usage/quota/limit`, headers, signal)
+    const data = rec(body['data'])
+    const limits = records(data['limits'])
+    for (const lim of limits) {
+      const type = str(lim['type']) ?? 'QUOTA'
+      const percentage = num(lim['percentage'])
+      const nextReset = num(lim['nextResetTime'])
+      const label = type === 'TOKENS_LIMIT' ? 'Token limit' : type === 'TIME_LIMIT' ? 'Time limit' : type
+      if (percentage !== undefined) {
+        const remain = Math.max(0, 100 - percentage)
+        windows.push({
+          id: type.toLowerCase(),
+          label,
+          remain,
+          limit: 100,
+          unit: '%',
+          ...nextReset !== undefined && nextReset > 0 ? { resetsAt: new Date(nextReset).toISOString() } : {},
+        })
+      }
+    }
+    if (windows.length > 0) plan = 'Coding Plan'
+  } catch {
+    // Coding Plan endpoint not reachable or not supported on this account
+  }
+
+  if (windows.length === 0) {
+    try {
+      const body = await getJson('https://bigmodel.cn/api/biz/subscription/list', headers, signal)
+      const list = records(rec(body['data'])['list'])
+      for (const item of list) {
+        const status = str(item['status'])
+        const productName = str(item['productName']) ?? 'Subscription'
+        const expireTime = str(item['expireTime'])
+        if (status === 'VALID') {
+          plan = productName
+          windows.push({
+            id: `sub-${productName.toLowerCase().replace(/\s+/g, '-')}`,
+            label: productName,
+            unit: 'VALID',
+            ...expireTime !== undefined ? { resetsAt: expireTime } : {},
+          })
+        }
+      }
+    } catch {
+      // Subscription list not available
+    }
+  }
+
+  return {
+    provider: 'bigmodel',
+    ...plan === undefined ? {} : { plan },
+    windows,
+    fetchedAt: Date.now(),
+    ...windows.length === 0 ? { error: 'the quota endpoint reported no usable quota or subscription' } : {},
+  }
+}
+
+/**
+ * MiniMax Token Plan quota.
+ *
+ * `GET {base}/v1/token_plan/remains` returns 5-hour rolling interval and weekly
+ * window token counters and percentages.
+ */
+export const minimaxUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
+  if (apiKey === undefined) return { provider: 'minimax', windows: [], fetchedAt: Date.now() }
+  const root = trimBase(baseURL ?? 'https://api.minimaxi.com')
+  const headers = { authorization: `Bearer ${apiKey}` }
+  const body = await getJson(`${root}/v1/token_plan/remains`, headers, signal)
+  const data = rec(body['data'])
+  const windows: UsageWindow[] = []
+
+  const intervalRemainPct = num(body['current_interval_remaining_percent'] ?? data['current_interval_remaining_percent'])
+  const intervalTotal = num(body['current_interval_total_count'] ?? data['current_interval_total_count'])
+  const intervalUsage = num(body['current_interval_usage_count'] ?? data['current_interval_usage_count'])
+  if (intervalTotal !== undefined && intervalUsage !== undefined) {
+    windows.push({
+      id: 'interval',
+      label: 'Rolling window (5h)',
+      remain: Math.max(0, intervalTotal - intervalUsage),
+      limit: intervalTotal,
+      unit: 'tokens',
+    })
+  } else if (intervalRemainPct !== undefined) {
+    windows.push({
+      id: 'interval',
+      label: 'Rolling window (5h)',
+      remain: intervalRemainPct,
+      limit: 100,
+      unit: '%',
+    })
+  }
+
+  const weeklyRemainPct = num(body['current_weekly_remaining_percent'] ?? data['current_weekly_remaining_percent'])
+  const weeklyTotal = num(body['current_weekly_total_count'] ?? data['current_weekly_total_count'])
+  const weeklyUsage = num(body['current_weekly_usage_count'] ?? data['current_weekly_usage_count'])
+  if (weeklyTotal !== undefined && weeklyUsage !== undefined) {
+    windows.push({
+      id: 'weekly',
+      label: 'Weekly window',
+      remain: Math.max(0, weeklyTotal - weeklyUsage),
+      limit: weeklyTotal,
+      unit: 'tokens',
+    })
+  } else if (weeklyRemainPct !== undefined) {
+    windows.push({
+      id: 'weekly',
+      label: 'Weekly window',
+      remain: weeklyRemainPct,
+      limit: 100,
+      unit: '%',
+    })
+  }
+
+  return {
+    provider: 'minimax',
+    windows,
+    fetchedAt: Date.now(),
+    ...windows.length === 0 ? { error: 'the token plan endpoint reported no usable window' } : {},
+  }
+}
+
+/**
+ * OpenAI / OneAPI / NewAPI billing subscription and balance.
+ *
+ * Checks `GET {base}/dashboard/billing/subscription` (or `/v1/...`) and optionally
+ * `GET {base}/dashboard/billing/usage`.
+ */
+export const openaiUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
+  if (apiKey === undefined) return { provider: 'openai', windows: [], fetchedAt: Date.now() }
+  const root = trimBase(baseURL ?? 'https://api.openai.com')
+  const headers = { authorization: `Bearer ${apiKey}` }
+  let sub: Record<string, unknown> = {}
+  try {
+    sub = await getJson(`${root}/dashboard/billing/subscription`, headers, signal)
+  } catch {
+    sub = await getJson(`${root}/v1/dashboard/billing/subscription`, headers, signal)
+  }
+
+  const windows: UsageWindow[] = []
+  let planTitle: string | undefined
+  const plan = rec(sub['plan'])
+  if (str(plan['title'])) planTitle = str(plan['title'])
+
+  const hardLimit = num(sub['hard_limit_usd'] ?? sub['system_hard_limit_usd'] ?? sub['max_budget'])
+  const totalAvailable = num(sub['total_available'])
+  const accessUntil = num(sub['access_until'])
+  const resetsAt = accessUntil !== undefined && accessUntil > 0 ? new Date(accessUntil * 1000).toISOString() : undefined
+
+  if (totalAvailable !== undefined) {
+    windows.push({
+      id: 'balance',
+      label: 'Balance',
+      remain: totalAvailable,
+      unit: 'usd',
+      ...hardLimit !== undefined ? { limit: hardLimit } : {},
+      ...resetsAt !== undefined ? { resetsAt } : {},
+    })
+  } else if (hardLimit !== undefined) {
+    let usageCost = 0
+    try {
+      const now = new Date()
+      const startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+      const endDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+      const usageRes = await getJson(`${root}/dashboard/billing/usage?start_date=${startDate}&end_date=${endDate}`, headers, signal)
+        .catch(() => getJson(`${root}/v1/dashboard/billing/usage?start_date=${startDate}&end_date=${endDate}`, headers, signal))
+      const totalUsageCents = num(usageRes['total_usage'])
+      if (totalUsageCents !== undefined) {
+        usageCost = totalUsageCents / 100
+      }
+    } catch {
+      // Usage endpoint unavailable, balance equals hardLimit
+    }
+    windows.push({
+      id: 'balance',
+      label: 'Balance',
+      remain: Math.max(0, hardLimit - usageCost),
+      limit: hardLimit,
+      unit: 'usd',
+      ...resetsAt !== undefined ? { resetsAt } : {},
+    })
+  }
+
+  return {
+    provider: 'openai',
+    ...planTitle === undefined ? {} : { plan: planTitle },
+    windows,
+    fetchedAt: Date.now(),
+    ...windows.length === 0 ? { error: 'the billing subscription endpoint reported no quota' } : {},
+  }
+}
+
+/**
  * Every built-in querier, keyed by provider route.
  *
  * Registering these is opt-out by omission: a deployment that wants different
@@ -200,4 +437,8 @@ export const BUILTIN_USAGE_QUERIERS: ReadonlyMap<string, { querier: ProviderUsag
   ['deepseek', { querier: deepseekUsage, displayName: 'DeepSeek' }],
   ['openrouter', { querier: openrouterUsage, displayName: 'OpenRouter' }],
   ['moonshot', { querier: moonshotUsage, displayName: 'Moonshot' }],
+  ['siliconflow', { querier: siliconflowUsage, displayName: 'SiliconFlow' }],
+  ['bigmodel', { querier: bigmodelUsage, displayName: 'BigModel' }],
+  ['minimax', { querier: minimaxUsage, displayName: 'MiniMax' }],
+  ['openai', { querier: openaiUsage, displayName: 'OpenAI / OneAPI' }],
 ])

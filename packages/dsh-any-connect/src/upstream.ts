@@ -141,6 +141,7 @@ export interface WorkBuddyCreditAccount {
   packageName: string
   remain: number
   size: number
+  expiredAt?: string
 }
 
 /** Aggregated credit answer for one credential. */
@@ -1159,16 +1160,22 @@ export class ZCodeUpstreamClient {
           accounts: [{ packageName: 'Coding Plan (有效)', remain: 1, size: 1 }],
         }
       }
-      const json = await response.json() as { code?: number; data?: Array<{ productName?: string; status?: string }> }
+      const json = await response.json() as { code?: number; data?: Array<{ productName?: string; status?: string; expireTime?: number | string }> }
       const accounts: WorkBuddyCreditAccount[] = []
       if (Array.isArray(json.data) && json.data.length > 0) {
         for (const item of json.data) {
           const name = item.productName || 'Coding Plan'
           const isValid = item.status === 'VALID' || item.status === 'ACTIVE'
+          let expiredAt: string | undefined
+          if (item.expireTime) {
+            const d = new Date(item.expireTime)
+            if (!Number.isNaN(d.getTime())) expiredAt = d.toISOString()
+          }
           accounts.push({
             packageName: isValid ? `${name} (有效)` : `${name} (${item.status ?? '未知'})`,
             remain: isValid ? 1 : 0,
             size: 1,
+            ...expiredAt === undefined ? {} : { expiredAt },
           })
         }
       } else {

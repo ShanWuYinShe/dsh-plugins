@@ -30,6 +30,12 @@ export const en = {
   badgeNightDiscount: 'Night discount',
   rateUnknown: 'Price unknown — refresh to update',
   detectingShort: 'Detecting…',
+  codingPlanLabel: 'Coding Plan',
+  codingPlanActive: 'Active',
+  codingPlanExpired: 'Expired',
+  codingPlanNightFree: 'Free 23:00~09:00',
+  codingPlanExtraQuota: '150% Quota',
+  codingPlanExpiresAt: 'Expires {date}',
 } as const
 
 export type WorkBuddySettingsKey = keyof typeof en
@@ -64,4 +70,10 @@ export const zh: Record<WorkBuddySettingsKey, string> = {
   badgeNightDiscount: '夜间折扣',
   rateUnknown: '价格未知 — 刷新后更新',
   detectingShort: '检测中…',
+  codingPlanLabel: 'Coding Plan 订阅',
+  codingPlanActive: '有效',
+  codingPlanExpired: '已过期',
+  codingPlanNightFree: '夜间 23:00~09:00 免费',
+  codingPlanExtraQuota: '150% 专属额度',
+  codingPlanExpiresAt: '到期时间：{date}',
 }

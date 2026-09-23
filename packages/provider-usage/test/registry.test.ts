@@ -213,6 +213,31 @@ describe('ProviderUsageRegistry', () => {
     await registry.snapshot('acme')
     expect(seen).toEqual([{ provider: 'acme', baseURL: 'https://acme.example', apiKey: 'k' }])
   })
+
+  it('resolves snapshots via canonical provider aliases', async () => {
+    const { registry } = makeRegistry()
+    registry.register('moonshot', fixedQuerier([{ id: 'm', label: 'Moonshot', remain: 42, unit: 'cny' }]), 'Moonshot')
+
+    expect(registry.has('kimi')).toBe(true)
+    const snapshot = await registry.snapshot('kimi')
+    expect(snapshot?.windows).toEqual([{ id: 'm', label: 'Moonshot', remain: 42, unit: 'cny' }])
+  })
+
+  it('infers querier from baseURL when custom provider ID is unregistered', async () => {
+    const { registry } = makeRegistry()
+    registry.setResolver(async () => ({ baseURL: 'https://api.siliconflow.cn/v1', apiKey: 'sk-sf' }))
+    const sfQuerier = vi.fn(async context => ({
+      provider: context.provider,
+      windows: [{ id: 'sf', label: 'Balance', remain: 99, unit: 'cny' }],
+      fetchedAt: 0,
+    }))
+    registry.register('siliconflow', sfQuerier, 'SiliconFlow')
+
+    // 'my-cloud' is not directly registered and not an alias, but its baseURL is siliconflow.cn
+    const snapshot = await registry.snapshot('my-cloud')
+    expect(sfQuerier).toHaveBeenCalledTimes(1)
+    expect(snapshot?.windows).toEqual([{ id: 'sf', label: 'Balance', remain: 99, unit: 'cny' }])
+  })
 })
 
 describe('safeMessage', () => {
