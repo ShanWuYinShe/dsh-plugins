@@ -427,15 +427,17 @@ export class WorkBuddyCredentialStore {
     // misconfigured `authFile` / env var is a realistic mistake, and sending one
     // region's token to the other's endpoint would leak it across products.
     // Naming the file and the expected region is what makes it fixable.
-    for (const [label, credential] of [['desktop file', desktop], ['plugin copy', own]] as const) {
-      if (credential === undefined) continue
-      const region = regionOf(credential.domain)
-      if (region !== this.variant.region) {
-        throw new RegionMismatchError(
-          `${this.variant.displayName} received a ${region === 'cn' ? 'WorkBuddy (CN)' : 'WorkBuddy AI'} credential`
-          + ` in its ${label} (domain ${JSON.stringify(credential.domain)});`
-          + ` point ${this.variant.env} at the ${this.variant.appName} sign-in, or remove the mismatched file`,
-        )
+    if (this.variant.region !== undefined) {
+      for (const [label, credential] of [['desktop file', desktop], ['plugin copy', own]] as const) {
+        if (credential === undefined) continue
+        const region = regionOf(credential.domain)
+        if (region !== this.variant.region) {
+          throw new RegionMismatchError(
+            `${this.variant.displayName} received a ${region === 'cn' ? 'WorkBuddy (CN)' : 'WorkBuddy AI'} credential`
+            + ` in its ${label} (domain ${JSON.stringify(credential.domain)});`
+            + ` point ${this.variant.env} at the ${this.variant.appName} sign-in, or remove the mismatched file`,
+          )
+        }
       }
     }
     const stored = desktop === undefined

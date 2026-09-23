@@ -4,9 +4,9 @@
 import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { WorkBuddyCredentialStore, workbuddyOwnAuthPath, WORKBUDDY_AUTH_FILE_ENV } from './auth.js'
-import { WorkBuddyUpstreamClient } from './upstream.js'
-import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS } from './catalog.js'
-import { CN_VARIANT, variantFor, WORKBUDDY_VARIANTS } from './variants.js'
+import { WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
+import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS } from './catalog.js'
+import { CN_VARIANT, variantFor, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { isHeartbeatProcessAlive, readHostHeartbeat, workbuddyHostHeartbeatPath } from './host-heartbeat.js'
@@ -30,7 +30,7 @@ function printHelp(): void {
     '  doctor   secret-free sign-in and environment diagnostics',
     '  status   sign-in state, remaining WorkBuddy credit, and host-bundle health',
     '  logout   remove the plugin-owned credential copy (the desktop app keeps its sign-in)',
-    '  --provider  which product to inspect: workbuddy or workbuddy-ai',
+    '  --provider  which product to inspect: workbuddy, workbuddy-ai, or zcode',
     '              (defaults to workbuddy)',
     '  --json   emit one secret-free JSON document (doctor/status only)',
     '',
@@ -41,9 +41,9 @@ function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`)
 }
 
-/** WorkBuddy credential store wired for CLI diagnostics. */
+/** Credential store wired for CLI diagnostics. */
 function makeWorkBuddyStore(variant: WorkBuddyVariant): WorkBuddyCredentialStore {
-  const client = new WorkBuddyUpstreamClient()
+  const client = variant.kind === 'zcode' ? new ZCodeUpstreamClient() : new WorkBuddyUpstreamClient()
   return new WorkBuddyCredentialStore({ variant, refresh: credential => client.refreshToken(credential) })
 }
 
@@ -51,6 +51,7 @@ function makeWorkBuddyStore(variant: WorkBuddyVariant): WorkBuddyCredentialStore
 const FALLBACK_COUNT_BY_ID = new Map<string, number>([
   [CN_VARIANT.id, FALLBACK_WORKBUDDY_MODELS.length],
   [WORKBUDDY_VARIANTS[1]!.id, FALLBACK_WORKBUDDY_AI_MODELS.length],
+  [ZCODE_VARIANT.id, FALLBACK_ZCODE_MODELS.length],
 ])
 
 function fallbackFor(variant: WorkBuddyVariant): number {
@@ -123,7 +124,10 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
   let credits: { total: number; error?: string } | undefined
   try {
     const credential = await workbuddyStore.current()
-    if (credential !== undefined) credits = { total: (await new WorkBuddyUpstreamClient().fetchCredits(credential)).total }
+    if (credential !== undefined) {
+      const client = variant.kind === 'zcode' ? new ZCodeUpstreamClient() : new WorkBuddyUpstreamClient()
+      credits = { total: (await client.fetchCredits(credential)).total }
+    }
   } catch (error: unknown) {
     credits = { total: 0, error: safeMessage(error) }
   }
@@ -193,7 +197,7 @@ export async function run(argv: readonly string[]): Promise<number> {
   const variant = providerId === undefined ? CN_VARIANT : variantFor(providerId)
   if (variant === undefined) {
     process.stderr.write(
-      `dsh-any-connect: unknown provider ${JSON.stringify(providerId)}; expected one of ${WORKBUDDY_VARIANTS.map(v => v.id).join(', ')}\n`,
+      `dsh-any-connect: unknown provider ${JSON.stringify(providerId)}; expected one of ${PROVIDER_VARIANTS.map(v => v.id).join(', ')}\n`,
     )
     return 1
   }
