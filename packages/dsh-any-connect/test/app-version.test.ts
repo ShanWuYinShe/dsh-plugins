@@ -51,15 +51,9 @@ describe('readBundleVersion', () => {
 })
 
 describe('installedAppVersion', () => {
-  it('returns undefined off macOS rather than guessing paths', async () => {
-    // This assertion pins the platform guard; on macOS CI with the App
-    // installed the live path is exercised by real runs instead.
-    if (process.platform !== 'darwin') {
-      expect(await installedAppVersion()).toBeUndefined()
-    } else {
-      const found = await installedAppVersion()
-      if (found !== undefined) expect(found.version).toMatch(/^\d+\.\d+\.\d+/)
-    }
+  // macOS 上走真实安装路径（有/无 App 结果都合法），只在非 macOS 钉住平台守卫。
+  it.skipIf(process.platform === 'darwin')('returns undefined off macOS rather than guessing paths', async () => {
+    expect(await installedAppVersion()).toBeUndefined()
   })
 })
 

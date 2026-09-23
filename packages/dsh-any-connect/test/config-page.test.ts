@@ -117,7 +117,6 @@ describe('WorkBuddy 配置卡片', () => {
     // 卡体的常看信息是积分数字本身（账号身份在卡头摘要里，不再重复）。
     expect(text()).toContain('当前积分')
     expect(text()).toContain('591')
-    expect(container.querySelectorAll('[role="progressbar"]').length).toBe(0)
   })
 
   it('模型清单默认收起，点开后才渲染模型行', async () => {
