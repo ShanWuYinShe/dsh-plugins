@@ -6,14 +6,6 @@ DSH host 插件 monorepo，双分支跟随 DSH 宿主线。通用约束以全局
 [RELEASING.md](RELEASING.md)（分支 / 版本号 / 发布流程的唯一权威约定）；
 README 面向用户，面向开发者的内容以 RELEASING.md 为准。
 
-## 按需加载的 skill（.agents/skills/）
-
-| skill | 何时加载 |
-|---|---|
-| dsh-plugin-release | 发版（打 tag 才发）、升版本、合线、查门禁规则时（分支模型+发布纪律+版本约定） |
-| dsh-plugin-worktree | 跨分支切换、cherry-pick、确认 lib 产物归属时 |
-| dsh-plugin-tag | 打发版 tag、tag 被门禁打回、删错 tag、配签名、查 tag 归属时 |
-
 ## 常用命令
 
 ```bash
