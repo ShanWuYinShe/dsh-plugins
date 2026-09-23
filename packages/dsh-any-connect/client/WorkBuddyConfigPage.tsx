@@ -94,15 +94,31 @@ const nameStyle: CSSProperties = { fontSize: 14, lineHeight: '20px', fontWeight:
 const summaryStyle: CSSProperties = { paddingLeft: 16, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' }
 const chevronStyle: CSSProperties = { flex: '0 0 auto', fontSize: 18, lineHeight: 1, transition: 'transform 120ms ease' }
 const cardBodyStyle: CSSProperties = { borderTop: '1px solid var(--dsw-alias-border-l2)', padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }
-const sectionStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8 }
-const sectionDividerStyle: CSSProperties = { border: 0, borderTop: '1px solid var(--dsw-alias-border-l2)', margin: 0 }
-const sectionHeadStyle: CSSProperties = { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }
-const sectionTitleStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', fontWeight: 600, letterSpacing: '0.02em', color: 'var(--dsw-alias-label-tertiary)' }
-const sectionMetaStyle: CSSProperties = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums' }
+const dividerStyle: CSSProperties = { border: 0, borderTop: '1px solid var(--dsw-alias-border-l2)', margin: 0 }
+/** 卡体摘要行：左标签右数值，一行讲完当前积分（刷新按钮同行）。 */
+const summaryRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }
+const summaryLabelStyle: CSSProperties = { fontSize: 13, lineHeight: '20px', fontWeight: 500, color: 'var(--dsw-alias-label-secondary)' }
+const summaryValueStyle: CSSProperties = { fontSize: 13, lineHeight: '20px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)', fontVariantNumeric: 'tabular-nums' }
+const summaryHeadStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }
+/** 模型清单的折叠开关：与区块标题同样的低调小号灰字。 */
+const summaryToggleStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  border: 0,
+  padding: 0,
+  background: 'transparent',
+  font: 'inherit',
+  fontSize: 12,
+  lineHeight: '18px',
+  fontWeight: 600,
+  letterSpacing: '0.02em',
+  color: 'var(--dsw-alias-label-tertiary)',
+  cursor: 'pointer',
+}
+const summaryNoteStyle: CSSProperties = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums' }
 
 const bodyStyle: CSSProperties = { margin: 0, fontSize: 14, lineHeight: '22px', color: 'var(--dsw-alias-label-secondary)' }
-const statusRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }
-const statusLabelStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, lineHeight: '20px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' }
 const descriptionStyle: CSSProperties = { fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' }
 const buttonStyle: CSSProperties = { boxSizing: 'border-box', minHeight: 26, padding: '3px 10px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, background: 'transparent', color: 'var(--dsw-alias-label-primary)', font: 'inherit', fontSize: 12, lineHeight: '18px', cursor: 'pointer' }
 const errorStyle: CSSProperties = { ...bodyStyle, color: 'var(--dsw-alias-state-error-primary)' }
@@ -116,8 +132,6 @@ const modelBadgesStyle: CSSProperties = { display: 'flex', alignItems: 'center',
 const modelRowStyle: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto auto', gap: '0 10px', alignItems: 'center' }
 const modelNameStyle: CSSProperties = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, lineHeight: '22px', color: 'var(--dsw-alias-label-primary)' }
 const metaCellStyle: CSSProperties = { fontSize: 12, lineHeight: '20px', color: 'var(--dsw-alias-label-tertiary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
-const creditLabelStyle: CSSProperties = { flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, lineHeight: '20px', color: 'var(--dsw-alias-label-secondary)' }
-const creditValueStyle: CSSProperties = { flex: '0 0 auto', minWidth: 40, textAlign: 'right', fontSize: 12, lineHeight: '20px', color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums' }
 const signedOutRowStyle: CSSProperties = {
   ...cardStyle,
 }
@@ -166,56 +180,6 @@ function modelBadgeLabel(badge: string, t: WorkBuddyConfigPageInjected['t']): st
   if (badge === '限时免费') return t('badgeLimitedFree')
   if (badge === '夜间折扣') return t('badgeNightDiscount')
   return badge
-}
-
-const progressTrackStyle: CSSProperties = { flex: '1 1 auto', height: 6, overflow: 'hidden', borderRadius: 999, background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.08))' }
-
-function progressFillStyle(percent: number): CSSProperties {
-  return {
-    width: `${Math.max(0, Math.min(100, percent))}%`,
-    height: '100%',
-    borderRadius: 'inherit',
-    background: 'var(--dsw-alias-brand-primary, #1677ff)',
-  }
-}
-
-/**
- * One billing package on a single line: name, bar, and the remaining share
- * (an absolute count when the package size is unknown — a full bar would
- * imply a certainty the upstream did not give). The exact figures live in the
- * tooltip; repeating them on screen was noise.
- */
-function CreditBar({ label, remain, size }: {
-  label: string
-  remain: number
-  size: number
-}): React.ReactNode {
-  const known = size > 0
-  const percent = known ? (remain / size) * 100 : 100
-  // remain 理论上可超过 size（上游记账口径不保证一致）：进度条宽度与
-  // aria-valuenow 夹到 [0,100]，避免出现 ">100%" 的剩余读数。
-  const clamped = Math.max(0, Math.min(100, percent))
-  const display = known
-    ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(clamped)}%`
-    : formatNumber(remain)
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }} title={known ? `${formatNumber(remain)} / ${formatNumber(size)}` : undefined}>
-      <span style={creditLabelStyle}>{label}</span>
-      {known ? (
-        <div
-          style={progressTrackStyle}
-          role="progressbar"
-          aria-label={label}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={clamped}
-        >
-          <div style={progressFillStyle(clamped)} />
-        </div>
-      ) : null}
-      <span style={creditValueStyle}>{display}</span>
-    </div>
-  )
 }
 
 /**
@@ -416,6 +380,8 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
 }): React.ReactNode {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | undefined>(undefined)
+  // 模型清单默认收起：它是最长的一段，而卡片的常看信息只有积分本身。
+  const [modelsOpen, setModelsOpen] = useState(false)
   const mounted = useRef(true)
 
   useEffect(() => {
@@ -492,12 +458,13 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
     ? t('signedInAs', { nickname: '' }).replace(/[:：]\s*$/, '')
     : t('signedInAs', { nickname: status.nickname })
 
-  // 卡头摘要：已登录身份 + 积分合计 + 模型数，常见查询零点击。
-  // 静态产品介绍退到 title tooltip，不丢失。
+  // 卡头摘要：已登录身份 + 当前积分，收起态下也要一眼看到。模型数不进来
+  // （卡体里已有折叠开关），静态产品介绍退到 title tooltip，不丢失。
+  // 「合计」在此指当前剩余总量（上游积分接口的 total），不是套餐份额，
+  // 所以就用「当前积分」的说法。
   const headerSummary = [
     label,
     status.credits !== undefined ? t('creditsTotal', { total: formatNumber(status.credits.total) }) : undefined,
-    status.models !== undefined ? t('modelsCount', { n: status.models.length }) : undefined,
   ].filter(part => part !== undefined).join(' · ')
 
   /** Efforts shown on one model row: a declared set wins, then a validating
@@ -529,63 +496,58 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
       </button>
       {open ? (
         <div style={cardBodyStyle}>
-          <div style={statusRowStyle}>
-            <div style={statusLabelStyle} role="status">
-              <span aria-hidden="true" style={dotStyle('signed-in')} />
-              <span>{t('signedIn')}</span>
-            </div>
-            <button
-              type="button"
-              style={buttonStyle}
-              disabled={busy}
-              onClick={() => { void refreshWithCatalog() }}
-            >
-              {busy ? t('refreshing') : t('refresh')}
-            </button>
+          {/* 卡体只回答一个问题：现在还剩多少积分。账号身份在卡头摘要里，
+              积分由哪些套餐构成（进度条明细）是实现细节——两者都不再重复。 */}
+          <hr style={dividerStyle} />
+          <div style={summaryRowStyle}>
+            <span style={summaryLabelStyle}>{t('creditsLabel')}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={summaryValueStyle} title={status.domain}>
+                {status.credits !== undefined ? formatNumber(status.credits.total) : '—'}
+              </span>
+              <button
+                type="button"
+                style={buttonStyle}
+                disabled={busy}
+                onClick={() => { void refreshWithCatalog() }}
+              >
+                {busy ? t('refreshing') : t('refresh')}
+              </button>
+            </span>
           </div>
           {notice !== undefined ? <p style={{ ...errorStyle, fontSize: 12 }} role="alert">{t('refreshFailed', { message: notice })}</p> : null}
-
-          {status.credits !== undefined ? (
-            <div style={sectionStyle}>
-              <hr style={sectionDividerStyle} />
-              <div style={sectionHeadStyle}>
-                <h3 style={sectionTitleStyle}>{t('creditsHeading')}</h3>
-                <span style={sectionMetaStyle}>{t('creditsTotal', { total: formatNumber(status.credits.total) })}</span>
-              </div>
-              {status.credits.accounts
-                .filter(account => account.remain > 0)
-                .map((account, index) => (
-                  <CreditBar
-                    key={`${account.packageName}-${String(index)}`}
-                    label={account.packageName}
-                    remain={account.remain}
-                    size={account.size}
-                  />
-                ))}
-            </div>
-          ) : null}
           {status.creditsError !== undefined
             ? <p style={{ ...errorStyle, fontSize: 12 }}>{t('creditsError', { message: status.creditsError })}</p>
             : null}
 
           {status.models !== undefined && status.models.length > 0 ? (
-            <div style={sectionStyle}>
-              <hr style={sectionDividerStyle} />
-              <div style={sectionHeadStyle}>
-                <h3 style={sectionTitleStyle}>{t('modelsCount', { n: status.models.length })}</h3>
-                {probe?.running === true ? <span style={sectionMetaStyle}>{t('detectingShort')}</span> : null}
+            <>
+              <hr style={dividerStyle} />
+              <div style={summaryHeadStyle}>
+                <button
+                  type="button"
+                  style={summaryToggleStyle}
+                  aria-expanded={modelsOpen}
+                  onClick={() => { setModelsOpen(!modelsOpen) }}
+                >
+                  <span aria-hidden="true" style={{ ...chevronStyle, fontSize: 14, transform: modelsOpen ? 'rotate(180deg)' : 'none' }}>⌄</span>
+                  <span>{t('modelsCount', { n: status.models.length })}</span>
+                </button>
+                {probe?.running === true ? <span style={summaryNoteStyle}>{t('detectingShort')}</span> : null}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                {status.models.map(row => (
-                  <ModelRow
-                    key={row.id}
-                    row={row}
-                    t={t}
-                    efforts={effortsOf(row)}
-                  />
-                ))}
-              </div>
-            </div>
+              {modelsOpen ? (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {status.models.map(row => (
+                    <ModelRow
+                      key={row.id}
+                      row={row}
+                      t={t}
+                      efforts={effortsOf(row)}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </>
           ) : null}
         </div>
       ) : null}
