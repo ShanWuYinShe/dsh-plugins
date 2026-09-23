@@ -74,7 +74,7 @@
     },
     "packages/sandbox-extra-roots": {
       "name": "@chaoset/sandbox-extra-roots",
-      "version": "0.4.13-alpha.3",
+      "version": "0.4.13-alpha.4",
       "dependencies": {
         "@deepseek-ai/dsh-sandbox": "^0.1.7-alpha.2",
       },
