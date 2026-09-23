@@ -20,21 +20,19 @@
 
 ### 适配
 
-* 跟进 DSH 宿主 0.1.7-alpha.1：settings 体系重构（`settings.register`
-  不复存在），删除 `registerSettingsNamespace` 及其调用——卡片可见性改由
-  Loader profile entry 与 `plugins.bundle.config` slot 决定（0.1.6-alpha.2
-  已迁移），卡片读写仍走 config gateway。核心沙盒包装无改动。
+* 删除 `registerSettingsNamespace` 及其调用——卡片可见性由
+  Loader profile entry 与 `plugins.bundle.config` slot 决定，卡片读写仍走
+  config gateway。核心沙盒包装无改动。
 
 ## 0.4.13-alpha.1 (2026-09-17)
 
 ### 适配
 
-* 跟进 DSH 宿主 0.1.6-alpha.2：配置卡片从 `settings.plugin.item` 迁移到
-  `plugins.bundle.config`（key 改为 npm 包名），显示在本插件的 Plugins 页
-  （描述与组件列表之间）；非 page 视图防御性返回一句话 summary（该 slot
-  契约只 dispatch page），view 判断留在无 hooks 的外层组件
-* TypertCodec 的 `schema` 字段在宿主侧改为惰性 `create` 工厂（typert-loader
-  强制校验 `create()` 存在，旧 `schema` 字段会令插件加载失败）：客户端
+* 配置卡片改由 `plugins.bundle.config` 承接（key 为 npm 包名），显示在本插件
+  的 Plugins 页（描述与组件列表之间）；非 page 视图防御性返回一句话
+  summary（该 slot 契约只 dispatch page），view 判断留在无 hooks 的外层组件
+* TypertCodec 改用惰性 `create` 工厂（typert-loader
+  强制校验 `create()` 存在）：客户端
   `$mount` 描述符与 `typert.host` 工件同步迁移
 
 ## 0.4.13-alpha.0 (2026-09-15)
@@ -45,12 +43,11 @@
   （检出漂移放弃重建、保持官方 argv，bash 侧额外根随之失效并告警）、
   fs 侧包装内部异常兜底 rethrow 官方 `FS_SANDBOX_DENIED`、客户端预览补
   `/private`、主目录祖先与裸 `~` 的 danger 判定（阻塞级行禁用保存）
-* 跟进 DSH 宿主 0.1.6-alpha.1：`SandboxProvider.confine` 同步改异步
-  （宿主 terminal-bash 以 `await` + `signal` 调用）。`confine` 包装改
-  `async`，`await` 原实现并把第三参数 `signal` 透传，否则 `wrapped.argv`
+* `confine` 包装为 `async`：`await` 原实现并把第三参数 `signal` 透传
+  （宿主 terminal-bash 以 `await` + `signal` 调用），否则 `wrapped.argv`
   为 `undefined`、每次 bash 执行都抛 `TypeError`；`dsh.d.ts` 宿主契约同步
-  更新。测试 mock 镜像新宿主（async + signal 捕获），新增 signal 透传
-  用例；在真实 0.1.6 `dsh-sandbox-local`（bwrap）上端到端验证额外根注入
+  更新。测试 mock 覆盖 async + signal 透传；在真实 `dsh-sandbox-local`
+  （bwrap）上端到端验证额外根注入
 
 ### Fixes
 
@@ -72,13 +69,6 @@
 
 ## 0.4.10 (2026-09-11)
 
-### Changes
-
-* 跟进 DSH 稳定版 0.1.5-rc.2：`@deepseek-ai/dsh-sandbox` 与
-  `@deepseek-ai/dsh-typert-protocol` 依赖由 `^0.1.5-rc.1` 升至
-  `^0.1.5-rc.2`，`dsh.host` 更新为 `0.1.5-rc.2`（rc.2 与 rc.1 逐包对比
-  源码零差异，纯依赖 range 重发，无适配代码改动）
-
 ### Fixes
 
 * 修复设置页「沙盒额外允许目录」卡片不渲染：本插件注册的 settings
@@ -93,9 +83,6 @@
 
 ### Changes
 
-* 跟进 DSH 稳定版 0.1.5-rc.1（合并 alpha 线 0.4.9-alpha.0 ~ alpha.1 的适配
-  内容）：`@deepseek-ai/dsh-sandbox` 与 `@deepseek-ai/dsh-typert-protocol`
-  依赖由 `^0.1.2-rc.1` 升至 `^0.1.5-rc.1`，`dsh.host` 更新为 `0.1.5-rc.1`
 * build + typecheck + 全量测试通过，并在隔离测试实例真实验证
 
 ## 0.4.8 (2026-09-05)
@@ -139,15 +126,7 @@
 
 ### Changes
 
-* alpha 线合并 + 稳定线跟进 DSH 0.1.2-rc.1：`@deepseek-ai/dsh-sandbox` 与
-  `@deepseek-ai/dsh-typert-protocol` 由 `^0.1.1-rc.2` 升到 `^0.1.2-rc.1`
-  （合入 alpha 线 0.4.4-alpha.0 / 0.4.4-alpha.1 的适配内容，功能与 0.4.3
-  一致）
-* 已对照 0.1.2-rc.1 全量 diff 官方包（36 个：逐包与 0.1.2-alpha.5 字节对比，
-  除版本号外零差异——rc.1 是纯转正 bump）：dsh-sandbox 的 `canonicalPath` /
-  `writableRoots` / `SandboxProvider.confine` 签名与 alpha.5 适配时一致，
-  运行时逻辑无需调整；全仓 build + typecheck + 162 项测试在 rc.1 依赖闭包
-  上通过
+* 功能与 0.4.3 一致（依赖基线同步）
 
 ## 0.4.3 (2026-08-29)
 
@@ -164,22 +143,14 @@
   `$DSH_HOME/profiles/node_modules/<pkg>`（harness 启动时 heal 的依赖闭包
   symlink 镜像），以 realpath 导入保证与 harness 同一模块实例；失败回落原有
   解析链。全局不安装 `@deepseek-ai/*`、`dsh plugin add` 本地路径链接安装时，
-  官方包不再依赖 profile 内的 npm 副本。已对照 dsh 源码 0.1.2-alpha.1 复核
-  sandbox/fs 契约无变化
+  官方包不再依赖 profile 内的 npm 副本
 
 ## 0.4.1 (2026-08-28)
 
 ### Bug Fixes
 
-* 适配 DSH 0.1.1-rc.2：`@deepseek-ai/dsh-sandbox`、
-  `@deepseek-ai/dsh-typert-protocol`、`@deepseek-ai/node-addon-landlock-run`
-  依赖 range 从 `^0.1.0-rc.8` 升到 `^0.1.1-rc.2`（npm semver 的 prerelease
-  规则下旧 range 无法匹配 `0.1.1-rc.2`，新版宿主下会解析到旧官方包或直接失败）
 * fs fence 包装对 `sandboxPolicy` 的解析加防御：宿主策略服务缺失/契约变化时
   rethrow 原始 `FS_SANDBOX_DENIED`，插件内部异常不再盖过沙盒拒绝语义
-* 已对照 0.1.1-rc.2 的 `dsh-sandbox-local` 复核：Seatbelt SBPL profile、
-  bwrap/Landlock argv 契约无漂移（仅新增 `--unshare-pid` 与 read-only 分支
-  重构，插件在 `--` 前插入额外根的方式不受影响）
 
 ## 0.4.0 (2026-08-25)
 

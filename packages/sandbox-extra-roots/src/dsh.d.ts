@@ -5,11 +5,10 @@ declare module "@deepseek-ai/cordis" {
     sandbox: {
       [key: string]: any;
       [key: symbol]: any;
-      /** 宿主契约（DSH 0.1.6 起）:dsh-sandbox-local 的 confine(argv, policy,
-       * signal?) 是异步实现，返回 Promise；宿主 terminal-bash 以
+      /** 宿主契约：dsh-sandbox-local 的 confine(argv, policy, signal?)
+       * 是异步实现，返回 Promise；宿主 terminal-bash 以
        * `await sandbox.confine(argv, {...}, signal)` 调用。本插件的包装与之
-       * 对齐同样是 async，并把 signal 透传给原实现。0.1.5 及更早宿主是同步
-       * confine——本分支只跟随 0.1.6 线，不再兼容同步宿主。 */
+       * 对齐同样是 async，并把 signal 透传给原实现。 */
       confine?: (argv: string[], policy: any, signal?: AbortSignal) => Promise<{ argv: string[]; [key: string]: any }>;
     };
     fs: {
@@ -24,9 +23,8 @@ declare module "@deepseek-ai/cordis" {
        * 失效;升级 DSH 时请核对该签名。 */
       resolve(): { mode: string; workspaceRoot?: string };
     };
-    // DSH 0.1.7 移除了 settings namespace 注册体系：宿主 settings 服务现为
-    // SettingsForms（Loader profile 条目的 Config 表单投影），不再有
-    // register/installSection。本插件不声明 Config schema，卡片经
+    // 宿主 settings 服务为 SettingsForms（Loader profile 条目的 Config
+    // 表单投影）。本插件不声明 Config schema，卡片经
     // plugins.bundle.config slot 与 config gateway 读写，此处无需声明。
   }
 }

@@ -32,7 +32,7 @@ function sbpl(roots: string[]): string {
 }
 
 function makeSandboxMock() {
-  // 镜像 DSH 0.1.6 宿主：confine 是异步实现，第三参数为 AbortSignal。
+  // 镜像当前宿主：confine 是异步实现，第三参数为 AbortSignal。
   const mock: any = {
     lastSignal: undefined as any,
     async confine(argv: string[], policy: any, signal?: any) {
