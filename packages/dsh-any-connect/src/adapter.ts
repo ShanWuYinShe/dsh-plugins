@@ -28,8 +28,8 @@ export const WORKBUDDY_PROVIDER = 'workbuddy'
 export const WORKBUDDY_STREAM_IDLE_TIMEOUT_MS = 300_000
 
 /**
- * Image-request budgets at the dsh-llm-pi-ai defaults; the profile type made
- * them required in 0.1.1-rc.2. They bound requests to models whose catalog
+ * Image-request budgets at the dsh-llm-pi-ai defaults; the profile type
+ * requires them. They bound requests to models whose catalog
  * entry declares `supportsImages`; text-only models never receive images.
  */
 const REQUEST_IMAGE_BUDGETS = {
@@ -42,7 +42,7 @@ const REQUEST_IMAGE_BUDGETS = {
  * Inert pi-ai auth plane. The workbuddy route authenticates only through the
  * shim shared secret resolved per request by `resolveApiKey`, so pi-ai's own
  * credential lifecycle and ambient discovery must never manufacture a
- * credential for it. `PiAiAdapterOptions.auth` is required since 0.1.1-rc.2;
+ * credential for it. `PiAiAdapterOptions.auth` is required;
  * every ambient question here answers "nothing stored, nothing set".
  */
 const INERT_AUTH: { credentials: CredentialStore; authContext: AuthContext } = {
@@ -248,7 +248,7 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
     streamIdleTimeoutMs: WORKBUDDY_STREAM_IDLE_TIMEOUT_MS,
     retryPolicy: resolveRetryPolicy(undefined, 'dsh-any-connect retryPolicy'),
     configuredMaxTokens: new Map(),
-    // 解析失败模型的诊断（0.1.5 起必填）：本插件的 catalog 只含已成功解析
+    // 解析失败模型的诊断：本插件的 catalog 只含已成功解析
     // 的模型，无可保留的诊断，与宿主自身缺省一致传空 Map。
     modelErrors: new Map(),
     ...REQUEST_IMAGE_BUDGETS,

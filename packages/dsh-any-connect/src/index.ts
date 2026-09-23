@@ -47,7 +47,6 @@ export {
 export {
   defaultDesktopAuthCandidates,
   desktopAuthCandidatesFor,
-  defaultDesktopAuthPath,
   parseWorkBuddyAuth,
   RegionMismatchError,
   WORKBUDDY_AUTH_FILE_ENV,
@@ -146,9 +145,8 @@ export const inject = ['llm']
 /**
  * Fallback settings namespace owning the configuration card.
  *
- * DSH 0.1.7 removed registered settings namespaces: the directory entry's
- * `settingsNs` is now the Loader profile entry id
- * (`ctx.fiber.entry?.options.id`), and these constants only survive as the
+ * The directory entry's `settingsNs` is the Loader profile entry id
+ * (`ctx.fiber.entry?.options.id`); these constants only survive as the
  * fallback when no Loader hosts the plugin (bare-`Context` tests) plus the
  * stable provider-identity strings the client and tests already key on.
  */
@@ -159,21 +157,18 @@ export const WORKBUDDY_AI_SETTINGS_NS = 'anyconnect-ai' as SettingsNamespace
 
 /** Plugin configuration: live volatile references committed by the Loader.
  *
- * DSH 0.1.7 removed the settings provider service (`settings.installSection`
- * / `register`): editable fields are declared `.volatile()` and read with
- * `.get()`, which tracks profile edits without a remount (see
- * `loader/volatile-update` below, mirroring upstream `dsh-llm-pi-ai`). The
- * `Options` type is the plain-value shape callers pass to `ctx.plugin()`;
- * Cordis parses it through this schema into the `Config` references.
+ * Editable fields are declared `.volatile()` and read with `.get()`, which
+ * tracks profile edits without a remount (see `loader/volatile-update`
+ * below, mirroring upstream `dsh-llm-pi-ai`). The `Options` type is the
+ * plain-value shape callers pass to `ctx.plugin()`; Cordis parses it through
+ * this schema into the `Config` references.
  */
 export interface Config {
   /** Explicit WorkBuddy desktop auth-file path, overriding env and platform defaults. */
   authFile: Volatile<string | undefined>
   /** Explicit WorkBuddy AI desktop auth-file path, overriding env and platform defaults. */
   authFileAI: Volatile<string | undefined>
-  // probeConsent lived here until automatic detection moved its authorization
-  // into the probe-store file (the card's write path cannot reach the settings
-  // store). schemastery strips unknown fields, so a stale `probeConsent` in a
+  // schemastery strips unknown fields, so a stale field in a
   // cordis.patch.yml is ignored rather than rejected.
 }
 

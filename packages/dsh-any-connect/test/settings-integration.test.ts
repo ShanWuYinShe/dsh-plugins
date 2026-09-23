@@ -196,9 +196,8 @@ describe('WorkBuddy Host settings integration', () => {
     context = ctx
     await ctx.plugin(LlmRuntime)
 
-    // 假时钟从插件安装前开启。DSH 0.1.7 起配置是 volatile 引用、启动只有
-    // shim 就绪后的一次拉取（旧 installSection 的装配期 onChange 拉取已随
-    // settings provider 一并移除）：单条失败链带重试。
+    // 假时钟从插件安装前开启。配置是 volatile 引用，启动只有 shim 就绪后
+    // 的一次拉取：单条失败链带重试。
     vi.useFakeTimers()
     try {
       await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })

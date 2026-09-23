@@ -199,13 +199,11 @@
 
 ### 适配
 
-* 跟进 DSH 宿主 0.1.6-alpha.2：宿主把插件配置从「设置 → 插件配置 tab」
-  重构为独立的「插件」（Plugins）页面，配置注册从 `settings.plugin.item`
-  （keyed by 设置 namespace）迁移到 `plugins.bundle.config`（keyed by 包名）。
+* 配置卡片改由 `plugins.bundle.config` 承接（keyed by 包名）。
   WorkBuddy 两张卡片现显示在本插件的 Plugins 页（描述与组件列表之间），
   展开交互与内容不变；非 page 视图按契约防御性返回一句话 intro。编译期
-  契约依赖随之从 `dsh-client-ui-settings-plugins` 换为
-  `dsh-client-ui-plugin-manager`（import type 引入 slot 声明，零运行时依赖）
+  契约依赖为 `dsh-client-ui-plugin-manager`
+  （import type 引入 slot 声明，零运行时依赖）
 
 ## 0.3.18-alpha.5 (2026-09-15)
 
@@ -289,14 +287,9 @@
   目录启动拉取改 `resolve()`（过期 token 自动刷新）+ 失败延迟重试、刷新
   退避不再被绕过、chatStream 抛错路径补 `clearTimeout`、进度条无障碍与
   500 诊断拼入失败原因
-* 跟进 DSH 宿主 0.1.6-alpha.1：仅依赖基线（`dsh.host` → `0.1.6-alpha.1`），
-  本包无代码改动——逐符号核对未命中任何宿主破坏性变更（`AssistantProvenance`
-  改名、`RequestImageOffloadPolicy` 及 `offloadedImagePrefixCount` /
-  `offloadRequestImagesWithPolicy` 删除、`ImageRequestPolicy` →
-  `ImageRequestTarget`、`priceImages` 参数收窄），新基线 typecheck 通过。
-  行为注意：宿主图片管线改为超预算抛 `IMAGE_OFFLOAD_REQUIRED`（不再静默
-  裁剪）；本包图片预算走 `PiAiAdapter` profile 默认路径，超大图片请求的
-  失败/重试语义跟随宿主
+* 依赖基线同步，本包无代码改动。行为注意：宿主图片管线超预算抛
+  `IMAGE_OFFLOAD_REQUIRED`（不再静默裁剪）；本包图片预算走 `PiAiAdapter`
+  profile 默认路径，超大图片请求的失败/重试语义跟随宿主
 
 ### Fixes
 
@@ -343,21 +336,14 @@
 
 ### Changes
 
-* 跟进 DSH 稳定版 0.1.5-rc.2：全部 `@deepseek-ai/dsh-*` 依赖由 `^0.1.5-rc.1`
-  升至 `^0.1.5-rc.2`，`dsh.host` 更新为 `0.1.5-rc.2`（rc.2 与 rc.1 逐包
-  对比源码零差异，纯依赖 range 重发，无适配代码改动）
 * build + typecheck + 全量测试通过，并在隔离测试实例真实验证
 
 ## 0.3.13 (2026-09-10)
 
 ### Changes
 
-* 跟进 DSH 稳定版 0.1.5-rc.1（合并 alpha 线 0.3.13-alpha.0 ~ alpha.1 的适配
-  内容）：全部 `@deepseek-ai/dsh-*` 依赖由 `^0.1.2-rc.1` 升至 `^0.1.5-rc.1`，
-  `dsh.host` 更新为 `0.1.5-rc.1`
-* 适配 0.1.5 起的 provider 契约：`ResolvedPiAiProviderProfile` 新增必填的
-  `modelErrors`（解析失败模型的诊断），本插件补传空 Map（catalog 只含已成功
-  解析的模型，与宿主自身缺省一致），否则 typecheck 不过
+* provider 契约要求补传 `modelErrors`（解析失败模型的诊断）：本插件
+  catalog 只含已成功解析的模型，传空 Map（与宿主自身缺省一致）
 * 对齐上游 `@deepseek-ai/dsh-llm-pi-ai` 依赖更新：`@earendil-works/pi-ai`
   由 `^0.84.2` 升级为 `^0.85.1`，消除类型冲突
 * build + typecheck + 全量测试通过，并在隔离测试实例真实验证
@@ -407,22 +393,7 @@
 
 ### Changes
 
-* alpha 线合并 + 稳定线跟进 DSH 0.1.2-rc.1：`@deepseek-ai/dsh-*` 依赖线由
-  `^0.1.1-rc.2` 升到 `^0.1.2-rc.1`，并合入 alpha 线的 0.1.2 宿主适配（功能
-  与 0.3.7 一致，不含新功能）
-* 0.1.2 线破坏性 API 适配（自 alpha 线合入）：上游移除了
-  `settingsNamespace()`——命名空间现为普通字符串（`'anyconnect'`，附
-  `SettingsNamespace` 类型标注）；`installSettingsSection()` 自由函数改为
-  provider 服务上的 `settings.installSection()`，经
-  `ctx.inject(['settings'], …)` 延迟装配；client 的 `ClientContext` 改由
-  `@deepseek-ai/cordis` 引入并补 `dsh-client-ui-renderer` 副作用导入；
-  上游在 0.1.2 线删除了 `dsh-client-runtime` 包（止于 `0.1.1-rc.2`），本包
-  依赖同步移除
-* 已对照 0.1.2-rc.1 全量 diff 官方包（36 个：逐包与 0.1.2-alpha.5 字节对比，
-  除版本号外零差异——rc.1 是纯转正 bump）：settings / llm / llm-pi-ai /
-  client-ui-settings-plugins / client-ui-slots / attachment 各契约面与
-  alpha.5 适配时一致，运行时逻辑无需调整；全仓 build + typecheck + 162 项
-  测试在 rc.1 依赖闭包上通过
+* 功能与 0.3.7 一致（依赖基线同步）
 
 ## 0.3.7 (2026-09-03)
 
@@ -435,7 +406,6 @@
 * 移除设置 → 通用设置中的 WorkBuddy 剩余积分行（设置 → 插件的卡片已有
   完整额度展示）
 
-与 alpha 线的 0.3.8-alpha.0 内容对应（宿主依赖线不同：本版锁 `^0.1.1-rc.2`）。
 
 ## 0.3.6 (2026-09-03)
 
@@ -446,7 +416,6 @@
   行自绘标签与数值（WorkBuddy 剩余积分 · 43），未登录或无数据时不渲染；
   详情（分包进度条、模型优惠）保持在设置 → 插件的卡片
 
-与 alpha 线的 0.3.7-alpha.0 内容对应（宿主依赖线不同：本版锁 `^0.1.1-rc.2`）。
 
 ## 0.3.5 (2026-09-03)
 
@@ -460,7 +429,6 @@
 * 模型下拉框不再显示模型介绍文案：倍率只随模型名显示
   （`GLM-5.2 · x0.79`），description 不再携带内容，消除费率重复
 
-与 alpha 线的 0.3.6-alpha.0 内容对应（宿主依赖线不同：本版锁 `^0.1.1-rc.2`）。
 
 ## 0.3.4 (2026-09-03)
 
@@ -471,7 +439,6 @@
 * 模型费率去重：倍率只保留在模型名后缀（`GLM-5.2 · x0.79`），模型描述不再
   重复展示倍率，改为携带上游的模型文案（按登录区域取中/英文）
 
-与 alpha 线的 0.3.5-alpha.0 内容对应（宿主依赖线不同：本版锁 `^0.1.1-rc.2`）。
 
 ## 0.3.3 (2026-09-03)
 
@@ -483,7 +450,6 @@
   因此没有账号与额度内容）。空串/纯空白覆盖现在回退到平台默认探测顺序，
   与空环境变量的既有行为一致
 
-与 alpha 线的 0.3.4-alpha.0 内容对应（宿主依赖线不同：本版锁 `^0.1.1-rc.2`）。
 
 ## 0.3.2 (2026-09-02)
 
@@ -496,7 +462,6 @@
   促销模型的倍率行保持不变
 * 静态兜底模型目录对照 2026-09-02 线上数据复核：15/15 完全一致
 
-与 alpha 线的 0.3.2-alpha.1 内容对应（宿主依赖线不同：本版锁 `^0.1.1-rc.2`）。
 
 ## 0.3.1 (2026-09-02)
 
@@ -534,5 +499,4 @@ dsh-plugins monorepo，标识改为 @chaoset/dsh-any-connect（插件名
 
 ### Notes
 
-* 本包锁 dsh 0.1.1-rc.2 稳定线依赖；适配 dsh alpha 的版本在 alpha 分支维护
 * 基于 upstream 的 LICENSE 为 MIT；README 顶部声明了来源与致谢
