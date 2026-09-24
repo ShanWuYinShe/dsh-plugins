@@ -28,6 +28,11 @@ function fakeCtx(options: {
   noLlm?: boolean
   noSettings?: boolean
   noCredentials?: boolean
+  /** DeepSeek OAuth 余额桩：缺席=未登录（null），'throw' 字符串=查询抛错。 */
+  accountBalance?: unknown
+  accountThrows?: boolean
+  noAccount?: boolean
+  onAccountQuery?: () => void
 } = {}): Context {
   const services: Record<string, unknown> = {}
   if (options.noLlm !== true) {
@@ -43,6 +48,15 @@ function fakeCtx(options: {
       resolve: async (ref: string) => {
         const value = options.credentials?.[ref]
         return value === undefined ? undefined : { value, source: 'store' }
+      },
+    }
+  }
+  if (options.noAccount !== true) {
+    services['deepseekAccount'] = {
+      getBalance: async () => {
+        options.onAccountQuery?.()
+        if (options.accountThrows === true) throw new Error('grant changed')
+        return options.accountBalance ?? null
       },
     }
   }
@@ -100,6 +114,57 @@ describe('createProviderResolver', () => {
       credentials: { DEEPSEEK_API_KEY: '' },
     })
     expect(await createProviderResolver(ctx)('deepseek', signal)).toEqual({})
+  })
+
+  it('keyless deepseek falls back to OAuth account wallets (grouped per currency)', async () => {
+    const ctx = fakeCtx({
+      entries: [entry('deepseek', 'llm-deepseek')],
+      sections: { 'llm-deepseek': {} },
+      accountBalance: {
+        status: 'ready',
+        value: [{ currency: 'CNY', balance: '10.00' }],
+        bonusWallets: [{ currency: 'CNY', balance: '5.00' }, { currency: 'USD', balance: '2.50' }],
+      },
+    })
+    expect(await createProviderResolver(ctx)('deepseek', signal)).toEqual({
+      accountWallets: [
+        { currency: 'CNY', recharge: 10, bonus: 5 },
+        { currency: 'USD', recharge: 0, bonus: 2.5 },
+      ],
+    })
+  })
+
+  it('does not touch the account when an API key exists', async () => {
+    let queried = false
+    const ctx = fakeCtx({
+      entries: [entry('deepseek', 'llm-deepseek')],
+      sections: { 'llm-deepseek': { apiKeyEnv: 'DEEPSEEK_API_KEY' } },
+      credentials: { DEEPSEEK_API_KEY: 'k' },
+      accountBalance: { status: 'ready', value: [], bonusWallets: [] },
+      onAccountQuery: () => { queried = true },
+    })
+    expect(await createProviderResolver(ctx)('deepseek', signal)).toEqual({ apiKey: 'k' })
+    expect(queried).toBe(false)
+  })
+
+  it('surfaces an account failure as accountError, and ignores other providers', async () => {
+    const failing = fakeCtx({
+      entries: [entry('deepseek', 'llm-deepseek')],
+      sections: { 'llm-deepseek': {} },
+      accountThrows: true,
+    })
+    expect(await createProviderResolver(failing)('deepseek', signal)).toEqual({
+      accountError: 'grant changed',
+    })
+    let queried = false
+    const other = fakeCtx({
+      entries: [entry('muse', 'llm-pi-ai')],
+      sections: { 'llm-pi-ai': {} },
+      accountBalance: { status: 'ready', value: [], bonusWallets: [] },
+      onAccountQuery: () => { queried = true },
+    })
+    expect(await createProviderResolver(other)('muse', signal)).toEqual({})
+    expect(queried).toBe(false)
   })
 
   it('reports the endpoint even with no credential service mounted', async () => {

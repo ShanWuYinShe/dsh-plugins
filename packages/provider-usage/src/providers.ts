@@ -77,9 +77,31 @@ interface BalanceReader {
  * `GET {base}/user/balance` answers `balance_infos[]`, one entry per
  * currency, each carrying string amounts. A multi-currency account gets one
  * window per currency so the surface never adds unlike units together.
+ *
+ * Without an API key the OAuth account wallets (resolve layer) are the
+ * fallback: one window per currency with recharge + bonus summed, the same
+ * shape as the API path so the pill renders identically whichever auth the
+ * user has. The API path wins whenever a key exists — a single source
+ * answers, never double-counted.
  */
-export const deepseekUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
-  if (apiKey === undefined) return { provider: 'deepseek', windows: [], fetchedAt: Date.now() }
+export const deepseekUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal, accountWallets, accountError }) => {
+  if (apiKey === undefined) {
+    if (accountError !== undefined) return { provider: 'deepseek', windows: [], fetchedAt: Date.now(), error: accountError }
+    if (accountWallets !== undefined) {
+      const windows: UsageWindow[] = []
+      for (const wallet of accountWallets) {
+        const remain = wallet.recharge + wallet.bonus
+        windows.push({ id: `account-${wallet.currency}`, label: wallet.currency, remain, unit: wallet.currency.toLowerCase() })
+      }
+      return {
+        provider: 'deepseek',
+        windows,
+        fetchedAt: Date.now(),
+        ...windows.length === 0 ? { error: 'the account reports no usable balance' } : {},
+      }
+    }
+    return { provider: 'deepseek', windows: [], fetchedAt: Date.now() }
+  }
   const root = trimBase(baseURL ?? 'https://api.deepseek.com')
   const body = await getJson(`${root}/user/balance`, { authorization: `Bearer ${apiKey}` }, signal)
   const windows: UsageWindow[] = []

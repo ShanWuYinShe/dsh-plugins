@@ -20,6 +20,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { Readable } from 'node:stream'
 import type { WorkBuddyCredentialStore } from './auth.js'
 import type { WorkBuddyCatalog } from './catalog.js'
+import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { prepareChatBody, WorkBuddyUpstreamClient, type UpstreamErrorKind } from './upstream.js'
 
 /** Minimal logger surface the plugin context already provides. */
@@ -56,46 +57,8 @@ export interface WorkBuddyShimOptions {
 
 const REQUEST_BODY_LIMIT = 64 * 1024 * 1024
 
-/** Loopback hostnames the shim's own in-process client uses. */
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]'])
-
-/** Strip the optional :port from a Host header value, IPv6-bracket aware. */
-function hostnameOfHost(host: string): string {
-  let hostname = host.trim().toLowerCase()
-  if (hostname.startsWith('[')) {
-    const end = hostname.indexOf(']')
-    return end === -1 ? hostname : hostname.slice(0, end + 1)
-  }
-  const colon = hostname.lastIndexOf(':')
-  if (colon !== -1 && /^\d+$/.test(hostname.slice(colon + 1))) hostname = hostname.slice(0, colon)
-  return hostname
-}
-
-/**
- * The request's Host header must name the loopback interface. A DNS-rebinding
- * page (attacker domain re-resolved to 127.0.0.1) sends its own domain in
- * Host, so this check drops those before any routing happens.
- */
-function hostIsLoopback(host: string | undefined): boolean {
-  if (host === undefined || host.trim() === '') return false
-  return LOOPBACK_HOSTS.has(hostnameOfHost(host))
-}
-
-/**
- * A browser-sent Origin (present header) must be loopback. Non-browser
- * clients (the plugin's own fetch calls) send no Origin at all and pass.
- */
-function originIsLoopback(origin: string | undefined): boolean {
-  if (origin === undefined || origin.trim() === '') return true
-  try {
-    const { hostname } = new URL(origin)
-    // WHATWG URL 对 IPv6 主机名返回带方括号的拼写，LOOPBACK_HOSTS 已覆盖。
-    return LOOPBACK_HOSTS.has(hostname)
-  } catch {
-    return false
-  }
-}
-
+// 回环守卫统一走 ./loopback.js（本文件此前的局部拷贝已删除：三处分化后
+// shim 版与标准版在 `[::1]garbage` 上语义不一致，单源是唯一的修法）。
 /** Chat-completion POSTs must carry a JSON body type (simple-request CSRF drops here). */
 function isJsonContentType(req: IncomingMessage): boolean {
   const type = req.headers['content-type']

@@ -1,4 +1,4 @@
-/** Route behaviour: origin guard, method guard, request parsing, and answers. */
+/** Route behaviour: loopback guards (Host + Origin), method guard, request parsing, and answers. */
 
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -19,8 +19,11 @@ function makeRegistry(): ProviderUsageRegistry {
 }
 
 /** Minimal request/response doubles capturing what the handler wrote. */
-function fakeExchange(options: { method?: string; url?: string; origin?: string } = {}) {
+function fakeExchange(options: { method?: string; url?: string; origin?: string; host?: string | null } = {}) {
   const headers: Record<string, string> = {}
+  // 真实浏览器同源请求恒带 Host：默认补环回 Host，只在显式测缺席时传 null。
+  if (options.host === undefined) headers['host'] = '127.0.0.1'
+  else if (options.host !== null) headers['host'] = options.host
   if (options.origin !== undefined) headers['origin'] = options.origin
   const req = { method: options.method ?? 'GET', url: options.url ?? '/', headers } as unknown as IncomingMessage
   let status = 0
@@ -82,8 +85,32 @@ describe('providerUsageHandler', () => {
     const handler = providerUsageHandler({ registry: makeRegistry() })
     const exchange = fakeExchange({ url: '/?providers=acme', origin: 'https://evil.example' })
     await handler(exchange.req, exchange.res)
-    expect(exchange.result()).toEqual({ status: 403, body: { error: 'origin-not-trusted' } })
+    expect(exchange.result()).toEqual({ status: 403, body: { error: 'request-not-trusted' } })
   })
+
+  it('refuses a missing Host header (DNS-rebinding navigation carries no Origin)', async () => {
+    const handler = providerUsageHandler({ registry: makeRegistry() })
+    const exchange = fakeExchange({ url: '/?providers=acme', host: null })
+    await handler(exchange.req, exchange.res)
+    expect(exchange.result()).toEqual({ status: 403, body: { error: 'request-not-trusted' } })
+  })
+
+  it('refuses an attacker-domain Host header (DNS rebinding)', async () => {
+    const handler = providerUsageHandler({ registry: makeRegistry() })
+    const exchange = fakeExchange({ url: '/?providers=acme', host: 'evil.example' })
+    await handler(exchange.req, exchange.res)
+    expect(exchange.result()).toEqual({ status: 403, body: { error: 'request-not-trusted' } })
+  })
+
+  it.each(['127.0.0.1:3080', 'localhost:3080', '[::1]:3080'])(
+    'accepts the loopback Host %s',
+    async host => {
+      const handler = providerUsageHandler({ registry: makeRegistry() })
+      const exchange = fakeExchange({ url: '/?providers=acme', host })
+      await handler(exchange.req, exchange.res)
+      expect(exchange.result().status).toBe(200)
+    },
+  )
 
   it.each(['http://localhost:3080', 'http://127.0.0.1:3080', 'http://[::1]:3080'])(
     'accepts the loopback origin %s',

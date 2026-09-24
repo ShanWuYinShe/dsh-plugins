@@ -9,17 +9,35 @@
  * 各持一份模块实例时 markers 会丢失，SRC 认领为空，web 端报
  * "transport failure ... HTTP 404"）。
  *
- * codec 使用最小透传 schema（create() 返回 {_zod, parse}）：typert-loader
- * 要求 codec 提供 create() 工厂，网关 decode/encode 走 codec.create().parse()
- * 透传，与
- * client.tsx 里 $mount 的透传描述符一致。
+ * codec.create() 返回 {_zod, parse}：typert-loader 要求 codec 提供 create()
+ * 工厂，网关 decode/encode 走 codec.create().parse()。
+ *
+ * 参数（网关信任边界）用真校验：畸形输入在方法分发前即被拒绝；结果保持
+ * 透传——结果由 host 端构造，校验它们只会增加与构造体的双重维护，不挡
+ * 任何外部输入。方法层的同形手写检查（remote.ts）保留：单测直调网关方法
+ * 不经过 codec，两处语义一致（改一处必须改另一处）。
  */
 
 const passthrough = (value) => value;
-const codec = (typeSymbol) => ({
+/** 批量上限：面板勾选集现实中不足千级，超限直接拒绝（防网关层失控展开）。 */
+const SESSION_ID_ARRAY_LIMIT = 5000;
+const parseSessionId = (value) => {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new TypeError('sessionArchive expects a non-empty session id string');
+  }
+  return value;
+};
+const parseSessionIdArray = (value) => {
+  if (!Array.isArray(value) || value.length > SESSION_ID_ARRAY_LIMIT
+    || value.some((id) => typeof id !== 'string' || id.length === 0)) {
+    throw new TypeError('sessionArchive expects an array of non-empty session id strings');
+  }
+  return value;
+};
+const codec = (typeSymbol, parse = passthrough) => ({
   mode: 'strict',
   typeSymbol,
-  create: () => ({ _zod: true, parse: passthrough }),
+  create: () => ({ _zod: true, parse }),
 });
 
 export const TYPERT = {
@@ -58,7 +76,7 @@ export const TYPERT = {
           name: 'sessionId',
           wire: 'sessionId',
           source: 'json',
-          codec: codec('@chaoset/session-archive/types#SessionId'),
+          codec: codec('@chaoset/session-archive/types#SessionId', parseSessionId),
         },
       ],
       result: codec('@chaoset/session-archive/types#ArchiveDetailResult'),
@@ -75,7 +93,7 @@ export const TYPERT = {
           name: 'sessionIds',
           wire: 'sessionIds',
           source: 'json',
-          codec: codec('@chaoset/session-archive/types#SessionIdArray'),
+          codec: codec('@chaoset/session-archive/types#SessionIdArray', parseSessionIdArray),
         },
       ],
       result: codec('@chaoset/session-archive/types#DeleteResult'),
@@ -92,7 +110,7 @@ export const TYPERT = {
           name: 'sessionIds',
           wire: 'sessionIds',
           source: 'json',
-          codec: codec('@chaoset/session-archive/types#SessionIdArray'),
+          codec: codec('@chaoset/session-archive/types#SessionIdArray', parseSessionIdArray),
         },
       ],
       result: codec('@chaoset/session-archive/types#UnarchiveResult'),

@@ -60,6 +60,11 @@ var css = [
   ".sa_ok{color:var(--dsw-alias-state-success-primary);margin:8px 0;font-size:12px;line-height:18px}",
   // 提示级通知（如「请先勾选会话」）不该与错误同色：用 warn 色区分严重度。
   ".sa_warn{color:var(--dsw-alias-state-warn-primary);margin:8px 0;font-size:12px;line-height:18px}",
+  // 大批量删除确认条：错误色边框 + 浅红底（12% mix，与宿主 Tag danger 同口径）。
+  ".sa_ack{border:1px solid var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);border-radius:12px;padding:10px 12px;margin:0 0 8px;flex-direction:column;gap:8px;display:flex}",
+  ".sa_ackText{color:var(--dsw-alias-label-primary);margin:0;font-size:12px;line-height:18px}",
+  ".sa_ackLabel{color:var(--dsw-alias-label-primary);font-size:12px;line-height:18px;user-select:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px}",
+  ".sa_ackActions{justify-content:flex-end;display:flex}",
   ".sa_rows{flex-direction:column;gap:8px;margin:0;padding:0;list-style:none;display:flex}",
   ".sa_row{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);border-radius:12px;flex-direction:column;gap:6px;padding:8px 10px;display:flex;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}",
   ".sa_row:hover{border-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-shadow-lv1);transform:translateY(-1px)}",
@@ -70,7 +75,7 @@ var css = [
   ".sa_rowTitle:hover{text-decoration:underline}",
   ".sa_live{background:var(--dsw-alias-state-warn-tertiary);color:var(--dsw-alias-state-warn-label);height:18px;border-radius:9px;flex:none;align-items:center;padding:0 6px;font-size:11px;line-height:18px;display:inline-flex}",
   ".sa_rowMeta{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px;overflow-wrap:anywhere}",
-  ".sa_rowMeta code{font-family:var(--dsh-font-mono,monospace)}",
+  ".sa_rowMeta code{font-family:var(--ds-font-family-code,monospace)}",
   ".sa_rowFoot{justify-content:space-between;align-items:center;gap:8px;display:flex}",
   ".sa_rowActions{flex:none;align-items:center;gap:8px;display:flex}",
   ".sa_detail{border-top:1px dashed var(--dsw-alias-border-l2);padding-top:8px;flex-direction:column;gap:10px;display:flex;max-height:260px;overflow-y:auto}",
@@ -123,6 +128,11 @@ const zh = {
   deleteDone: "已删除 {n} 个归档会话",
   deleteFailed: "删除失败：{n} 个",
   confirmAll: "确认删除全部 {n} 个？",
+  joiner: "；",
+  deleteConfirmBody: "将彻底删除 {n} 个归档会话，对应文件无法恢复。",
+  deleteAcknowledge: "我确认删除这 {n} 个会话",
+  cancel: "取消",
+  showMore: "加载更多（剩余 {n} 个）",
   noSelection: "请先勾选会话",
   view: "查看",
   collapse: "收起",
@@ -164,6 +174,11 @@ const en = {
   deleteDone: "Deleted {n} archived sessions",
   deleteFailed: "Deletion failed: {n}",
   confirmAll: "Delete all {n}?",
+  joiner: ";",
+  deleteConfirmBody: "This will permanently delete {n} archived sessions; their files cannot be recovered.",
+  deleteAcknowledge: "I confirm deleting these {n} sessions",
+  cancel: "Cancel",
+  showMore: "Show more ({n} remaining)",
   noSelection: "Select sessions first",
   view: "View",
   collapse: "Collapse",
@@ -213,6 +228,27 @@ function sameItems(a: any[], b: any[]) {
     if (x.sessionId !== y.sessionId || x.updatedAt !== y.updatedAt || x.size !== y.size || x.live !== y.live) return false;
   }
   return true;
+}
+
+// 焦点陷阱的按键判定（纯函数，可单测）：面板内有序可聚焦元素 + 当前
+// activeElement，返回 Tab / Shift+Tab 应跳往的元素；不需要环绕返回 undefined。
+// 行为抄宿主 Modal（只抄行为，不引用其实现——官方插件开发 skill 明令
+// 第三方插件不得 require 宿主 client 包）。
+function trapTarget(focusables: any[], active: any, shift: boolean): any | undefined {
+  if (focusables.length === 0) return undefined;
+  if (shift && active === focusables[0]) return focusables[focusables.length - 1];
+  if (!shift && active === focusables[focusables.length - 1]) return focusables[0];
+  return undefined;
+}
+
+// 大批量彻底删除的二次确认阈值：达到该数量的删除不再允许“同按钮双击
+// 穿透”，必须经下面的 needsDeleteAck 闸（勾选确认框后才可点——抄宿主
+// RiskConfirmation 的行为，不引用其实现）。
+const DELETE_ACK_THRESHOLD = 5;
+// 归档列表分页步长：全量渲染几百行会卡，默认只渲第一页，“加载更多”追加。
+const ARCHIVE_PAGE_SIZE = 50;
+function needsDeleteAck(selectedSize: number, confirming: boolean): boolean {
+  return confirming && selectedSize >= DELETE_ACK_THRESHOLD;
 }
 
 // ── 归档面板 ─────────────────────────────────────────────────────────
@@ -267,9 +303,18 @@ function ArchivePanel(props: any) {
   const [detailLoading, setDetailLoading] = React.useState<Set<any>>(new Set());
   const [busy, setBusy] = React.useState(false);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
+  // 大批量删除的勾选确认（抄宿主 RiskConfirmation“先勾选后可点”的行为）：
+  // 确认态解除时由下面的 effect 统一复位，各处不再逐个补。
+  const [deleteAcked, setDeleteAcked] = React.useState(false);
+  React.useEffect(() => {
+    if (!confirmingDelete) setDeleteAcked(false);
+  }, [confirmingDelete]);
   const [notice, setNotice] = React.useState<any>(null);
   // 关闭态徽标计数（由 count() 轻端点轮询维护；列表落地时也会同步）。
   const [badgeCount, setBadgeCount] = React.useState(0);
+  // 列表分页：只渲前 visibleCount 行；打开/手动刷新回到第一页，
+  // 静默刷新不碰（不打断用户已展开的“更多”）。
+  const [visibleCount, setVisibleCount] = React.useState(ARCHIVE_PAGE_SIZE);
 
   // 列表落地（加载与静默刷新共用）：sameItems 比较避免无变化时整表
   // reconcile；同时剔除已消失 id 的残留勾选——否则"已选 N 项"虚高，
@@ -288,6 +333,7 @@ function ArchivePanel(props: any) {
   const load = React.useCallback(async () => {
     setLoading(true);
     setError(null);
+    setVisibleCount(ARCHIVE_PAGE_SIZE);
     try {
       const result = await call("list");
       applyItems(Array.isArray(result.items) ? result.items : []);
@@ -404,19 +450,45 @@ function ArchivePanel(props: any) {
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [open]);
 
-  // Esc 关闭面板(仅 open 时监听):对话框惯例,键盘用户此前只能找 ✕。
+  // 面板按键（仅 open 时监听）：Esc 关闭是对话框惯例；Tab 环绕是焦点陷阱——
+  // 面板声明了 aria-modal，Tab 不得跑到遮罩后的侧边栏元素上。
   React.useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: any) => {
-      if (event.key === "Escape") closePanel();
+      if (event.key === "Escape") {
+        closePanel();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const panel = panelRef.current;
+      if (panel === undefined || panel === null) return;
+      const focusables = Array.from(panel.querySelectorAll(
+        'button:not([disabled]),input:not([disabled]),[tabindex]:not([tabindex="-1"])'
+      ));
+      const target = trapTarget(focusables, document.activeElement, event.shiftKey === true);
+      if (target !== undefined) {
+        event.preventDefault();
+        target.focus();
+      }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
+  const visibleItems = items.slice(0, visibleCount);
   const selectable = items.filter((item) => !item.live);
   const allSelected = selectable.length > 0 && selectable.every((item) => selected.has(item.sessionId));
 
+  // 两段式删除 armed 态的 4 秒复位 timer：存 id，改勾选/执行/卸载时清掉，
+  // 过期 timer 不得在 armed 已解除后再次写 false（方向虽安全，属卫生债）。
+  const confirmTimer = React.useRef<any>(0);
+  const disarmDelete = () => {
+    if (confirmTimer.current !== 0) {
+      globalThis.clearTimeout(confirmTimer.current);
+      confirmTimer.current = 0;
+    }
+    setConfirmingDelete(false);
+  };
   const toggleAll = (checked: any) => {
     if (checked) {
       setSelected(new Set(selectable.map((item) => item.sessionId)));
@@ -425,7 +497,7 @@ function ArchivePanel(props: any) {
     }
     // 选择集变化即解除两段式删除的 armed 态:否则 4 秒窗口内改勾选,
     // 第二次点击会把确认"误嫁"给新的选择集。
-    setConfirmingDelete(false);
+    disarmDelete();
   };
   const toggleOne = (sessionId: any, checked: any) => {
     setSelected((current) => {
@@ -433,7 +505,7 @@ function ArchivePanel(props: any) {
       if (checked) next.add(sessionId); else next.delete(sessionId);
       return next;
     });
-    setConfirmingDelete(false);
+    disarmDelete();
   };
 
   const toggleDetail = (item: any) => {
@@ -442,6 +514,10 @@ function ArchivePanel(props: any) {
       return;
     }
     setExpanded(item.sessionId);
+    // 同一 id 的详情请求在途时不重复发（快速“查看→收起→查看”）：
+    // last-write-wins 虽结果一致，但多一次完整事件流解析纯属浪费。
+    // 展开态先给，在途请求落定后内容自动出现。
+    if (detailLoading.has(item.sessionId)) return;
     const cached = details.get(item.sessionId);
     // 失败结果不缓存拦截:之前把 {error} 写进 Map 后 has() 恒真,唯一出路是
     // 刷新页面;现在再次点击即重新请求。
@@ -506,10 +582,10 @@ function ArchivePanel(props: any) {
         const failText = t(failKey).replace("{n}", String(result.failed.length)) + " — " + detail + more;
         // 全失败才用 error 样式;部分成功是 warn,成功计数也要如实带上,
         // 不能只报失败让用户以为一个都没成。附带 needsRestart 时同样 warn。
-        if (n > 0) setNotice({ kind: "warn", text: doneText + "；" + failText + (restartText !== null ? "；" + restartText : "") });
+        if (n > 0) setNotice({ kind: "warn", text: doneText + t("joiner") + " " + failText + (restartText !== null ? t("joiner") + " " + restartText : "") });
         else setNotice({ kind: "error", text: failText });
       } else if (restartText !== null) {
-        setNotice({ kind: "warn", text: doneText + "；" + restartText });
+        setNotice({ kind: "warn", text: doneText + t("joiner") + " " + restartText });
       } else {
         setNotice({ kind: "ok", text: doneText });
       }
@@ -526,7 +602,7 @@ function ArchivePanel(props: any) {
         setExpanded((current: any) => (current !== null && done.has(current) ? null : current));
       }
       setSelected(new Set());
-      setConfirmingDelete(false);
+      disarmDelete();
       if (doneIds.length > 0 && typeof props.refreshSessions === "function") {
         // 删除/恢复后刷新客户端会话列表：原生"设置 → 已归档会话"页的每行是
         // 归档集合 ∩ 会话摘要（byId），cold 会话的文件已删但客户端 byId 缓存
@@ -546,9 +622,16 @@ function ArchivePanel(props: any) {
   const deleteSelected = () => {
     if (!confirmingDelete) {
       setConfirmingDelete(true);
-      window.setTimeout(() => setConfirmingDelete(false), 4000);
+      if (confirmTimer.current !== 0) globalThis.clearTimeout(confirmTimer.current);
+      confirmTimer.current = globalThis.setTimeout(() => {
+        confirmTimer.current = 0;
+        setConfirmingDelete(false);
+      }, 4000);
       return;
     }
+    // 大批量且未勾选确认框：第二次点击也不执行，等勾选（工具栏按钮同样
+    // 禁用中，双保险防“双击节奏穿透”）。
+    if (needsDeleteAck(selected.size, confirmingDelete) && !deleteAcked) return;
     runBatch("delete", "deleteDone", "deleteFailed");
   };
 
@@ -595,7 +678,9 @@ function ArchivePanel(props: any) {
           "span",
           { style: { display: "inline-flex", gap: "6px", alignItems: "center" } },
           React.createElement("button", { className: "sa_refresh", type: "button", title: t("refresh"), disabled: busy || loading, onClick: load }, t("refresh")),
-          React.createElement("button", { className: "sa_iconBtn", type: "button", title: t("close"), disabled: busy, onClick: closePanel }, "✕")
+          React.createElement("button", { className: "sa_iconBtn", type: "button", title: t("close"), "aria-label": t("close"), disabled: busy, onClick: closePanel },
+            React.createElement("svg", { viewBox: "0 0 24 24", width: 14, height: 14, fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", "aria-hidden": true },
+              React.createElement("path", { d: "M6 6l12 12M18 6L6 18" })))
         )
       ),
       React.createElement(
@@ -606,6 +691,8 @@ function ArchivePanel(props: any) {
             className: "sa_check",
             type: "checkbox",
             checked: allSelected,
+            // 部分选中时半选态：否则半选显示为全不选，误导用户以为没勾上。
+            ref: (el: any) => { if (el !== null && el !== undefined) el.indeterminate = hasSelection && !allSelected; },
             disabled: busy || selectable.length === 0,
             onChange: (e) => toggleAll(e.target.checked)
           }),
@@ -621,7 +708,7 @@ function ArchivePanel(props: any) {
         React.createElement("button", {
           className: "sa_action " + (confirmingDelete ? "sa_actionDanger sa_confirm" : "sa_actionDanger"),
           type: "button",
-          disabled: busy || !hasSelection,
+          disabled: busy || !hasSelection || (needsDeleteAck(selected.size, confirmingDelete) && !deleteAcked),
           onClick: deleteSelected
         }, confirmingDelete
           ? (selected.size > 1 ? t("confirmAll").replace("{n}", String(selected.size)) : t("deleteConfirm"))
@@ -632,6 +719,32 @@ function ArchivePanel(props: any) {
         { className: "sa_body" },
         notice !== null ? React.createElement("p", { className: notice.kind === "ok" ? "sa_ok" : notice.kind === "warn" ? "sa_warn" : "sa_error", role: "status" }, notice.text) : null,
         error !== null ? React.createElement("p", { className: "sa_error", role: "alert" }, error) : null,
+        // 大批量删除的勾选确认条（数量达阈值才出现）：文案说清不可恢复，
+        // 主按钮在勾选前禁用——抄宿主 RiskConfirmation 的行为。
+        needsDeleteAck(selected.size, confirmingDelete) ? React.createElement(
+          "div",
+          { className: "sa_ack", role: "alert" },
+          React.createElement("p", { className: "sa_ackText" },
+            t("deleteConfirmBody").replace("{n}", String(selected.size))),
+          React.createElement("label", { className: "sa_ackLabel" },
+            React.createElement("input", {
+              className: "sa_check",
+              type: "checkbox",
+              checked: deleteAcked,
+              onChange: (e: any) => setDeleteAcked(e.target.checked)
+            }),
+            t("deleteAcknowledge").replace("{n}", String(selected.size))
+          ),
+          React.createElement(
+            "div",
+            { className: "sa_ackActions" },
+            React.createElement("button", {
+              className: "sa_action",
+              type: "button",
+              onClick: () => disarmDelete()
+            }, t("cancel"))
+          )
+        ) : null,
         // 加载中明确提示（loading 只由打开面板/手动刷新置位，静默刷新不打扰）：
         // 此前列表已有内容时手动刷新零反馈，首次加载只有一个孤零零的 "…"。
         loading ? React.createElement("p", { className: "sa_loading", role: "status" },
@@ -650,7 +763,7 @@ function ArchivePanel(props: any) {
         items.length > 0 ? React.createElement(
           "ul",
           { className: "sa_rows" },
-          items.map((item) => {
+          visibleItems.map((item) => {
             const isExpanded = expanded === item.sessionId;
             const detail = details.get(item.sessionId);
             const detailPending = detailLoading.has(item.sessionId);
@@ -721,7 +834,14 @@ function ArchivePanel(props: any) {
                   ))
               ) : null
             );
-          })
+          }),
+          // 分页：还有未渲的行就给“加载更多”，点一次追加一页。
+          visibleCount < items.length ? React.createElement("button", {
+            className: "sa_action",
+            type: "button",
+            style: { display: "block", margin: "4px auto 0" },
+            onClick: () => setVisibleCount((current) => current + ARCHIVE_PAGE_SIZE)
+          }, t("showMore").replace("{n}", String(items.length - visibleCount))) : null
         ) : null
       )
     )) : null
@@ -743,7 +863,11 @@ const REMOTE_CONTRIBUTION: TypertRemoteContribution = {
     { id: "@chaoset/session-archive#sessionArchive/unarchive", service: "sessionArchive", namespace: "sessionArchive", method: "unarchive", invocation: { kind: "direct" }, parameters: [{ name: "sessionIds", wire: "sessionIds", source: "json", codec: { mode: "strict", typeSymbol: "sessionArchive/unarchive:sessionIds", create: () => passthroughSchema } }], result: { mode: "strict", typeSymbol: "sessionArchive/unarchive:result", create: () => passthroughSchema } }
   ]
 };
+// 与 dsh-any-connect / provider-usage 同一条兜底边界：slot API 破坏时
+// 降级为 console.error（侧边栏少一个徽标），不得把异常抛给宿主 loader
+// 炸出整页红条——纯 additive 的面板没有资格打断宿主。
 async function apply(ctx: any) {
+  try {
   const t = ctx.locale.bind(NS);
   ctx.effect(() => {
     try {
@@ -797,6 +921,9 @@ async function apply(ctx: any) {
       } : void 0,
     })
   }, ArchivePanel));
+  } catch (error: any) {
+    console.error("[session-archive] client panel failed to load (sidebar badge missing):", error);
+  }
 }
 
-export { apply, inject };
+export { apply, inject, trapTarget, needsDeleteAck, DELETE_ACK_THRESHOLD, ARCHIVE_PAGE_SIZE };

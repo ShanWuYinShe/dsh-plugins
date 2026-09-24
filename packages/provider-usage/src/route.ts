@@ -44,20 +44,45 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 }
 
 /**
- * Loopback browser origins only.
+ * Loopback guards. Semantics mirror dsh-any-connect's `src/loopback.ts`
+ * (kept as a local copy: the two packages ship independently and cannot
+ * import each other — intentional drift-toward-rejection if they diverge).
  *
- * Usage is account-level information, so the same posture the WorkBuddy card
- * takes applies here: a request without an origin is a same-origin fetch from
- * the served page (browsers omit it on some GETs), and any other origin is a
- * cross-site read attempt.
+ * Usage is account-level information: a request without an origin is a
+ * same-origin fetch from the served page (browsers omit it on some GETs),
+ * and any other origin is a cross-site read attempt. The Host check
+ * additionally drops DNS-rebinding navigation/form requests, which carry
+ * no Origin but send the attacker's domain in Host.
  */
-function loopbackOrigin(req: IncomingMessage): boolean {
-  const origin = req.headers.origin
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+
+function hostnameOfHost(host: string): string {
+  let hostname = host.trim().toLowerCase()
+  if (hostname.startsWith('[')) {
+    const end = hostname.indexOf(']')
+    if (end === -1) return hostname
+    const rest = hostname.slice(end + 1)
+    if (rest !== '' && !/^:\d+$/.test(rest)) return hostname
+    return hostname.slice(0, end + 1)
+  }
+  const colon = hostname.lastIndexOf(':')
+  if (colon !== -1 && !hostname.slice(0, colon).includes(':') && /^\d+$/.test(hostname.slice(colon + 1))) {
+    hostname = hostname.slice(0, colon)
+  }
+  return hostname
+}
+
+function hostIsLoopback(host: string | undefined): boolean {
+  if (host === undefined || host.trim() === '') return false
+  return LOOPBACK_HOSTS.has(hostnameOfHost(host))
+}
+
+function originIsLoopback(origin: string | undefined): boolean {
   if (origin === undefined) return true
   try {
     const { hostname } = new URL(origin)
     // WHATWG URL returns IPv6 hostnames bracketed.
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+    return LOOPBACK_HOSTS.has(hostname) || hostname === '::1'
   } catch {
     return false
   }
@@ -89,8 +114,10 @@ export function providerUsageHandler(options: ProviderUsageRouteOptions): (req: 
       json(res, 405, { error: 'method not allowed' })
       return
     }
-    if (!loopbackOrigin(req)) {
-      json(res, 403, { error: 'origin-not-trusted' })
+    // 与探针路由同口径：Host 必环回（挡 DNS 重绑定导航/表单）+
+    // Origin 必环回（挡跨站读），缺一即 403。
+    if (!hostIsLoopback(req.headers.host) || !originIsLoopback(req.headers.origin)) {
+      json(res, 403, { error: 'request-not-trusted' })
       return
     }
     try {

@@ -97,6 +97,42 @@ describe('deepseekUsage', () => {
     expect(snapshot.error).toBeUndefined()
   })
 
+  it('falls back to OAuth account wallets without an API key (one window per currency)', async () => {
+    const snapshot = await deepseekUsage({
+      provider: 'deepseek',
+      accountWallets: [
+        { currency: 'CNY', recharge: 10, bonus: 5 },
+        { currency: 'USD', recharge: 0, bonus: 2.5 },
+      ],
+    })
+    expect(snapshot.windows).toEqual([
+      { id: 'account-CNY', label: 'CNY', remain: 15, unit: 'cny' },
+      { id: 'account-USD', label: 'USD', remain: 2.5, unit: 'usd' },
+    ])
+    expect(snapshot.error).toBeUndefined()
+  })
+
+  it('prefers the API path whenever a key exists (no double counting)', async () => {
+    stubFetch({
+      'https://api.deepseek.com/user/balance': {
+        body: { balance_infos: [{ currency: 'CNY', total_balance: '7' }] },
+      },
+    })
+    const snapshot = await deepseekUsage({
+      provider: 'deepseek',
+      apiKey: 'k',
+      accountWallets: [{ currency: 'CNY', recharge: 100, bonus: 100 }],
+    })
+    // balance- 前缀证明走的是 API（而非 account- 的 200）。
+    expect(snapshot.windows).toEqual([{ id: 'balance-CNY', label: 'CNY', remain: 7, unit: 'cny' }])
+  })
+
+  it('surfaces an account-source failure as an error', async () => {
+    const snapshot = await deepseekUsage({ provider: 'deepseek', accountError: 'account signed out' })
+    expect(snapshot.windows).toEqual([])
+    expect(snapshot.error).toBe('account signed out')
+  })
+
   it('surfaces a non-2xx as an error rather than a wrong balance', async () => {
     stubFetch({ 'https://api.deepseek.com/user/balance': { status: 401, body: { error: 'bad key' } } })
     await expect(deepseekUsage({ provider: 'deepseek', apiKey: 'k' })).rejects.toThrow('401')

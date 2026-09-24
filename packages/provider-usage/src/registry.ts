@@ -16,7 +16,7 @@
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import { inferProviderFromBaseUrl, normalizeProviderKey } from './resolve.js'
-import type { ProviderUsageQuerier, UsageSnapshot } from './types.js'
+import type { AccountWalletBalance, ProviderUsageQuerier, UsageSnapshot } from './types.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -238,12 +238,16 @@ export class ProviderUsageRegistry extends Service {
   private resolveProvider: ((provider: string, signal: AbortSignal) => Promise<{
     baseURL?: string
     apiKey?: string
+    accountWallets?: AccountWalletBalance[]
+    accountError?: string
   }>) = async () => ({})
 
   /** Install the resolver used to fill each query's endpoint and credential. */
   setResolver(resolver: (provider: string, signal: AbortSignal) => Promise<{
     baseURL?: string
     apiKey?: string
+    accountWallets?: AccountWalletBalance[]
+    accountError?: string
   }>): void {
     this.resolveProvider = resolver
   }
@@ -255,6 +259,8 @@ export class ProviderUsageRegistry extends Service {
       provider,
       ...resolved.baseURL === undefined ? {} : { baseURL: resolved.baseURL },
       ...resolved.apiKey === undefined ? {} : { apiKey: resolved.apiKey },
+      ...resolved.accountWallets === undefined ? {} : { accountWallets: resolved.accountWallets },
+      ...resolved.accountError === undefined ? {} : { accountError: resolved.accountError },
       signal,
     })
   }

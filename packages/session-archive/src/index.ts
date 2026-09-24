@@ -9,8 +9,8 @@
  * dsh-session / dsh-session-persistence / dsh-session-title 的官方 d.ts），
  * 面向 DSH 0.1.7-alpha 宿主线：
  *   1. list()       — archivedSessionIds ∩ 逐 id persistence.stat()，
- *                     每条附带标题（官方 foldSessionTitle 折叠，事件流
- *                     分块读取）、目录、创建时间、最后修改时间（文件
+ *                     每条附带标题（sessionQuery 批量索引优先，缺席回退
+ *                     事件流分块读 + fold）、目录、创建时间、最后修改时间（文件
  *                     mtime）、体积与 live 状态（会话仍在内存中运行时
  *                     禁止删除）。
  *   2. detail(id)   — open(id,'read') 句柄只读会话事件流（标题 + 文本
@@ -241,6 +241,28 @@ function messageText(content: unknown, maxChars: number): string {
  * 只读操作失败各自容错：单个会话的标题/详情读取失败不拖垮列表。
  */
 export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
+  /**
+   * sessionQuery 标题批量查询的最小结构契约（可选服务，运行时探测）。
+   * 官方 SessionTitleObservationResult 的读子集：故意不用官方类型——
+   * 服务缺席/降级/契约漂移时靠运行时收窄兜底，加 devDep 只为类型是虚假
+   * 安全（且该包不在插件依赖树内）；必填服务才走 dsh.d.ts 官方类型。
+   */
+  interface TitleBulkValue {
+    title?: { title?: unknown };
+  }
+  interface TitleBulkResult {
+    sessionId: string;
+    status: string;
+    value?: TitleBulkValue;
+  }
+  const sessionQueryTitles = ((): ((ids: readonly SessionId[]) => Promise<TitleBulkResult[]>) | undefined => {
+    const query: unknown = (ctx as { sessionQuery?: unknown }).sessionQuery;
+    if (query === null || typeof query !== 'object') return undefined;
+    const read = (query as { readTitleSnapshots?: unknown }).readTitleSnapshots;
+    if (typeof read !== 'function') return undefined;
+    const engine = query as { readTitleSnapshots(ids: readonly SessionId[]): Promise<TitleBulkResult[]> };
+    return (ids) => engine.readTitleSnapshots(ids);
+  })();
   const registry: WorkspaceRegistry = ctx.workspaceRegistry;
   const persistence: SessionPersistence & LocatableSessionPersistence = ctx.sessionPersistence;
 
@@ -446,13 +468,43 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
    * 时跳过缓存直接读，标题仍然可得。折叠用官方 foldSessionTitle。
    * 缓存有上限（FIFO 淘汰最旧条目）：已删除会话的条目不再被 mtime 命中
    * 更新，长驻 host 进程下无界累积。 */
+  /**
+   * 批量读标题（官方标题索引存在时）：O(1)/id，不用 open 整条事件流。
+   * 返回 null 表示整单回退直读；Map 缺席的 id 表示该行 rejected，调用方
+   * 对该行回退直读。标题语义与直读一致（latest-wins fold，缺标题为 null）。
+   *
+   * live-preferred 的说明：归档会话已从会话列表移除、无法继续对话，不会
+   * 再写持久化文件，内存与文件中的标题必然收敛；展示用标题取 fresher
+   * 的一方无害（体积/mtime 等安全关键字段仍以文件为准）。
+   */
+  async function readTitlesBulk(ids: readonly SessionId[]): Promise<Map<string, string | null> | null> {
+    if (sessionQueryTitles === undefined) return null;
+    let results: TitleBulkResult[];
+    try {
+      results = await sessionQueryTitles(ids);
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(results)) return null;
+    const titles = new Map<string, string | null>();
+    for (const result of results) {
+      if (result === null || typeof result !== 'object' || result.status !== 'fulfilled') continue;
+      const title = result.value?.title?.title;
+      titles.set(result.sessionId, typeof title === 'string' ? title : null);
+    }
+    return titles;
+  }
+
   const TITLE_CACHE_LIMIT = 500;
   const titleCache = new Map<string, { mtimeMs: number; title: string | null }>();
-  async function rowFor(sessionId: SessionId, header: SessionHeader) {
+  async function rowFor(sessionId: SessionId, header: SessionHeader, titles: Map<string, string | null> | null) {
     const file = await fileInfo(header);
     const located = file.state === 'located' ? file : null;
     let title: string | null = null;
-    if (located !== null) {
+    if (titles !== null && titles.has(sessionId)) {
+      // bulk 命中：索引本就新鲜，跳过缓存与直读。
+      title = titles.get(sessionId) ?? null;
+    } else if (located !== null) {
       const cached = titleCache.get(sessionId);
       if (cached !== undefined && cached.mtimeMs === located.mtimeMs) {
         title = cached.title;
@@ -503,7 +555,11 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
         if (snapshot === undefined) continue; // 幽灵 id：会话文件已不存在
         rows.push({ sessionId, header: snapshot.header });
       }
-      const items = await limitedConcurrency(cfg.titleReadConcurrency, rows.map(({ sessionId, header }) => () => rowFor(sessionId as SessionId, header)));
+      // 标题优先走官方索引批量读（无 sessionQuery/整单失败时 readTitlesBulk
+      // 返回 null，逐行回退直读；单行 rejected 同理）。存在性过滤与体积/mtime
+      // 仍以文件为准，不受索引影响。
+      const bulk = await readTitlesBulk(rows.map(({ sessionId }) => sessionId as SessionId));
+      const items = await limitedConcurrency(cfg.titleReadConcurrency, rows.map(({ sessionId, header }) => () => rowFor(sessionId as SessionId, header, bulk)));
       return { items };
     },
 

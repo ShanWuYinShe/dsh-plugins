@@ -13,6 +13,7 @@ import type { WorkBuddyAuthStatus, WorkBuddyCredential } from './auth.js'
 import type { WorkBuddyCredits } from './upstream.js'
 import { normalizeCredits } from './upstream.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
+import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { WORKBUDDY_STATUS_PATH } from './status-paths.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from './status-paths.js'
 
@@ -58,18 +59,6 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload)
 }
 
-/** Loopback browser origins only; other devices are refused until trusted origins exist. */
-function loopbackOrigin(req: IncomingMessage): boolean {
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  try {
-    const { hostname } = new URL(origin)
-    // WHATWG URL 对 IPv6 主机名返回带方括号的拼写。
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
-  } catch {
-    return false
-  }
-}
 
 /**
  * Assemble the card's status document. Sign-in state is read-only; credit is
@@ -140,8 +129,10 @@ export function registerWorkBuddyStatusRoute(ctx: Context, deps: WorkBuddyStatus
           json(res, 405, { error: 'method not allowed' })
           return
         }
-        if (!loopbackOrigin(req)) {
-          json(res, 403, { error: 'origin-not-trusted' })
+        // 与探针路由同口径：Host 必环回（挡 DNS 重绑定导航/表单）+
+        // Origin 必环回（挡跨站读），缺一即 403。
+        if (!hostIsLoopback(req.headers.host) || !originIsLoopback(req.headers.origin)) {
+          json(res, 403, { error: 'request-not-trusted' })
           return
         }
         try {

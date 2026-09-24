@@ -178,4 +178,28 @@ describe('WorkBuddy 配置卡片', () => {
     expect(content).toContain('夜间 23:00~09:00 免费')
     expect(content).not.toContain('当前积分 1')
   })
+
+  it('error 态行内显示读取失败而不是未登录，并可一键重试', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      calls.push(String(input))
+      return { ok: false, status: 500, json: async () => ({}) }
+    }))
+    await mount()
+    // 服务错误不得误读成“没登录”。
+    expect(text()).toContain('读取失败')
+    expect(text()).not.toContain('未登录')
+    // 展开第一行：看到原因 + 重试按钮，点重试即再发请求。
+    const row = [...container.querySelectorAll('button')]
+      .find(button => button.getAttribute('aria-expanded') !== null
+        && button.getAttribute('aria-label') === null)
+    expect(row).not.toBeUndefined()
+    await act(async () => { (row as HTMLButtonElement).click() })
+    const retry = [...container.querySelectorAll('button')]
+      .find(button => button.textContent === '重试')
+    expect(retry).not.toBeUndefined()
+    const before = calls.length
+    await act(async () => { (retry as HTMLButtonElement).click() })
+    expect(calls.length).toBeGreaterThan(before)
+  })
 })

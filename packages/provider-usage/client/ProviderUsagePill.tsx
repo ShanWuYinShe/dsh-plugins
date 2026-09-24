@@ -177,7 +177,7 @@ function fillStyle(percent: number): CSSProperties {
   const color = percent <= 5
     ? 'var(--dsw-alias-state-error-primary, #ff4d4f)'
     : percent <= 20
-      ? 'var(--dsw-alias-state-warning-primary, #faad14)'
+      ? 'var(--dsw-alias-state-warn-primary, #faad14)'
       : 'var(--dsw-alias-brand-primary, #1677ff)'
   return {
     width: `${Math.max(0, Math.min(100, percent))}%`,
@@ -195,7 +195,7 @@ function getDotColor(snapshot?: UsageSnapshot, queried?: boolean): string {
   if (first?.remain !== undefined && first.limit !== undefined && first.limit > 0) {
     const pct = (first.remain / first.limit) * 100
     if (pct <= 5) return 'var(--dsw-alias-state-error-primary, #ff4d4f)'
-    if (pct <= 20) return 'var(--dsw-alias-state-warning-primary, #faad14)'
+    if (pct <= 20) return 'var(--dsw-alias-state-warn-primary, #faad14)'
   }
   return 'var(--dsw-alias-state-success-primary, #52c41a)'
 }
@@ -223,12 +223,12 @@ function WindowRow({ window, t }: { window: UsageWindow; t: ProviderUsageInjecte
   return (
     <div style={windowRowStyle}>
       <div style={windowHeadStyle}>
-        <span style={labelStyle}>{window.label}</span>
+        <span id={`pu-window-${window.id}`} style={labelStyle}>{window.label}</span>
         <span style={{ fontWeight: 500 }}>
           {window.remain === undefined ? window.unit : `${formatAmount(remain)} ${window.unit}`}
         </span>
       </div>
-      {hasLimit ? <div style={trackStyle} role="progressbar" aria-valuenow={Math.round(percent)} aria-valuemin={0} aria-valuemax={100}><div className={percent <= 20 ? 'pu-stripe' : undefined} style={fillStyle(percent)} /></div> : null}
+      {hasLimit ? <div style={trackStyle} role="progressbar" aria-labelledby={`pu-window-${window.id}`} aria-valuenow={Math.round(percent)} aria-valuemin={0} aria-valuemax={100}><div className={percent <= 20 ? 'pu-stripe' : undefined} style={fillStyle(percent)} /></div> : null}
       <span style={windowMetaStyle}>
         {hasLimit ? t('windowRemaining', { remain: formatAmount(remain), limit: formatAmount(window.limit!) }) : null}
         {window.resetsAt === undefined ? null : <>{hasLimit ? ' · ' : ''}{t('resetsAt', { time: formatReset(window.resetsAt) })}</>}
@@ -261,8 +261,9 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
   // renders from, so a model switch moves the pill with no coordination and a
   // brand-new session (empty durable projection) still reports.
   const state = useSyncExternalStore(
-    directory === undefined ? (() => () => {}) : directory.subscribe,
-    directory === undefined ? (() => ABSENT_DIRECTORY) : directory.getSnapshot,
+    // 方法引用不绑定 this：宿主目录实现若依赖 this 会静默坏，包一层箭头防御。
+    directory === undefined ? (() => () => {}) : (fn => directory.subscribe(fn)),
+    directory === undefined ? (() => ABSENT_DIRECTORY) : (() => directory.getSnapshot()),
   )
   // The directory is lazy: `current` stays null until someone loads it, which
   // the composer's own model seat does on mount. A pill that only read the
@@ -272,8 +273,16 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
   const [answer, setAnswer] = useState<RouteAnswer | undefined>(undefined)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  // 保旧值时的“数据可能过期”信号：只有展示更早成功答案时才亮。
+  const [stale, setStale] = useState(false)
+  // 面板左右对齐：触发按钮靠右缘时左对齐面板会溢出视口，提前翻转。
+  const [alignRight, setAlignRight] = useState(false)
+  const answerRef = useRef<RouteAnswer | undefined>(undefined)
   const mounted = useRef(true)
   const rootRef = useRef<HTMLSpanElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const prevOpenRef = useRef(false)
 
   useEffect(() => {
     mounted.current = true
@@ -301,6 +310,14 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
     }
   }, [open])
 
+  // 面板挂着 role="dialog" 就必须可聚焦、可进入：打开时把焦点移入面板
+  // （键盘用户才能读到 380px 可滚内容），关闭时归还给触发按钮。
+  useEffect(() => {
+    if (open && !prevOpenRef.current) panelRef.current?.focus()
+    else if (!open && prevOpenRef.current) buttonRef.current?.focus()
+    prevOpenRef.current = open
+  }, [open])
+
   const refresh = useCallback(async (signal?: AbortSignal): Promise<void> => {
     if (provider === undefined || provider === '') return
     setBusy(true)
@@ -314,14 +331,24 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const first = (value as { snapshots?: unknown } | null)?.snapshots
       const snapshot = Array.isArray(first) ? first[0] as RouteAnswer : undefined
-      if (mounted.current && signal?.aborted !== true) setAnswer(snapshot)
+      if (mounted.current && signal?.aborted !== true) {
+        answerRef.current = snapshot
+        setAnswer(snapshot)
+        setStale(false)
+      }
     } catch (error: unknown) {
       // Keep the last good answer: a transient failure must not blank the
-      // number the user is reading.
+      // number the user is reading. Showing an older success is flagged
+      // stale (dot dims + copy suffix); anything else degrades to failed.
+      const prev = answerRef.current
+      if (prev !== undefined && !('queried' in prev) && prev.error === undefined) {
+        if (mounted.current && signal?.aborted !== true) setStale(true)
+        return
+      }
       if (mounted.current && signal?.aborted !== true) {
-        setAnswer(previous => previous === undefined || 'queried' in previous
-          ? { provider, windows: [], fetchedAt: Date.now(), error: error instanceof Error ? error.message : String(error) }
-          : previous)
+        const failed: RouteAnswer = { provider, windows: [], fetchedAt: Date.now(), error: error instanceof Error ? error.message : String(error) }
+        answerRef.current = failed
+        setAnswer(failed)
       }
     } finally {
       if (mounted.current) setBusy(false)
@@ -333,7 +360,9 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
     const controller = new AbortController()
     // Reset first so a provider switch never shows the previous provider's
     // balance while the new answer is in flight.
+    answerRef.current = undefined
     setAnswer(undefined)
+    setStale(false)
     void refresh(controller.signal)
     return () => { controller.abort() }
   }, [provider, refresh])
@@ -373,9 +402,13 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
             ? `${snapshot!.windows[0]!.label}: ${snapshot!.windows[0]!.unit}${snapshot!.windows.length > 1 ? ` +${snapshot!.windows.length - 1}` : ''}`
             : `${formatAmount(snapshot!.windows[0]!.remain ?? 0)} ${snapshot!.windows[0]!.unit} ${t('remaining')}${snapshot!.windows.length > 1 ? ` +${snapshot!.windows.length - 1}` : ''}`
 
+  // 过期后缀同时进可见文案与 aria-label：读屏用户同样感知数据新鲜度。
+  const headlineText = stale ? `${headline} · ${t('staleData')}` : headline
+
   return (
     <span ref={rootRef} style={{ ...rootStyle, position: 'relative' }}>
       <button
+        ref={buttonRef}
         type="button"
         className="pu-pill-btn"
         style={{
@@ -384,16 +417,37 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
         }}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={headline}
-        onClick={() => { setOpen(!open) }}
+        aria-label={headlineText}
+        onClick={() => {
+          if (!open && buttonRef.current) {
+            // 面板默认左对齐；触发按钮靠右缘时 320px 面板会溢出视口，
+            // 按按钮位置提前决定翻转（抄 useAnchoredPosition 的翻转意图）。
+            const rect = buttonRef.current.getBoundingClientRect()
+            setAlignRight(rect.left + 320 > window.innerWidth - 8)
+          }
+          setOpen(!open)
+        }}
       >
-        <span aria-hidden="true" style={{ ...dotStyle, background: getDotColor(snapshot, queried) }} />
+        <span aria-hidden="true" style={{ ...dotStyle, background: getDotColor(snapshot, queried), opacity: stale ? 0.45 : 1 }} />
         <span style={labelStyle}>{provider}</span>
-        <span style={labelStyle}>{answer === undefined ? <><span className="pu-spin" aria-hidden="true" />{headline}</> : headline}</span>
+        <span style={labelStyle}>{answer === undefined ? <><span className="pu-spin" aria-hidden="true" />{headlineText}</> : headlineText}</span>
       </button>
       {open ? (
-        <div className="pu-pill-panel" style={panelStyle} role="dialog" aria-label={t('providerUsageTitle')}>
-          <p style={panelTitleStyle}>{provider}{snapshot?.plan === undefined ? null : ` · ${t('plan')} ${snapshot.plan}`}</p>
+        <div ref={panelRef} tabIndex={-1} className="pu-pill-panel" style={{ ...panelStyle, outline: 'none', ...(alignRight ? { right: 0, left: 'auto' } : { left: 0 }) }} role="dialog" aria-label={t('providerUsageTitle')}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 0 8px' }}>
+            <p style={{ ...panelTitleStyle, margin: 0 }}>{provider}{snapshot?.plan === undefined ? null : ` · ${t('plan')} ${snapshot.plan}`}</p>
+            <button
+              type="button"
+              className="pu-pill-btn"
+              style={{ ...pillStyle, border: '1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1))', borderRadius: 8, padding: '2px 8px', fontSize: 12, lineHeight: '18px' }}
+              disabled={busy}
+              title={t('refresh')}
+              aria-label={t('refresh')}
+              onClick={() => { void refresh() }}
+            >
+              {busy ? <><span className="pu-spin" aria-hidden="true" />{t('refreshing')}</> : t('refresh')}
+            </button>
+          </div>
           {busy ? <p style={noteStyle}>{t('refreshing')}</p> : null}
           {!queried
             ? <p style={noteStyle}>{t('noQuerierHint')}</p>

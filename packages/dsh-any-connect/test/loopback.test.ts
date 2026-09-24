@@ -26,13 +26,17 @@ describe('hostIsLoopback', () => {
     expect(hostIsLoopback('\t127.0.0.1\n')).toBe(true)
   })
 
-  it('rejects a bracketed IPv6 host with a port (fail-closed)', () => {
-    // 端口剥离只认「头段无冒号 + 尾段纯数字」：[::1] 头段含冒号，整体
-    // 不被剥离也不在清单里，按当前语义拒绝。防护代码允许保守拒绝——
-    // 浏览器对 localhost 通常发不带端口的 IPv6 或 IPv4 Host。
-    expect(hostIsLoopback('[::1]:8080')).toBe(false)
+  it('accepts a bracketed IPv6 host with a port', () => {
+    // 浏览器经 IPv6 同源访问页面时 Host 恒为 `[::1]:port`（宿主支持
+    // 0.0.0.0 监听，此时 IPv6 回环可达）：它是真回环，拒绝会把插件
+    // 自己的 fetch 一起杀掉，可用性损失而无安全收益，故必须放行。
+    expect(hostIsLoopback('[::1]:8080')).toBe(true)
     // 裸 IPv6 带端口本就不是合法 Host 拼写，同样拒绝。
     expect(hostIsLoopback('::1:8080')).toBe(false)
+    // 括号不闭合、括号后跟非端口：fail-closed。
+    expect(hostIsLoopback('[::1')).toBe(false)
+    expect(hostIsLoopback('[::1]evil.com')).toBe(false)
+    expect(hostIsLoopback('[::1]:abc')).toBe(false)
   })
 
   it('does not strip a non-numeric or empty port suffix', () => {

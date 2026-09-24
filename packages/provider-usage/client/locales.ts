@@ -16,6 +16,8 @@ export type ProviderUsageLocaleKey =
   | 'collapse'
   | 'providerUsageTitle'
   | 'emptyProvider'
+  | 'refresh'
+  | 'staleData'
 
 export const en: Record<ProviderUsageLocaleKey, string> = {
   loading: 'Loading usage…',
@@ -32,6 +34,8 @@ export const en: Record<ProviderUsageLocaleKey, string> = {
   collapse: 'Collapse',
   providerUsageTitle: 'Provider usage',
   emptyProvider: 'No provider',
+  refresh: 'Refresh',
+  staleData: 'may be stale',
 }
 
 export const zh: Record<ProviderUsageLocaleKey, string> = {
@@ -49,4 +53,6 @@ export const zh: Record<ProviderUsageLocaleKey, string> = {
   collapse: '收起',
   providerUsageTitle: 'Provider 额度',
   emptyProvider: '无 provider',
+  refresh: '刷新',
+  staleData: '数据可能过期',
 }

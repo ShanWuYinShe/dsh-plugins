@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.15 (2026-09-25)
+
+### 修复
+
+* **主题变量拼写修正**：未保存徽标改用 `--dsw-alias-state-warn-primary`、等宽字体改用 `--ds-font-family-code`（此前两个名字宿主不存在，暗色/高对比主题下静默回退硬编码）；配套新增 CSS 变量白名单回归测试。
+* **错误消息独立展示**：保存/加载失败改走块级 `role="alert"`（此前复用 footer 状态行）。
+* **apply 加 slot 兜底边界**：与 dsh-any-connect / provider-usage 一致，slot API 破坏时降级 console 而不是炸宿主红条。
+* **set 网关参数加真 schema 校验**：畸形输入在方法分发前即被拒绝。
+
+### 优化
+
+* **展开卡片时静默重读配置**：CLI/别处改过后页面不显示陈旧值；有未保存编辑时不覆盖，dirty 按新基准重算。
+* **成功提示 5 秒自动消失**：与 session-archive 的 notice 策略统一；错误常驻到下一次编辑。
+* **无障碍**：折叠头关联 `aria-controls`，问题行 emoji 前缀对读屏隐藏。
+
 ## 0.4.14 (2026-09-24)
 
 ### 优化

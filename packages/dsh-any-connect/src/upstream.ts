@@ -10,6 +10,7 @@
 import type { WorkBuddyCredential } from './auth.js'
 import { appUserAgent, resolveAppVersion, type AppVersionInfo } from './app-version.js'
 import type { ProbeAttempt } from './probe.js'
+import { deadlineSignal, withTimeout } from './timeout.js'
 import { ZCodeClientSigner } from './zcode-signer.js'
 
 /** Prompt body used by every probe request; carries nothing user-specific. */
@@ -868,11 +869,10 @@ export class WorkBuddyUpstreamClient {
     bodyJson: string,
     signal?: AbortSignal,
   ): Promise<WorkBuddyChatResult> {
-    const headerTimer = new AbortController()
-    const timer = setTimeout(
-      () => headerTimer.abort(new Error(`no response headers within ${CHAT_HEADER_TIMEOUT_MS}ms`)),
-      CHAT_HEADER_TIMEOUT_MS,
-    )
+    // 头超时与调用方取消经宿主 deadline 融合（此前手写 AbortController +
+    // setTimeout + AbortSignal.any 三件套）：任一触发都中止请求，超时原因
+    // 可分类（此前是裸 Error 字符串）。
+    const headersTimeout = await deadlineSignal(signal, CHAT_HEADER_TIMEOUT_MS, 'ANY_CONNECT_HEADERS')
     const international = regionOf(credential.domain) === 'global'
     let response: Response
     try {
@@ -881,14 +881,13 @@ export class WorkBuddyUpstreamClient {
         headers: { ...chatHeaders(credential), 'Authorization': `Bearer ${credential.accessToken}` },
         // 国际网关硬性要求首条 system 消息（缺失即 400/11128），国内线不加。
         body: international ? prepareInternationalChatBody(bodyJson) : bodyJson,
-        // 调用方断开信号与头超时合并：任一触发都中止请求。
-        signal: signal === undefined ? headerTimer.signal : AbortSignal.any([headerTimer.signal, signal]),
+        signal: headersTimeout.signal,
       })
     } catch (error: unknown) {
       // fetch 本身抛错（取消/传输错误/头超时）同样要拆掉定时器：超时回调对
       // 已 settled 的 controller 是无害 no-op，但定时器会继续挂住事件循环
       // 30s，连续失败的请求会积攒一堆待触发回调。
-      clearTimeout(timer)
+      headersTimeout.dispose()
       // 客户端主动断开（pi-ai 取消生成）不是上游故障，按 client 分类回报；
       // shim 对这类结果不向已销毁的 socket 回写错误。
       if (signal?.aborted) {
@@ -897,7 +896,7 @@ export class WorkBuddyUpstreamClient {
       return { ok: false, status: 0, kind: 'server', message: `transport error: ${String(error)}` }
     }
     if (response.ok) {
-      clearTimeout(timer) // 头已到：流式阶段不受头超时约束
+      headersTimeout.dispose() // 头已到：流式阶段不受头超时约束
       return { ok: true, response }
     }
     let text: string
@@ -908,7 +907,7 @@ export class WorkBuddyUpstreamClient {
     } catch {
       return { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)' }
     } finally {
-      clearTimeout(timer)
+      headersTimeout.dispose()
     }
     return {
       ok: false,
@@ -969,23 +968,26 @@ export class WorkBuddyUpstreamClient {
 
   /** POST the token-refresh endpoint; the caller merges the outcome. */
   async refreshToken(credential: WorkBuddyCredential): Promise<WorkBuddyRefreshOutcome> {
-    const response = await fetch(`${chatBase(credential)}/v2/plugin/auth/token/refresh`, {
-      method: 'POST',
-      headers: refreshHeaders(credential),
-      signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
+    // JSON 短读统一走宿主 deadline（超时原因可分类；此前裸 AbortSignal.timeout）。
+    return withTimeout(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON', async (signal) => {
+      const response = await fetch(`${chatBase(credential)}/v2/plugin/auth/token/refresh`, {
+        method: 'POST',
+        headers: refreshHeaders(credential),
+        signal,
+      })
+      const envelope = await readEnvelope(response)
+      if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope)
+      const data = typeof envelope.data === 'object' && envelope.data !== null
+        ? envelope.data as Record<string, unknown>
+        : {}
+      const accessToken = typeof data['accessToken'] === 'string' ? data['accessToken'] : ''
+      if (accessToken === '') throw new Error('workbuddy token refresh returned no accessToken; sign in again in the WorkBuddy app')
+      const outcome: WorkBuddyRefreshOutcome = { accessToken }
+      if (typeof data['refreshToken'] === 'string' && data['refreshToken'] !== '') outcome.refreshToken = data['refreshToken']
+      if (typeof data['expiresIn'] === 'number' && data['expiresIn'] > 0) outcome.expiresInSec = data['expiresIn']
+      if (typeof data['domain'] === 'string' && data['domain'] !== '') outcome.domain = data['domain']
+      return outcome
     })
-    const envelope = await readEnvelope(response)
-    if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope)
-    const data = typeof envelope.data === 'object' && envelope.data !== null
-      ? envelope.data as Record<string, unknown>
-      : {}
-    const accessToken = typeof data['accessToken'] === 'string' ? data['accessToken'] : ''
-    if (accessToken === '') throw new Error('workbuddy token refresh returned no accessToken; sign in again in the WorkBuddy app')
-    const outcome: WorkBuddyRefreshOutcome = { accessToken }
-    if (typeof data['refreshToken'] === 'string' && data['refreshToken'] !== '') outcome.refreshToken = data['refreshToken']
-    if (typeof data['expiresIn'] === 'number' && data['expiresIn'] > 0) outcome.expiresInSec = data['expiresIn']
-    if (typeof data['domain'] === 'string' && data['domain'] !== '') outcome.domain = data['domain']
-    return outcome
   }
 
   /** GET the personal model catalog and keep the `cli` agent's models only.
@@ -1008,52 +1010,54 @@ export class WorkBuddyUpstreamClient {
         userAgent = CLIENT_UA
       }
     }
-    const response = await fetch(
-      `${chatBase(credential)}${international ? '/v3/config' : '/console/enterprises/personal/models'}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${credential.accessToken}`,
-          'Accept': 'application/json',
-          'Origin': originReferer(credential),
-          'Referer': `${originReferer(credential)}/`,
-          'User-Agent': userAgent,
-          ...international ? { 'X-Requested-With': 'XMLHttpRequest', 'X-Product': 'SaaS' } : {},
+    return withTimeout(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON', async (signal) => {
+      const response = await fetch(
+        `${chatBase(credential)}${international ? '/v3/config' : '/console/enterprises/personal/models'}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${credential.accessToken}`,
+            'Accept': 'application/json',
+            'Origin': originReferer(credential),
+            'Referer': `${originReferer(credential)}/`,
+            'User-Agent': userAgent,
+            ...international ? { 'X-Requested-With': 'XMLHttpRequest', 'X-Product': 'SaaS' } : {},
+          },
+          signal,
         },
-        signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
-      },
-    )
-    const envelope = await readEnvelope(response)
-    if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope)
-    const data = typeof envelope.data === 'object' && envelope.data !== null
-      ? envelope.data as Record<string, unknown>
-      : {}
-    const rawModels = Array.isArray(data['models']) ? data['models'] : []
-    const agents = Array.isArray(data['agents']) ? data['agents'] : []
-    let cliIds: readonly string[] | undefined
-    for (const agent of agents) {
-      if (typeof agent === 'object' && agent !== null) {
-        const wrapped = agent as Record<string, unknown>
-        if (wrapped['name'] === 'cli' && Array.isArray(wrapped['models'])) {
-          cliIds = wrapped['models'].filter((id): id is string => typeof id === 'string')
-          break
+      )
+      const envelope = await readEnvelope(response)
+      if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope)
+      const data = typeof envelope.data === 'object' && envelope.data !== null
+        ? envelope.data as Record<string, unknown>
+        : {}
+      const rawModels = Array.isArray(data['models']) ? data['models'] : []
+      const agents = Array.isArray(data['agents']) ? data['agents'] : []
+      let cliIds: readonly string[] | undefined
+      for (const agent of agents) {
+        if (typeof agent === 'object' && agent !== null) {
+          const wrapped = agent as Record<string, unknown>
+          if (wrapped['name'] === 'cli' && Array.isArray(wrapped['models'])) {
+            cliIds = wrapped['models'].filter((id): id is string => typeof id === 'string')
+            break
+          }
         }
       }
-    }
-    if (cliIds === undefined || cliIds.length === 0) {
-      throw new Error('workbuddy model catalog lists no cli agent models')
-    }
-    const promotions = international ? data['modelPromotions'] : undefined
-    const byId = new Map<string, WorkBuddyUpstreamModel>()
-    for (const model of rawModels) {
-      if (typeof model !== 'object' || model === null) continue
-      const parsed = parseModelRow(model as Record<string, unknown>, international, promotions)
-      if (parsed !== undefined) byId.set(parsed.id, parsed)
-    }
-    const models = cliIds
-      .map(id => byId.get(id))
-      .filter((model): model is WorkBuddyUpstreamModel => model !== undefined)
-    if (models.length === 0) throw new Error('workbuddy model catalog resolved to an empty list')
-    return models
+      if (cliIds === undefined || cliIds.length === 0) {
+        throw new Error('workbuddy model catalog lists no cli agent models')
+      }
+      const promotions = international ? data['modelPromotions'] : undefined
+      const byId = new Map<string, WorkBuddyUpstreamModel>()
+      for (const model of rawModels) {
+        if (typeof model !== 'object' || model === null) continue
+        const parsed = parseModelRow(model as Record<string, unknown>, international, promotions)
+        if (parsed !== undefined) byId.set(parsed.id, parsed)
+      }
+      const models = cliIds
+        .map(id => byId.get(id))
+        .filter((model): model is WorkBuddyUpstreamModel => model !== undefined)
+      if (models.length === 0) throw new Error('workbuddy model catalog resolved to an empty list')
+      return models
+    })
   }
 
   /** POST the billing endpoint for the aggregated remaining credit. */
@@ -1068,65 +1072,67 @@ export class WorkBuddyUpstreamClient {
       date.getMinutes().toString().padStart(2, '0'),
       date.getSeconds().toString().padStart(2, '0'),
     ].join(':')
-    const response = await fetch(`${billingBase(credential)}/v2/billing/meter/get-user-resource`, {
-      method: 'POST',
-      headers: billingHeaders(credential),
-      body: JSON.stringify({
-        PageNumber: 1,
-        PageSize: 100,
-        ProductCode: 'p_tcaca',
-        Status: [0, 3],
-        PackageEndTimeRangeBegin: format(now),
-        // 窗口上界沿用上游 CLI 的拼写：约 101 年（365×101 天），毫秒数。
-        PackageEndTimeRangeEnd: format(new Date(now.getTime() + 365 * 101 * 24 * 3600 * 1000)),
-      }),
-      signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
-    })
-    const envelope = await readEnvelope(response)
-    if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope)
-    const responseWrapper = typeof envelope.data === 'object' && envelope.data !== null
-      ? envelope.data as Record<string, unknown>
-      : {}
-    const data = typeof responseWrapper['Response'] === 'object' && responseWrapper['Response'] !== null
-      ? responseWrapper['Response'] as Record<string, unknown>
-      : {}
-    const inner = typeof data['Data'] === 'object' && data['Data'] !== null
-      ? data['Data'] as Record<string, unknown>
-      : {}
-    const rawAccounts = Array.isArray(inner['Accounts']) ? inner['Accounts'] : []
-    const accounts: WorkBuddyCreditAccount[] = []
-    let total = 0
-    for (const raw of rawAccounts) {
-      if (typeof raw !== 'object' || raw === null) continue
-      const account = raw as Record<string, unknown>
-      const numberField = (key: string): number => (typeof account[key] === 'number' ? account[key] as number : 0)
-      const size = numberField('CycleCapacitySize')
-      const cycleRemain = numberField('CycleCapacityRemain')
-      const cycleUsed = numberField('CycleCapacityUsed')
-      const capacityRemain = numberField('CapacityRemain')
-      const remainCycles = numberField('RemainCycles')
-      let remain: number
-      if (size > 0) {
-        // True availability of a cyclic package = this cycle's remainder plus
-        // the full grant of every cycle that has not started yet: a package
-        // with its current cycle drained is not empty while RemainCycles > 0.
-        remain = cycleRemain + remainCycles * size
-      } else if (cycleRemain > 0 || cycleUsed > 0) {
-        remain = cycleRemain
-      } else {
-        remain = capacityRemain
-      }
-      if (remain < 0) remain = 0
-      total += remain
-      accounts.push({
-        packageName: typeof account['PackageName'] === 'string' ? account['PackageName'] : '(unnamed)',
-        remain,
-        // The bar's denominator spans the same scope as the numerator: current
-        // cycle plus the not-yet-started ones.
-        size: size > 0 ? size * (1 + remainCycles) : numberField('CapacitySize'),
+    return withTimeout(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON', async (signal) => {
+      const response = await fetch(`${billingBase(credential)}/v2/billing/meter/get-user-resource`, {
+        method: 'POST',
+        headers: billingHeaders(credential),
+        body: JSON.stringify({
+          PageNumber: 1,
+          PageSize: 100,
+          ProductCode: 'p_tcaca',
+          Status: [0, 3],
+          PackageEndTimeRangeBegin: format(now),
+          // 窗口上界沿用上游 CLI 的拼写：约 101 年（365×101 天），毫秒数。
+          PackageEndTimeRangeEnd: format(new Date(now.getTime() + 365 * 101 * 24 * 3600 * 1000)),
+        }),
+        signal,
       })
-    }
-    return { total, accounts }
+      const envelope = await readEnvelope(response)
+      if (!response.ok || envelope.code !== 0) throw envelopeError(response.status, envelope)
+      const responseWrapper = typeof envelope.data === 'object' && envelope.data !== null
+        ? envelope.data as Record<string, unknown>
+        : {}
+      const data = typeof responseWrapper['Response'] === 'object' && responseWrapper['Response'] !== null
+        ? responseWrapper['Response'] as Record<string, unknown>
+        : {}
+      const inner = typeof data['Data'] === 'object' && data['Data'] !== null
+        ? data['Data'] as Record<string, unknown>
+        : {}
+      const rawAccounts = Array.isArray(inner['Accounts']) ? inner['Accounts'] : []
+      const accounts: WorkBuddyCreditAccount[] = []
+      let total = 0
+      for (const raw of rawAccounts) {
+        if (typeof raw !== 'object' || raw === null) continue
+        const account = raw as Record<string, unknown>
+        const numberField = (key: string): number => (typeof account[key] === 'number' ? account[key] as number : 0)
+        const size = numberField('CycleCapacitySize')
+        const cycleRemain = numberField('CycleCapacityRemain')
+        const cycleUsed = numberField('CycleCapacityUsed')
+        const capacityRemain = numberField('CapacityRemain')
+        const remainCycles = numberField('RemainCycles')
+        let remain: number
+        if (size > 0) {
+          // True availability of a cyclic package = this cycle's remainder plus
+          // the full grant of every cycle that has not started yet: a package
+          // with its current cycle drained is not empty while RemainCycles > 0.
+          remain = cycleRemain + remainCycles * size
+        } else if (cycleRemain > 0 || cycleUsed > 0) {
+          remain = cycleRemain
+        } else {
+          remain = capacityRemain
+        }
+        if (remain < 0) remain = 0
+        total += remain
+        accounts.push({
+          packageName: typeof account['PackageName'] === 'string' ? account['PackageName'] : '(unnamed)',
+          remain,
+          // The bar's denominator spans the same scope as the numerator: current
+          // cycle plus the not-yet-started ones.
+          size: size > 0 ? size * (1 + remainCycles) : numberField('CapacitySize'),
+        })
+      }
+      return { total, accounts }
+    })
   }
 }
 
@@ -1156,11 +1162,8 @@ export class ZCodeUpstreamClient {
     bodyJson: string,
     signal?: AbortSignal,
   ): Promise<WorkBuddyChatResult> {
-    const headerTimer = new AbortController()
-    const timer = setTimeout(
-      () => headerTimer.abort(new Error(`no response headers within ${CHAT_HEADER_TIMEOUT_MS}ms`)),
-      CHAT_HEADER_TIMEOUT_MS,
-    )
+    // 头超时与调用方取消经宿主 deadline 融合（同上，与 WorkBuddy 线同口径）。
+    const headersTimeout = await deadlineSignal(signal, CHAT_HEADER_TIMEOUT_MS, 'ANY_CONNECT_HEADERS')
     let response: Response
     try {
       const zcodeHeaders = await this.signer.buildHeaders({ apiKey: credential.accessToken })
@@ -1173,17 +1176,17 @@ export class ZCodeUpstreamClient {
           'anthropic-version': '2023-06-01',
         },
         body: prepareAnthropicBody(bodyJson),
-        signal: signal === undefined ? headerTimer.signal : AbortSignal.any([headerTimer.signal, signal]),
+        signal: headersTimeout.signal,
       })
     } catch (error: unknown) {
-      clearTimeout(timer)
+      headersTimeout.dispose()
       if (signal?.aborted) {
         return { ok: false, status: 0, kind: 'client', message: 'client disconnected before upstream response' }
       }
       return { ok: false, status: 0, kind: 'server', message: `transport error: ${String(error)}` }
     }
     if (response.ok) {
-      clearTimeout(timer)
+      headersTimeout.dispose()
       return { ok: true, response }
     }
     let text: string
@@ -1192,7 +1195,7 @@ export class ZCodeUpstreamClient {
     } catch {
       return { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)' }
     } finally {
-      clearTimeout(timer)
+      headersTimeout.dispose()
     }
     return {
       ok: false,
@@ -1203,13 +1206,15 @@ export class ZCodeUpstreamClient {
   }
 
   async fetchModels(credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
+    // 超时同样走宿主 deadline：外层 try/catch 的降级语义（失败回退已有模型）不变。
+    const modelsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
     try {
       const response = await fetch('https://open.bigmodel.cn/api/paas/v4/models', {
         headers: {
           'Authorization': `Bearer ${credential.accessToken}`,
           'Accept': 'application/json',
         },
-        signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
+        signal: modelsTimeout.signal,
       })
       if (!response.ok) {
         return this.models
@@ -1223,10 +1228,13 @@ export class ZCodeUpstreamClient {
       return this.models
     } catch {
       return this.models
+    } finally {
+      modelsTimeout.dispose()
     }
   }
 
   async fetchCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
+    const creditsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
     try {
       const response = await fetch('https://bigmodel.cn/api/biz/subscription/list', {
         headers: {
@@ -1234,7 +1242,7 @@ export class ZCodeUpstreamClient {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
         },
-        signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
+        signal: creditsTimeout.signal,
       })
       if (!response.ok) {
         return {
@@ -1276,6 +1284,8 @@ export class ZCodeUpstreamClient {
         total: 1,
         accounts: [{ packageName: 'Coding Plan (有效)', remain: 1, size: 1 }],
       }
+    } finally {
+      creditsTimeout.dispose()
     }
   }
 

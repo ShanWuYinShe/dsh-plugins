@@ -39,8 +39,9 @@ export const inject = ['slots', 'locale']
  * the loader.
  */
 export function apply(ctx: ClientContext): void {
+  // namespace 提到 try 之外：catch 里的占位逻辑也要用它，留在 try 内会撞 TDZ。
+  const namespace = 'settings.anyconnect'
   try {
-    const namespace = 'settings.anyconnect'
     ctx.effect((): (() => void) => {
       try {
         return ctx.locale.register(namespace, { zh, en })
@@ -67,5 +68,25 @@ export function apply(ctx: ClientContext): void {
     // Degrade silently on the page: the host provider still serves models.
     // Developers see the full cause in the browser console; users see no banner.
     console.error('[dsh-any-connect] client card failed to load (host provider unaffected):', error)
+    // 无声消失不如一行静态占位：用户应知道“配置面板没加载出来”（而非
+    // “本来就没有”）。占位注册本身也包一层，slot 系统整体坏掉时才放弃。
+    // 文案不在这里复用外层 t：t 本身可能就是抛错点，TDZ 下引用它直接再抛；
+    // 重新 bind 一次拿本地化，拿不到就用硬编码英文保底。
+    let fallbackText = 'WorkBuddy config failed to load'
+    try {
+      fallbackText = (ctx.locale.bind(namespace) as WorkBuddyConfigPageInjected['t'])('cardLoadFailed')
+    } catch {
+      // locale 服务整体坏掉时保底。
+    }
+    try {
+      const text = fallbackText
+      ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+        name: 'plugins.bundle.config',
+        key: '@chaoset/dsh-any-connect',
+        inject: () => ({}),
+      }, () => text))
+    } catch {
+      // 连占位都挂不上去就彻底放弃（console 已留痕）。
+    }
   }
 }

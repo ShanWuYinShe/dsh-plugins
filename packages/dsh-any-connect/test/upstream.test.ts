@@ -337,11 +337,16 @@ describe('WorkBuddyUpstreamClient.chatStream', () => {
   })
 
   it('classifies a caller abort as a client disconnect, not an upstream failure', async () => {
-    // 模拟 undici 语义:signal 触发时 fetch 以 AbortError reject。
+    // 模拟 undici 语义:signal 触发时 fetch 以 AbortError reject——含已预
+    // abort 的信号（真 fetch 对预 abort 立即拒；deadline 获取是异步的，调用
+    // 方取消可能落在 fetch 发起前， fused 信号已是 aborted 态）。
     const controller = new AbortController()
-    vi.stubGlobal('fetch', vi.fn((_url: unknown, init: { signal: AbortSignal }) => new Promise<Response>((_resolve, reject) => {
-      init.signal.addEventListener('abort', () => reject(new Error('This operation was aborted')))
-    })))
+    vi.stubGlobal('fetch', vi.fn((_url: unknown, init: { signal: AbortSignal }) => {
+      if (init.signal.aborted) return Promise.reject(new Error('This operation was aborted'))
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(new Error('This operation was aborted')))
+      })
+    }))
     const client = new WorkBuddyUpstreamClient()
     const pending = client.chatStream(CREDENTIAL, '{}', controller.signal)
     controller.abort()
@@ -350,8 +355,9 @@ describe('WorkBuddyUpstreamClient.chatStream', () => {
   })
 
   it('aborts with a server classification when upstream never returns headers', async () => {
-    // 头超时兜底:上游接受连接但不返回响应头。定时器触发 → 合并 signal
-    // 中止 → fetch reject → 按 server 分类,消息带超时说明。
+    // 头超时兜底:上游接受连接但不返回响应头。deadline 触发 → 融合 signal
+    // 中止 → fetch reject → 按 server 分类,消息带可分类的超时 code
+    // （此前是裸 Error 'no response headers within …ms' 字符串）。
     vi.useFakeTimers()
     try {
       vi.stubGlobal('fetch', vi.fn((_url: unknown, init: { signal: AbortSignal }) => new Promise<Response>((_resolve, reject) => {
@@ -361,7 +367,7 @@ describe('WorkBuddyUpstreamClient.chatStream', () => {
       await vi.advanceTimersByTimeAsync(30_000)
       const result = await pending
       expect(!result.ok && result.kind === 'server').toBe(true)
-      if (!result.ok) expect(result.message).toContain('no response headers')
+      if (!result.ok) expect(result.message).toContain('ANY_CONNECT_HEADERS')
     } finally {
       vi.useRealTimers()
     }

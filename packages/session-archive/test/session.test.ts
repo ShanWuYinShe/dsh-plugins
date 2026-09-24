@@ -63,6 +63,9 @@ function makeFixture(options: {
   archived?: string[];
   headers?: Array<Record<string, any>>;
   withLocate?: boolean;
+  /** sessionQuery 标题索引桩：map 给 fulfilled 标题（缺席=无标题）、
+   * reject 列单行 rejected、throwAll 整单抛错。不传=无该服务（回退直读）。 */
+  titles?: { map?: Record<string, string>; reject?: string[]; throwAll?: boolean };
 } = {}) {
   const registryState = {
     initialized: true,
@@ -98,6 +101,8 @@ function makeFixture(options: {
     : {};
   let statCalls = 0;
   let listCalls = 0;
+  let openCalls = 0;
+  let titleCalls = 0;
   // 官方契约 stat(id):只读该会话元数据;枚举不到(无 header 或文件已删)
   // 返回 undefined。四端点都走 stat 逐 id 定位，不做全量 list()。
   persistenceMock.stat = async (id: string) => {
@@ -115,6 +120,7 @@ function makeFixture(options: {
     }));
   };
   persistenceMock.open = async (id: string, access: string) => {
+    openCalls++;
     if (access !== "read") throw new Error("fixture supports read handles only");
     const header = headerOf(id);
     return {
@@ -130,13 +136,34 @@ function makeFixture(options: {
       close: async () => {},
     };
   };
+  // sessionQuery 标题索引桩（可选服务）：官方 readTitleSnapshots 语义——
+  // 保输入序、逐行 fulfilled/rejected、取消整单抛错由调用方回退。
+  const sessionQuery = options.titles === undefined ? undefined : {
+    readTitleSnapshots: async (ids: string[]) => {
+      titleCalls++;
+      if (options.titles!.throwAll === true) throw new Error("index unavailable");
+      return ids.map((id) => options.titles!.reject?.includes(id) === true
+        ? { sessionId: id, status: "rejected", reason: "unavailable" }
+        : {
+          sessionId: id,
+          status: "fulfilled",
+          value: {
+            session: { id },
+            ...(options.titles!.map?.[id] === undefined
+              ? {}
+              : { title: { title: options.titles!.map[id] } }),
+          },
+        });
+    },
+  };
   // 刻意的部分桩：只实现被测路径用到的服务面，单点断言为完整 Context。
   const ctx = {
     workspaceRegistry: archiveRegistry,
     sessionPersistence: persistenceMock,
     sessions: { get: (id: string) => sessions.get(id) },
+    ...(sessionQuery === undefined ? {} : { sessionQuery }),
   } as unknown as Context;
-  return { ctx, registryState, headers, sessions, persistenceMock, eventReads: () => eventReads, statCalls: () => statCalls, listCalls: () => listCalls };
+  return { ctx, registryState, headers, sessions, persistenceMock, eventReads: () => eventReads, statCalls: () => statCalls, listCalls: () => listCalls, openCalls: () => openCalls, titleCalls: () => titleCalls };
 }
 
 const baseCfg = { detailMaxMessages: 50, messagePreviewChars: 500, titleReadConcurrency: 2 };
@@ -696,5 +723,67 @@ describe("session-archive host", () => {
     // 徽标轮询端点不该打全量枚举:stat 缺失才回退 list()。
     expect(f.listCalls()).toBe(0);
     expect(f.statCalls()).toBeGreaterThanOrEqual(6); // count 3 + list 3
+  });
+
+  it("list() 标题优先走 sessionQuery 批量索引（全程不 open 事件流）", async () => {
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-titles-"));
+    const f = makeFixture({
+      archived: ["s1", "s2"],
+      headers: [
+        { id: "s1", cwd: "/proj/a", createdAt: 1000 },
+        { id: "s2", cwd: "/proj/b", createdAt: 3000 },
+      ],
+      titles: { map: { s1: "索引标题" } },
+    });
+    // s1 文件里是另一个标题：用索引标题才算走了批量路径；s2 索引无标题。
+    writeSession("s1", [
+      { type: "session/title", seq: 1, time: 1000, data: { title: "文件标题", messageSeqs: [], source: { kind: "user" } } },
+    ]);
+    writeSession("s2", [
+      { type: "user/message", seq: 1, time: 3000, data: { id: "m1", role: "user", content: [{ type: "text", text: "hi" }] } },
+    ]);
+    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+
+    const { items } = await archiveHost.list();
+    expect(items.find((i) => i.sessionId === "s1")?.title).toBe("索引标题");
+    expect(items.find((i) => i.sessionId === "s2")?.title).toBeNull();
+    // 标题零事件流扫描：一次批量调用替代逐行 open。
+    expect(f.titleCalls()).toBe(1);
+    expect(f.openCalls()).toBe(0);
+    expect(f.eventReads()).toBe(0);
+  });
+
+  it("索引单行 rejected/整单抛错时回退直读（标题仍对）", async () => {
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-titles-fb-"));
+    const mk = (titles: { map?: Record<string, string>; reject?: string[]; throwAll?: boolean }) => makeFixture({
+      archived: ["s1", "s2"],
+      headers: [
+        { id: "s1", cwd: "/proj/a", createdAt: 1000 },
+        { id: "s2", cwd: "/proj/b", createdAt: 3000 },
+      ],
+      titles,
+    });
+    const files = () => {
+      writeSession("s1", [
+        { type: "session/title", seq: 1, time: 1000, data: { title: "文件标题一", messageSeqs: [], source: { kind: "user" } } },
+      ]);
+      writeSession("s2", [
+        { type: "session/title", seq: 1, time: 3000, data: { title: "文件标题二", messageSeqs: [], source: { kind: "user" } } },
+      ]);
+    };
+    // 单行 rejected：该行回退直读，其余仍走索引。
+    files();
+    const partial = createArchiveHost(mk({ map: { s1: "索引标题" }, reject: ["s2"] }).ctx, baseCfg);
+    const partialItems = await partial.list();
+    expect(partialItems.items.find((i) => i.sessionId === "s1")?.title).toBe("索引标题");
+    expect(partialItems.items.find((i) => i.sessionId === "s2")?.title).toBe("文件标题二");
+    // 整单抛错：全量回退直读，标题仍对。
+    files();
+    const f = mk({ throwAll: true });
+    const fallback = createArchiveHost(f.ctx, baseCfg);
+    const fallbackItems = await fallback.list();
+    expect(fallbackItems.items.find((i) => i.sessionId === "s1")?.title).toBe("文件标题一");
+    expect(fallbackItems.items.find((i) => i.sessionId === "s2")?.title).toBe("文件标题二");
+    expect(f.openCalls()).toBeGreaterThan(0);
   });
 });

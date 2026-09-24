@@ -27,6 +27,7 @@
  */
 
 import { randomBytes } from 'node:crypto'
+import { withTimeout } from './timeout.js'
 import type { WorkBuddyEffort } from './upstream.js'
 
 /**
@@ -122,14 +123,12 @@ export async function probeModel(options: {
 
   const attempt = async (effort: string | undefined): Promise<ProbeAttempt> => {
     requests += 1
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    // 单次探测超时走宿主 deadline（超时原因可分类；此前手写 controller +
+    // setTimeout 三件套）。
     try {
-      return await options.send(effort, controller.signal)
+      return await withTimeout(undefined, timeoutMs, 'ANY_CONNECT_PROBE', (signal) => options.send(effort, signal))
     } catch (error: unknown) {
       return { status: 0, streamed: false, detail: `transport error: ${String(error)}` }
-    } finally {
-      clearTimeout(timer)
     }
   }
 

@@ -7,14 +7,23 @@
  * 双实例时 markers 丢失导致 SRC 认领为空、web 设置页 404）。
  */
 
+// set(partial) 的网关层校验：与 remote.ts 的同形检查语义一致（plain
+// object），畸形输入在方法分发前即被拒绝。结果保持透传（见 session-archive
+// 同名文件的注释：结果由 host 构造，不是不信任边界）。
 const passthrough = (value) => value;
-const codec = (typeSymbol) => ({
+const parsePartial = (value) => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('set expects a plain config object');
+  }
+  return value;
+};
+const codec = (typeSymbol, parse = passthrough) => ({
   mode: 'strict',
   typeSymbol,
   // TypertCodec 使用惰性 create 工厂（typert-loader 校验 create() 存在，
   // 网关 decode/encode 调
   // codec.create().parse()），透传对象无状态，每次返回同一实例即可。
-  create: () => ({ _zod: true, parse: passthrough }),
+  create: () => ({ _zod: true, parse }),
 });
 
 export const TYPERT = {
@@ -43,7 +52,7 @@ export const TYPERT = {
           name: 'partial',
           wire: 'partial',
           source: 'json',
-          codec: codec('@chaoset/sandbox-extra-roots/types#PartialSandboxExtraRootsConfig'),
+          codec: codec('@chaoset/sandbox-extra-roots/types#PartialSandboxExtraRootsConfig', parsePartial),
         },
       ],
       result: codec('@chaoset/sandbox-extra-roots/types#SetResult'),

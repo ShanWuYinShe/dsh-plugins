@@ -9,11 +9,23 @@
 /** Host spellings that name this machine's loopback interface. */
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
 
-/** Strip an optional `:port` suffix without breaking bare IPv6 literals. */
+/** Strip an optional `:port` suffix, IPv6-bracket aware. */
 function hostnameOfHost(host: string): string {
   let hostname = host.trim().toLowerCase()
+  if (hostname.startsWith('[')) {
+    // [v6] 或 [v6]:port → 取括号内：浏览器经 IPv6 同源访问页面时 Host
+    // 恒为 `[::1]:port`，拒绝它会把插件自己的 fetch 一起杀掉（宿主支持
+    // 0.0.0.0 监听，此时 IPv6 回环可达）。括号不闭合、或括号后跟的不
+    // 是空串/:纯数字端口，原样返回（必不在清单内，fail-closed）。
+    const end = hostname.indexOf(']')
+    if (end === -1) return hostname
+    const rest = hostname.slice(end + 1)
+    if (rest !== '' && !/^:\d+$/.test(rest)) return hostname
+    return hostname.slice(0, end + 1)
+  }
   // A trailing `:port` follows the last colon only when the head holds no
-  // other colon (otherwise it is part of an IPv6 literal).
+  // other colon (otherwise it is part of a bare IPv6 literal, which without
+  // brackets is not a legal Host spelling anyway).
   const colon = hostname.lastIndexOf(':')
   if (colon !== -1 && !hostname.slice(0, colon).includes(':') && /^\d+$/.test(hostname.slice(colon + 1))) {
     hostname = hostname.slice(0, colon)

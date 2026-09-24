@@ -183,7 +183,14 @@ describe("client bundles", () => {
     // 故对真实入口零覆盖（源码改了它们也不会红）。这里直接 import 真实入口
     // （本文件的 react vi.mock 已让浏览器专用依赖可在 node 下解析），让注册
     // 函数抛出异常，断言 apply() 吞掉异常并保留已完成的注册。
-    for (const pkg of ["dsh-any-connect", "provider-usage"]) {
+    // 四包同标准：slot 注入抛错不得穿透（各包 apply 内的 try/catch 兜底）。
+    const expectedError: Record<string, string> = {
+      "dsh-any-connect": "client card failed to load",
+      "provider-usage": "client pill failed to load",
+      "session-archive": "client panel failed to load",
+      "sandbox-extra-roots": "client card failed to load",
+    };
+    for (const pkg of ["dsh-any-connect", "provider-usage", "session-archive", "sandbox-extra-roots"]) {
       const mod = await import(`../packages/${pkg}/client/index.tsx`);
       const registrations: any[] = [];
       const errors: unknown[] = [];
@@ -204,9 +211,21 @@ describe("client bundles", () => {
           remote: { $mount: async () => {} },
           get: () => ({}),
         };
-        expect(() => mod.apply(ctx as any), `${pkg}: apply 不得把异常抛给宿主 loader`).not.toThrow();
+        // 同步包抛在调用栈、异步包（session-archive/sandbox-extra-roots）
+        // 拒在微任务：包一层 async IIFE 统一成 Promise 断言，兜底后必须
+        // resolve 而不是 reject。
+        await expect(
+          (async () => { await mod.apply(ctx as any); })(),
+          `${pkg}: apply 不得把异常抛给宿主 loader`
+        ).resolves.toBeUndefined();
         expect(errors.length, `${pkg}: 失败必须在 console.error 里可见`).toBe(1);
-        expect(String(errors[0])).toContain(pkg === "dsh-any-connect" ? "client card failed to load" : "client pill failed to load");
+        expect(String(errors[0])).toContain(expectedError[pkg]);
+        if (pkg === "dsh-any-connect") {
+          // 兜底占位：真卡片注册炸了之后，同 key 的静态占位必须挂上去，
+          // 用户看到一行失败提示而不是空白（mock 的 register 只在首次抛错）。
+          expect(registrations.length, "占位注册必须发生").toBe(2);
+          expect(registrations[1].key, "占位与真卡片同 key").toBe("@chaoset/dsh-any-connect");
+        }
       } finally {
         errorSpy.mockRestore();
         warnSpy.mockRestore();

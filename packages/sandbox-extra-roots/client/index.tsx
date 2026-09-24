@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol";
 
-var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:12px;min-width:0;overflow:hidden;transition:border-color .15s ease,box-shadow .15s ease}.ser_card[data-open=true]{border-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-shadow-lv1)}.ser_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:12px 14px;display:flex;transition:background-color .15s ease}.ser_header:hover,.ser_card[data-open=true]>.ser_header{background:var(--dsw-alias-interactive-bg-hover)}.ser_title{flex:1;min-width:0;font-size:14px;font-weight:600;line-height:20px}.ser_badge{white-space:nowrap;background:color-mix(in srgb,var(--dsw-alias-state-warning-primary,#faad14) 14%,transparent);color:var(--dsw-alias-state-warning-primary,#faad14);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;line-height:16px}.ser_body{border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-module-platform);padding:12px 14px 14px}.ser_field{flex-direction:column;gap:6px;padding:8px 0;display:flex}.ser_label{font-size:12px;font-weight:500;line-height:18px}.ser_textarea{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:8px 12px;font-size:12px;line-height:18px;resize:vertical;min-height:120px;font-family:var(--dsh-font-mono,monospace);transition:border-color .15s ease,box-shadow .15s ease}.ser_textarea:focus{outline:none;border-color:var(--dsw-alias-brand-primary,#1677ff);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary,#1677ff) 20%,transparent)}.ser_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:11px;line-height:16px}.ser_footer{border-top:1px solid var(--dsw-alias-border-l2);justify-content:flex-end;align-items:center;gap:8px;padding:10px 0 2px;display:flex}.ser_save{font:inherit;cursor:pointer;border:1px solid transparent;border-radius:6px;padding:5px 16px;font-size:12px;font-weight:500;line-height:18px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3);transition:all .15s ease}.ser_save:hover:not(:disabled){filter:brightness(1.1)}.ser_save:disabled{opacity:.4;cursor:default}.ser_discard{font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l1);background:0 0;color:var(--dsw-alias-label-secondary,#666);border-radius:6px;padding:5px 16px;font-size:12px;line-height:18px;transition:all .15s ease}.ser_discard:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.ser_discard:disabled{opacity:.4;cursor:default}.ser_status{flex:1;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px}.ser_warn{color:var(--dsw-alias-state-warn-primary)}.ser_danger{color:var(--dsw-alias-state-error-primary)}.ser_info{color:var(--dsw-alias-label-tertiary)}.ser_error{color:var(--dsw-alias-state-error-primary)}.ser_spin{flex:none;width:10px;height:10px;border:1.5px solid var(--dsw-alias-border-l2);border-top-color:var(--dsw-alias-label-secondary);border-radius:50%;animation:ser-spin .8s linear infinite}@keyframes ser-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.ser_spin{animation:none}}";
+var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:12px;min-width:0;overflow:hidden;transition:border-color .15s ease,box-shadow .15s ease}.ser_card[data-open=true]{border-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-shadow-lv1)}.ser_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:12px 14px;display:flex;transition:background-color .15s ease}.ser_header:hover,.ser_card[data-open=true]>.ser_header{background:var(--dsw-alias-interactive-bg-hover)}.ser_title{flex:1;min-width:0;font-size:14px;font-weight:600;line-height:20px}.ser_badge{white-space:nowrap;background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#faad14) 14%,transparent);color:var(--dsw-alias-state-warn-primary,#faad14);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;line-height:16px}.ser_body{border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-module-platform);padding:12px 14px 14px}.ser_field{flex-direction:column;gap:6px;padding:8px 0;display:flex}.ser_label{font-size:12px;font-weight:500;line-height:18px}.ser_textarea{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:8px 12px;font-size:12px;line-height:18px;resize:vertical;min-height:120px;font-family:var(--ds-font-family-code,monospace);transition:border-color .15s ease,box-shadow .15s ease}.ser_textarea:focus{outline:none;border-color:var(--dsw-alias-brand-primary,#1677ff);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary,#1677ff) 20%,transparent)}.ser_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:11px;line-height:16px}.ser_footer{border-top:1px solid var(--dsw-alias-border-l2);justify-content:flex-end;align-items:center;gap:8px;padding:10px 0 2px;display:flex}.ser_save{font:inherit;cursor:pointer;border:1px solid transparent;border-radius:6px;padding:5px 16px;font-size:12px;font-weight:500;line-height:18px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3);transition:all .15s ease}.ser_save:hover:not(:disabled){filter:brightness(1.1)}.ser_save:disabled{opacity:.4;cursor:default}.ser_discard{font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l1);background:0 0;color:var(--dsw-alias-label-secondary,#666);border-radius:6px;padding:5px 16px;font-size:12px;line-height:18px;transition:all .15s ease}.ser_discard:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.ser_discard:disabled{opacity:.4;cursor:default}.ser_status{flex:1;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px}.ser_warn{color:var(--dsw-alias-state-warn-primary)}.ser_danger{color:var(--dsw-alias-state-error-primary)}.ser_info{color:var(--dsw-alias-label-tertiary)}.ser_error{color:var(--dsw-alias-state-error-primary);margin:8px 0 0}.ser_spin{flex:none;width:10px;height:10px;border:1.5px solid var(--dsw-alias-border-l2);border-top-color:var(--dsw-alias-label-secondary);border-radius:50%;animation:ser-spin .8s linear infinite}@keyframes ser-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.ser_spin{animation:none}}";
 
     var tagId = "@chaoset/sandbox-extra-roots/client.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=\"" + tagId + "\"]") === null) {
@@ -139,17 +139,38 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       const [saving, setSaving] = React.useState(false);
       const [status, setStatus] = React.useState<any>(null);
 
+      // 最新基准镜像：展开重读时判断“用户是否动过输入”，避免覆盖编辑
+      // （与 WorkBuddy 的 statusesRef/openIdsRef 同一写法）。
+      const cfgRef = React.useRef<any>(null);
+      cfgRef.current = cfg;
+      // 展开时静默重读配置：CLI/别处改过后页面不显示陈旧值。用户没动过
+      // 输入（与旧基准一致）才跟进新值；动过则保留编辑，dirty 按新基准
+      // 重算。首展即首读：挂载不再预拉（面板收着时读了也看不见）。
       React.useEffect(() => {
+        if (!open) return;
         let cancelled = false;
         props.getConfig().then((value: any) => {
           if (cancelled) return;
+          const freshRoots = ((value && value.extraWritableRoots) || []).join("\n");
+          const prevRoots = ((cfgRef.current && cfgRef.current.extraWritableRoots) || []).join("\n");
           setCfg(value);
-          setDraftText(((value && value.extraWritableRoots) || []).join("\n"));
+          setDraftText((current: any) => {
+            const text = current === null ? prevRoots : String(current);
+            const normalized = text.split("\n").map((s: string) => s.trim()).filter((s: string) => s.length > 0).join("\n");
+            return normalized === prevRoots ? freshRoots : current;
+          });
         }).catch((error: any) => {
           if (!cancelled) setStatus({ kind: "error", text: `${error?.message || String(error)}`.length > 0 ? `${t("loadFailed")}: ${error?.message || String(error)}` : t("loadFailed") });
         });
         return () => { cancelled = true; };
-      }, []);
+      }, [open]);
+      // 成功提示几秒后自动消失（与 session-archive 的 notice 策略统一）：
+      // 错误常驻——需用户处理，编辑/重读时才清除。
+      React.useEffect(() => {
+        if (status === null || status.kind === "error") return;
+        const id = globalThis.setTimeout(() => setStatus(null), 5000);
+        return () => clearTimeout(id);
+      }, [status]);
 
       const cfgRoots = cfg === null ? [] : (cfg.extraWritableRoots || []);
       const parsedRoots = draftText === null ? cfgRoots
@@ -180,14 +201,14 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
         { className: "ser_card", "data-open": open },
         React.createElement(
           "button",
-          { className: "ser_header", type: "button", onClick: () => setOpen(!open), "aria-expanded": open },
+          { className: "ser_header", type: "button", onClick: () => setOpen(!open), "aria-expanded": open, "aria-controls": "ser-roots-body" },
           React.createElement("span", { className: "ser_title" }, t("title")),
           dirty ? React.createElement("span", { className: "ser_badge" }, t("unsaved")) : null,
           React.createElement("span", { "aria-hidden": true }, open ? "▲" : "▼")
         ),
         open ? React.createElement(
           "div",
-          { className: "ser_body" },
+          { className: "ser_body", id: "ser-roots-body" },
           React.createElement("p", { className: "ser_hint" }, t("hint")),
           React.createElement(
             "label",
@@ -214,12 +235,21 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
               const isWarn = kind === "system";
               const prefix = isDanger ? "⛔ " : isWarn ? "⚠ " : "💡 ";
               const cls = isDanger ? "ser_hint ser_danger" : isWarn ? "ser_hint ser_warn" : "ser_hint ser_info";
+              // emoji 前缀仅视觉编码（语义已在文案里），对读屏隐藏。
               return React.createElement("span", { key: index, className: cls, style: { display: "block" } },
-                prefix + t("root" + kind.charAt(0).toUpperCase() + kind.slice(1))
+                React.createElement("span", { "aria-hidden": true }, prefix),
+                t("root" + kind.charAt(0).toUpperCase() + kind.slice(1))
                   .replace("{n}", String(problem.line))
                   .replace("{v}", problem.value)
               );
             })
+          ) : null,
+          // 错误独立块级展示（role=alert）：此前错误复用 footer 的 ser_status
+          // 行（role=status），语义不对且窄行易截断。
+          status !== null && status.kind === "error" ? React.createElement(
+            "p",
+            { className: "ser_error", role: "alert" },
+            status.text
           ) : null,
           React.createElement(
             "div",
@@ -227,14 +257,14 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
             React.createElement(
               "span",
               {
-                className: "ser_status" + (status !== null && status.kind === "error" ? " ser_error" : ""),
+                className: "ser_status",
                 role: "status",
                 // 初次读取配置期间给出加载提示：此前只显示禁用的空白表单，
                 // 无法区分加载中与加载失败。
                 style: status === null && cfg === null ? { display: "inline-flex", alignItems: "center", gap: "5px" } : void 0
               },
-              status !== null ? status.text
-                : cfg === null
+              status !== null && status.kind !== "error" ? status.text
+                : status === null && cfg === null
                   ? [React.createElement("span", { className: "ser_spin", key: "spin", "aria-hidden": true }), t("loading")]
                   : ""
             ),
@@ -289,7 +319,11 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
         }
       ]
     };
+    // 与 dsh-any-connect / provider-usage 同一条兜底边界：slot API 破坏时
+    // 降级为 console.error（设置页少一张卡片），不得把异常抛给宿主 loader
+    // 炸出整页红条——纯 additive 的配置卡没有资格打断宿主。
     async function apply(ctx: any) {
+      try {
       const t = ctx.locale.bind(NS);
       ctx.effect(() => {
         try {
@@ -324,6 +358,9 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
         locale: NS,
         inject: () => ({ getConfig, setConfig })
       }, SandboxRootsCard));
+      } catch (error: any) {
+        console.error("[sandbox-extra-roots] client card failed to load (settings card missing):", error);
+      }
     }
 
     export { apply, inject, analyzeRootsText, hasBlockingProblems };

@@ -12,7 +12,7 @@ import {
   ZCODE_PROBE_PATH,
   ZCODE_STATUS_PATH,
 } from '../src/status-paths.js'
-import type { WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
 import type { WorkBuddySettingsKey } from './locales.js'
 
 const WB_STYLE_ID = '@chaoset/dsh-any-connect/config.css'
@@ -101,8 +101,15 @@ export type WorkBuddyConfigPageProps =
   & Partial<WorkBuddyConfigPageInjected>
 
 const POLL_INTERVAL_MS = 60_000
-/** POST refresh 后等目录异步落地的宽限：refresh 立即返回，目录在后台拉取。 */
-const REFRESH_SETTLE_MS = 2_000
+/** refresh 后轮询目录落定的步长：refresh POST 立即返回，目录在后台拉取。 */
+const REFRESH_POLL_MS = 500
+/** 目录落定等待上限：超时则按当前文档渲染，不无限转圈。 */
+const REFRESH_TIMEOUT_MS = 8_000
+
+/** 目录是否已落地（live 且无错误）：refresh 轮询与自动重拉的同一判据。 */
+export function isCatalogLive(catalog: WorkBuddyWebCatalog | undefined): boolean {
+  return catalog !== undefined && catalog.source === 'live' && catalog.error === undefined
+}
 
 const cardStyle: CSSProperties = {
   overflow: 'hidden',
@@ -162,7 +169,7 @@ const errorStyle: CSSProperties = { ...bodyStyle, color: 'var(--dsw-alias-state-
 const hintStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
 const chipStyle: CSSProperties = {
   padding: '1px 8px', borderRadius: 999, fontSize: 11, lineHeight: '16px',
-  background: 'var(--dsw-alias-state-success-subtle, rgba(34, 160, 107, 0.12))',
+  background: 'color-mix(in srgb, var(--dsw-alias-state-success-primary, #22a06b) 12%, transparent)',
   color: 'var(--dsw-alias-state-success-primary, #22a06b)',
 }
 const modelBadgesStyle: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, verticalAlign: 'middle' }
@@ -288,8 +295,8 @@ function ModelRow({ row, efforts, t, even }: {
       <td style={modelTdStyle}>
         <span style={modelBadgesStyle}>
           {row.free === true ? <span style={chipStyle}>{t('freeModel')}</span> : null}
-          {row.badges?.map(badge => (
-            <span key={badge} style={chipStyle}>{modelBadgeLabel(badge, t)}</span>
+          {row.badges?.map((badge, index) => (
+            <span key={`${badge}-${index}`} style={chipStyle}>{modelBadgeLabel(badge, t)}</span>
           ))}
         </span>
       </td>
@@ -364,16 +371,27 @@ function VariantsPage({ t }: { t: WorkBuddyConfigPageInjected['t'] }): React.Rea
     if (mountedRef.current) setStatuses(current => ({ ...current, [variantId]: next }))
   }, [])
 
+  // 首拉与重试共用的落定链：成功进状态表，失败进 error 态（行内展示，不打扰其它变体）。
+  const fetchAndApply = useCallback((variant: WorkBuddyCardVariant): void => {
+    void fetchOne(variant).then(
+      status => applyOne(variant.id, status),
+      error => applyOne(variant.id, { status: 'error', message: error instanceof Error ? error.message : String(error) }),
+    )
+  }, [fetchOne, applyOne])
+
+  // 错误行重试：先回 loading 给即时反馈，再走与首拉同一条落定链。
+  const retryOne = useCallback((variant: WorkBuddyCardVariant): void => {
+    applyOne(variant.id, { status: 'loading' })
+    fetchAndApply(variant)
+  }, [applyOne, fetchAndApply])
+
   // 挂载：并行拉全部变体；之后 60s 轮询只刷「未登录」与「已展开」的变体，
-  // 收起的已登录卡不打扰（展开时由卡片立即拉取）。
+  // 收起的已登录卡不打扰（展开时由卡片立即拉取）。标签页隐藏时暂停轮询
+  // （后台打 status 路由是纯浪费），恢复可见立即刷一次并重启——与同仓
+  // session-archive / provider-usage 的轮询纪律对齐。
   useEffect(() => {
-    for (const variant of CARD_VARIANTS) {
-      fetchOne(variant).then(
-        status => applyOne(variant.id, status),
-        error => applyOne(variant.id, { status: 'error', message: error instanceof Error ? error.message : String(error) }),
-      )
-    }
-    const timer = window.setInterval(() => {
+    for (const variant of CARD_VARIANTS) fetchAndApply(variant)
+    const poll = () => {
       for (const variant of CARD_VARIANTS) {
         const current = statusesRef.current[variant.id]
         const needsPoll = current === undefined
@@ -385,9 +403,18 @@ function VariantsPage({ t }: { t: WorkBuddyConfigPageInjected['t'] }): React.Rea
           () => { /* 轮询失败不打扰：下一拍再试，已有数据保留 */ },
         )
       }
-    }, POLL_INTERVAL_MS)
-    return () => { window.clearInterval(timer) }
-  }, [fetchOne, applyOne])
+    }
+    let timer = 0
+    const start = () => { if (timer === 0) timer = window.setInterval(poll, POLL_INTERVAL_MS) }
+    const stop = () => { if (timer !== 0) { window.clearInterval(timer); timer = 0 } }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') { poll(); start() }
+      else stop()
+    }
+    if (document.visibilityState === 'visible') start()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => { stop(); document.removeEventListener('visibilitychange', onVisibility) }
+  }, [fetchOne, applyOne, fetchAndApply])
 
   // 首个已登录的变体自动展开一次。等全部变体的首拉落定再选——status 路由
   // 快慢不一（各 status 路由响应快慢不一），按"谁先回
@@ -441,7 +468,7 @@ function VariantsPage({ t }: { t: WorkBuddyConfigPageInjected['t'] }): React.Rea
             />
           )
         }
-        return <SignedOutRow key={variant.id} t={t} variant={variant} status={status} />
+        return <SignedOutRow key={variant.id} t={t} variant={variant} status={status} onRetry={() => retryOne(variant)} />
       })}
     </div>
   )
@@ -510,15 +537,35 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
     }
   }, [probeKey, t, variant.probePath])
 
+  /** 等目录落地：每次重读 status，live 即停、超时即停。首读立即发生，
+   * 替代固定盲等（目录快时白等、慢时读到旧目录又触发二次刷新）。 */
+  const waitCatalogLive = useCallback(async (): Promise<void> => {
+    const startedAt = Date.now()
+    for (;;) {
+      let next: WorkBuddyWebStatus
+      try {
+        next = await fetchStatus()
+      } catch {
+        return
+      }
+      if (!mounted.current) return
+      applyStatus(next)
+      // signed-out 文档无 catalog 字段：按缺失处理（继续轮询至超时）。
+      const catalog = (next as { catalog?: WorkBuddyWebCatalog }).catalog
+      if (isCatalogLive(catalog) || Date.now() - startedAt >= REFRESH_TIMEOUT_MS) return
+      await new Promise(resolve => setTimeout(resolve, REFRESH_POLL_MS))
+    }
+  }, [fetchStatus, applyStatus])
+
   /** The merged refresh button: ask the host to re-pull the catalog first
-   * (returns immediately), give it a short grace period to land, then read
-   * the status document. */
+   * (returns immediately), then poll the status document until the fresh
+   * catalog lands or the wait times out. */
   const refreshWithCatalog = useCallback(async (): Promise<void> => {
     setBusy(true)
     setNotice(undefined)
     try {
       await control({ action: 'refresh' })
-      await new Promise(resolve => setTimeout(resolve, REFRESH_SETTLE_MS))
+      await waitCatalogLive()
     } catch (error: unknown) {
       // refresh POST 失败也照常读一次 status：读本身可能仍是成功的。
       if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
@@ -526,7 +573,7 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
       await refresh()
       if (mounted.current) setBusy(false)
     }
-  }, [control, refresh, t])
+  }, [control, refresh, t, waitCatalogLive])
 
   // Stale 目录自动刷新一次：saved/fallback 或上次失败时，后台重拉目录，
   // 用户不用按刷新。once per mount；失败只进 notice，不打扰不循环。
@@ -536,7 +583,7 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
     if (probeKey === undefined) return
     const catalog = status.catalog
     if (catalog === undefined) return
-    if (catalog.source === 'live' && catalog.error === undefined) return
+    if (isCatalogLive(catalog)) return
     autoRefreshTried.current = true
     void refreshWithCatalog()
   }, [probeKey, status.catalog, refreshWithCatalog])
@@ -618,8 +665,8 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                   </button>
                 </div>
                 <div style={planBadgeRowStyle}>
-                  <span style={privilegeChipStyle}>⚡ {t('codingPlanExtraQuota')}</span>
-                  <span style={privilegeChipStyle}>🌙 {t('codingPlanNightFree')}</span>
+                  <span style={privilegeChipStyle}><span aria-hidden="true">⚡</span> {t('codingPlanExtraQuota')}</span>
+                  <span style={privilegeChipStyle}><span aria-hidden="true">🌙</span> {t('codingPlanNightFree')}</span>
                 </div>
                 {zcodePlan?.expiredAt ? (
                   <span style={planMetaStyle}>
@@ -676,7 +723,7 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                     <thead>
                       <tr>
                         <th style={{ ...modelThStyle, textAlign: 'left' }}>{t('colName')}</th>
-                        <th style={modelThStyle} aria-label="Tags" />
+                        <th style={modelThStyle} aria-label={t('colTags')} />
                         <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colRate')}</th>
                         <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colContext')}</th>
                         <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colEfforts')}</th>
@@ -705,15 +752,19 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
 }
 
 /** One collapsed row per signed-out (or unreadable) variant. */
-function SignedOutRow({ t, variant, status }: {
+function SignedOutRow({ t, variant, status, onRetry }: {
   t: WorkBuddyConfigPageInjected['t']
   variant: WorkBuddyCardVariant
   status: CardStatus
+  /** error 态的立即重试（首拉/轮询的落定链，不经过卡片展开）。 */
+  onRetry: () => void
 }): React.ReactNode {
   const [open, setOpen] = useState(false)
   const title = t(variant.titleKey)
+  // error 原文是英文技术串（HTTP 5xx 等）：套本地化前缀再上屏，
+  // 与卡片内 refreshFailed「本地化摘要 + 技术详情」的口径一致。
   const detail = status.status === 'error'
-    ? status.message
+    ? `${t('requestFailed')}: ${status.message}`
     : status.status === 'signed-out' && status.reason !== undefined
       ? status.reason
       : t(variant.signedOutHintKey)
@@ -723,11 +774,16 @@ function SignedOutRow({ t, variant, status }: {
         <span aria-hidden="true" style={dotStyle(status.status)} />
         <span style={{ ...nameStyle, flex: '0 0 auto', fontWeight: 500 }}>{title}</span>
         <span style={{ ...descriptionStyle, flex: 1, minWidth: 0, whiteSpace: open ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: open ? 'clip' : 'ellipsis' }}>
-          {status.status === 'loading' ? t('loading') : t('signedOut')}
+          {status.status === 'loading' ? t('loading') : status.status === 'error' ? t('loadFailedShort') : t('signedOut')}
         </span>
         <span aria-hidden="true" style={{ ...chevronStyle, fontSize: 14, transform: open ? 'rotate(180deg)' : 'none' }}>⌄</span>
       </button>
-      {open ? <div style={signedOutBodyStyle}><p style={hintStyle}>{detail}</p></div> : null}
+      {open ? <div style={signedOutBodyStyle}>
+        <p style={hintStyle}>{detail}</p>
+        {status.status === 'error' ? <div style={{ marginTop: 8 }}>
+          <button type="button" className="wb-btn" style={buttonStyle} onClick={onRetry}>{t('retry')}</button>
+        </div> : null}
+      </div> : null}
     </div>
   )
 }

@@ -53,6 +53,16 @@ export interface UsageSnapshot {
   error?: string
 }
 
+/** One OAuth/account wallet bucket, amounts already parsed to numbers. */
+export interface AccountWalletBalance {
+  /** Currency code as reported (e.g. 'CNY'). */
+  currency: string
+  /** Recharge-wallet remainder. */
+  recharge: number
+  /** Bonus-wallet remainder. */
+  bonus: number
+}
+
 /** Everything a querier needs to ask one provider for its usage. */
 export interface ProviderUsageContext {
   /** Provider route key being queried. */
@@ -61,6 +71,15 @@ export interface ProviderUsageContext {
   baseURL?: string
   /** Resolved credential value, when the provider has one configured. */
   apiKey?: string
+  /**
+   * OAuth/account wallets, when the provider has no API key but the harness
+   * holds a signed-in account for it (today: DeepSeek only). A querier prefers
+   * `apiKey` and uses these only as the keyless fallback, so the two sources
+   * never double-count.
+   */
+  accountWallets?: AccountWalletBalance[]
+  /** Account-source failure text; set only when the keyless fallback itself failed. */
+  accountError?: string
   /** Operator cancellation; a query must settle promptly after it aborts. */
   signal?: AbortSignal
 }

@@ -96,6 +96,11 @@ interface ModelDirectoryLike {
   load: () => Promise<unknown>
 }
 
+/** Load closures keyed by directory: inject() runs per slot render and would
+ * otherwise hand the pill a fresh `load` identity each time, re-firing its
+ * load effect (and the host request behind it, if the host never dedupes). */
+const loadCache = new WeakMap<object, () => void>()
+
 /** Resolve one session's model seat, or nothing when the harness omits it. */
 function modelSeat(
   ctx: ClientContext,
@@ -111,9 +116,14 @@ function modelSeat(
   if (directories === undefined) return undefined
   try {
     const directory = directories.directoryFor(sessionId as never)
+    let load = loadCache.get(directory)
+    if (load === undefined) {
+      load = () => { void directory.load().catch(() => {}) }
+      loadCache.set(directory, load)
+    }
     return {
       directory: directory.store,
-      load: () => { void directory.load().catch(() => {}) },
+      load,
     }
   } catch {
     // `directoryFor` is typed to the branded SessionId and rejects unknown

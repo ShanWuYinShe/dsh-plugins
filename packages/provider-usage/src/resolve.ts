@@ -24,6 +24,7 @@
 
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { Context } from '@deepseek-ai/cordis'
+import type { AccountWalletBalance } from './types.js'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-settings'
 
@@ -33,6 +34,10 @@ export interface ResolvedProvider {
   baseURL?: string
   /** Resolved credential value, when the provider has one configured. */
   apiKey?: string
+  /** DeepSeek OAuth wallets (keyless fallback); see ProviderUsageContext. */
+  accountWallets?: AccountWalletBalance[]
+  /** Keyless-fallback failure text. */
+  accountError?: string
 }
 
 /** Read a nested path out of one settings section. */
@@ -108,6 +113,62 @@ export function inferProviderFromBaseUrl(baseURL?: string): string | undefined {
 }
 
 /**
+ * DeepSeek OAuth wallets for the keyless fallback: when the provider has no
+ * API key but the harness holds a signed-in DeepSeek account, read its
+ * recharge + bonus wallets so OAuth users still see a number. The account
+ * service is genuinely optional (lazy ctx.get, never inject — same posture as
+ * llm/settings/credentials above): without it the resolver returns no wallets
+ * and the querier reports nothing-to-show.
+ *
+ * Amounts arrive as decimal strings; parsed per currency, unparseable entries
+ * skipped. Recharge and bonus stay separate here (no summation — the querier
+ * decides the window shape, mirroring the API path's per-currency rows).
+ */
+async function readDeepSeekAccountWallets(ctx: Context, signal: AbortSignal): Promise<{
+  wallets?: AccountWalletBalance[]
+  error?: string
+}> {
+  const account = (ctx as unknown as { get(name: string): unknown }).get('deepseekAccount') as
+    { getBalance?: () => Promise<unknown> } | undefined
+  if (account === undefined || account === null || typeof account.getBalance !== 'function') return {}
+  let balance: unknown
+  try {
+    balance = await account.getBalance()
+  } catch (error: unknown) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+  if (signal.aborted) return {}
+  if (balance === null || typeof balance !== 'object') return {}
+  if ((balance as { status?: unknown }).status !== 'ready') return { error: 'DeepSeek account balance unavailable' }
+  const parseWallets = (list: unknown): Array<{ currency: string; amount: number }> => {
+    if (!Array.isArray(list)) return []
+    const out: Array<{ currency: string; amount: number }> = []
+    for (const entry of list) {
+      if (entry === null || typeof entry !== 'object') continue
+      const record = entry as Record<string, unknown>
+      if (typeof record['currency'] !== 'string' || record['currency'] === '' || typeof record['balance'] !== 'string') continue
+      const amount = Number(record['balance'])
+      if (!Number.isFinite(amount) || amount < 0) continue
+      out.push({ currency: record['currency'], amount })
+    }
+    return out
+  }
+  const body = balance as { value?: unknown; bonusWallets?: unknown }
+  const grouped = new Map<string, AccountWalletBalance>()
+  for (const wallet of parseWallets(body.value)) {
+    const slot = grouped.get(wallet.currency) ?? { currency: wallet.currency, recharge: 0, bonus: 0 }
+    slot.recharge += wallet.amount
+    grouped.set(wallet.currency, slot)
+  }
+  for (const wallet of parseWallets(body.bonusWallets)) {
+    const slot = grouped.get(wallet.currency) ?? { currency: wallet.currency, recharge: 0, bonus: 0 }
+    slot.bonus += wallet.amount
+    grouped.set(wallet.currency, slot)
+  }
+  return { wallets: [...grouped.values()] }
+}
+
+/**
  * Build the resolver the registry calls before each query.
  *
  * Every dependency is read through `ctx.get` at call time rather than
@@ -170,9 +231,23 @@ export function createProviderResolver(ctx: Context): (provider: string, signal:
       }
     }
 
+    // DeepSeek keyless fallback: an API key wins whenever present (a single
+    // source answers, never double-counted); only keyless DeepSeek routes
+    // consult the OAuth account.
+    let accountWallets: AccountWalletBalance[] | undefined
+    let accountError: string | undefined
+    if ((apiKey === undefined || apiKey === '') && normalized === 'deepseek') {
+      const read = await readDeepSeekAccountWallets(ctx, signal)
+      if (signal.aborted) return { ...baseURL === undefined ? {} : { baseURL } }
+      accountWallets = read.wallets
+      accountError = read.error
+    }
+
     return {
       ...baseURL === undefined ? {} : { baseURL },
       ...apiKey === undefined || apiKey === '' ? {} : { apiKey },
+      ...accountWallets === undefined ? {} : { accountWallets },
+      ...accountError === undefined ? {} : { accountError },
     }
   }
 }
