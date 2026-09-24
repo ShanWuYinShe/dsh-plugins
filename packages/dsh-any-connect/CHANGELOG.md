@@ -11,6 +11,10 @@
   * **Linux**：支持 `~/.zcode/v2/credentials.json` 与 `~/.config/(.)zcode/v2/credentials.json`；
   * 支持 `authFileZCode` 配置项与 `ZCODE_AUTH_FILE` 环境变量显式指定。
 
+### 优化
+
+* **模型列表排版升级**：设置页模型列表改用语义化表格布局，增设列头（模型、倍率、窗口、档位）与隔行斑马纹背景，提升视觉对齐与浏览体验。
+
 ## 0.4.0 (2026-09-24)
 
 ### 新增
