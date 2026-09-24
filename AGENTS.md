@@ -1,7 +1,7 @@
 # AGENTS.md — AI 协作指引
 
 DSH host 插件 monorepo，双分支跟随 DSH 宿主线。通用约束以全局 `~/AGENTS.md` 为准
-（本项目例外：`alpha` 分支允许推送，见全局「Git 与提交」），本文件只做项目特有补充。
+（本项目例外：`alpha` 分支允许推送，见全局「Git 红线」），本文件只做项目特有补充。
 动手前先读
 [RELEASING.md](RELEASING.md)（分支 / 版本号 / 发布流程的唯一权威约定）；
 README 面向用户，面向开发者的内容以 RELEASING.md 为准。
@@ -41,7 +41,7 @@ bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览�
 ## 约定
 
 - 发布相关（分支模型、发布纪律、版本号/推送门禁）：详见 skill dsh-plugin-release；跨分支 worktree 操作：详见 skill dsh-plugin-worktree。
-- 提交信息按 `git-commit` skill 写（全局 Commit 格式 `<分类>(<范围>): <中文描述>`），本项目惯例用
+- 提交信息按 skill `git-workflow` 写（全局 Commit 格式 `<分类>(<范围>): <中文描述>`），本项目惯例用
   中文分类前缀（`新增:` / `修复:` / `重构:` / `文档:` / `测试:` / `ci:` 等）。
 - 测试环境通过 vitest 配置里的 `DSH_HOME` 与真实用户目录隔离，不要在测试里
   读写真实的 `~/.dsh`。
