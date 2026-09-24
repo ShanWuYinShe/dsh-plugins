@@ -183,12 +183,26 @@ if (tagFlag !== -1) {
 }
 
 for (const { dir, expectVersion } of targets) {
-  const { name, version } = JSON.parse(readFileSync(join(ROOT, "packages", dir, "package.json"), "utf8"));
+  const pkgJson = JSON.parse(readFileSync(join(ROOT, "packages", dir, "package.json"), "utf8"));
+  const { name, version, dsh } = pkgJson;
 
   if (typeof version !== "string" || !VERSION_RE.test(version)) {
     log(`✗ ${name} 的版本号 ${JSON.stringify(version)} 不是合法 semver，拒绝发布。请修正 package.json 的 version。`);
     failed = true;
     continue;
+  }
+
+  // 待命期安全门禁：若包版本包含 -alpha / -beta 预发布标识，其 dsh.host 必须为已适配的 alpha/beta 预发布宿主线。
+  // 若 dsh.host 仍为 rc 稳定候选或纯 semver，说明 DSH 当前处于待命期或尚未适配新宿主，严禁发布 -alpha 预发布版本。
+  if (/-alpha|-beta/i.test(version)) {
+    const host = dsh?.host;
+    const hostPre = typeof host === "string" ? host.replace(/^[\^~>=< ]+/, "").split("-")[1] : null;
+    const isHostAlpha = hostPre && /^(alpha|beta)/i.test(hostPre);
+    if (!isHostAlpha) {
+      log(`✗ ${name}@${version} 为 -alpha 预发布版本，但 dsh.host 声明为 ${host ?? "未声明"}（非进行中的 alpha 宿主线）。待命期禁止发 -alpha 版本；日常功能与修复请在 main 分支推进并使用纯 semver 发布正式版。若 DSH 已出新预发布线，请先执行 bun run adapt <新线版本>。`);
+      failed = true;
+      continue;
+    }
   }
 
   if (expectVersion !== null && version !== expectVersion) {

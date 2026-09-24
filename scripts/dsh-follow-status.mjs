@@ -216,9 +216,13 @@ for (const branch of ["main", "alpha"]) {
 }
 
 console.log(`dsh 稳定线(最新 rc) = ${stable}`);
-console.log(devLine === null
-  ? `进行中预发布线: 无 —— alpha 分支待命（与 main 同基线），等待 >${stableBase} 的新 alpha 线`
-  : `进行中预发布线 = ${devLine}`);
+if (devLine === null) {
+  console.log(`进行中预发布线: 无 —— alpha 分支待命（与 main 同基线），等待 >${stableBase} 的新 alpha 线`);
+  console.log(`💡 阶段指引: 当前处于【待命期】。日常功能演进与修复请在 main 推进（版本号用纯 semver，发正式版）；alpha 待命，切勿在待命期向 alpha 提交新功能或发版。`);
+} else {
+  console.log(`进行中预发布线 = ${devLine}`);
+  console.log(`💡 阶段指引: 当前处于【活跃期】。所有功能与修复请在 alpha 推进（版本号用 -alpha.N / -rc.N，发 prerelease）；main 整体搁置。`);
+}
 let problems = 0;
 for (const { branch, baseline, host, target, state } of rows) {
   const mark = state.startsWith("就位") ? "✔" : "✖";

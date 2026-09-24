@@ -19,6 +19,19 @@ bun run dsh-status      # 两分支 dsh 依赖基线 vs dsh 最新 rc（正式�
 bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览），详见 RELEASING.md
 ```
 
+## 分支选择铁律：动手前必跑 `bun run dsh-status`
+
+**任何开发、修复、依赖调整或发版前，必须先跑 `bun run dsh-status` 核对宿主状态，严禁凭经验或当前工作区分支盲目开工：**
+
+1. **待命期**（`dsh-status` 报告「进行中预发布线: 无 —— alpha 分支待命」）：
+   - **工作分支**：必须在 **`main`**（若主检出目录停留在 `alpha`，先 `git checkout main` 并 `bun install && bun run build` 确保产物干净）。
+   - **日常功能与修复**：一律直接在 `main` 推进，版本号为**纯 semver 正式版**（如 `0.4.1`），发正式 Release。
+   - **`alpha` 分支待命**：代码与 main 保持完全一致（`git branch -f alpha main`），**严禁在待命期向 alpha 提交新功能或发版**。
+2. **活跃期**（`dsh-status` 报告存在高于稳定 rc 的新 `-alpha` 线）：
+   - **工作分支**：主检出目录停在 **`alpha`**。
+   - **功能与修复**：一律落在 `alpha`，版本号为 `-alpha.N`（进 rc 后换 `-rc.N`），发 prerelease Release。
+   - **`main` 分支搁置**：停在原地不开发不发布，不 cherry-pick。
+
 ## 已知技术债
 
 登记在 GitHub issues（label: [`tech-debt`](https://github.com/ShanWuYinShe/dsh-plugins/issues?q=label%3Atech-debt)），均为「有测试兜底前的已知债务」，不阻塞日常开发，但改动相邻代码时应优先考虑顺手消化，销项后关闭对应 issue。
