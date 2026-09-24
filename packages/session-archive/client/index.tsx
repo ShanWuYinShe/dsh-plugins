@@ -22,23 +22,26 @@ var css = [
   ".sa_badge--collapsed{border-radius:50%;justify-content:center;gap:0;width:36px;height:36px;margin:8px 0 10px;padding:0}",
   ".sa_badge--collapsed .sa_badgeLabel,.sa_badge--collapsed .sa_badgeCount{display:none}",
   ".sa_badge--collapsed .sa_badgeIcon,.sa_badge--collapsed .sa_badgeIcon svg{width:18px;height:18px}",
-  // z-index 30：仅高于侧边栏内容层、低于宿主模态遮罩（如设置面板 overlay），
-  // 与"从侧边栏弹出的浮层"层级预期一致；调整前先核对宿主浮层层级表。
-  ".sa_panel{z-index:30;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);width:440px;max-width:calc(100vw - 24px);max-height:62vh;box-shadow:0 12px 32px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border-radius:12px;flex-direction:column;display:flex;position:fixed;bottom:128px;left:12px;overflow:hidden}",
-  // 入场动画：150ms 淡入 + 轻微上移（退出直接卸载，不做退场动画）；
+  // 页面居中模态：z-index 30 高于侧边栏、低于宿主全局遮罩。
+  ".sa_panel{z-index:30;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);width:640px;max-width:calc(100vw - 48px);max-height:min(72vh,calc(100vh - 96px));box-shadow:0 16px 48px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.10);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border-radius:14px;flex-direction:column;display:flex;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);overflow:hidden}",
+  // 遮罩层：居中模态弹窗的视口级半透明底层，点击关闭面板。
+  ".sa_overlay{position:fixed;inset:0;z-index:29;background:rgba(0,0,0,.25)}",
+  // 入场动画：面板 150ms 淡入 + 轻微放大，遮罩 150ms 淡入。
   // 系统开启「减少动态效果」时完全禁用。
   "@media (prefers-reduced-motion:no-preference){.sa_panel{animation:sa-panel-in .15s ease-out}}",
-  "@keyframes sa-panel-in{from{opacity:0;transform:translateY(4px)}}",
+  "@keyframes sa-panel-in{from{opacity:0;transform:translate(-50%,-50%) scale(.97)}}",
+  "@media (prefers-reduced-motion:no-preference){.sa_overlay{animation:sa-overlay-in .15s ease-out}}",
+  "@keyframes sa-overlay-in{from{opacity:0}}",
   ".sa_panel:focus{outline:none}",
-  ".sa_header{box-sizing:border-box;border-bottom:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);flex:none;justify-content:space-between;align-items:center;min-height:44px;padding:8px 12px;display:flex}",
-  ".sa_title{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:20px}",
+  ".sa_header{box-sizing:border-box;border-bottom:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);flex:none;justify-content:space-between;align-items:center;min-height:48px;padding:10px 16px;display:flex}",
+  ".sa_title{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:600;line-height:22px}",
   ".sa_iconBtn{font:inherit;cursor:pointer;border:0;border-radius:8px;width:36px;height:36px;color:var(--dsw-alias-label-secondary,#666);background:0 0;display:inline-flex;align-items:center;justify-content:center;font-size:18px}",
   ".sa_refresh{font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l1);border-radius:8px;min-height:36px;padding:5px 14px;font-size:13px;line-height:20px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);display:inline-flex;align-items:center;gap:5px}",
   ".sa_refresh:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}",
   ".sa_refresh:disabled{opacity:.4;cursor:default}",
   ".sa_iconBtn:hover{background:var(--dsw-alias-interactive-bg-hover)}",
   ".sa_iconBtn:disabled{opacity:.4;cursor:default}",
-  ".sa_toolbar{flex:none;border-bottom:1px solid var(--dsw-alias-border-l2);align-items:center;gap:8px;padding:8px 12px;display:flex;flex-wrap:wrap}",
+  ".sa_toolbar{flex:none;border-bottom:1px solid var(--dsw-alias-border-l2);align-items:center;gap:8px;padding:8px 16px;display:flex;flex-wrap:wrap}",
   ".sa_check{accent-color:var(--dsw-alias-label-primary);width:14px;height:14px;flex:none;cursor:pointer}",
   ".sa_check:disabled{cursor:default;opacity:.45}",
   ".sa_toolLabel{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;user-select:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px}",
@@ -51,7 +54,7 @@ var css = [
   ".sa_actionDanger:disabled{opacity:.4}",
   ".sa_confirm{color:var(--dsw-alias-state-error-primary);border:1px solid var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent)}",
   ".sa_confirm:hover:not(:disabled){background:var(--dsw-alias-state-error-primary);color:#fff}",
-  ".sa_body{flex:1;min-height:0;padding:4px 12px 12px;overflow-y:auto}",
+  ".sa_body{flex:1;min-height:0;padding:8px 16px 16px;overflow-y:auto}",
   ".sa_empty{color:var(--dsw-alias-label-tertiary);margin:24px 0;text-align:center;font-size:12px;line-height:18px}",
   ".sa_error{color:var(--dsw-alias-state-error-primary);margin:8px 0;font-size:12px;line-height:18px}",
   ".sa_ok{color:var(--dsw-alias-state-success-primary);margin:8px 0;font-size:12px;line-height:18px}",
@@ -554,7 +557,9 @@ function ArchivePanel(props: any) {
         iconOnly ? null : React.createElement("span", { className: "sa_badgeLabel" }, t("badge")),
         iconOnly ? null : React.createElement("span", { className: "sa_badgeCount" }, String(open ? items.length : badgeCount))
       ),
-    open ? React.createElement(
+    open ? React.createElement(React.Fragment, null,
+      React.createElement("div", { className: "sa_overlay", onClick: () => setOpen(false) }),
+      React.createElement(
       "div",
       { className: "sa_panel", role: "dialog", "aria-label": t("panelTitle"), tabIndex: -1, ref: panelRef },
       React.createElement(
@@ -685,7 +690,7 @@ function ArchivePanel(props: any) {
           })
         ) : null
       )
-    ) : null
+    )) : null
   );
 }
 
