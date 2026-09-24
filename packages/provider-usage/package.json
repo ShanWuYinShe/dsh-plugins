@@ -1,6 +1,6 @@
 {
   "name": "@chaoset/provider-usage",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH plugin: show the current LLM provider's remaining quota in the composer dock — a generic querier registry any provider plugin can extend",
   "engines": {
     "node": ">=22.19.0"
