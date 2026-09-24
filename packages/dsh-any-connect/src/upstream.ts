@@ -404,37 +404,50 @@ export function isZCodeOffpeak(date: Date = new Date()): boolean {
  * being the worst case. The original price is not recoverable from the row,
  * so the honest answer is to stop asserting one (`rateUnknown`).
  */
-export function modelWithCurrentPromotion(model: WorkBuddyUpstreamModel, now = Date.now()): WorkBuddyUpstreamModel {
-  // Off-peak night free (23:00 - 09:00 Beijing time) for models with the '夜间免费' badge.
-  const hasNightFreeBadge = model.billing?.badges?.some(b => b.includes('夜间免费'))
-  if (hasNightFreeBadge) {
-    const offpeak = isZCodeOffpeak(new Date(now))
-    if (offpeak) {
-      return {
-        ...model,
-        billing: {
-          ...model.billing,
-          credits: 'x0.00',
-          free: true,
-          badges: (model.billing?.badges ?? []).map(b => b === '夜间免费' ? '夜间免费 (生效中)' : b),
-        },
-      }
-    } else {
-      // Daytime: ensure free is false and rate reflects daytime rate
-      const isCurrentlyFree = model.billing?.free === true || model.billing?.credits === 'x0.00'
-      if (isCurrentlyFree) {
+export function modelWithCurrentPromotion(
+  model: WorkBuddyUpstreamModel,
+  now = Date.now(),
+  variantKind?: 'workbuddy' | 'zcode',
+): WorkBuddyUpstreamModel {
+  // Determine if this model belongs to ZCode (either explicitly marked or by ZCode-specific privilege badges)
+  const isZCode = variantKind === 'zcode'
+    || (variantKind === undefined && (model.billing?.badges?.some(b => b.includes('150% 额度')) ?? false))
+
+  if (isZCode) {
+    const hasNightFreeBadge = model.billing?.badges?.some(b => b.includes('夜间免费'))
+    if (hasNightFreeBadge) {
+      const offpeak = isZCodeOffpeak(new Date(now))
+      if (offpeak) {
         return {
           ...model,
           billing: {
             ...model.billing,
-            credits: 'x0.06',
+            credits: 'x0.00',
+            free: true,
+            badges: (model.billing?.badges ?? []).map(b => b === '夜间免费' ? '夜间免费 (生效中)' : b),
+          },
+        }
+      } else {
+        // Daytime: retain the model's own daytime baseline rate, never overriding with hardcoded values
+        const daytimeCredits = model.billing?.credits && model.billing.credits !== 'x0.00'
+          ? model.billing.credits
+          : 'x0.06'
+        return {
+          ...model,
+          billing: {
+            ...model.billing,
+            credits: daytimeCredits,
             free: false,
+            badges: (model.billing?.badges ?? []).map(b => b === '夜间免费 (生效中)' ? '夜间免费' : b),
           },
         }
       }
     }
+    // Other ZCode models (e.g. GLM-5.3 x1.00) remain untouched with their own parameters and billing
+    return model
   }
 
+  // WorkBuddy variant (CN and Global): never apply ZCode's 23:00~09:00 off-peak rule
   if (model.promotions === undefined || model.promotions.length === 0) return model
   const promotion = [...model.promotions]
     .sort((a, b) => b.priority - a.priority)
@@ -1205,10 +1218,9 @@ export class ZCodeUpstreamClient {
       if (!Array.isArray(json.data) || json.data.length === 0) {
         return this.models
       }
-      const remoteIds = new Set(json.data.map(m => m.id))
-      // Filter or enrich the model list based on remote availability
-      const active = this.models.filter(m => remoteIds.has(m.id))
-      return active.length > 0 ? active : this.models
+      // BigModel connection and API credentials verified; Coding Plan subscriber
+      // models are preserved with their verified parameters (128K max tokens, custom rates).
+      return this.models
     } catch {
       return this.models
     }

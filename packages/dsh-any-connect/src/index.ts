@@ -358,7 +358,7 @@ export function apply(ctx: Context, config: Config): void {
 
   /** Build one variant's stores and catalog; the shim starts below. */
   function createRuntime(variant: WorkBuddyVariant): VariantRuntime {
-    const catalog = new WorkBuddyCatalog(fallbackFor(variant))
+    const catalog = new WorkBuddyCatalog(fallbackFor(variant), variant.kind)
     // Start hidden: a variant must serve no models until an account has actually
     // been adopted, so a signed-out variant is empty rather than showing a roster
     // whose models could only fail.

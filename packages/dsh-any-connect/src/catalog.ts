@@ -8,6 +8,8 @@
 import type { WorkBuddyUpstreamModel } from './upstream.js'
 import { modelWithCurrentPromotion } from './upstream.js'
 
+import type { VariantKind } from './variants.js'
+
 /** One model entry the adapter exposes. */
 export type WorkBuddyModelInfo = WorkBuddyUpstreamModel
 
@@ -146,9 +148,14 @@ export const FALLBACK_ZCODE_MODELS: readonly WorkBuddyModelInfo[] = [
 export class WorkBuddyCatalog {
   private models: readonly WorkBuddyModelInfo[]
   private visible = true
+  private readonly kind?: VariantKind
 
-  constructor(initial: readonly WorkBuddyModelInfo[] = FALLBACK_WORKBUDDY_MODELS) {
+  constructor(
+    initial: readonly WorkBuddyModelInfo[] = FALLBACK_WORKBUDDY_MODELS,
+    kind?: VariantKind,
+  ) {
     this.models = initial
+    this.kind = kind
   }
 
   /**
@@ -159,7 +166,7 @@ export class WorkBuddyCatalog {
    */
   current(): readonly WorkBuddyModelInfo[] {
     if (!this.visible) return []
-    return this.models.map(model => modelWithCurrentPromotion(model))
+    return this.models.map(model => modelWithCurrentPromotion(model, Date.now(), this.kind))
   }
 
   /** Replace the list; the adapter's `getModels` reads the live catalog, so

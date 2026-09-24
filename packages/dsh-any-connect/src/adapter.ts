@@ -89,11 +89,12 @@ const RATE_SEPARATOR = ' · '
  * contents. Nothing in the host resolves a model *by* name.
  */
 function withRate(name: string, info: WorkBuddyModelInfo): string {
+  const baseName = name.split(RATE_SEPARATOR)[0] ?? name
   if (info.billing?.free === true) {
-    return `${name}${RATE_SEPARATOR}免费`
+    return `${baseName}${RATE_SEPARATOR}免费`
   }
   const rate = normalizeCredits(info.billing?.credits)
-  return rate === undefined ? name : `${name}${RATE_SEPARATOR}${rate}`
+  return rate === undefined ? baseName : `${baseName}${RATE_SEPARATOR}${rate}`
 }
 
 /** Constructor dependencies. */
@@ -260,7 +261,7 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
 
   const profiles = new Map<string, ResolvedPiAiProviderProfile>([[providerId, profile]])
 
-  const adapter = new WorkBuddyPiAiAdapter(catalog, {
+  const adapter = new WorkBuddyPiAiAdapter(catalog, providerId, {
     profiles: () => profiles,
     auth: INERT_AUTH,
     // Resolve the shim's per-process shared secret as the OpenAI apiKey so
@@ -295,6 +296,7 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
 class WorkBuddyPiAiAdapter extends PiAiAdapter {
   constructor(
     private readonly catalog: WorkBuddyCatalog,
+    private readonly providerId: string,
     options: ConstructorParameters<typeof PiAiAdapter>[0],
   ) {
     super(options)
@@ -306,6 +308,7 @@ class WorkBuddyPiAiAdapter extends PiAiAdapter {
   }
 
   override async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
+    if (provider !== this.providerId) return []
     const models = await super.listModels(provider)
     return models.map(model => {
       const info = this.infoFor(model.id)
