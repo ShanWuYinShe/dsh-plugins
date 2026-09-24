@@ -37,52 +37,23 @@ git config --global tag.gpgSign true
 git tag -v <tag>   # 自验签名
 ```
 
-## 铁律一：tag 必须一个一个推（单次推送上限 3 个）
+## 铁律：tag 一个一个推，推完确认再推下一个
 
-**一次推送超过 3 个 tag，GitHub 不会为其中任何一个产生 `push` 事件，CI
-全程静默不触发，而且 `git push` 不报任何错。** GitHub 官方文档
-（Events that trigger workflows，`push` 一节）原文：
+**通用纪律与两条静默失败机制（单次推送超 3 个 tag 时 GitHub 不产生任何 `push`
+事件、连推会被并发组顶掉流水）以全局 `git-workflow` skill「打 tag 与推送纪律」
+为准**——那与具体仓库无关，不在本文件复述，避免两处漂移。本节只记本仓库特有的
+部分。
 
-> Events will not be created if more than 5,000 branches are pushed at once.
-> **Events will not be created for tags when more than three tags are pushed
-> at once.**
+本仓库为何非守不可：`publish.yml` 用仓库级并发组 `concurrency: group: publish`
+（`cancel-in-progress: false`），同一时刻只允许 1 个 running + 1 个 pending，
+**新排队的 run 会取消当前 pending 的 run**。于是快速连推时：tag1 在跑 → tag2 变
+pending → tag3 排队**把 tag2 顶掉** → tag4 排队**把 tag3 顶掉**——中间的流水被
+取消，对应 Release 永远不建，而推送命令照样全部「成功」。
 
-上限是**推送批次的粒度**，不是「前 3 个能过」——推 4 个 tag 是**全部**不触发。
-本仓库 2026-09-24 实测印证：`dsh-any-connect-v0.4.2`、`provider-usage-v0.1.1`、
-`sandbox-extra-roots-v0.4.14`、`session-archive-v0.3.16` 四个 tag 用一条命令同时
-推送，Actions 里**零条 push 流水**（Releases 页那 4 个 Release 全是事后手工
-`workflow_dispatch` 补出来的）。
-
-这是最容易踩的坑：出错时**没有任何显式报错**，只有"发布了但 CI 没跑、Release
-没出现"这种事后才发现的现象——而版本号已经推出去了，按「不可变铁律」不能
-重来。`delete` 事件同样限 3 个一批，所以删 tag 也要一个一个删。
-
-**不要用 `git push --tags`，也不要 `git push origin tag1 tag2 tag3 tag4`**：
-前者会把本地所有 tag（含历史与不该发的）一次性推出，必然超限；后者就是要防
-的批量推送。
-
-## 铁律二：推一个 tag，等它跑完，再推下一个
-
-逐个推送还不够——**推完不等就接着推，中间的 run 会被静默取消**。原因是
-`publish.yml` 用了仓库级并发组：
-
-```yaml
-concurrency:
-  group: publish
-  cancel-in-progress: false
-```
-
-GitHub 的并发组**同一时刻只允许 1 个 running + 1 个 pending**，且默认
-`queue: single`——**新排队的 run 会取消当前 pending 的那个**（官方
-「Control the concurrency of workflows and jobs」原文：any existing `pending`
-job or workflow in the same concurrency group will be canceled and the new
-queued job or workflow will take its place）。
-
-于是快速连推时：tag1 在跑 → tag2 变 pending → tag3 排队**把 tag2 顶掉** →
-tag4 排队**把 tag3 顶掉**——tag2、tag3 的流水被取消，对应 Release 永远不会建，
-而推送命令照样全部「成功」。
-
-本仓库 2026-09-24 实测印证（手工补发那批）：
+2026-09-24 实测印证（4 个 tag 同推）：Actions 里**零条 push 流水**，
+`dsh-any-connect-v0.4.2`、`provider-usage-v0.1.1`、`sandbox-extra-roots-v0.4.14`、
+`session-archive-v0.3.16` 的 4 个 Release 全是事后手工 `workflow_dispatch` 补出。
+手工补发那批同样印证连推会被顶掉：
 
 | run | 创建 | 结束 | 结果 |
 |---|---|---|---|
@@ -111,12 +82,12 @@ gh run list --workflow=publish.yml --branch <tag> \
 ```
 
 **第 5 步的确认输出为空 = 没触发 push 流水，必须停下排查，不要继续推下一个**
-（多半是批量推送超限，见铁律一）。`--branch` 接受 tag 名（实测 `gh 2.101.0`
+（多半是批量推送超限或流水被顶掉，通用机制见全局 `git-workflow`）。`--branch` 接受 tag 名（实测 `gh 2.101.0`
 对 `--branch session-archive-v0.3.15` 能返回该 tag 的 push 流水，真 tag 与不存在
 的 tag 也能正确区分），这一条就是"该 tag 到底有没有触发 CI"的权威判据。
 
 拿到 run id 后 `gh run watch <run-id> --exit-status` 跟随到结束（失败时以非零
-码退出，便于脚本判定），**确认 success 再推下一个 tag**——既满足铁律二，也顺带
+码退出，便于脚本判定），**确认 success 再推下一个 tag**——既守住本条纪律，也顺带
 确保该包的 Release 已经建出来。
 
 一次发多包（monorepo 常态）就是把第 5 步循环 N 遍：
@@ -137,7 +108,7 @@ done
 按「打错处理」情形 B 删 tag 重来。
 
 **分支推送永远用 plain `git push`，不用 `--follow-tags`**：该选项会把
-annotated tags 顺带推出，让"显式打 tag"形同虚设，也会绕过本节的两条铁律。
+annotated tags 顺带推出，让"显式打 tag"形同虚设，也绕过本节纪律。
 
 ## 打错处理（按情形）
 
@@ -149,7 +120,7 @@ annotated tags 顺带推出，让"显式打 tag"形同虚设，也会绕过本�
   删远程 tag 前先确认 Releases 页没有同名 Release。
   **批量推送超限、或 run 被并发组顶掉，都走这条**：tag 已推但没触发流水 /
   流水被取消，Release 必然没建，删掉重来即可——重推同一个 tag 不会补触发。
-  删远程 tag 同样受"一批 3 个"限制，也要一个一个删。
+  删远程 tag 同样受"一批 3 个"限制（通用纪律见全局 `git-workflow`），也要一个一个删。
 - **C. Release 已建**：永不删、不移动该 tag。升版本号打新 tag 发一版
   覆盖叙事（CHANGELOG 写明替代关系），旧版本号就地作废。
 

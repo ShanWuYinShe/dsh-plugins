@@ -67,7 +67,8 @@ main 分支的每次 dsh 稳定版适配都归档为一个 git tag，**由用户
 - **命名**：`dsh-v<dsh 版本>`（如 `dsh-v0.1.2-rc.1`），与包发布归档 tag
   （`<目录>-v<版本>`）同一模式、互不冲突——`dsh` 不是任何包的目录名。
 - **时机**：跟进新稳定版、验证通过后手工打在对应提交上：
-  `git tag -a dsh-v<基线> -m "dsh v<基线> 适配归档" && git push origin dsh-v<基线>`（基线值取
+  `git tag -a dsh-v<基线> -m "dsh v<基线> 适配归档"` 然后单独
+  `git push origin dsh-v<基线>`（基线值取
   `bun run dsh-status` 的输出）。dsh 基线没变的日常开发不打；alpha 分支
   **不打**：它永远追随 dsh 最新的 alpha 线，没有按宿主版本回退的管理需求。
   **推送同样受「一次最多 3 个 tag」限制**（见下方「tag 推送纪律」）：这类归档
@@ -218,23 +219,15 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
 
 ### tag 推送纪律（一次一个，推完确认再推下一个）
 
-**发布动作是「逐个推 tag」，不是「批量推 tag」。** 两条静默失败机制都只在
-批量/连推时出现，`git push` 本身不会报错：
-
-1. **单次推送超过 3 个 tag，GitHub 不为其中任何一个产生 `push` 事件**，CI 完全
-   不触发。官方文档（Events that trigger workflows，`push` 一节）原文：
-   「Events will not be created for tags when more than three tags are pushed at
-   once.」上限是**推送批次**的粒度——推 4 个是**全部**不触发，不是「前 3 个能过」。
-   本仓库 2026-09-24 实测：`dsh-any-connect-v0.4.2`、`provider-usage-v0.1.1`、
-   `sandbox-extra-roots-v0.4.14`、`session-archive-v0.3.16` 四个 tag 一条命令同时
-   推送，Actions 里零条 push 流水，4 个 Release 全靠事后手工 `workflow_dispatch`
-   补出。`delete` 事件同样限 3 个一批，删 tag 也要一个一个删。
-2. **连推不等会取消流水**：`publish.yml` 的仓库级并发组（`group: publish`、
-   `cancel-in-progress: false`）同一时刻只允许 1 个 running + 1 个 pending，且默认
-   `queue: single`——新排队的 run 会取消当前 pending 的 run。于是快速连推时
-   后面的 tag 会把前面排队中的 tag 顶掉，流水显示 **cancelled**，对应 Release
-   永远不建。同批实测：run 36014030331 成功、36014048743 被顶掉（7 秒 cancelled）、
-   36014057179 成功。等待不增加总耗时——并发组本来就把这些 run 串行化了。
+**发布动作是「逐个推 tag」，不是「批量推 tag」。** 两条静默失败机制（单次推超
+3 个 tag 时 GitHub 不产生任何 `push` 事件；连推会被并发组顶掉流水）**与仓库无关，
+通用纪律见全局 `git-workflow` skill「打 tag 与推送纪律」**，此处只记本仓库特有的
+后果与实测：2026-09-24 `dsh-any-connect-v0.4.2`、`provider-usage-v0.1.1`、
+`sandbox-extra-roots-v0.4.14`、`session-archive-v0.3.16` 四个 tag 一条命令同时推送，
+Actions 里零条 push 流水，4 个 Release 全靠事后手工 `workflow_dispatch` 补出；
+补发时连推又被 `publish.yml` 的并发组顶掉一条（run 36014030331 成功、
+36014048743 被顶成 cancelled、36014057179 成功）。等待不增加总耗时——并发组本来
+就把这些 run 串行化了。
 
 多包同发（monorepo 常态）的固定顺序：**先推分支**（`git push` 只跑测试，让 tag
 落在远程已存在的提交上）→ **再逐个 tag 推送并逐条确认**：

@@ -75,14 +75,12 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    创建 tag**。发版后核对 Release 资产 tarball 与 `dsh.host` 字段符合预期
    （解包 `tar -xOf <tgz> package/package.json`）。
 
-   必须逐个推的两个原因（**两者都不报错，只会静默失败**）：
-
-   1. **一次推送超过 3 个 tag，GitHub 不为其中任何一个产生 `push` 事件**，
-      CI 完全不触发（官方文档：Events will not be created for tags when more
-      than three tags are pushed at once）；
-   2. `publish.yml` 的仓库级并发组 `group: publish` 只允许「1 个 running +
-      1 个 pending」，**新排队的 run 会取消前一个 pending 的 run**——推完不等
-      就接着推，中间的 tag 流水会被取消，Release 永远不建。
+   必须逐个推、且推完确认再推下一个，原因两条（**都不报错，只会静默失败**，
+   通用机制见全局 `git-workflow`「打 tag 与推送纪律」）：**单次推超过 3 个 tag
+   时 GitHub 不产生任何 `push` 事件**（CI 完全不触发）；且本仓库 `publish.yml`
+   的仓库级并发组 `group: publish` 只允许「1 个 running + 1 个 pending」，
+   **新排队的 run 会取消前一个 pending 的 run**（中间的 tag 流水被顶成
+   cancelled，Release 永远不建）。
 
    多包同发时顺序固定为：**先推分支**（`git push`，只跑测试）→ **再逐个 tag
    推送并逐条确认**（完整循环脚本见 skill dsh-plugin-tag「标准流程」）。
@@ -97,12 +95,13 @@ RELEASING.md「日常发布流程」——工作未完成期间代码可以本�
   升版本必须同时补该包 `CHANGELOG.md` 的 `## <版本> (YYYY-MM-DD)` 小节
   （GitHub Release 说明自动取自这里）。
 - 推送 `main` / `alpha` 只跑测试（test.yml），永远不发布；发版只由 tag 推送
-  触发（`git tag -a <目录>-v<版本> -m "<包名> v<版本>" && git push origin
-  <目录>-v<版本>`，GitHub Release tarball 分发，不经过 npm）。**tag 由你明确
-  打出，CI 绝不创建 tag**——没推 tag 就没有任何 Release。**tag 必须逐个推送**：
-  单次推送超过 3 个 tag 时 GitHub 不产生任何 `push` 事件（全部静默漏发），且
-  并发组会取消排队中的 run；一次发多个包时逐个推送、逐个确认触发与成败
-  （详见 skill dsh-plugin-tag「铁律一 / 铁律二」）。门禁规则（打 tag 发版时强制
+  触发（`git tag -a <目录>-v<版本> -m "<包名> v<版本>"` 后逐个
+  `git push origin <目录>-v<版本>`，GitHub Release tarball 分发，不经过 npm）。
+  **tag 由你明确打出，CI 绝不创建 tag**——没推 tag 就没有任何 Release。
+  **tag 必须逐个推送、推完确认再推下一个**：单次推送超过 3 个 tag 时 GitHub 不
+  产生任何 `push` 事件（全部静默漏发），且并发组会取消排队中的 run
+  （通用纪律见全局 `git-workflow`「打 tag 与推送纪律」，本仓库流程见 skill
+  dsh-plugin-tag「标准流程」）。门禁规则（打 tag 发版时强制
   执行）：版本号**严格低于**已归档版本会直接红；「改了代码没升版本号」
   不再是 CI 红灯——那种推送只跑测试，想发版就升版本打新 tag。版本与已归档
   tag 相同则幂等跳过。任何情况下不满足发布条件的包不会出现在 Release 资产里。
