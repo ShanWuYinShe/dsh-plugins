@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.1 (2026-09-24)
+
+### 新增
+
+* **ZCode 多系统凭据自动发现与跨系统解密支持**：
+  * **macOS**：支持 `~/.zcode/v2/credentials.json` 以及 `~/Library/Application Support/(.)zcode/v2/credentials.json` 候选路径；
+  * **Windows**：支持 `%USERPROFILE%\.zcode\v2\credentials.json`，并自动回落至 `%LOCALAPPDATA%` 与 `%APPDATA%`（Local / Roaming）目录；
+  * **WSL**：借鉴 WorkBuddy 跨系统探测机制，优先透过 WSL 挂载探测 Windows 宿主用户目录（`/mnt/c/Users/<user>/.zcode/...`）与 Windows AppData 目录，并自动利用 Windows 用户名及 profile 路径完成跨环境 AES-256-GCM 解密，未发现时自动回落至 Linux 原生路径；
+  * **Linux**：支持 `~/.zcode/v2/credentials.json` 与 `~/.config/(.)zcode/v2/credentials.json`；
+  * 支持 `authFileZCode` 配置项与 `ZCODE_AUTH_FILE` 环境变量显式指定。
+
 ## 0.4.0 (2026-09-24)
 
 ### 新增

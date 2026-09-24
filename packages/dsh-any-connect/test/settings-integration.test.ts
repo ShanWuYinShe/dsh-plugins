@@ -16,7 +16,7 @@ afterEach(async () => {
   vi.restoreAllMocks()
   await context?.fiber.dispose()
   context = undefined
-  if (root !== undefined) await rm(root, { recursive: true, force: true })
+  if (root !== undefined) await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   root = undefined
   vi.unstubAllEnvs()
 })

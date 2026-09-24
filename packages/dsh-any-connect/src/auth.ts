@@ -168,41 +168,174 @@ export function defaultDesktopAuthCandidates(): string[] {
   return []
 }
 
+/** Windows ZCode credential candidates visible from a WSL process. */
+function wslZCodeDesktopCandidates(home: string, filename: string = 'credentials.json'): string[] {
+  const profile = windowsPathForWsl(process.env['USERPROFILE'])
+    ?? join('/mnt/c/Users', basename(home))
+  const localAppData = windowsPathForWsl(process.env['LOCALAPPDATA'])
+    ?? join(profile, 'AppData', 'Local')
+  const roamingAppData = windowsPathForWsl(process.env['APPDATA'])
+    ?? join(profile, 'AppData', 'Roaming')
+  return [
+    join(profile, '.zcode', 'v2', filename),
+    join(localAppData, '.zcode', 'v2', filename),
+    join(roamingAppData, '.zcode', 'v2', filename),
+    join(localAppData, 'zcode', 'v2', filename),
+    join(roamingAppData, 'zcode', 'v2', filename),
+  ]
+}
+
+/**
+ * Platform-default candidates for the ZCode desktop app's credentials file, in
+ * probe order.
+ * - macOS: ~/.zcode/v2/credentials.json, ~/Library/Application Support/(.)zcode/v2/credentials.json
+ * - Windows: %USERPROFILE%\.zcode\v2\credentials.json, AppData Local/Roaming roots
+ * - WSL: Windows profile & AppData via WSL mount first, then native Linux paths
+ * - Linux: ~/.zcode/v2/credentials.json, ~/.config/(.)zcode/v2/credentials.json
+ */
+export function defaultZCodeDesktopCandidates(filename: string = 'credentials.json'): string[] {
+  const home = homedir()
+  if (process.platform === 'darwin') {
+    return [
+      join(home, '.zcode', 'v2', filename),
+      join(home, 'Library', 'Application Support', 'zcode', 'v2', filename),
+      join(home, 'Library', 'Application Support', '.zcode', 'v2', filename),
+    ]
+  }
+  if (process.platform === 'win32') {
+    const localAppData = process.env['LOCALAPPDATA'] ?? join(home, 'AppData', 'Local')
+    const roamingAppData = process.env['APPDATA'] ?? join(home, 'AppData', 'Roaming')
+    return [
+      ...new Set([
+        join(home, '.zcode', 'v2', filename),
+        join(localAppData, '.zcode', 'v2', filename),
+        join(roamingAppData, '.zcode', 'v2', filename),
+        join(localAppData, 'zcode', 'v2', filename),
+        join(roamingAppData, 'zcode', 'v2', filename),
+      ]),
+    ]
+  }
+  if (process.platform === 'linux') {
+    const linux = [
+      join(home, '.zcode', 'v2', filename),
+      join(home, '.config', 'zcode', 'v2', filename),
+      join(home, '.config', '.zcode', 'v2', filename),
+    ]
+    return isWsl() ? [...new Set([...wslZCodeDesktopCandidates(home, filename), ...linux])] : linux
+  }
+  return [join(home, '.zcode', 'v2', filename)]
+}
+
 /**
  * Platform-default candidates for one variant, in probe order.
  */
 export function desktopAuthCandidatesFor(variant: WorkBuddyVariant): string[] {
   if (variant.kind === 'zcode') {
-    const home = homedir()
-    return [join(home, '.zcode', 'v2', 'credentials.json')]
+    return defaultZCodeDesktopCandidates(variant.desktopFilename ?? 'credentials.json')
   }
   return defaultDesktopAuthCandidates().map(path => join(dirname(path), variant.desktopFilename!))
 }
 
-/** Decrypt enc:v1:<iv>.<tag>.<cipher> encrypted values from ~/.zcode/v2/credentials.json */
-export function decryptZCodeEncryptedKey(encStr: string): string {
+export interface DecryptZCodeKeyOptions {
+  desktopPath?: string
+  platform?: string
+  homedir?: string
+  username?: string
+}
+
+/** Decrypt enc:v1:<iv>.<tag>.<cipher> encrypted values from credentials.json */
+export function decryptZCodeEncryptedKey(
+  encStr: string,
+  options?: DecryptZCodeKeyOptions,
+): string {
   if (!encStr.startsWith('enc:v1:')) return encStr
-  let username = 'unknown'
-  try {
-    username = os.userInfo().username
-  } catch {}
-  const fallbackSecret = `zcode-credential-fallback:${os.platform()}:${os.homedir()}:${username}`
-  const secret = process.env.ZCODE_CREDENTIAL_SECRET || fallbackSecret
-  const aesKey = crypto.createHash('sha256').update(secret).digest()
   const parts = encStr.slice('enc:v1:'.length).split('.')
   if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
     throw new Error('Invalid ZCode enc:v1 credential format')
   }
   const [ivB64, tagB64, cipherB64] = parts
-  const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, Buffer.from(ivB64, 'base64url'))
-  decipher.setAuthTag(Buffer.from(tagB64, 'base64url'))
-  return Buffer.concat([decipher.update(Buffer.from(cipherB64, 'base64url')), decipher.final()]).toString('utf8')
+  const iv = Buffer.from(ivB64, 'base64url')
+  const tag = Buffer.from(tagB64, 'base64url')
+  const cipherBuffer = Buffer.from(cipherB64, 'base64url')
+
+  let currentUsername = 'unknown'
+  try {
+    currentUsername = os.userInfo().username
+  } catch {}
+
+  const currentPlatform = process.platform || os.platform()
+  const currentHomedir = homedir()
+
+  const secrets: string[] = []
+
+  // 1. Explicit env override if set
+  if (process.env.ZCODE_CREDENTIAL_SECRET) {
+    secrets.push(process.env.ZCODE_CREDENTIAL_SECRET)
+  }
+
+  // 2. Explicit options if passed
+  if (options?.platform && options?.homedir && options?.username) {
+    secrets.push(`zcode-credential-fallback:${options.platform}:${options.homedir}:${options.username}`)
+  }
+
+  // 3. Current host runtime fallback
+  secrets.push(`zcode-credential-fallback:${currentPlatform}:${currentHomedir}:${currentUsername}`)
+  if (os.homedir() !== currentHomedir) {
+    secrets.push(`zcode-credential-fallback:${currentPlatform}:${os.homedir()}:${currentUsername}`)
+  }
+
+  // 4. If desktopPath is a Windows path mounted in WSL (/mnt/<drive>/Users/<user>/...):
+  const pathToCheck = options?.desktopPath
+  if (pathToCheck) {
+    const mntMatch = /^\/mnt\/([a-zA-Z])\/Users\/([^/]+)/iu.exec(pathToCheck)
+    if (mntMatch) {
+      const drive = mntMatch[1]!.toUpperCase()
+      const winUser = mntMatch[2]!
+      secrets.push(`zcode-credential-fallback:win32:${drive}:\\Users\\${winUser}:${winUser}`)
+      secrets.push(`zcode-credential-fallback:win32:${drive}:/Users/${winUser}:${winUser}`)
+    }
+  }
+
+  // 5. If running inside WSL, try Windows user profile credentials
+  if (isWsl()) {
+    const winProfile = windowsPathForWsl(process.env['USERPROFILE'])
+    const winUser = winProfile ? basename(winProfile) : basename(currentHomedir)
+    secrets.push(`zcode-credential-fallback:win32:C:\\Users\\${winUser}:${winUser}`)
+    secrets.push(`zcode-credential-fallback:win32:C:/Users/${winUser}:${winUser}`)
+    secrets.push(`zcode-credential-fallback:win32:C:\\Users\\${currentUsername}:${currentUsername}`)
+    secrets.push(`zcode-credential-fallback:win32:C:/Users/${currentUsername}:${currentUsername}`)
+  }
+
+  // 6. If on Windows, check USERPROFILE and USERNAME env vars
+  if (currentPlatform === 'win32') {
+    const winProfile = process.env['USERPROFILE']
+    const winUser = process.env['USERNAME'] ?? currentUsername
+    if (winProfile) {
+      secrets.push(`zcode-credential-fallback:win32:${winProfile}:${winUser}`)
+      secrets.push(`zcode-credential-fallback:win32:${winProfile.replace(/\\/g, '/')}:${winUser}`)
+    }
+  }
+
+  const candidateSecrets = [...new Set(secrets)]
+  let lastError: unknown
+  for (const secret of candidateSecrets) {
+    try {
+      const aesKey = crypto.createHash('sha256').update(secret).digest()
+      const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, iv)
+      decipher.setAuthTag(tag)
+      return Buffer.concat([decipher.update(cipherBuffer), decipher.final()]).toString('utf8')
+    } catch (err) {
+      lastError = err
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Invalid ZCode enc:v1 credential format')
 }
 
 /**
  * Parse a ZCode credentials.json document into a WorkBuddyCredential representation.
  */
-export function parseZCodeAuth(text: string): WorkBuddyCredential | undefined {
+export function parseZCodeAuth(text: string, desktopPath?: string): WorkBuddyCredential | undefined {
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
@@ -231,7 +364,7 @@ export function parseZCodeAuth(text: string): WorkBuddyCredential | undefined {
 
   let decryptedKey: string
   try {
-    decryptedKey = decryptZCodeEncryptedKey(apiKeyRaw)
+    decryptedKey = decryptZCodeEncryptedKey(apiKeyRaw, { desktopPath })
   } catch {
     return undefined
   }
@@ -597,7 +730,7 @@ export class WorkBuddyCredentialStore {
       try {
         const text = await readFile(desktopPath, 'utf8')
         if (this.variant.kind === 'zcode') {
-          return parseZCodeAuth(text)
+          return parseZCodeAuth(text, desktopPath)
         }
         return parseWorkBuddyAuth(text)
       } catch (error: unknown) {

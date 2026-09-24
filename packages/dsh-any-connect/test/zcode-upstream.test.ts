@@ -45,6 +45,45 @@ describe('ZCode upstream and auth', () => {
       expect(parsed?.uid).toBe('57271768622479063')
       expect(parsed?.domain).toBe('bigmodel.cn')
     })
+
+    it('decrypts encrypted key created on Windows when reading from WSL mount path', () => {
+      const winSecret = 'zcode-credential-fallback:win32:C:\\Users\\alice:alice'
+      const aesKey = crypto.createHash('sha256').update(winSecret).digest()
+      const plainKey = '57271768622479063.windowskey123456'
+
+      const iv = crypto.randomBytes(12)
+      const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv)
+      const ciphertext = Buffer.concat([cipher.update(Buffer.from(plainKey, 'utf8')), cipher.final()])
+      const tag = cipher.getAuthTag()
+
+      const encStr = `enc:v1:${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`
+
+      // Decrypt with WSL path
+      const decrypted = decryptZCodeEncryptedKey(encStr, { desktopPath: '/mnt/c/Users/alice/.zcode/v2/credentials.json' })
+      expect(decrypted).toBe(plainKey)
+
+      // parseZCodeAuth with desktopPath
+      const credentialsDoc = JSON.stringify({
+        'account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:57271768622479063:api-key': encStr,
+      })
+      const parsed = parseZCodeAuth(credentialsDoc, '/mnt/c/Users/alice/.zcode/v2/credentials.json')
+      expect(parsed?.accessToken).toBe(plainKey)
+    })
+
+    it('decrypts with explicit platform options', () => {
+      const customSecret = 'zcode-credential-fallback:darwin:/Users/bob:bob'
+      const aesKey = crypto.createHash('sha256').update(customSecret).digest()
+      const plainKey = '57271768622479063.customplatformkey'
+
+      const iv = crypto.randomBytes(12)
+      const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv)
+      const ciphertext = Buffer.concat([cipher.update(Buffer.from(plainKey, 'utf8')), cipher.final()])
+      const tag = cipher.getAuthTag()
+
+      const encStr = `enc:v1:${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`
+      const decrypted = decryptZCodeEncryptedKey(encStr, { platform: 'darwin', homedir: '/Users/bob', username: 'bob' })
+      expect(decrypted).toBe(plainKey)
+    })
   })
 
   describe('ZCodeUpstreamClient', () => {

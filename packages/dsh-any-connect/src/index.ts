@@ -48,6 +48,7 @@ export {
 export {
   decryptZCodeEncryptedKey,
   defaultDesktopAuthCandidates,
+  defaultZCodeDesktopCandidates,
   desktopAuthCandidatesFor,
   parseWorkBuddyAuth,
   parseZCodeAuth,
@@ -56,6 +57,7 @@ export {
   WORKBUDDY_AUTH_FILENAME,
   WorkBuddyCredentialStore,
   workbuddyOwnAuthPath,
+  type DecryptZCodeKeyOptions,
   type WorkBuddyAuthStatus,
   type WorkBuddyCredential,
 } from './auth.js'

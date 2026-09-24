@@ -91,14 +91,15 @@ dsh-any-connect doctor --provider workbuddy-ai
 |---|---|---|
 | `authFile` | 自动探测 | 显式指定 WorkBuddy 桌面凭据文件路径（覆盖环境变量与平台默认探测） |
 | `authFileAI` | 自动探测 | 同上，作用于 WorkBuddy AI（国际版） |
+| `authFileZCode` | 自动探测 | 同上，作用于 ZCode 桌面端凭据文件（覆盖环境变量与平台默认探测） |
 
 思考档位检测全自动：目录刷新后自动补测未声明档位的模型，无需配置。
 
 生效顺序（后者覆盖前者）：内置默认值 → bundle patch 的 config →
 profile/home 的 `cordis.patch.yml`（DSH 0.1.7 起第三方 provider 的模型设置表单
-只读，字段改走补丁文件即时生效——Loader 以 volatile 引用提交，无需重装）。凭据来源的探测顺序与上游一致：
-macOS/Linux 的原生路径、Windows 的 Local → Roaming AppData、WSL 下挂载的
-Windows 用户目录；也可用 `WORKBUDDY_AUTH_FILE` 环境变量直接指定。
+只读，字段改走补丁文件即时生效——Loader 以 volatile 引用提交，无需重装）。凭据来源的探测顺序与跨系统支持：
+- **WorkBuddy**：macOS / Linux 原生路径、Windows 的 Local → Roaming AppData、WSL 下挂载的 Windows 用户目录；亦可用 `WORKBUDDY_AUTH_FILE` / `WORKBUDDY_AI_AUTH_FILE` 环境变量显式指定。
+- **ZCode**：macOS（`~/.zcode/v2/credentials.json` 及 `Library/Application Support`）、Windows（`%USERPROFILE%\.zcode\v2\credentials.json` 及 Local/Roaming AppData）、WSL（优先通过 WSL 挂载探测 Windows 宿主用户目录与 AppData，并自动计算跨系统解密密钥，随后回落 Linux 原生目录）、Linux（`~/.zcode/v2/credentials.json` 及 `~/.config`）；亦可用 `ZCODE_AUTH_FILE` 环境变量显式指定。
 
 ## 发布线
 

@@ -4,12 +4,15 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   defaultDesktopAuthCandidates,
+  defaultZCodeDesktopCandidates,
+  desktopAuthCandidatesFor,
   parseWorkBuddyAuth,
+  parseZCodeAuth,
   WorkBuddyCredentialStore,
   WORKBUDDY_AUTH_FILE_ENV,
   type WorkBuddyCredential,
 } from '../src/auth.js'
-import { AI_VARIANT, CN_VARIANT } from '../src/variants.js'
+import { AI_VARIANT, CN_VARIANT, ZCODE_VARIANT } from '../src/variants.js'
 
 // node:os's ESM namespace rejects vi.spyOn (non-configurable), so homedir is
 // mocked at the module level; unset state falls through to the real one.
@@ -342,6 +345,83 @@ describe('WorkBuddyCredentialStore', () => {
   })
 })
 
+/** Run the case body as win32 with the given home; restore on exit. */
+async function asWindows<T>(home: string, run: () => Promise<T>): Promise<T> {
+  const savedPlatform = process.platform
+  const savedEnv = process.env[WORKBUDDY_AUTH_FILE_ENV]
+  delete process.env[WORKBUDDY_AUTH_FILE_ENV]
+  fakeOs.home = home
+  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+  try {
+    return await run()
+  } finally {
+    Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true })
+    fakeOs.home = undefined
+    if (savedEnv === undefined) delete process.env[WORKBUDDY_AUTH_FILE_ENV]
+    else process.env[WORKBUDDY_AUTH_FILE_ENV] = savedEnv
+  }
+}
+
+/** Run the case body as WSL with the given home/env; restore on exit. */
+async function asWsl<T>(options: {
+  home: string
+  env?: Partial<Record<'APPDATA' | 'LOCALAPPDATA' | 'USERPROFILE', string>>
+}, run: () => Promise<T>): Promise<T> {
+  const savedPlatform = process.platform
+  const savedEnv = Object.fromEntries(
+    ['APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'WSL_DISTRO_NAME', 'WSL_INTEROP']
+      .map(name => [name, process.env[name]]),
+  )
+  Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+  fakeOs.home = options.home
+  fakeOs.release = '6.6.87.2-microsoft-standard-WSL2'
+  delete process.env['APPDATA']
+  delete process.env['LOCALAPPDATA']
+  delete process.env['USERPROFILE']
+  delete process.env['WSL_DISTRO_NAME']
+  delete process.env['WSL_INTEROP']
+  Object.assign(process.env, options.env)
+  try {
+    return await run()
+  } finally {
+    Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true })
+    fakeOs.home = undefined
+    fakeOs.release = undefined
+    for (const [name, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
+}
+
+/** Run the case body as native Linux (non-WSL); restore on exit. */
+async function asLinux<T>(home: string, run: () => Promise<T>): Promise<T> {
+  const savedPlatform = process.platform
+  const savedEnv = Object.fromEntries(
+    ['APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'WSL_DISTRO_NAME', 'WSL_INTEROP']
+      .map(name => [name, process.env[name]]),
+  )
+  Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+  fakeOs.home = home
+  fakeOs.release = '6.6.0-generic'
+  delete process.env['APPDATA']
+  delete process.env['LOCALAPPDATA']
+  delete process.env['USERPROFILE']
+  delete process.env['WSL_DISTRO_NAME']
+  delete process.env['WSL_INTEROP']
+  try {
+    return await run()
+  } finally {
+    Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true })
+    fakeOs.home = undefined
+    fakeOs.release = undefined
+    for (const [name, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
+}
+
 describe('Windows default desktop path probing', () => {
   function windowsDoc(token: string): string {
     return JSON.stringify({
@@ -357,23 +437,6 @@ describe('Windows default desktop path probing', () => {
     const local = join(home, 'AppData', 'Local', 'CodeBuddyExtension', 'Data', 'Public', 'auth', 'workbuddy-desktop.info')
     const roaming = join(home, 'AppData', 'Roaming', 'CodeBuddyExtension', 'Data', 'Public', 'auth', 'workbuddy-desktop.info')
     return { home, local, roaming }
-  }
-
-  /** Run the case body as win32 with the given home; restore on exit. */
-  async function asWindows<T>(home: string, run: () => Promise<T>): Promise<T> {
-    const savedPlatform = process.platform
-    const savedEnv = process.env[WORKBUDDY_AUTH_FILE_ENV]
-    delete process.env[WORKBUDDY_AUTH_FILE_ENV]
-    fakeOs.home = home
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
-    try {
-      return await run()
-    } finally {
-      Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true })
-      fakeOs.home = undefined
-      if (savedEnv === undefined) delete process.env[WORKBUDDY_AUTH_FILE_ENV]
-      else process.env[WORKBUDDY_AUTH_FILE_ENV] = savedEnv
-    }
   }
 
   it('lists Local before Roaming on win32', async () => {
@@ -468,37 +531,6 @@ describe('Windows default desktop path probing', () => {
 describe('WSL default desktop path probing', () => {
   const AUTH_TAIL = join('CodeBuddyExtension', 'Data', 'Public', 'auth', 'workbuddy-desktop.info')
 
-  async function asWsl<T>(options: {
-    home: string
-    env?: Partial<Record<'APPDATA' | 'LOCALAPPDATA' | 'USERPROFILE', string>>
-  }, run: () => Promise<T>): Promise<T> {
-    const savedPlatform = process.platform
-    const savedEnv = Object.fromEntries(
-      ['APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'WSL_DISTRO_NAME', 'WSL_INTEROP']
-        .map(name => [name, process.env[name]]),
-    )
-    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
-    fakeOs.home = options.home
-    fakeOs.release = '6.6.87.2-microsoft-standard-WSL2'
-    delete process.env['APPDATA']
-    delete process.env['LOCALAPPDATA']
-    delete process.env['USERPROFILE']
-    delete process.env['WSL_DISTRO_NAME']
-    delete process.env['WSL_INTEROP']
-    Object.assign(process.env, options.env)
-    try {
-      return await run()
-    } finally {
-      Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true })
-      fakeOs.home = undefined
-      fakeOs.release = undefined
-      for (const [name, value] of Object.entries(savedEnv)) {
-        if (value === undefined) delete process.env[name]
-        else process.env[name] = value
-      }
-    }
-  }
-
   it('probes the matching mounted Windows profile before the Linux path', async () => {
     await asWsl({ home: '/home/alice' }, async () => {
       expect(defaultDesktopAuthCandidates()).toEqual([
@@ -586,5 +618,133 @@ describe('WorkBuddyCredentialStore variants', () => {
     expect(status.state).toBe('signed-out')
     expect(status.reason).toContain('WORKBUDDY_AI_AUTH_FILE')
   })
-
 })
+
+describe('ZCode macOS default desktop path probing', () => {
+  async function asDarwin<T>(home: string, run: () => Promise<T>): Promise<T> {
+    const savedPlatform = process.platform
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+    fakeOs.home = home
+    try {
+      return await run()
+    } finally {
+      Object.defineProperty(process, 'platform', { value: savedPlatform, configurable: true })
+      fakeOs.home = undefined
+    }
+  }
+
+  it('lists ~/.zcode before Library/Application Support candidates on macOS', async () => {
+    await asDarwin('/Users/alice', async () => {
+      expect(defaultZCodeDesktopCandidates()).toEqual([
+        '/Users/alice/.zcode/v2/credentials.json',
+        '/Users/alice/Library/Application Support/zcode/v2/credentials.json',
+        '/Users/alice/Library/Application Support/.zcode/v2/credentials.json',
+      ])
+      expect(desktopAuthCandidatesFor(ZCODE_VARIANT)).toEqual(defaultZCodeDesktopCandidates())
+    })
+  })
+})
+
+describe('ZCode Windows default desktop path probing', () => {
+  function zcodeDoc(apiKey: string): string {
+    return JSON.stringify({
+      'account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:57271768622479063:api-key': apiKey,
+    })
+  }
+
+  async function fakeWindowsZCodeHome(): Promise<{ home: string; profileZcode: string; localZcode: string; roamingZcode: string }> {
+    const home = await mkdtemp(join(tmpdir(), 'zc-win-'))
+    CLEANUP.push(() => rm(home, { recursive: true, force: true }))
+    const profileZcode = join(home, '.zcode', 'v2', 'credentials.json')
+    const localZcode = join(home, 'AppData', 'Local', '.zcode', 'v2', 'credentials.json')
+    const roamingZcode = join(home, 'AppData', 'Roaming', '.zcode', 'v2', 'credentials.json')
+    return { home, profileZcode, localZcode, roamingZcode }
+  }
+
+  it('lists profile .zcode before AppData candidates on win32', async () => {
+    const { home, profileZcode, localZcode, roamingZcode } = await fakeWindowsZCodeHome()
+    await asWindows(home, async () => {
+      const candidates = defaultZCodeDesktopCandidates()
+      expect(candidates[0]).toBe(profileZcode)
+      expect(candidates).toContain(localZcode)
+      expect(candidates).toContain(roamingZcode)
+    })
+  })
+
+  it('reads the profile .zcode credentials when present on win32', async () => {
+    const { home, profileZcode } = await fakeWindowsZCodeHome()
+    await mkdir(join(profileZcode, '..'), { recursive: true })
+    await writeFile(profileZcode, zcodeDoc('test.win-api-key'))
+    await asWindows(home, async () => {
+      const store = new WorkBuddyCredentialStore({
+        variant: ZCODE_VARIANT,
+        ownPath: join(home, 'own-zcode.json'),
+        refresh: async credential => ({ accessToken: credential.accessToken }),
+      })
+      await expect(store.resolve()).resolves.toMatchObject({ accessToken: 'test.win-api-key', source: 'desktop' })
+      await expect(store.desktopFilePresent()).resolves.toBe(true)
+    })
+  })
+
+  it('falls back to AppData/Local on win32 when profile .zcode is absent', async () => {
+    const { home, localZcode } = await fakeWindowsZCodeHome()
+    await mkdir(join(localZcode, '..'), { recursive: true })
+    await writeFile(localZcode, zcodeDoc('test.local-api-key'))
+    await asWindows(home, async () => {
+      const store = new WorkBuddyCredentialStore({
+        variant: ZCODE_VARIANT,
+        ownPath: join(home, 'own-zcode.json'),
+        refresh: async credential => ({ accessToken: credential.accessToken }),
+      })
+      await expect(store.resolve()).resolves.toMatchObject({ accessToken: 'test.local-api-key', source: 'desktop' })
+      await expect(store.desktopFilePresent()).resolves.toBe(true)
+    })
+  })
+})
+
+describe('ZCode WSL default desktop path probing', () => {
+  it('probes the mounted Windows user profile before native Linux path', async () => {
+    await asWsl({ home: '/home/alice' }, async () => {
+      const candidates = defaultZCodeDesktopCandidates()
+      expect(candidates[0]).toBe('/mnt/c/Users/alice/.zcode/v2/credentials.json')
+      expect(candidates).toContain('/mnt/c/Users/alice/AppData/Local/.zcode/v2/credentials.json')
+      expect(candidates).toContain('/home/alice/.zcode/v2/credentials.json')
+      expect(candidates.indexOf('/mnt/c/Users/alice/.zcode/v2/credentials.json'))
+        .toBeLessThan(candidates.indexOf('/home/alice/.zcode/v2/credentials.json'))
+    })
+  })
+
+  it('reads and decrypts Windows ZCode credential from WSL', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'zc-wsl-'))
+    CLEANUP.push(() => rm(root, { recursive: true, force: true }))
+    const windowsProfile = join(root, 'Users', 'windows-alice')
+    const zcodePath = join(windowsProfile, '.zcode', 'v2', 'credentials.json')
+    await mkdir(join(zcodePath, '..'), { recursive: true })
+    await writeFile(zcodePath, JSON.stringify({
+      'account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:57271768622479063:api-key': 'wsl-test-key-12345',
+    }))
+
+    await asWsl({ home: '/home/linux-alice', env: { USERPROFILE: windowsProfile } }, async () => {
+      const store = new WorkBuddyCredentialStore({
+        variant: ZCODE_VARIANT,
+        ownPath: join(root, 'own-zcode.json'),
+        refresh: async credential => ({ accessToken: credential.accessToken }),
+      })
+      expect(store.desktopAuthPath()).toBe(zcodePath)
+      await expect(store.resolve()).resolves.toMatchObject({ accessToken: 'wsl-test-key-12345', source: 'desktop' })
+    })
+  })
+})
+
+describe('ZCode Linux native default desktop path probing', () => {
+  it('lists ~/.zcode and ~/.config paths on native Linux', async () => {
+    await asLinux('/home/bob', async () => {
+      expect(defaultZCodeDesktopCandidates()).toEqual([
+        '/home/bob/.zcode/v2/credentials.json',
+        '/home/bob/.config/zcode/v2/credentials.json',
+        '/home/bob/.config/.zcode/v2/credentials.json',
+      ])
+    })
+  })
+})
+
