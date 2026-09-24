@@ -41,7 +41,7 @@ bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览�
 ## 约定
 
 - 发布相关（分支模型、发布纪律、版本号/推送门禁）：详见 skill dsh-plugin-release；跨分支 worktree 操作：详见 skill dsh-plugin-worktree。
-- 提交信息按 `git-workflow` skill 写（全局 Commit 格式 `<分类>(<范围>): <中文描述>`），本项目惯例用
+- 提交信息按 `git-commit` skill 写（全局 Commit 格式 `<分类>(<范围>): <中文描述>`），本项目惯例用
   中文分类前缀（`新增:` / `修复:` / `重构:` / `文档:` / `测试:` / `ci:` 等）。
 - 测试环境通过 vitest 配置里的 `DSH_HOME` 与真实用户目录隔离，不要在测试里
   读写真实的 `~/.dsh`。
