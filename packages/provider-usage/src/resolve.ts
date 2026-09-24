@@ -77,6 +77,8 @@ export const CANONICAL_ALIASES: Readonly<Record<string, string>> = Object.freeze
   newapi: 'openai',
   doneapi: 'openai',
   openai: 'openai',
+  opencode: 'opencode',
+  opencodego: 'opencode-go',
 })
 
 /** Normalize provider names (stripping punctuation, lowering case, applying aliases). */
@@ -97,6 +99,7 @@ export function inferProviderFromBaseUrl(baseURL?: string): string | undefined {
     if (host.includes('bigmodel.cn') || host.includes('z.ai')) return 'bigmodel'
     if (host.includes('minimax.io') || host.includes('minimaxi.com') || host.includes('minimax.chat')) return 'minimax'
     if (host.includes('openrouter.ai')) return 'openrouter'
+    if (host.includes('opencode.ai')) return 'opencode-go'
     if (host.includes('oneapi') || host.includes('newapi') || host.includes('doneapi') || host.includes('openai.com')) return 'openai'
   } catch {
     // baseURL was not a valid URL
@@ -124,25 +127,47 @@ export function createProviderResolver(ctx: Context): (provider: string, signal:
     const normalized = normalizeProviderKey(provider)
     const entry = candidates.find(candidate => candidate.provider === provider)
       ?? candidates.find(candidate => normalizeProviderKey(candidate.provider) === normalized)
-    if (entry === undefined) return {}
 
-    // DSH 0.1.7 removed the namespace section read (`settings.get(ns)`): the
-    // forms service projects Loader profile entries, so the section is the
-    // resolved value of the descriptor keyed by the directory's settingsNs.
-    const section = ctx.get('settings')?.describe().find(candidate => candidate.ns === entry.settingsNs)?.value
-    const profile = profileOf(section, entry.settingsPath)
-    const baseURL = str(profile?.['baseURL'])
-    const apiKeyEnv = str(profile?.['apiKeyEnv'])
-
+    let baseURL: string | undefined
     let apiKey: string | undefined
     const credentials = ctx.get('credentials')
-    if (apiKeyEnv !== undefined && credentials !== undefined) {
-      // Re-read rather than cache: a credential rotated between two queries
-      // would otherwise be answered with a stale value and the user would see
-      // a failure they cannot explain.
-      const resolved = await credentials.resolve(credentialRef(apiKeyEnv))
-      if (signal.aborted) return baseURL === undefined ? {} : { baseURL }
-      apiKey = resolved?.value
+
+    if (entry !== undefined) {
+      // DSH 0.1.7 removed the namespace section read (`settings.get(ns)`): the
+      // forms service projects Loader profile entries, so the section is the
+      // resolved value of the descriptor keyed by the directory's settingsNs.
+      const section = ctx.get('settings')?.describe().find(candidate => candidate.ns === entry.settingsNs)?.value
+      const profile = profileOf(section, entry.settingsPath)
+      baseURL = str(profile?.['baseURL'])
+      const apiKeyEnv = str(profile?.['apiKeyEnv'])
+
+      if (apiKeyEnv !== undefined && credentials !== undefined) {
+        const resolved = await credentials.resolve(credentialRef(apiKeyEnv))
+        if (signal.aborted) return baseURL === undefined ? {} : { baseURL }
+        apiKey = resolved?.value
+      }
+    }
+
+    // Fallback: check ambient or well-known credentials if still unresolved
+    if (apiKey === undefined && credentials !== undefined) {
+      const fallbackRefs: Record<string, string[]> = {
+        'opencode': ['OPENCODE_API_KEY', 'OPENCODE_GO_API_KEY'],
+        'opencode-go': ['OPENCODE_GO_API_KEY', 'OPENCODE_API_KEY'],
+        'deepseek': ['DEEPSEEK_API_KEY'],
+      }
+      const refs = fallbackRefs[provider] ?? fallbackRefs[normalized]
+      if (refs !== undefined) {
+        for (const ref of refs) {
+          try {
+            const resolved = await credentials.resolve(credentialRef(ref))
+            if (signal.aborted) return baseURL === undefined ? {} : { baseURL }
+            if (resolved?.value) {
+              apiKey = resolved.value
+              break
+            }
+          } catch {}
+        }
+      }
     }
 
     return {

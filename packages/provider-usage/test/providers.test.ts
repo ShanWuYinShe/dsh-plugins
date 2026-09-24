@@ -14,6 +14,7 @@ import {
   minimaxUsage,
   moonshotUsage,
   openaiUsage,
+  opencodeUsage,
   openrouterUsage,
   siliconflowUsage,
 } from '../src/providers.js'
@@ -43,12 +44,16 @@ describe('BUILTIN_USAGE_QUERIERS', () => {
       'bigmodel',
       'minimax',
       'openai',
+      'opencode',
+      'opencode-go',
     ])
     expect(BUILTIN_USAGE_QUERIERS.get('deepseek')?.displayName).toBe('DeepSeek')
     expect(BUILTIN_USAGE_QUERIERS.get('siliconflow')?.displayName).toBe('SiliconFlow')
     expect(BUILTIN_USAGE_QUERIERS.get('bigmodel')?.displayName).toBe('BigModel')
     expect(BUILTIN_USAGE_QUERIERS.get('minimax')?.displayName).toBe('MiniMax')
     expect(BUILTIN_USAGE_QUERIERS.get('openai')?.displayName).toBe('OpenAI / OneAPI')
+    expect(BUILTIN_USAGE_QUERIERS.get('opencode')?.displayName).toBe('OpenCode')
+    expect(BUILTIN_USAGE_QUERIERS.get('opencode-go')?.displayName).toBe('OpenCode Go')
   })
 
   it('exposes a querier for every entry', () => {
@@ -370,5 +375,60 @@ describe('openaiUsage', () => {
         unit: 'usd',
       },
     ])
+  })
+})
+
+describe('opencodeUsage', () => {
+  it('parses rolling, weekly, and monthly quota windows', async () => {
+    stubFetch({
+      'https://opencode.ai/zen/go/v1/usage': {
+        body: {
+          usage: {
+            rolling: { status: 'ok', percent: 8, resetsAt: '2026-09-24T11:00:46.539Z' },
+            weekly: { status: 'ok', percent: 20, resetsAt: '2026-09-28T00:00:00.000Z' },
+            monthly: { status: 'ok', percent: 38, resetsAt: '2026-10-12T14:16:37.000Z' },
+          },
+        },
+      },
+    })
+    const snapshot = await opencodeUsage({ provider: 'opencode-go', apiKey: 'sk-test' })
+    expect(snapshot.plan).toBe('OpenCode Go')
+    expect(snapshot.windows).toEqual([
+      {
+        id: 'rolling',
+        label: 'Rolling window (5h)',
+        remain: 92,
+        limit: 100,
+        unit: '%',
+        resetsAt: '2026-09-24T11:00:46.539Z',
+      },
+      {
+        id: 'weekly',
+        label: 'Weekly window',
+        remain: 80,
+        limit: 100,
+        unit: '%',
+        resetsAt: '2026-09-28T00:00:00.000Z',
+      },
+      {
+        id: 'monthly',
+        label: 'Monthly window',
+        remain: 62,
+        limit: 100,
+        unit: '%',
+        resetsAt: '2026-10-12T14:16:37.000Z',
+      },
+    ])
+  })
+
+  it('handles empty or missing windows gracefully', async () => {
+    stubFetch({
+      'https://opencode.ai/zen/go/v1/usage': {
+        body: { usage: {} },
+      },
+    })
+    const snapshot = await opencodeUsage({ provider: 'opencode-go', apiKey: 'sk-test' })
+    expect(snapshot.windows).toEqual([])
+    expect(snapshot.error).toBe('the usage endpoint reported no quota windows')
   })
 })

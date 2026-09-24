@@ -421,6 +421,56 @@ export const openaiUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signa
 }
 
 /**
+ * OpenCode / OpenCode Go usage (rolling 5h, weekly, and monthly quota windows).
+ *
+ * `GET {base}/usage` returns current usage percentages and reset timestamps.
+ */
+export const opencodeUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
+  if (apiKey === undefined) return { provider: 'opencode-go', windows: [], fetchedAt: Date.now() }
+  const root = trimBase(baseURL ?? 'https://opencode.ai/zen/go/v1')
+  const headers = { authorization: `Bearer ${apiKey}` }
+  let body: Record<string, unknown> = {}
+  try {
+    body = await getJson(`${root}/usage`, headers, signal)
+  } catch {
+    body = await getJson(`${root}/v1/usage`, headers, signal)
+  }
+  const usage = rec(body['usage'])
+  const windows: UsageWindow[] = []
+
+  const windowDefs = [
+    { key: 'rolling', label: 'Rolling window (5h)' },
+    { key: 'weekly', label: 'Weekly window' },
+    { key: 'monthly', label: 'Monthly window' },
+  ] as const
+
+  for (const { key, label } of windowDefs) {
+    const item = rec(usage[key])
+    const usedPct = num(item['percent'])
+    const resetsAt = str(item['resetsAt'])
+    if (usedPct !== undefined) {
+      const remain = Math.max(0, 100 - usedPct)
+      windows.push({
+        id: key,
+        label,
+        remain,
+        limit: 100,
+        unit: '%',
+        ...resetsAt !== undefined ? { resetsAt } : {},
+      })
+    }
+  }
+
+  return {
+    provider: 'opencode-go',
+    plan: 'OpenCode Go',
+    windows,
+    fetchedAt: Date.now(),
+    ...windows.length === 0 ? { error: 'the usage endpoint reported no quota windows' } : {},
+  }
+}
+
+/**
  * Every built-in querier, keyed by provider route.
  *
  * Registering these is opt-out by omission: a deployment that wants different
@@ -441,4 +491,6 @@ export const BUILTIN_USAGE_QUERIERS: ReadonlyMap<string, { querier: ProviderUsag
   ['bigmodel', { querier: bigmodelUsage, displayName: 'BigModel' }],
   ['minimax', { querier: minimaxUsage, displayName: 'MiniMax' }],
   ['openai', { querier: openaiUsage, displayName: 'OpenAI / OneAPI' }],
+  ['opencode', { querier: opencodeUsage, displayName: 'OpenCode' }],
+  ['opencode-go', { querier: opencodeUsage, displayName: 'OpenCode Go' }],
 ])
