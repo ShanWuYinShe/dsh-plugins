@@ -126,9 +126,9 @@ export const FALLBACK_ZCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       canDisableThinking: true,
     },
     billing: {
-      credits: 'x0.00',
+      credits: 'x0.06',
       badges: ['夜间免费', '150% 额度'],
-      free: true,
+      free: false,
     },
   },
 ]

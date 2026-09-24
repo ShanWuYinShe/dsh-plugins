@@ -263,6 +263,8 @@ function formatTokens(value: number): string {
 function modelBadgeLabel(badge: string, t: WorkBuddyConfigPageInjected['t']): string {
   if (badge === '限时免费') return t('badgeLimitedFree')
   if (badge === '夜间折扣') return t('badgeNightDiscount')
+  if (badge === '夜间免费') return t('badgeNightFree')
+  if (badge.includes('夜间免费') && badge.includes('生效')) return t('badgeNightFreeActive')
   return badge
 }
 

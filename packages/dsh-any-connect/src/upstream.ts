@@ -372,6 +372,25 @@ function parsePromotions(value: unknown, model: string): WorkBuddyPromotion[] {
 }
 
 /**
+ * Whether the current time falls into the Beijing (UTC+8) off-peak night-free window (23:00 - 09:00).
+ */
+export function isZCodeOffpeak(date: Date = new Date()): boolean {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Shanghai',
+      hour: 'numeric',
+      hour12: false,
+    })
+    const hour = parseInt(formatter.format(date), 10)
+    return hour >= 23 || hour < 9
+  } catch {
+    const utc = date.getTime() + date.getTimezoneOffset() * 60000
+    const beijingHour = new Date(utc + 3600000 * 8).getHours()
+    return beijingHour >= 23 || beijingHour < 9
+  }
+}
+
+/**
  * Layer the currently-effective promotion onto a copy of one model row.
  *
  * Ported from corrinehu/dsh-workbuddy-connect (MIT). Non-destructive: the
@@ -386,6 +405,36 @@ function parsePromotions(value: unknown, model: string): WorkBuddyPromotion[] {
  * so the honest answer is to stop asserting one (`rateUnknown`).
  */
 export function modelWithCurrentPromotion(model: WorkBuddyUpstreamModel, now = Date.now()): WorkBuddyUpstreamModel {
+  // Off-peak night free (23:00 - 09:00 Beijing time) for models with the '夜间免费' badge.
+  const hasNightFreeBadge = model.billing?.badges?.some(b => b.includes('夜间免费'))
+  if (hasNightFreeBadge) {
+    const offpeak = isZCodeOffpeak(new Date(now))
+    if (offpeak) {
+      return {
+        ...model,
+        billing: {
+          ...model.billing,
+          credits: 'x0.00',
+          free: true,
+          badges: (model.billing?.badges ?? []).map(b => b === '夜间免费' ? '夜间免费 (生效中)' : b),
+        },
+      }
+    } else {
+      // Daytime: ensure free is false and rate reflects daytime rate
+      const isCurrentlyFree = model.billing?.free === true || model.billing?.credits === 'x0.00'
+      if (isCurrentlyFree) {
+        return {
+          ...model,
+          billing: {
+            ...model.billing,
+            credits: 'x0.06',
+            free: false,
+          },
+        }
+      }
+    }
+  }
+
   if (model.promotions === undefined || model.promotions.length === 0) return model
   const promotion = [...model.promotions]
     .sort((a, b) => b.priority - a.priority)
@@ -1140,8 +1189,29 @@ export class ZCodeUpstreamClient {
     }
   }
 
-  async fetchModels(_credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
-    return this.models
+  async fetchModels(credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
+    try {
+      const response = await fetch('https://open.bigmodel.cn/api/paas/v4/models', {
+        headers: {
+          'Authorization': `Bearer ${credential.accessToken}`,
+          'Accept': 'application/json',
+        },
+        signal: AbortSignal.timeout(JSON_TIMEOUT_MS),
+      })
+      if (!response.ok) {
+        return this.models
+      }
+      const json = await response.json() as { data?: Array<{ id: string }> }
+      if (!Array.isArray(json.data) || json.data.length === 0) {
+        return this.models
+      }
+      const remoteIds = new Set(json.data.map(m => m.id))
+      // Filter or enrich the model list based on remote availability
+      const active = this.models.filter(m => remoteIds.has(m.id))
+      return active.length > 0 ? active : this.models
+    } catch {
+      return this.models
+    }
   }
 
   async fetchCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {

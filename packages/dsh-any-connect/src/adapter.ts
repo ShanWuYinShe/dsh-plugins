@@ -89,6 +89,9 @@ const RATE_SEPARATOR = ' · '
  * contents. Nothing in the host resolves a model *by* name.
  */
 function withRate(name: string, info: WorkBuddyModelInfo): string {
+  if (info.billing?.free === true) {
+    return `${name}${RATE_SEPARATOR}免费`
+  }
   const rate = normalizeCredits(info.billing?.credits)
   return rate === undefined ? name : `${name}${RATE_SEPARATOR}${rate}`
 }

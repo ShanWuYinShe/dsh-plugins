@@ -17,7 +17,7 @@ import { WorkBuddyCatalogStore, credentialIdentity, workbuddyCatalogPath } from 
 import { createWorkBuddyAdapter, WORKBUDDY_PROVIDER } from './adapter.js'
 import { createWorkBuddyShim } from './shim.js'
 import type { WorkBuddyShim } from './shim.js'
-import { WorkBuddyUpstreamClient, ZCodeUpstreamClient, chatBase } from './upstream.js'
+import { WorkBuddyUpstreamClient, ZCodeUpstreamClient, chatBase, isZCodeOffpeak } from './upstream.js'
 import type { WorkBuddyCredential } from './auth.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebProbeSection } from './status-paths.js'
 import { WorkBuddyProbeService } from './probe-service.js'
@@ -717,11 +717,18 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   // 身份核对：只读 current()，身份没变就什么都不做（零上游请求）。
+  // 身份与时段核对：只读 current()，身份没变就什么都不做（零上游请求）。
+  // 时段交界处（夜间免费 23:00 / 09:00）自动重新同步 ZCode 目录。
   // 用 unref 的 interval，vitest 假时钟下 advanceTimers 会触发它——回调内
   // 无身份变化时不触网，现有重试计数测试不受影响。区域错配在这里静默隐藏
   // （原因已由 status 报给卡片），不每 60s 打一条告警。
+  let lastOffpeak = isZCodeOffpeak()
   const sweep = setInterval(() => {
     if (stopped) return
+    const currentOffpeak = isZCodeOffpeak()
+    const offpeakChanged = currentOffpeak !== lastOffpeak
+    lastOffpeak = currentOffpeak
+
     for (const runtime of runtimes) {
       void (async () => {
         try {
@@ -729,7 +736,10 @@ export function apply(ctx: Context, config: Config): void {
           const identity = signedIn === undefined
             ? undefined
             : credentialIdentity(signedIn as unknown as Parameters<typeof credentialIdentity>[0])
-          if (identity !== runtime.lastIdentity && !stopped) refreshCatalog(runtime, 'identity sweep')
+          const shouldRefresh = identity !== runtime.lastIdentity || (offpeakChanged && runtime.variant.kind === 'zcode')
+          if (shouldRefresh && !stopped) {
+            refreshCatalog(runtime, offpeakChanged ? 'offpeak boundary crossed' : 'identity sweep')
+          }
         } catch (error: unknown) {
           if (error instanceof RegionMismatchError) {
             if (!stopped) adoptSignedOut(runtime)
@@ -747,7 +757,7 @@ export function apply(ctx: Context, config: Config): void {
   const catalogTimer = setInterval(() => {
     if (stopped) return
     for (const runtime of runtimes) {
-      if (runtime.variant.kind === 'workbuddy') refreshCatalog(runtime, 'scheduled refresh')
+      refreshCatalog(runtime, 'scheduled refresh')
     }
   }, CATALOG_REFRESH_INTERVAL_MS)
   catalogTimer.unref()
