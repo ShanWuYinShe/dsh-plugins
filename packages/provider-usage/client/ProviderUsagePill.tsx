@@ -76,6 +76,39 @@ if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin
 @media (prefers-reduced-motion: reduce) {
   .pu-pill-panel { animation: none; }
 }
+@keyframes pu-stripe-move {
+  from { background-position: 0 0; }
+  to { background-position: 20px 0; }
+}
+.pu-stripe {
+  background-image: linear-gradient(
+    -45deg,
+    rgba(255,255,255,.15) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(255,255,255,.15) 50%,
+    rgba(255,255,255,.15) 75%,
+    transparent 75%
+  );
+  background-size: 20px 20px;
+  animation: pu-stripe-move .8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pu-stripe { animation: none; }
+}
+.pu-spin {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--dsw-alias-border-l2, rgba(0,0,0,0.08));
+  border-top-color: var(--dsw-alias-label-secondary, #666);
+  border-radius: 50%;
+  animation: pu-spin .8s linear infinite;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+@keyframes pu-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pu-spin { animation: none; } }
 `
   document.head.appendChild(styleEl)
 }
@@ -195,7 +228,7 @@ function WindowRow({ window, t }: { window: UsageWindow; t: ProviderUsageInjecte
           {window.remain === undefined ? window.unit : `${formatAmount(remain)} ${window.unit}`}
         </span>
       </div>
-      {hasLimit ? <div style={trackStyle}><div style={fillStyle(percent)} /></div> : null}
+      {hasLimit ? <div style={trackStyle} role="progressbar" aria-valuenow={Math.round(percent)} aria-valuemin={0} aria-valuemax={100}><div className={percent <= 20 ? 'pu-stripe' : undefined} style={fillStyle(percent)} /></div> : null}
       <span style={windowMetaStyle}>
         {hasLimit ? t('windowRemaining', { remain: formatAmount(remain), limit: formatAmount(window.limit!) }) : null}
         {window.resetsAt === undefined ? null : <>{hasLimit ? ' · ' : ''}{t('resetsAt', { time: formatReset(window.resetsAt) })}</>}
@@ -308,10 +341,19 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
   useEffect(() => {
     if (provider === undefined || provider === '') return
     const controller = new AbortController()
-    const timer = window.setInterval(() => { void refresh(controller.signal) }, POLL_INTERVAL_MS)
+    let timer: number | undefined
+    const start = () => { timer = window.setInterval(() => { void refresh(controller.signal) }, POLL_INTERVAL_MS) }
+    const stop = () => { if (timer !== undefined) { window.clearInterval(timer); timer = undefined } }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') { void refresh(controller.signal); start() }
+      else stop()
+    }
+    if (document.visibilityState === 'visible') start()
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
-      window.clearInterval(timer)
+      stop()
       controller.abort()
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [provider, refresh])
 
@@ -347,10 +389,10 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
       >
         <span aria-hidden="true" style={{ ...dotStyle, background: getDotColor(snapshot, queried) }} />
         <span style={labelStyle}>{provider}</span>
-        <span style={labelStyle}>{headline}</span>
+        <span style={labelStyle}>{answer === undefined ? <><span className="pu-spin" aria-hidden="true" />{headline}</> : headline}</span>
       </button>
       {open ? (
-        <span className="pu-pill-panel" style={panelStyle} role="dialog" aria-label={t('providerUsageTitle')}>
+        <div className="pu-pill-panel" style={panelStyle} role="dialog" aria-label={t('providerUsageTitle')}>
           <p style={panelTitleStyle}>{provider}{snapshot?.plan === undefined ? null : ` · ${t('plan')} ${snapshot.plan}`}</p>
           {busy ? <p style={noteStyle}>{t('refreshing')}</p> : null}
           {!queried
@@ -359,7 +401,7 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
               ? <p style={noteStyle}>{snapshot!.error === undefined ? t('noWindows') : t('failed')}</p>
               : snapshot!.windows.map(window => <WindowRow key={window.id} window={window} t={t} />)}
           {queried && snapshot!.error !== undefined ? <p style={errorStyle}>{snapshot!.error}</p> : null}
-        </span>
+        </div>
       ) : null}
     </span>
   )
