@@ -61,8 +61,10 @@ var css = [
   // 提示级通知（如「请先勾选会话」）不该与错误同色：用 warn 色区分严重度。
   ".sa_warn{color:var(--dsw-alias-state-warn-primary);margin:8px 0;font-size:12px;line-height:18px}",
   ".sa_rows{flex-direction:column;gap:8px;margin:0;padding:0;list-style:none;display:flex}",
-  ".sa_row{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);border-radius:12px;flex-direction:column;gap:6px;padding:8px 10px;display:flex;transition:border-color .15s ease,box-shadow .15s ease}",
-  ".sa_row:hover{border-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-shadow-lv1)}",
+  ".sa_row{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);border-radius:12px;flex-direction:column;gap:6px;padding:8px 10px;display:flex;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}",
+  ".sa_row:hover{border-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-shadow-lv1);transform:translateY(-1px)}",
+  ".sa_row .sa_check{opacity:.55;transition:opacity .15s ease}",
+  ".sa_row:hover .sa_check{opacity:1}",
   ".sa_rowHead{align-items:center;gap:8px;display:flex}",
   ".sa_rowTitle{background:none;border:none;padding:0;text-align:left;font:inherit;min-width:0;color:var(--dsw-alias-label-primary);text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:13px;font-weight:500;line-height:20px;overflow:hidden;cursor:pointer}",
   ".sa_rowTitle:hover{text-decoration:underline}",
@@ -71,11 +73,19 @@ var css = [
   ".sa_rowMeta code{font-family:var(--dsh-font-mono,monospace)}",
   ".sa_rowFoot{justify-content:space-between;align-items:center;gap:8px;display:flex}",
   ".sa_rowActions{flex:none;align-items:center;gap:8px;display:flex}",
-  ".sa_detail{border-top:1px dashed var(--dsw-alias-border-l2);padding-top:8px;flex-direction:column;gap:6px;display:flex;max-height:260px;overflow-y:auto}",
+  ".sa_detail{border-top:1px dashed var(--dsw-alias-border-l2);padding-top:8px;flex-direction:column;gap:10px;display:flex;max-height:260px;overflow-y:auto}",
   ".sa_msg{flex-direction:column;gap:2px;display:flex}",
   ".sa_msgRole{color:var(--dsw-alias-label-tertiary);font-size:10px;line-height:14px;text-transform:uppercase;letter-spacing:.04em}",
   ".sa_msgText{color:var(--dsw-alias-label-primary);white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:18px}",
   ".sa_msgTextUser{color:var(--dsw-alias-label-secondary)}",
+  ".sa_msgBubble{max-width:85%;padding:8px 12px;border-radius:12px;font-size:12px;line-height:18px;overflow-wrap:anywhere;white-space:pre-wrap}",
+  ".sa_msgUser{align-self:flex-end;background:var(--dsw-alias-brand-primary,#1677ff);color:#fff;border-bottom-right-radius:4px}",
+  ".sa_msgAssistant{align-self:flex-start;background:var(--dsw-alias-bg-layer-2,rgba(0,0,0,0.04));color:var(--dsw-alias-label-primary);border-bottom-left-radius:4px}",
+  ".sa_msgRoleChip{display:inline-block;font-size:10px;line-height:14px;padding:1px 6px;border-radius:4px;margin-bottom:2px}",
+  ".sa_msgRoleUser{color:rgba(255,255,255,.7);align-self:flex-end}",
+  ".sa_msgRoleAssistant{color:var(--dsw-alias-label-tertiary);align-self:flex-start}",
+  ".sa_overlay--closing{opacity:0;transition:opacity .15s ease-out}",
+  ".sa_panel--closing{opacity:0;transform:translate(-50%,-50%) scale(.97);transition:opacity .15s ease-out,transform .15s ease-out}",
   ".sa_busy{opacity:.55;pointer-events:none}",
   // 加载中：spinner + 文案（列表与详情共用）。系统开启「减少动态效果」时
   // spinner 停止旋转（保持静态圆环，提示语义仍在）。
@@ -233,6 +243,21 @@ function ArchivePanel(props: any) {
   const iconOnly = collapsed;
   const rootRef = React.useRef<any>(null);
   const [open, setOpen] = React.useState(false);
+  const [closing, setClosing] = React.useState(false);
+
+  const closePanel = React.useCallback(() => {
+    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setOpen(false);
+      setClosing(false);
+    } else {
+      setClosing(true);
+      window.setTimeout(() => {
+        setOpen(false);
+        setClosing(false);
+      }, 150);
+    }
+  }, []);
+
   const [items, setItems] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<any>(null);
@@ -372,7 +397,7 @@ function ArchivePanel(props: any) {
     if (!open) return;
     const onPointerDown = (event: any) => {
       if (rootRef.current !== null && !rootRef.current.contains(event.target)) {
-        setOpen(false);
+        closePanel();
       }
     };
     document.addEventListener("pointerdown", onPointerDown);
@@ -383,7 +408,7 @@ function ArchivePanel(props: any) {
   React.useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: any) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") closePanel();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -542,7 +567,7 @@ function ArchivePanel(props: any) {
           ref: badgeRef,
           className: "sa_badge" + (iconOnly ? " sa_badge--collapsed" : ""),
           type: "button",
-          onClick: () => setOpen(!open),
+          onClick: () => { if (open) closePanel(); else setOpen(true); },
           "aria-expanded": open,
           "aria-label": badgeTitle,
           title: badgeTitle
@@ -557,11 +582,11 @@ function ArchivePanel(props: any) {
         iconOnly ? null : React.createElement("span", { className: "sa_badgeLabel" }, t("badge")),
         iconOnly ? null : React.createElement("span", { className: "sa_badgeCount" }, String(open ? items.length : badgeCount))
       ),
-    open ? React.createElement(React.Fragment, null,
-      React.createElement("div", { className: "sa_overlay", onClick: () => setOpen(false) }),
+    open || closing ? React.createElement(React.Fragment, null,
+      React.createElement("div", { className: "sa_overlay" + (closing ? " sa_overlay--closing" : ""), onClick: closePanel }),
       React.createElement(
       "div",
-      { className: "sa_panel", role: "dialog", "aria-label": t("panelTitle"), tabIndex: -1, ref: panelRef },
+      { className: "sa_panel" + (closing ? " sa_panel--closing" : ""), role: "dialog", "aria-modal": true, "aria-label": t("panelTitle"), tabIndex: -1, ref: panelRef },
       React.createElement(
         "div",
         { className: "sa_header" },
@@ -570,7 +595,7 @@ function ArchivePanel(props: any) {
           "span",
           { style: { display: "inline-flex", gap: "6px", alignItems: "center" } },
           React.createElement("button", { className: "sa_refresh", type: "button", title: t("refresh"), disabled: busy || loading, onClick: load }, t("refresh")),
-          React.createElement("button", { className: "sa_iconBtn", type: "button", title: t("close"), disabled: busy, onClick: () => setOpen(false) }, "✕")
+          React.createElement("button", { className: "sa_iconBtn", type: "button", title: t("close"), disabled: busy, onClick: closePanel }, "✕")
         )
       ),
       React.createElement(
@@ -612,7 +637,16 @@ function ArchivePanel(props: any) {
         loading ? React.createElement("p", { className: "sa_loading", role: "status" },
           React.createElement("span", { className: "sa_spin", "aria-hidden": true }),
           t("loading")) : null,
-        !loading && items.length === 0 && error === null ? React.createElement("p", { className: "sa_empty" }, t("empty")) : null,
+        !loading && items.length === 0 && error === null ? React.createElement(
+          "div",
+          { style: { display: "flex", flexDirection: "column", alignItems: "center" } },
+          React.createElement("svg", { width: 48, height: 48, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.5, style: { color: "var(--dsw-alias-label-tertiary)", marginTop: "24px" } },
+            React.createElement("rect", { x: 4, y: 8, width: 16, height: 12, rx: 2 }),
+            React.createElement("path", { d: "M4 8l8-4 8 4" }),
+            React.createElement("line", { x1: 9, y1: 14, x2: 15, y2: 14, strokeDasharray: "2 2" })
+          ),
+          React.createElement("p", { className: "sa_empty", style: { margin: "12px 0" } }, t("empty"))
+        ) : null,
         items.length > 0 ? React.createElement(
           "ul",
           { className: "sa_rows" },
@@ -682,8 +716,8 @@ function ArchivePanel(props: any) {
                   detail.messages.map((message: any, index: any) => React.createElement(
                     "div",
                     { className: "sa_msg", key: index },
-                    React.createElement("span", { className: "sa_msgRole" }, message.role === "user" ? t("user") : t("assistant") + " · " + formatTime(message.time)),
-                    React.createElement("span", { className: "sa_msgText" + (message.role === "user" ? " sa_msgTextUser" : "") }, message.text)
+                    React.createElement("span", { className: "sa_msgRoleChip " + (message.role === "user" ? "sa_msgRoleUser" : "sa_msgRoleAssistant") }, message.role === "user" ? t("user") : t("assistant") + " · " + formatTime(message.time)),
+                    React.createElement("span", { className: "sa_msgBubble " + (message.role === "user" ? "sa_msgUser" : "sa_msgAssistant") }, message.text)
                   ))
               ) : null
             );
