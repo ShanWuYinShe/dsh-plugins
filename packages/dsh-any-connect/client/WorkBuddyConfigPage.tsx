@@ -143,10 +143,23 @@ const chipStyle: CSSProperties = {
   background: 'var(--dsw-alias-state-success-subtle, rgba(34, 160, 107, 0.12))',
   color: 'var(--dsw-alias-state-success-primary, #22a06b)',
 }
-const modelBadgesStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6 }
-const modelRowStyle: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto auto', gap: '0 10px', alignItems: 'center', padding: '4px 6px', borderRadius: 6 }
-const modelNameStyle: CSSProperties = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, lineHeight: '22px', color: 'var(--dsw-alias-label-primary)' }
-const metaCellStyle: CSSProperties = { fontSize: 12, lineHeight: '20px', color: 'var(--dsw-alias-label-tertiary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+const modelBadgesStyle: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, verticalAlign: 'middle' }
+const modelTableStyle: CSSProperties = { width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }
+const modelThStyle: CSSProperties = {
+  padding: '4px 6px 6px',
+  fontSize: 11,
+  lineHeight: '16px',
+  fontWeight: 600,
+  letterSpacing: '0.02em',
+  color: 'var(--dsw-alias-label-tertiary)',
+  whiteSpace: 'nowrap',
+  borderBottom: '1px solid var(--dsw-alias-border-l2)',
+}
+const modelRowBaseStyle: CSSProperties = { borderRadius: 6 }
+const modelRowEvenStyle: CSSProperties = { ...modelRowBaseStyle, background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.025))' }
+const modelTdStyle: CSSProperties = { padding: '5px 6px' }
+const modelNameStyle: CSSProperties = { ...modelTdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, lineHeight: '22px', color: 'var(--dsw-alias-label-primary)' }
+const metaCellStyle: CSSProperties = { ...modelTdStyle, fontSize: 12, lineHeight: '20px', color: 'var(--dsw-alias-label-tertiary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
 
 const planCardStyle: CSSProperties = {
   display: 'flex',
@@ -232,34 +245,36 @@ function modelBadgeLabel(badge: string, t: WorkBuddyConfigPageInjected['t']): st
 }
 
 /**
- * One row of the unified model list, as a four-column grid: name (which may
- * shrink), badges, rate, window, efforts. Grid columns are shared by every
- * row, so the tabular figures line up down the card instead of wavering with
- * each label's width. Detection's negative conclusion ("upstream ignores the
- * parameter") renders no efforts cell content — no selectable levels is the
- * answer itself.
+ * One row of the model table: name, badges, rate, context window, efforts.
+ * Column widths are shared across all rows because the parent is a semantic
+ * `<table>`, so tabular figures line up perfectly. Even-indexed rows get a
+ * subtle background for visual grouping.
  */
-function ModelRow({ row, efforts, t }: {
+function ModelRow({ row, efforts, t, even }: {
   row: WorkBuddyWebModelRow
   /** The effort levels the model accepts: declared, or automatically detected. */
   efforts: readonly string[] | undefined
   t: WorkBuddyConfigPageInjected['t']
+  /** Whether this is an even-indexed row (for zebra striping). */
+  even: boolean
 }): React.ReactNode {
   return (
-    <div style={modelRowStyle}>
-      <span style={modelNameStyle} title={row.name}>{row.name}</span>
-      <span style={modelBadgesStyle}>
-        {row.free === true ? <span style={chipStyle}>{t('freeModel')}</span> : null}
-        {row.badges?.map(badge => (
-          <span key={badge} style={chipStyle}>{modelBadgeLabel(badge, t)}</span>
-        ))}
-      </span>
-      <span style={metaCellStyle}>{row.free === true ? null : row.rateUnknown === true ? t('rateUnknown') : row.credits}</span>
-      <span style={metaCellStyle}>{formatTokens(row.contextWindow)}</span>
-      <span style={{ ...metaCellStyle, color: 'var(--dsw-alias-label-secondary)' }}>
+    <tr style={even ? modelRowEvenStyle : modelRowBaseStyle}>
+      <td style={modelNameStyle} title={row.name}>{row.name}</td>
+      <td style={modelTdStyle}>
+        <span style={modelBadgesStyle}>
+          {row.free === true ? <span style={chipStyle}>{t('freeModel')}</span> : null}
+          {row.badges?.map(badge => (
+            <span key={badge} style={chipStyle}>{modelBadgeLabel(badge, t)}</span>
+          ))}
+        </span>
+      </td>
+      <td style={metaCellStyle}>{row.free === true ? null : row.rateUnknown === true ? t('rateUnknown') : row.credits}</td>
+      <td style={metaCellStyle}>{formatTokens(row.contextWindow)}</td>
+      <td style={{ ...metaCellStyle, color: 'var(--dsw-alias-label-secondary)' }}>
         {efforts !== undefined && efforts.length > 0 ? efforts.join('/') : null}
-      </span>
-    </div>
+      </td>
+    </tr>
   )
 }
 
@@ -629,16 +644,28 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                 {probe?.running === true ? <span style={summaryNoteStyle}>{t('detectingShort')}</span> : null}
               </div>
               {modelsOpen ? (
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  {status.models.map(row => (
-                    <ModelRow
-                      key={row.id}
-                      row={row}
-                      t={t}
-                      efforts={effortsOf(row)}
-                    />
-                  ))}
-                </div>
+                <table style={modelTableStyle}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...modelThStyle, textAlign: 'left' }}>{t('colName')}</th>
+                      <th style={modelThStyle} />
+                      <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colRate')}</th>
+                      <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colContext')}</th>
+                      <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colEfforts')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {status.models.map((row, i) => (
+                      <ModelRow
+                        key={row.id}
+                        row={row}
+                        t={t}
+                        efforts={effortsOf(row)}
+                        even={i % 2 === 1}
+                      />
+                    ))}
+                  </tbody>
+                </table>
               ) : null}
             </>
           ) : null}
