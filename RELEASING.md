@@ -8,10 +8,11 @@
 | 分支 | 适配的 DSH 线 | 跟随的宿主版本 | 版本号形态 | Release 形态 |
 |---|---|---|---|---|
 | `main` | DSH 稳定线 | **dsh 已发布版本中最新的一版 rc**（没有正式版期间，rc 即正式版；当前值以 `bun run dsh-status` 为准） | 纯 semver（如 `0.10.3`） | 正式 Release |
-| `alpha` | DSH 进行中的 alpha 线 | 基础号高于上述 rc 的最新 `-alpha`（无新线时与 `main` 同基线待命） | `-alpha.N` 后缀（进入 rc 阶段换 `-rc.N`，如 `0.10.4-alpha.0`） | prerelease Release |
+| `alpha`（按需创建） | DSH 进行中的 alpha 线 | 基础号高于上述 rc 的最新 `-alpha`（**无新线时不创建/不维护 alpha 分支**） | `-alpha.N` 后缀（进入 rc 阶段换 `-rc.N`，如 `0.10.4-alpha.0`） | prerelease Release |
 
-**双线并行是常态，不是过渡方案**：DSH 快速迭代期间，稳定线与 alpha 预发布
-线长期同时存在，两条分支各自跟随一条线持续维护。不变式只有一条：**main 的工作
+**按需分叉与单主干待命**：DSH 快速迭代期间，稳定线与 alpha 预发布
+线可能同时存在。但**当 DSH 没有新预发布线时，仓库保持单主干 `main` 运行，无需创建
+或维护 `alpha` 分支**。不变式只有一条：**main 的工作
 树必须始终处于「可直接发布」状态**（版本号与依赖线 = 稳定线目标的下一个
 候选），任何时刻都能直接热修稳定线。分支跟随的是 **DSH 宿主线**，不是「开发/
 测试」阶段；用户装到哪个版本完全由版本号后缀决定（见 Release 形态规则），与改动
@@ -41,17 +42,13 @@ npm 的**版本列表**：稳定线目标 = 非进行中预发布的最高版（
 
 - **main 跟「最新 rc」（稳定线本身）**。
 - **alpha 跟「基础号高于该 rc 的进行中 `-alpha` 线」**。这样的线存在
-  时，alpha 分支依赖基线锚定它的最新版；**不存在时 alpha 与 main 同基线
-  待命**——分支由最新 main 重建（见「双线生命周期」第 4 步），依赖范围、
-  lockfile、exclude 清单全部等于 main，不发版，等 dsh 出更高基础号的新
-  alpha 线再 `adapt` 跟进。
+  时，从最新 main 分叉创建 alpha 分支跟进；**不存在时不用创建 alpha 分支，
+  也不用更新 alpha 分支**——仓库保持单分支 main 运转，日常功能演进与修复
+  一律直接在 main 进行，等 dsh 出更高基础号的新 alpha 线再建分支 `adapt` 跟进。
 
 配套不变式：
 
-- **待命期的暂替语义**：alpha 与 main 同基线时处于 main 形态（这是新线到
-  来前的常态，不是待修正的漂移）。此状态下 alpha 不发版——它的版本号与
-  main 相同，推送分支只跑测试；真要发版必须先 `adapt` 到新线并把版本
-  bump 成 `-alpha.N`，再打 tag 推出。
+- **待命期无需 alpha 分支**：没有进行中预发布线时，仓库仅有 main 分支。此状态下不维护 alpha，日常开发直接在 main 发纯 semver 正式版；直到 dsh 发布新 alpha 线，才从最新 main 创建 alpha 分支并 bump 成 `-alpha.N` 推出。
 - **不再维护「上一条线的 alpha 锚点」**：旧流程会让 alpha 维持
   `^0.1.2-alpha.5` 这类锚点，靠同基础号的 prerelease range 向上覆盖稳定线。
   现改为分支直接由 main 重建，基线天然等于稳定线目标，无需靠 semver 技巧
@@ -138,13 +135,12 @@ DSH 0.1.6-alpha 新增的原生「设置 → 已归档会话」页（0.1.5 稳�
   从旧 main 分叉、缺一次稳定线修复），此时 baseline 只能靠人工同步补内容，
   属流程违规，应尽快按「双线生命周期」第 1 步重建。
 
-### 待命期原则（无新 alpha 线时：开发在 main，alpha 待命）
+### 待命期原则（无新 alpha 线时：开发在 main，无需创建/维护 alpha 分支）
 
-当上一条 alpha 线已收敛（发完最新 rc），而 DSH **尚无更高基础号的新 alpha 线**时（`bun run dsh-status` 报告「进行中预发布线: 无 —— alpha 分支待命」），处于**待命期**：
-1. **主检出目录停在 `main`**（两分支基线完全一致，日常无需停在 alpha）；
+当上一条 alpha 线已收敛（发完最新 rc），而 DSH **尚无更高基础号的新 alpha 线**时（`bun run dsh-status` 报告「进行中预发布线: 无」），处于**待命期**：
+1. **仓库不保留 alpha 分支**：收敛合入 main 并发布后，删除本地与远程 alpha 分支；在 DSH 发布新 alpha 线之前，**无需创建 `alpha` 分支，也不用更新 `alpha` 分支**；
 2. **日常功能演进与日常修复一律在 `main` 推进**，版本号使用**纯 semver**（如 `0.4.1`），打 tag 发布正式 Release；
-3. **`alpha` 分支仅作同基线待命**（代码由最新 main 重建，保持与 main 完全一致），**待命期不发版、不单独在 alpha 上做功能开发**；
-4. 严禁在待命期向 alpha 提交新功能或发 `-alpha.N` 预发布版本——直到 DSH 发布了更高基础号的 alpha 线，才按「DSH 宿主升级适配」流程在 alpha 上开启新一轮预发布周期。
+3. 严禁在待命期单独创建 alpha 分支做功能开发或发 `-alpha.N` 预发布版本——直到 DSH 发布了更高基础号的 alpha 线，才从最新 main 分叉创建 alpha 分支开启新一轮预发布周期。
 
 ## 版本号规则
 
@@ -190,8 +186,8 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
 
 1. **核对宿主阶段与目标分支（动手第一步）**：
    先跑 `bun run dsh-status` 确认状态：
-   - **待命期**（进行中预发布线为“无”）：目标分支为 **`main`**（确认主检出目录已停在 main，若在 alpha 先切回 main 并跑 `bun install && bun run build`），版本号使用**纯 semver 正式版**（如 `0.4.1`），发正式 Release。
-   - **活跃期**（存在进行中的新 alpha 线）：目标分支为 **`alpha`**（确认主检出目录停在 alpha），版本号带 **`-alpha.N` / `-rc.N`**，发 prerelease Release；`main` 搁置。
+   - **待命期**（进行中预发布线为“无”）：**无需创建或维护 `alpha` 分支**，目标分支直接为 **`main`**，版本号使用**纯 semver 正式版**（如 `0.4.1`），发正式 Release。
+   - **活跃期**（存在进行中的新 alpha 线）：若尚未创建 `alpha` 分支，先从最新 `main` 创建 `alpha` 分支（`git checkout -b alpha main`）并跑 `bun run adapt <新线版本>`；目标分支为 **`alpha`**，版本号带 **`-alpha.N` / `-rc.N`**，发 prerelease Release；`main` 搁置。
    确认目标分支后，在目标分支修改代码，`bun run test:ci` 全绿。
 2. 启动隔离测试实例（独立 `DSH_HOME` + 本地路径安装插件），在真实浏览器
    里验证功能与控制台（详见 AGENTS.md「发布纪律」）。未通过就回到 1，
@@ -305,11 +301,21 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 > 一次稳定线修复，导致 alpha 祖先链上**缺那次修复**，只能靠提交信息里的人工
 > 「同步稳定线修复」补内容——一旦漏搬，收敛时就会把稳定线的修复覆盖掉。
 
-1. **待命**：alpha 分支由最新 main 创建（`git branch alpha main`），代码与
-   依赖基线等于 main，不发版。此时 dsh 无进行中的预发布线（上一条已终结）。
-2. **dsh 出新高基础号的 alpha 线**（如 `0.1.3-alpha.0`）：alpha 分支执行
-   「DSH 宿主升级适配」流程（`adapt` 到该线 + `bun install`），把包版本
-   bump 成 `-alpha.N`，打 tag 发 prerelease Release。**main 就此整体搁置**——不再
+1. **待命期（无 alpha 分支）**：上一条线已终结，DSH 尚无新预发布线。仓库保持
+   单主干 `main` 运转，**无需创建 `alpha` 分支，也不用更新 `alpha` 分支**。日常
+   功能与 bug 修复一律直接在 `main` 推进，版本号为纯 semver 正式版，打 tag
+   发布正式 Release。
+2. **DSH 出新高基础号的 alpha 线（从最新 main 分叉创建 alpha）**：当 `bun run dsh-status`
+   检测到 DSH npm 上出现更高基础号的新 alpha 线（如 `0.1.3-alpha.0`）时，
+   **才从当下的最新 main 分叉创建 alpha 分支**：
+
+   ```bash
+   git checkout -b alpha main
+   node scripts/adapt-dsh.mjs <新线版本>   # 改全部 @deepseek-ai/dsh-* range 与 dsh.host
+   bun install                             # 重新生成 lockfile
+   ```
+
+   把包版本 bump 成 `-alpha.0`，打 tag 发 prerelease Release。**main 就此整体搁置**——不再
    开发、不再发布、不接受任何 cherry-pick，直到该线发出正式版（第 4 步）；
    这期间的稳定线用户继续用 main 上已发布的最后一版 `latest`。
 3. **alpha 线进入 rc**：该线开始发同基础号的 rc（如 `0.1.3-rc.1`、`0.1.3-rc.2`
@@ -349,28 +355,18 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
    > origin/main`）再 ff 合并——`reset --soft` 的目标必须始终是当下的
    > `origin/main`。
 
-5. **删除 alpha：远程与本地都删**：发布完成后该 alpha 分支即完成使命
-   （它的全部内容已进 main），**远程和本地都必须删除**，不留残留：
+5. **删除 alpha 分支（远程与本地都删），进入待命期**：发布完成后该 alpha 分支即完成使命
+   （它的全部内容已进 main），**远程和本地都必须彻底删除**，不留残留：
 
    ```bash
-   git push origin --delete alpha   # 先删远程（远程只留主干 + CI 自动分支）
+   git push origin --delete alpha   # 先删远程（远程只留 main 主干）
    git branch -D alpha              # 再删本地（-D 而非 -d：alpha 已被压缩成
                                     # 单个提交，不再是原分支的祖先，-d 会拒绝）
    ```
 
-   随后从**最新的 main** 重建下一条待命 alpha（回到第 1 步）：
-
-   ```bash
-   git branch alpha main            # 由最新 main 创建，代码与基线等于 main
-   git push origin alpha            # 全新分支，普通 push 即可（不需要 force）
-   ```
-
-   如此 alpha 的每次生命周期都是：**从最新 main 分叉 → 迭代若干提交 →
-   压缩成 1 个提交合回 main → 远程与本地删除 → 再从最新 main 重建**。因为
-   起点永远是当下的 main，alpha 永远是 main 的后代，既不会 diverged 需要
-   force push，也不会出现「alpha 缺了 main 某次修复」的祖先链断裂——那正是
-   靠人工同步才补上、极易漏搬的隐患。等 dsh 出下一条更高基础号的 alpha 线，
-   回到第 2 步。
+   **删除后不再从 main 重建 alpha 分支**。仓库回到第 1 步待命期（保持单主干 `main`
+   运行，日常演进在 `main` 直接推进），直到 DSH 出下一条更高基础号的 alpha 线，
+   才再次按第 2 步分叉。
 
 若某个时期同时活跃的宿主线超过两条，照同样模型再拉一条分支即可——分支数
 跟随活跃宿主线数，Release 形态（prerelease 与否）始终由版本后缀决定、与分支

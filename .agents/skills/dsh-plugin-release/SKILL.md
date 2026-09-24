@@ -12,9 +12,9 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
 - `main` = dsh 稳定线适配（发正式 Release），工作树必须始终处于可直接发布
   状态（停在被搁置的最后一版，需要时能立刻放紧急热修）；`alpha` = dsh 进行
   中的 alpha 预发布线（`-alpha.N`，进入 rc 阶段换 `-rc.N`，Release 的
-  prerelease 标记由版本后缀自动决定）。**alpha 是用完即弃的适配线**，每轮生命周期固定四步：**从最新
-  main 分叉 → 迭代若干提交 → 压缩成单个提交合回 main → 远程与本地删除
-  alpha，再从最新 main 重建待命**。起点永远是当下的 main，因此 alpha 恒为
+  prerelease 标记由版本后缀自动决定）。**alpha 是按需创建、用完即弃的适配线**，每轮生命周期固定四步：**DSH 出新 alpha 线时从最新
+  main 分叉创建 → 迭代若干提交 → 压缩成单个提交合回 main 并发布 → 远程与本地彻底删除
+  alpha**。待命期仓库不创建也不维护 alpha 分支。起点永远是当下的 main，因此 alpha 恒为
   main 的后代（基线自动继承稳定线成果，不靠人工搬运），收敛时 `merge
   --ff-only` 必然可行。详见 RELEASING.md「双线生命周期」。
 - **功能收敛原则（alpha 只进不出）**：活跃 alpha 线期间，功能开发与修复一律
@@ -26,11 +26,11 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
   文档、`scripts/`、workflows、根配置一律不往 main 搬，main 停在原地不开发不
   发布。唯一例外是稳定线紧急热修（需明确指示，且修完必须把改动带回 alpha）。
   收敛时随整条线一次搬过去，详见 RELEASING.md「跨分支同步」。
-- **待命期原则（无新 alpha 线时：开发在 main，alpha 待命）**：上一条线终结、DSH
-  尚无更高基础号的新 alpha 线时（`bun run dsh-status` 报告「进行中预发布线: 无 —— alpha 分支待命」），
-  alpha 与 main 同基线待命。**此时日常功能演进与 bug 修复一律在 `main` 推进，
-  使用纯 semver 版本号（如 `0.4.1`），发布正式 Release**。alpha 分支仅与 main
-  保持同基线待命（不发版），**严禁在待命期向 alpha 提交新功能或发版**。
+- **待命期原则（无新 alpha 线时：开发在 main，不创建/维护 alpha）**：上一条线终结、DSH
+  尚无更高基础号的新 alpha 线时（`bun run dsh-status` 报告「进行中预发布线: 无」），
+  **无需创建 `alpha` 分支，也不用更新 `alpha` 分支**；仓库保持单主干 `main` 运转。
+  **此时日常功能演进与 bug 修复一律在 `main` 推进，使用纯 semver 版本号（如 `0.4.1`），
+  发布正式 Release**。直到 DSH 发布更高基础号的新 alpha 线时，才从最新 `main` 创建 `alpha` 分支。
 - 依赖 range、`bun.lock` 只在所属分支重建，不跨分支搬运。
 
 ## 发布纪律（重要）
@@ -42,8 +42,8 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
 "再发一版"解决。一次功能开发的完整顺序：
 
 0. **核对宿主阶段与目标分支（动手第一步）**：必须先跑 `bun run dsh-status`。
-   - 若为**待命期**（进行中预发布线为“无”）：目标分支为 **`main`**（确认主检出目录已停在 main），版本号使用**纯 semver 正式版**（如 `0.4.1`），发正式 Release；
-   - 若为**活跃期**（存在进行中的新 alpha 线）：目标分支为 **`alpha`**（确认主检出目录停在 alpha），版本号带 **`-alpha.N` / `-rc.N`**，发 prerelease Release；`main` 搁置。
+   - 若为**待命期**（进行中预发布线为“无”）：**无需创建或更新 `alpha` 分支**，目标分支直接为 **`main`**，版本号使用**纯 semver 正式版**（如 `0.4.1`），发正式 Release；
+   - 若为**活跃期**（存在进行中的新 alpha 线）：若尚未创建 `alpha` 分支，先从最新 `main` 创建 `alpha` 分支（`git checkout -b alpha main`）并跑 `bun run adapt <新线版本>`；目标分支为 **`alpha`**，版本号带 **`-alpha.N` / `-rc.N`**，发 prerelease Release；`main` 搁置。
 1. 在目标分支开发 + `bun run test:ci`（build + typecheck + test）全绿；
 2. 启动隔离测试实例真实验证（不占用用户的 `~/.dsh`）：
 

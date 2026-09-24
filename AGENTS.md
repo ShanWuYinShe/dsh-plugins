@@ -21,16 +21,18 @@ bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览�
 
 ## 分支选择铁律：动手前必跑 `bun run dsh-status`
 
-**任何开发、修复、依赖调整或发版前，必须先跑 `bun run dsh-status` 核对宿主状态，严禁凭经验或当前工作区分支盲目开工：**
+**任何开发、修复、依赖调整或发版前，必须先跑 `bun run dsh-status` 核对宿主状态，严禁凭经验盲目开工：**
 
-1. **待命期**（`dsh-status` 报告「进行中预发布线: 无 —— alpha 分支待命」）：
-   - **工作分支**：必须在 **`main`**（若主检出目录停留在 `alpha`，先 `git checkout main` 并 `bun install && bun run build` 确保产物干净）。
-   - **日常功能与修复**：一律直接在 `main` 推进，版本号为**纯 semver 正式版**（如 `0.4.1`），发正式 Release。
-   - **`alpha` 分支待命**：代码与 main 保持完全一致（`git branch -f alpha main`），**严禁在待命期向 alpha 提交新功能或发版**。
+1. **待命期**（`dsh-status` 报告「进行中预发布线: 无」）：
+   - **无需创建 `alpha` 分支，也不用更新 `alpha` 分支**；仓库保持单主干 **`main`** 运行。
+   - **日常功能与修复**：一律直接在 **`main`** 推进，版本号为**纯 semver 正式版**（如 `0.4.1`），发正式 Release。
 2. **活跃期**（`dsh-status` 报告存在高于稳定 rc 的新 `-alpha` 线）：
-   - **工作分支**：主检出目录停在 **`alpha`**。
-   - **功能与修复**：一律落在 `alpha`，版本号为 `-alpha.N`（进 rc 后换 `-rc.N`），发 prerelease Release。
+   - **创建/进入分支**：若 `alpha` 分支未创建，从最新 **`main`** 创建 `alpha` 分支（`git checkout -b alpha main` 或用 worktree）；执行 `bun run adapt <新线版本>` 开始跟进。
+   - **功能与修复**：一律落在 **`alpha`**，版本号为 `-alpha.N`（进 rc 后换 `-rc.N`），发 prerelease Release。
    - **`main` 分支搁置**：停在原地不开发不发布，不 cherry-pick。
+3. **收敛期**（DSH 该线发完最新 rc 即正式版）：
+   - 在 `alpha` 适配最新 rc 并去后缀转正为正式版，压缩成单个基于 main 的提交合入 `main`，发正式 Release。
+   - **合回后彻底删除 `alpha` 分支（本地与远程）**，回到待命期（无 alpha 分支状态），等待 DSH 下一次发布新 alpha 线。
 
 ## 已知技术债
 

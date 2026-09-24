@@ -86,6 +86,17 @@ function branchRef(branch) {
   return branch;
 }
 
+/** 检查某分支是否存在（本地或远端 origin/）。 */
+function branchExists(branch) {
+  for (const ref of [`origin/${branch}`, branch]) {
+    try {
+      execFileSync("git", ["rev-parse", "--verify", "--quiet", ref], { cwd: ROOT });
+      return true;
+    } catch {}
+  }
+  return false;
+}
+
 /** 读某分支的全部 package.json 基线并聚合成单一基线（应全仓一致）；
  *  同时收集 dsh.host 适配声明（npm 消费者的可见元数据），供一致性核对。
  *  分支不可读（CI checkout 只有当前分支、本地无该分支等）时返回 unmixed
@@ -180,7 +191,34 @@ const devLine = devVersions.length > 0
   : null;
 
 const rows = [];
+const alphaExists = branchExists("alpha");
+
 for (const branch of ["main", "alpha"]) {
+  if (branch === "alpha" && !alphaExists) {
+    if (devLine === null) {
+      // 待命期：DSH 无新预发布线，无需创建 alpha 分支。
+      rows.push({
+        branch,
+        baseline: "(未创建)",
+        host: undefined,
+        target: `(待命：等待 >${stableBase} 的新线)`,
+        state: "就位(待命)",
+        packageDirs: [],
+      });
+    } else {
+      // 活跃期：DSH 出了新预发布线，但尚未创建 alpha 分支。
+      rows.push({
+        branch,
+        baseline: "(未创建)",
+        host: undefined,
+        target: devLine,
+        state: "待从 main 创建",
+        packageDirs: [],
+      });
+    }
+    continue;
+  }
+
   const { baseline, host, mixed, unreadable, packageDirs } = branchBaseline(branch === head ? null : branch);
   // 基线不是合法版本号（无 dsh 依赖 / 包间不一致 / 分支不可读）时比较
   // 无意义——NaN 会让 cmpVersion 的结果静默落进「超前」分支，报出荒谬
@@ -206,9 +244,8 @@ for (const branch of ["main", "alpha"]) {
     const cmp = cmpVersion(baseline, devLine);
     state = cmp === 0 ? "就位" : cmp < 0 ? "落后" : "超前";
   } else {
-    // 待命：没有进行中的预发布线。alpha 分支由最新 main 重建，基线等于
-    // 稳定线目标即就位——等 dsh 出更高基础号的新 alpha 线再 adapt 跟进。
-    target = `(待命，等待 >${stableBase} 的新线)`;
+    // 待命：没有进行中的预发布线，alpha 分支仍存在。
+    target = `(待命：无新线，建议删除)`;
     const cmp = cmpVersion(baseline, stable);
     state = cmp === 0 ? "就位(待命)" : cmp < 0 ? "落后" : "超前";
   }
@@ -217,11 +254,15 @@ for (const branch of ["main", "alpha"]) {
 
 console.log(`dsh 稳定线(最新 rc) = ${stable}`);
 if (devLine === null) {
-  console.log(`进行中预发布线: 无 —— alpha 分支待命（与 main 同基线），等待 >${stableBase} 的新 alpha 线`);
-  console.log(`💡 阶段指引: 当前处于【待命期】。日常功能演进与修复请在 main 推进（版本号用纯 semver，发正式版）；alpha 待命，切勿在待命期向 alpha 提交新功能或发版。`);
+  console.log(`进行中预发布线: 无 —— 待命期无需创建 alpha 分支，等待 >${stableBase} 的新 alpha 线`);
+  console.log(`💡 阶段指引: 当前处于【待命期】。日常功能演进与修复直接在 main 推进（版本号用纯 semver，发正式版）；无需创建或更新 alpha 分支。`);
 } else {
   console.log(`进行中预发布线 = ${devLine}`);
-  console.log(`💡 阶段指引: 当前处于【活跃期】。所有功能与修复请在 alpha 推进（版本号用 -alpha.N / -rc.N，发 prerelease）；main 整体搁置。`);
+  if (!alphaExists) {
+    console.log(`💡 阶段指引: 当前处于【活跃期】。DSH 已发布新预发布线 ${devLine}，请从最新 main 分支创建 alpha 分支开始跟进：git checkout -b alpha main && bun run adapt ${devLine}`);
+  } else {
+    console.log(`💡 阶段指引: 当前处于【活跃期】。所有功能与修复请在 alpha 推进（版本号用 -alpha.N / -rc.N，发 prerelease）；main 整体搁置。`);
+  }
 }
 let problems = 0;
 for (const { branch, baseline, host, target, state } of rows) {
@@ -235,12 +276,9 @@ for (const { branch, baseline, host, target, state } of rows) {
   }
 }
 
-// 单侧独有的包标注：双线活跃期两分支包集存在差异是预期（RELEASING.md
-// 「功能收敛原则」），不计为问题；各分支的基线聚合本来就限定在分支自己的
-// 包清单内，独有包不参与跨分支对比。任一侧不可读时不标注——空清单会把
-// 可读侧的全部包误报成单侧。
+// 单侧独有的包标注：仅在两分支均存在且可读时对比
 const rowsByBranch = new Map(rows.map((row) => [row.branch, row]));
-if (rows.every((row) => !row.unreadable)) {
+if (alphaExists && rows.every((row) => !row.unreadable)) {
   for (const branch of ["main", "alpha"]) {
     const other = branch === "main" ? "alpha" : "main";
     const otherDirs = new Set(rowsByBranch.get(other).packageDirs);
@@ -256,11 +294,12 @@ for (const { branch, baseline, target, state } of rows) {
   if (state.startsWith("就位")) continue;
   problems++;
   let advice = "核对 RELEASING.md「宿主跟随规则」";
-  if (state === "落后") {
+  if (state === "待从 main 创建") {
+    advice = `请从最新 main 分支创建 alpha 分支并跟进：git checkout -b alpha main && bun run adapt ${devLine}`;
+  } else if (state === "落后") {
     if (branch === "main") advice = `请在该分支执行 bun run adapt ${stable} 跟进`;
     else if (devLine !== null) advice = `请在该分支执行 bun run adapt ${devLine} 跟进`;
-    // 待命期没有新线可跟：alpha 落后只可能是它没跟上 main，重建即可。
-    else advice = "待命期无新线，alpha 应由最新 main 重建：git branch -f alpha main";
+    else advice = "待命期无需保留 alpha 分支，建议删除：git branch -d alpha";
   }
   const message = `dsh 跟随: ${branch} 分支依赖基线 ${baseline} 与跟随目标不一致（${state}，目标 ${target}）。${advice}`;
   if (ci) console.log(`::warning::${message}`);
