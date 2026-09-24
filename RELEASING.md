@@ -70,6 +70,8 @@ main 分支的每次 dsh 稳定版适配都归档为一个 git tag，**由用户
   `git tag -a dsh-v<基线> -m "dsh v<基线> 适配归档" && git push origin dsh-v<基线>`（基线值取
   `bun run dsh-status` 的输出）。dsh 基线没变的日常开发不打；alpha 分支
   **不打**：它永远追随 dsh 最新的 alpha 线，没有按宿主版本回退的管理需求。
+  **推送同样受「一次最多 3 个 tag」限制**（见下方「tag 推送纪律」）：这类归档
+  常与包发布 tag 在同一批出现，凑够 4 个一起推会全部静默漏发，务必逐个推。
 - **用途**：「该提交 = 对 dsh 此稳定版的已验证适配」。回退场景（如某次
   适配引入问题、或需要为旧版 dsh 维护热修）从对应 tag 拉：
 
@@ -203,7 +205,9 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    另跑一遍 `bun run gate` 干跑，确认门禁视角下该版本可发布。
 5. 推送分支。CI（`.github/workflows/test.yml`）只跑测试，永远不发布。
 6. **明确要发版时才打 tag**（annotated，详见 skill dsh-plugin-tag）：
-   `git tag -a <目录>-v<版本> -m "<包名> v<版本>" && git push origin <目录>-v<版本>`。
+   `git tag -a <目录>-v<版本> -m "<包名> v<版本>"` 后，**逐个**执行
+   `git push origin <目录>-v<版本>`——一次只推一个 tag，推完确认它触发了流水
+   并跑完，再推下一个（纪律见下节）。
    tag 推出去即发版——CI（`.github/workflows/publish.yml`）对该 tag 执行：测试 →
    门禁校验（tag 形态、annotated、tag 与 package.json 版本一致、版本不落后已归档）→
    `bun pm pack` 出 tarball 并创建 GitHub Release 挂为资产（prerelease 版本带
@@ -211,6 +215,49 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    Release，不存在「顺手多发一版」。发版后核对 Release 的资产 tarball 与 `dsh.host`
    字段符合预期（解包资产读 `package/package.json` 的 `dsh.host`：
    `tar -xOf <tgz> package/package.json`）。
+
+### tag 推送纪律（一次一个，推完确认再推下一个）
+
+**发布动作是「逐个推 tag」，不是「批量推 tag」。** 两条静默失败机制都只在
+批量/连推时出现，`git push` 本身不会报错：
+
+1. **单次推送超过 3 个 tag，GitHub 不为其中任何一个产生 `push` 事件**，CI 完全
+   不触发。官方文档（Events that trigger workflows，`push` 一节）原文：
+   「Events will not be created for tags when more than three tags are pushed at
+   once.」上限是**推送批次**的粒度——推 4 个是**全部**不触发，不是「前 3 个能过」。
+   本仓库 2026-09-24 实测：`dsh-any-connect-v0.4.2`、`provider-usage-v0.1.1`、
+   `sandbox-extra-roots-v0.4.14`、`session-archive-v0.3.16` 四个 tag 一条命令同时
+   推送，Actions 里零条 push 流水，4 个 Release 全靠事后手工 `workflow_dispatch`
+   补出。`delete` 事件同样限 3 个一批，删 tag 也要一个一个删。
+2. **连推不等会取消流水**：`publish.yml` 的仓库级并发组（`group: publish`、
+   `cancel-in-progress: false`）同一时刻只允许 1 个 running + 1 个 pending，且默认
+   `queue: single`——新排队的 run 会取消当前 pending 的 run。于是快速连推时
+   后面的 tag 会把前面排队中的 tag 顶掉，流水显示 **cancelled**，对应 Release
+   永远不建。同批实测：run 36014030331 成功、36014048743 被顶掉（7 秒 cancelled）、
+   36014057179 成功。等待不增加总耗时——并发组本来就把这些 run 串行化了。
+
+多包同发（monorepo 常态）的固定顺序：**先推分支**（`git push` 只跑测试，让 tag
+落在远程已存在的提交上）→ **再逐个 tag 推送并逐条确认**：
+
+```bash
+bun run gate                       # 干跑，确认该版本可发布
+git tag -a <目录>-v<版本> -m "<包名> v<版本>"
+git show <tag> --stat              # 核对 tag 指向的提交与内容
+git push                           # 先推分支（只跑测试）
+
+for t in <目录1>-v<版本1> <目录2>-v<版本2>; do
+  git push origin "$t" || break
+  RUN=$(gh run list --workflow=publish.yml --branch "$t" --limit 1 \
+    --json databaseId,event --jq 'map(select(.event=="push")) | .[0].databaseId // empty')
+  [ -n "$RUN" ] || { echo "$t 未触发 CI，停止后续推送"; break; }
+  gh run watch "$RUN" --exit-status || break
+done
+```
+
+`gh run list --branch <tag>` 接受 tag 名（实测 `gh 2.101.0` 可用），**查询为空
+即该 tag 没有触发 push 流水**——立即停止后续推送并排查（多半是批量超限），
+按「打错处理」情形 B 删 tag 重打重推。不要用 `git push --tags`、不要
+`git push origin <tag1> <tag2> <tag3> <tag4>`，也不要用 `--follow-tags`。
 
 发布门禁（`scripts/publish-gate.mjs --tag <tag>`，只在 tag 流水里强制执行；
 本地可用 `bun run gate` 干跑全仓计划）的判定，对该 tag 的包：
@@ -348,7 +395,7 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
    c. **验证后合入 main 并发布**：`bun run test:ci` 全绿 + 隔离实例真实
       验证，然后 `git merge --ff-only <alpha 分支>`（此刻它已是 main 的
       后代，必然可 ff）→ 推送 `main`（只跑测试），再给各包打 tag 发版
-      （无后缀正式版即 `latest`）。
+      （无后缀正式版即 `latest`；**逐个推 tag、逐个确认**，见「tag 推送纪律」）。
 
    > 若收敛期间 main 因**紧急热修**又前进了，`origin/main` 已不是刚才那位，
    > 需先把这条已压缩的提交 rebase 到最新 `origin/main` 之上（`git rebase
@@ -392,8 +439,9 @@ CI tag 流水失败、或需要完全手工发版时，按顺序兜底：
 
 1. **先在仓库根执行 `bun run build`**——`lib/` 与 `client/client.cjs` 都是
    gitignore 的构建产物，跳过构建直接 pack 会打出缺文件的 tarball（装上即坏）。
-2. 自己打 tag 并推出，让 CI 走完发布：`git tag -a <目录>-v<版本> -m "<包名> v<版本>"
-   && git push origin <目录>-v<版本>`（tag 流水会自动测试 → 门禁 → 建 Release）。
+2. 自己打 tag 并推出，让 CI 走完发布：`git tag -a <目录>-v<版本> -m "<包名> v<版本>"`
+   然后**逐个** `git push origin <目录>-v<版本>`（一次一个 tag，推完确认触发与
+   成败再推下一个，见「tag 推送纪律」；tag 流水会自动测试 → 门禁 → 建 Release）。
 3. CI 实在不可用时才完全手工：构建完成后 `cd packages/<pkg> && bun pm pack`
    （产物 `chaoset-<目录>-<版本>.tgz`），然后 `gh release create <目录>-v<版本>
    <tgz> --title "<npm 包名> v<版本>" --notes "<说明>"`（prerelease 版本加

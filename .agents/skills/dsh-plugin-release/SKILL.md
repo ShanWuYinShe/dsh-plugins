@@ -1,6 +1,6 @@
 ---
 name: dsh-plugin-release
-description: DSH 插件双分支发布体系。触发：发版、升版本号、写 CHANGELOG、推送 main 或 alpha、合 alpha 回 main、查发布门禁规则时加载。分支与版本号权威约定见 RELEASING.md。
+description: DSH 插件双分支发布体系。触发：发版、升版本号、写 CHANGELOG、推 main 或 alpha、逐个推 tag 发版、合 alpha 回 main、查发布门禁规则时加载。分支与版本号权威约定见 RELEASING.md。
 ---
 
 # 插件发布：分支、纪律与版本
@@ -66,12 +66,26 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    diff 里找到，diff 里每处行为变更都要有 CHANGELOG 与版本号对应；
    对不上就不要推。另跑一遍 `bun run gate` 干跑确认。然后 push
    （分支推送只跑测试，不发布）。
-5. **明确要发版时才打 tag**：`git tag <目录>-v<版本> && git push origin
-   <目录>-v<版本>`。tag 推出去即发版——CI 对该 tag 执行测试 → 门禁校验
-   （tag 形态、tag 与 package.json 版本一致、版本不落后已归档）→ 建
-   GitHub Release。**tag 由你明确打出，CI 绝不创建 tag**。发版后核对
-   Release 资产 tarball 与 `dsh.host` 字段符合预期（解包
-   `tar -xOf <tgz> package/package.json`）。
+5. **明确要发版时才打 tag，且一次只推一个 tag**：
+   `git tag -a <目录>-v<版本> -m "<包名> v<版本>"` 后，**逐个**执行
+   `git push origin <目录>-v<版本>`——推一个、确认它触发了流水并跑完、再推
+   下一个。tag 推出去即发版——CI（`.github/workflows/publish.yml`）对该 tag
+   执行：测试 → 门禁校验（tag 形态、annotated、tag 与 package.json 版本
+   一致、版本不落后已归档）→ 建 GitHub Release。**tag 由你明确打出，CI 绝不
+   创建 tag**。发版后核对 Release 资产 tarball 与 `dsh.host` 字段符合预期
+   （解包 `tar -xOf <tgz> package/package.json`）。
+
+   必须逐个推的两个原因（**两者都不报错，只会静默失败**）：
+
+   1. **一次推送超过 3 个 tag，GitHub 不为其中任何一个产生 `push` 事件**，
+      CI 完全不触发（官方文档：Events will not be created for tags when more
+      than three tags are pushed at once）；
+   2. `publish.yml` 的仓库级并发组 `group: publish` 只允许「1 个 running +
+      1 个 pending」，**新排队的 run 会取消前一个 pending 的 run**——推完不等
+      就接着推，中间的 tag 流水会被取消，Release 永远不建。
+
+   多包同发时顺序固定为：**先推分支**（`git push`，只跑测试）→ **再逐个 tag
+   推送并逐条确认**（完整循环脚本见 skill dsh-plugin-tag「标准流程」）。
 
 历史反例（先发布再验证连发 6+ 版本、发布产物缺字段多发一版）见
 RELEASING.md「日常发布流程」——工作未完成期间代码可以本地 commit（worktree
@@ -83,11 +97,13 @@ RELEASING.md「日常发布流程」——工作未完成期间代码可以本�
   升版本必须同时补该包 `CHANGELOG.md` 的 `## <版本> (YYYY-MM-DD)` 小节
   （GitHub Release 说明自动取自这里）。
 - 推送 `main` / `alpha` 只跑测试（test.yml），永远不发布；发版只由 tag 推送
-  触发（`git tag <目录>-v<版本> && git push origin <目录>-v<版本>`，
-  GitHub Release tarball 分发，不经过 npm）。**tag 由你明确打出，CI 绝不
-  创建 tag**——没推 tag 就没有任何 Release。门禁规则（打 tag 发版时强制
+  触发（`git tag -a <目录>-v<版本> -m "<包名> v<版本>" && git push origin
+  <目录>-v<版本>`，GitHub Release tarball 分发，不经过 npm）。**tag 由你明确
+  打出，CI 绝不创建 tag**——没推 tag 就没有任何 Release。**tag 必须逐个推送**：
+  单次推送超过 3 个 tag 时 GitHub 不产生任何 `push` 事件（全部静默漏发），且
+  并发组会取消排队中的 run；一次发多个包时逐个推送、逐个确认触发与成败
+  （详见 skill dsh-plugin-tag「铁律一 / 铁律二」）。门禁规则（打 tag 发版时强制
   执行）：版本号**严格低于**已归档版本会直接红；「改了代码没升版本号」
   不再是 CI 红灯——那种推送只跑测试，想发版就升版本打新 tag。版本与已归档
   tag 相同则幂等跳过。任何情况下不满足发布条件的包不会出现在 Release 资产里。
 - **待命期版本形态约束**：待命期发版必须为纯 semver 正式版，严禁发布 `-alpha.N` 预发布版本。发布门禁会校验 `dsh.host` 与版本形态的一致性：若宿主声明未适配到新 alpha 预发布线（仍为稳定线 rc），带 `-alpha` 后缀的包会被门禁直接拒绝。
-
