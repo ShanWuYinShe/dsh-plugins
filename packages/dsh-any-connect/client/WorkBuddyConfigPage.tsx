@@ -15,6 +15,28 @@ import {
 import type { WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
 import type { WorkBuddySettingsKey } from './locales.js'
 
+const WB_STYLE_ID = '@chaoset/dsh-any-connect/config.css'
+if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css="${WB_STYLE_ID}"]`) === null) {
+  const styleEl = document.createElement('style')
+  styleEl.dataset.pluginCss = WB_STYLE_ID
+  styleEl.textContent = `
+.wb-card { transition: border-color .15s ease, box-shadow .15s ease; }
+.wb-card:hover { border-color: var(--dsw-alias-border-l1); box-shadow: var(--dsw-shadow-lv1); }
+.wb-header:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.wb-header { transition: background-color .15s ease; border-radius: 10px; }
+.wb-btn { transition: background-color .15s ease, border-color .15s ease; }
+.wb-btn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover) !important; }
+.wb-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #1677ff); outline-offset: 1px; }
+.wb-dot-pulse { animation: wb-dot-pulse 2s ease-in-out infinite; }
+@keyframes wb-dot-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 160, 107, 0.3); } 50% { box-shadow: 0 0 0 4px rgba(34, 160, 107, 0); } }
+@media (prefers-reduced-motion: reduce) { .wb-dot-pulse { animation: none; } }
+.wb-spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--dsw-alias-border-l2); border-top-color: var(--dsw-alias-label-secondary); border-radius: 50%; animation: wb-spin .8s linear infinite; vertical-align: middle; margin-right: 4px; }
+@keyframes wb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .wb-spin { animation: none; } }
+`
+  document.head.appendChild(styleEl)
+}
+
 /** Localized copy injected by the browser-plugin registration. */
 export interface WorkBuddyConfigPageInjected {
   t: (key: WorkBuddySettingsKey, params?: Record<string, unknown>) => string
@@ -552,9 +574,10 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
   }
 
   return (
-    <div style={cardStyle}>
+    <div className="wb-card" style={cardStyle}>
       <button
         type="button"
+        className="wb-header"
         style={headerStyle}
         aria-expanded={open}
         aria-label={`${t(open ? 'collapse' : 'expand')}: ${title}`}
@@ -562,7 +585,7 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
       >
         <span style={headTextStyle}>
           <span style={nameRowStyle}>
-            <span aria-hidden="true" style={dotStyle('signed-in')} />
+            <span aria-hidden="true" className="wb-dot-pulse" style={dotStyle('signed-in')} />
             <span style={nameStyle}>{title}</span>
           </span>
           <span style={summaryStyle} title={t(variant.introKey)}>{headerSummary}</span>
@@ -578,17 +601,18 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                 <div style={planTitleRowStyle}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                     <span style={planNameStyle}>{zcodePlanName ?? t('codingPlanLabel')}</span>
-                    <span style={isPlanActive ? chipStyle : { ...chipStyle, background: 'rgba(0,0,0,0.06)', color: 'var(--dsw-alias-label-tertiary)' }}>
+                    <span style={isPlanActive ? chipStyle : { ...chipStyle, background: 'var(--dsw-alias-bg-layer-3, rgba(128, 128, 128, 0.12))', color: 'var(--dsw-alias-label-tertiary)' }}>
                       {t(isPlanActive ? 'codingPlanActive' : 'codingPlanExpired')}
                     </span>
                   </div>
                   <button
                     type="button"
+                    className="wb-btn"
                     style={buttonStyle}
                     disabled={busy}
                     onClick={() => { void refreshWithCatalog() }}
                   >
-                    {busy ? t('refreshing') : t('refresh')}
+                    {busy ? <><span className="wb-spin" aria-hidden="true" />{t('refreshing')}</> : t('refresh')}
                   </button>
                 </div>
                 <div style={planBadgeRowStyle}>
@@ -613,11 +637,12 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                   </span>
                   <button
                     type="button"
+                    className="wb-btn"
                     style={buttonStyle}
                     disabled={busy}
                     onClick={() => { void refreshWithCatalog() }}
                   >
-                    {busy ? t('refreshing') : t('refresh')}
+                    {busy ? <><span className="wb-spin" aria-hidden="true" />{t('refreshing')}</> : t('refresh')}
                   </button>
                 </span>
               </div>
@@ -644,28 +669,30 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                 {probe?.running === true ? <span style={summaryNoteStyle}>{t('detectingShort')}</span> : null}
               </div>
               {modelsOpen ? (
-                <table style={modelTableStyle}>
-                  <thead>
-                    <tr>
-                      <th style={{ ...modelThStyle, textAlign: 'left' }}>{t('colName')}</th>
-                      <th style={modelThStyle} />
-                      <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colRate')}</th>
-                      <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colContext')}</th>
-                      <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colEfforts')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {status.models.map((row, i) => (
-                      <ModelRow
-                        key={row.id}
-                        row={row}
-                        t={t}
-                        efforts={effortsOf(row)}
-                        even={i % 2 === 1}
-                      />
-                    ))}
-                  </tbody>
-                </table>
+                <div style={{ width: '100%', overflowX: 'auto' }}>
+                  <table style={modelTableStyle}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...modelThStyle, textAlign: 'left' }}>{t('colName')}</th>
+                        <th style={modelThStyle} aria-label="Tags" />
+                        <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colRate')}</th>
+                        <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colContext')}</th>
+                        <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colEfforts')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {status.models.map((row, i) => (
+                        <ModelRow
+                          key={row.id}
+                          row={row}
+                          t={t}
+                          efforts={effortsOf(row)}
+                          even={i % 2 === 1}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ) : null}
             </>
           ) : null}
@@ -689,8 +716,8 @@ function SignedOutRow({ t, variant, status }: {
       ? status.reason
       : t(variant.signedOutHintKey)
   return (
-    <div style={signedOutRowStyle}>
-      <button type="button" style={signedOutRowHeadStyle} aria-expanded={open} onClick={() => { setOpen(!open) }}>
+    <div className="wb-card" style={signedOutRowStyle}>
+      <button type="button" className="wb-header" style={signedOutRowHeadStyle} aria-expanded={open} onClick={() => { setOpen(!open) }}>
         <span aria-hidden="true" style={dotStyle(status.status)} />
         <span style={{ ...nameStyle, flex: '0 0 auto', fontWeight: 500 }}>{title}</span>
         <span style={{ ...descriptionStyle, flex: 1, minWidth: 0, whiteSpace: open ? 'normal' : 'nowrap', overflow: 'hidden', textOverflow: open ? 'clip' : 'ellipsis' }}>
