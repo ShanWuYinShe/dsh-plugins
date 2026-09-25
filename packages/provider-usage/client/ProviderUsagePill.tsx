@@ -218,8 +218,13 @@ type ProviderUsageInjected = ProviderUsagePillInjected
 /** One window's progress bar and figures. */
 function WindowRow({ window, t }: { window: UsageWindow; t: ProviderUsageInjected['t'] }): React.ReactNode {
   const hasLimit = window.limit !== undefined && window.limit > 0
+  // remain 是契约上的可选字段(「provider 上报时才有」):第三方查询器可
+  // 合法返回「有 limit 无 remain」。此时不渲染进度条与「剩余 0/…」——
+  // 强制按 0 渲染会给出红色空条的错误语义,与 headline(不显示数字)和
+  // 圆点(remain 缺失不判色)互相矛盾。
+  const hasRemain = window.remain !== undefined
   const remain = window.remain ?? 0
-  const percent = hasLimit ? (remain / window.limit!) * 100 : 0
+  const percent = hasLimit && hasRemain ? (remain / window.limit!) * 100 : 0
   return (
     <div style={windowRowStyle}>
       <div style={windowHeadStyle}>
@@ -228,10 +233,10 @@ function WindowRow({ window, t }: { window: UsageWindow; t: ProviderUsageInjecte
           {window.remain === undefined ? window.unit : `${formatAmount(remain)} ${window.unit}`}
         </span>
       </div>
-      {hasLimit ? <div style={trackStyle} role="progressbar" aria-labelledby={`pu-window-${window.id}`} aria-valuenow={Math.round(percent)} aria-valuemin={0} aria-valuemax={100}><div className={percent <= 20 ? 'pu-stripe' : undefined} style={fillStyle(percent)} /></div> : null}
+      {hasLimit && hasRemain ? <div style={trackStyle} role="progressbar" aria-labelledby={`pu-window-${window.id}`} aria-valuenow={Math.round(percent)} aria-valuemin={0} aria-valuemax={100}><div className={percent <= 20 ? 'pu-stripe' : undefined} style={fillStyle(percent)} /></div> : null}
       <span style={windowMetaStyle}>
-        {hasLimit ? t('windowRemaining', { remain: formatAmount(remain), limit: formatAmount(window.limit!) }) : null}
-        {window.resetsAt === undefined ? null : <>{hasLimit ? ' · ' : ''}{t('resetsAt', { time: formatReset(window.resetsAt) })}</>}
+        {hasLimit && hasRemain ? t('windowRemaining', { remain: formatAmount(remain), limit: formatAmount(window.limit!) }) : null}
+        {window.resetsAt === undefined ? null : <>{hasLimit && hasRemain ? ' · ' : ''}{t('resetsAt', { time: formatReset(window.resetsAt) })}</>}
       </span>
     </div>
   )
@@ -319,6 +324,11 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
     prevOpenRef.current = open
   }, [open])
 
+  // 跨闭包跟踪当前 provider:手动刷新(面板内按钮)不带 AbortSignal,provider
+  // 切换时无法取消在途的旧请求——写回前必须核对响应的 provider 是否仍是
+  // 当前值,否则 A 的旧余额会顶着 B 的名字显示到下一轮轮询。
+  const providerRef = useRef(provider)
+  useEffect(() => { providerRef.current = provider }, [provider])
   const refresh = useCallback(async (signal?: AbortSignal): Promise<void> => {
     if (provider === undefined || provider === '') return
     setBusy(true)
@@ -332,7 +342,7 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const first = (value as { snapshots?: unknown } | null)?.snapshots
       const snapshot = Array.isArray(first) ? first[0] as RouteAnswer : undefined
-      if (mounted.current && signal?.aborted !== true) {
+      if (mounted.current && signal?.aborted !== true && providerRef.current === provider) {
         answerRef.current = snapshot
         setAnswer(snapshot)
         setStale(false)
@@ -343,10 +353,10 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
       // stale (dot dims + copy suffix); anything else degrades to failed.
       const prev = answerRef.current
       if (prev !== undefined && !('queried' in prev) && prev.error === undefined) {
-        if (mounted.current && signal?.aborted !== true) setStale(true)
+        if (mounted.current && signal?.aborted !== true && providerRef.current === provider) setStale(true)
         return
       }
-      if (mounted.current && signal?.aborted !== true) {
+      if (mounted.current && signal?.aborted !== true && providerRef.current === provider) {
         const failed: RouteAnswer = { provider, windows: [], fetchedAt: Date.now(), error: error instanceof Error ? error.message : String(error) }
         answerRef.current = failed
         setAnswer(failed)
