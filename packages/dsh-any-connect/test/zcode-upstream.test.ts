@@ -251,6 +251,55 @@ describe('ZCode upstream and auth', () => {
         },
       ])
     })
-  })
+    it('merges into an existing top-level system string instead of dropping the messages', () => {
+      // 回归:此前顶层 system 已是 string 时,system/developer 消息被整体
+      // 丢弃(留在 messages 里会被 Anthropic 端点拒绝)。
+      const input = JSON.stringify({
+        model: 'glm-5.3',
+        system: 'Be concise.',
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant.' },
+          { role: 'user', content: 'question' },
+        ],
+      })
+      const output = JSON.parse(prepareAnthropicBody(input))
+      expect(output.system).toBe('Be concise.\n\nYou are a helpful assistant.')
+      expect(output.messages).toEqual([{ role: 'user', content: 'question' }])
+    })
+
+    it('appends text blocks to an existing system blocks array without overwriting it', () => {
+      // 回归:此前 blocks 数组形态的顶层 system 被 join 字符串整体覆盖,
+      // 原 system 内容静默丢失。
+      const input = JSON.stringify({
+        model: 'glm-5.3',
+        system: [{ type: 'text', text: 'Be concise.' }],
+        messages: [
+          { role: 'developer', content: 'Prefer TypeScript.' },
+          { role: 'user', content: 'question' },
+        ],
+      })
+      const output = JSON.parse(prepareAnthropicBody(input))
+      expect(output.system).toEqual([
+        { type: 'text', text: 'Be concise.' },
+        { type: 'text', text: 'Prefer TypeScript.' },
+      ])
+      expect(output.messages).toEqual([{ role: 'user', content: 'question' }])
+    })
+
+    it('leaves a malformed top-level system untouched instead of overwriting it', () => {
+      // 畸形形态(非 string/数组)不归本转换器管:保持原样连同 system 消息,
+      // 让上游校验给出明确错误,而不是猜测性地覆盖。
+      const input = JSON.stringify({
+        model: 'glm-5.3',
+        system: 42,
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant.' },
+          { role: 'user', content: 'question' },
+        ],
+      })
+      const output = JSON.parse(prepareAnthropicBody(input))
+      expect(output.system).toBe(42)
+      expect(output.messages).toHaveLength(2)
+    })  })
 })
 
