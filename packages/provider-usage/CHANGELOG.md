@@ -1,3 +1,14 @@
+## 0.1.4 (2026-09-25)
+
+### 修复
+
+* **查询超时改为真正生效的 deadline**：此前只 abort 不 race，不响应 abort 的挂死查询器（`register` 是公开扩展点）或挂起的凭据服务会让该 provider 的每次轮询被同一个挂起 Promise 永久拖住；现在 `Promise.race` 保证超时必然结算。
+* **软失败的 error 透传到浏览器**：内置查询器用「空 windows + error」表达软失败（端点不可用、无可用余额），转发层此前丢弃 error，浏览器把故障显示成「不上报额度」的绿点；现在透传并过统一脱敏。
+* **baseURL 推断回退路径加 deadline**：resolve 阶段（settings/credentials 读取、DeepSeek 无键路径的网络请求）此前无超时保护，挂死的 resolver 会把轮询端点整个拖住。
+* **OpenCode 回退路径对默认 baseURL 不再拼出 `/v1/v1` 死链**（必然 404 且盖掉首请求的真实错误）。
+* **500 兜底错误文本统一走 registry 导出的 safeMessage**：本地旧副本少一条「token= 查询参数」脱敏规则。
+* **配置卡**：手动刷新与 provider 切换并发时，旧请求的乱序响应不再覆盖新 provider 的数据；可选 `remain` 不再被强制按 0 渲染成红色空条。
+
 ## 0.1.3 (2026-09-25)
 
 ### 修复
