@@ -111,6 +111,15 @@ export function isCatalogLive(catalog: WorkBuddyWebCatalog | undefined): boolean
   return catalog !== undefined && catalog.source === 'live' && catalog.error === undefined
 }
 
+/** 目录来源的用户可见文案键：stale（saved）与离线（fallback）是不同的
+ * 用户处境,必须可分辨（status-paths 的 WorkBuddyWebCatalog 契约）。 */
+function catalogSourceKey(catalog: WorkBuddyWebCatalog | undefined): WorkBuddySettingsKey {
+  if (catalog === undefined) return 'catalogSourceFallback'
+  if (catalog.source === 'live') return 'catalogSourceLive'
+  if (catalog.source === 'saved') return 'catalogSourceSaved'
+  return 'catalogSourceFallback'
+}
+
 const cardStyle: CSSProperties = {
   overflow: 'hidden',
   border: '1px solid var(--dsw-alias-border-l2)',
@@ -300,7 +309,8 @@ function ModelRow({ row, efforts, t, even }: {
           ))}
         </span>
       </td>
-      <td style={metaCellStyle}>{row.free === true ? null : row.rateUnknown === true ? t('rateUnknown') : row.credits}</td>
+      {/* 无 credits 也无 rateUnknown 标记的行(内置 fallback 目录即有此形态)显示「价格未知」而非无声空白——同一语义不应两种呈现。 */}
+      <td style={metaCellStyle}>{row.free === true ? null : row.rateUnknown === true || row.credits === undefined ? t('rateUnknown') : row.credits}</td>
       <td style={metaCellStyle}>{formatTokens(row.contextWindow)}</td>
       <td style={{ ...metaCellStyle, color: 'var(--dsw-alias-label-secondary)' }}>
         {efforts !== undefined && efforts.length > 0 ? efforts.join('/') : null}
@@ -371,13 +381,26 @@ function VariantsPage({ t }: { t: WorkBuddyConfigPageInjected['t'] }): React.Rea
     if (mountedRef.current) setStatuses(current => ({ ...current, [variantId]: next }))
   }, [])
 
+  // 每变体请求纪元:60s 轮询、展开刷新、refresh 后的 500ms 落定轮询并发
+  // 时,慢的旧响应(如刚翻转为 signed-out 的旧 signed-in 文档)会在新响应
+  // 之后落地,按 variant 键 last-write-wins 会把行短暂翻回错误状态。落地
+  // 前必须确认自己仍是该变体最新一次请求。
+  const fetchSeqRef = useRef<Record<string, number>>({})
+  const beginFetch = useCallback((variantId: string): number => {
+    const seq = (fetchSeqRef.current[variantId] ?? 0) + 1
+    fetchSeqRef.current[variantId] = seq
+    return seq
+  }, [])
+  const isCurrentFetch = useCallback((variantId: string, seq: number): boolean => fetchSeqRef.current[variantId] === seq, [])
+
   // 首拉与重试共用的落定链：成功进状态表，失败进 error 态（行内展示，不打扰其它变体）。
   const fetchAndApply = useCallback((variant: WorkBuddyCardVariant): void => {
+    const seq = beginFetch(variant.id)
     void fetchOne(variant).then(
-      status => applyOne(variant.id, status),
-      error => applyOne(variant.id, { status: 'error', message: error instanceof Error ? error.message : String(error) }),
+      status => { if (isCurrentFetch(variant.id, seq)) applyOne(variant.id, status) },
+      error => { if (isCurrentFetch(variant.id, seq)) applyOne(variant.id, { status: 'error', message: error instanceof Error ? error.message : String(error) }) },
     )
-  }, [fetchOne, applyOne])
+  }, [fetchOne, applyOne, beginFetch, isCurrentFetch])
 
   // 错误行重试：先回 loading 给即时反馈，再走与首拉同一条落定链。
   const retryOne = useCallback((variant: WorkBuddyCardVariant): void => {
@@ -398,8 +421,9 @@ function VariantsPage({ t }: { t: WorkBuddyConfigPageInjected['t'] }): React.Rea
           || current.status !== 'signed-in'
           || openIdsRef.current.has(variant.id)
         if (!needsPoll) continue
+        const seq = beginFetch(variant.id)
         void fetchOne(variant).then(
-          status => applyOne(variant.id, status),
+          status => { if (isCurrentFetch(variant.id, seq)) applyOne(variant.id, status) },
           () => { /* 轮询失败不打扰：下一拍再试，已有数据保留 */ },
         )
       }
@@ -444,7 +468,14 @@ function VariantsPage({ t }: { t: WorkBuddyConfigPageInjected['t'] }): React.Rea
       else next.add(id)
       return next
     })
-  }, [])
+    // 展开时立即刷新已登录卡:收起卡不在 60s 轮询范围,长收起后展开看到
+    // 的是陈旧余额且无 loading 指示——「展开时由卡片立即拉取」的声明在此
+    // 落地。loading/error 态交给既有错误行重试链,不在此重复发起。
+    if (statusesRef.current[id]?.status === 'signed-in') {
+      const variant = CARD_VARIANTS.find(v => v.id === id)
+      if (variant !== undefined) fetchAndApply(variant)
+    }
+  }, [fetchAndApply])
 
   const anySignedIn = CARD_VARIANTS.some(variant => statuses[variant.id]?.status === 'signed-in')
   const loaded = CARD_VARIANTS.some(variant => statuses[variant.id] !== undefined)
@@ -716,6 +747,12 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                   <span>{t('modelsCount', { n: status.models.length })}</span>
                 </button>
                 {probe?.running === true ? <span style={summaryNoteStyle}>{t('detectingShort')}</span> : null}
+                {/* 目录来源与拉取失败对用户可见:stale 与离线是不同处境,
+                    不能只作内部判据(status-paths 的契约声明)。 */}
+                <span style={summaryNoteStyle}>{t(catalogSourceKey(status.catalog))}</span>
+                {status.catalog?.error !== undefined
+                  ? <span style={{ ...summaryNoteStyle, color: 'var(--dsw-alias-state-error-primary, #ff4d4f)' }}>{t('catalogSourceError', { message: status.catalog.error })}</span>
+                  : null}
               </div>
               {modelsOpen ? (
                 <div style={{ width: '100%', overflowX: 'auto' }}>
