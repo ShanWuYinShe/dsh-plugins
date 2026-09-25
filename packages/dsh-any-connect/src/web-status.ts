@@ -52,7 +52,9 @@ export interface WorkBuddyStatusRouteOptions {
 export function safeMessage(error: unknown): string {
   return (error instanceof Error ? error.message : String(error))
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted token]')
-    .replace(/(\b(?:code|token|refresh_token|access_token)=)[^&\s]+/giu, '$1[redacted]')
+    // api_?key= 与 provider-usage 的 safeMessage 规则集对齐:跨包独立发布
+    // 不能互 import,但脱敏规则集应保持等价。
+    .replace(/(\b(?:code|token|refresh_token|access_token|api_?key)=)[^&\s]+/giu, '$1[redacted]')
     .slice(0, 500)
 }
 

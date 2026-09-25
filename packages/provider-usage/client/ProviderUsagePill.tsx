@@ -362,7 +362,8 @@ export function ProviderUsagePill({ t, directory, load }: ProviderUsagePillProps
         setAnswer(failed)
       }
     } finally {
-      if (mounted.current) setBusy(false)
+      // 手动刷新与轮询并发时,迟到的旧请求不得提前关掉新请求的 busy。
+      if (mounted.current && providerRef.current === provider) setBusy(false)
     }
   }, [provider])
 

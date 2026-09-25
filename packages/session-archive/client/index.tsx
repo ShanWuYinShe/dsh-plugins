@@ -309,6 +309,9 @@ function ArchivePanel(props: any) {
     setClosing(false);
     setOpen(true);
   }, []);
+  // 卸载时取消挂着的关闭动画回调(声明与实现一致;React 下 setState 为 no-op,
+  // 但清理让卸载后的行为完全确定)。
+  React.useEffect(() => () => globalThis.clearTimeout(closeTimerRef.current), []);
 
   const [items, setItems] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -364,7 +367,8 @@ function ArchivePanel(props: any) {
       if (seq !== listSeqRef.current) return;
       setError(t("loadFailed") + ": " + (loadError && loadError.message || loadError));
     } finally {
-      setLoading(false);
+      // 纪元守卫:旧 load 迟到时不得提前关掉更新的、仍在途的 load 的 spinner。
+      if (seq === listSeqRef.current) setLoading(false);
     }
   }, [call, applyItems, t]);
   // 打开态的静默刷新：不碰 loading，长开面板的列表不再陈旧；

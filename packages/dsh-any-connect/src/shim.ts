@@ -241,7 +241,9 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         // 超限是客户端错误:按语义回 413(probe-route 同场景同口径),
         // 落进兜底 500 会把排障方向带偏到"服务端内部错误"。
         if (!res.headersSent) {
-          if ((new URL(req.url ?? '/', 'http://127.0.0.1').pathname === '/v1/messages')) {
+          // 尾斜杠变体与 401 分支/路由匹配同口径:SDK 会带查询串或尾斜杠。
+          const errPath = new URL(req.url ?? '/', 'http://127.0.0.1').pathname
+          if (errPath === '/v1/messages' || errPath === '/v1/messages/') {
             writeAnthropicError(res, 413, 'invalid_request_error', 'request body too large')
           } else {
             writeOpenAIError(res, 413, 'body_too_large', 'request body too large')
