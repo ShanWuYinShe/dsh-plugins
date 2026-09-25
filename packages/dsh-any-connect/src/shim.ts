@@ -250,7 +250,11 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     const prepared = prepareChatBody(raw)
 
     const controller = new AbortController()
-    req.on('close', () => controller.abort())
+    // Node ≥16 起 IncomingMessage 的 'close' 是「请求完成」而非「socket 关闭」:
+    // SSE 响应头发出后客户端断开,触发的是 res 'close',req 'close' 不再触发
+    // ——挂 req 会漏掉流式阶段的断开,上游照常跑完整次生成。res 'close' 在
+    // 正常结束与提前断开时都触发,事后 abort 是无害 no-op。
+    res.once('close', () => controller.abort())
     const result = await client.chatStream(credential, prepared, controller.signal)
 
     if (!result.ok) {
@@ -278,6 +282,13 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     let tail = Buffer.alloc(0)
     let sawDone = false
     const body = Readable.fromWeb(result.response.body as Parameters<typeof Readable.fromWeb>[0])
+    // 流式阶段的客户端断开必须显式取消上游:chatStream 的头超时 fuse 在头
+    // 到达时已 dispose(解除 signal→fetch 的传导),abort 传不到 undici;
+    // destroy 驱动 web reader 的 cancel(),上游请求才真正中止。正常收尾时
+    // body 已 end,destroy 是无害 no-op。
+    res.once('close', () => {
+      if (!body.readableEnded) body.destroy(new Error('client disconnected mid-stream'))
+    })
     body.on('data', (chunk: Buffer) => {
       const joined = Buffer.concat([tail, chunk])
       if (joined.includes(DONE_MARKER)) sawDone = true
@@ -309,7 +320,9 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
 
     const raw = (await readBody(req)).toString('utf8')
     const controller = new AbortController()
-    req.on('close', () => controller.abort())
+    // 与 chatCompletions 同口径:res 'close' 才是流式阶段的断开信号(req
+    // 'close' 在响应开始后不再触发)。
+    res.once('close', () => controller.abort())
     const result = await client.chatStream(credential, raw, controller.signal)
 
     if (!result.ok) {
@@ -330,6 +343,9 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
       'X-Accel-Buffering': 'no',
     })
     const body = Readable.fromWeb(result.response.body as Parameters<typeof Readable.fromWeb>[0])
+    res.once('close', () => {
+      if (!body.readableEnded) body.destroy(new Error('client disconnected mid-stream'))
+    })
     body.on('error', (error: unknown) => {
       logger?.warn('dsh-any-connect: upstream stream failed mid-flight', error)
       if (!res.writableEnded) res.end()

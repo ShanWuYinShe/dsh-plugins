@@ -493,4 +493,70 @@ describe('WorkBuddy shim', () => {
     })
     expect(entered).toBe(true)
   })
+  it('cancels the upstream stream when the client disconnects mid-flight', async () => {
+    // 回归:Node ≥16 起 req 'close' 在响应开始后不再触发(那是「请求完成」
+    // 语义),流式阶段客户端断开必须靠 res 'close' + 显式 destroy body——
+    // 此前两条都没有,上游 SSE 被照常消费到生成结束(白烧积分)。
+    // 断言:客户端收到首块后断开,上游 web body 的 cancel() 被调用。
+    const dir = await mkdtemp(join(tmpdir(), 'shim-midflight-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    await writeFile(join(dir, "desktop.json"), JSON.stringify({
+      auth: { accessToken: 'at', refreshToken: 'rt', expiresAt: Date.now() + 3600_000, domain: 'www.codebuddy.cn' },
+      account: { uid: 'uid-1' },
+    }))
+    const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
+      desktopPath: join(dir, "desktop.json"),
+      ownPath: join(dir, "own.json"),
+      refresh: async () => ({ accessToken: 'unused' }),
+    })
+    let cancelled = false
+    const shim = createWorkBuddyShim({
+      kind: "workbuddy",
+      store,
+      catalog: new WorkBuddyCatalog(),
+      client: {
+        async chatStream() {
+          const webBody = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'))
+              // 不 close:上游生成还在继续,等客户端断开来取消。
+            },
+            cancel() { cancelled = true },
+          })
+          return { ok: true as const, response: new Response(webBody, { status: 200 }) }
+        },
+      },
+    })
+    await shim.ready
+    CLEANUP.push(() => shim.close())
+
+    await new Promise<void>((resolve) => {
+      const req = request({
+        host: "127.0.0.1",
+        port: Number(new URL(shim.baseUrl()).port),
+        method: "POST",
+        path: "/v1/chat/completions",
+        headers: { "Content-Type": "application/json", authorization: `Bearer ${shim.token()}` },
+      }, (res) => {
+        res.on("data", () => {
+          // 收到首块(SSE 头已发、pipe 已建立)再断开,精确复现流式阶段断开。
+          req.destroy()
+        })
+        res.on("error", () => {})
+      })
+      req.on("error", () => {}) // 客户端主动断开:服务端 reset 是预期
+      req.end(JSON.stringify({ model: "auto", messages: [{ role: "user", content: "hi" }] }))
+      const waitCancelled = setInterval(() => {
+        if (cancelled) {
+          clearInterval(waitCancelled)
+          resolve()
+        }
+      }, 10)
+      CLEANUP.push(async () => clearInterval(waitCancelled))
+      // 兜底:8s 内未被取消即失败(避免悬挂)。
+      setTimeout(resolve, 8000)
+    })
+    expect(cancelled).toBe(true)
+  })
 })
