@@ -452,10 +452,13 @@ export const opencodeUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, sig
   const root = trimBase(baseURL ?? 'https://opencode.ai/zen/go/v1')
   const headers = { authorization: `Bearer ${apiKey}` }
   let body: Record<string, unknown> = {}
+  // 回退路径只对未带 /v1 的自定义 baseURL 追加 /v1:默认 root 已含 /v1,
+  // 再拼 /v1/usage 是必然 404 的死请求,还会把真正的首请求错误盖成 404。
+  const fallbackPath = root.endsWith('/v1') ? '/usage' : '/v1/usage'
   try {
     body = await getJson(`${root}/usage`, headers, signal)
   } catch {
-    body = await getJson(`${root}/v1/usage`, headers, signal)
+    body = await getJson(`${root}${fallbackPath}`, headers, signal)
   }
   const usage = rec(body['usage'])
   const windows: UsageWindow[] = []

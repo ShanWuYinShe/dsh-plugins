@@ -201,6 +201,39 @@ describe('ProviderUsageRegistry', () => {
     expect(snapshot?.error).toContain('timed out')
   })
 
+  it('times out even when the querier ignores abort and never settles', async () => {
+    // 回归:withDeadline 此前只 abort 不 race,querier 是公开扩展点,不理
+    // abort 的挂死实现(或挂起的 credentials 服务)会让 inflight 条目永久
+    // 残留,该 provider 的每次 snapshot 都返回同一个挂起 Promise——轮询
+    // 端点对它永久挂起。deadline 必须靠 race 落地,不依赖对方配合。
+    const { registry } = makeRegistry({ timeoutMs: 20 })
+    registry.register('acme', async () => new Promise<UsageSnapshot>(() => {}))
+
+    const snapshot = await registry.snapshot('acme')
+    expect(snapshot?.error).toContain('timed out')
+
+    // 超时后 inflight 条目必须已清理:下一次查询重新发起,而不是复用挂死
+    // 的旧 Promise 永久挂起。
+    const second = await registry.snapshot('acme')
+    expect(second?.error).toContain('timed out')
+  })
+
+  it('carries a querier-reported error through the success path', async () => {
+    // 回归:软失败契约是「空 windows + error」,转发层此前丢弃 error,浏览器
+    // 只能看到「不上报额度」的绿点而非失败原因。
+    const { registry } = makeRegistry()
+    registry.register('acme', async () => ({
+      provider: 'acme',
+      windows: [],
+      fetchedAt: 0,
+      error: 'the balance endpoint reported no usable balance',
+    }))
+
+    const snapshot = await registry.snapshot('acme')
+    expect(snapshot?.error).toContain('no usable balance')
+    expect(snapshot?.windows).toEqual([])
+  })
+
   it('passes the resolved endpoint and credential to the querier', async () => {
     const { registry } = makeRegistry()
     const seen: unknown[] = []

@@ -239,6 +239,11 @@ export class ProviderUsageRegistry extends Service {
       return {
         ...base,
         ...snapshot.plan === undefined ? {} : { plan: snapshot.plan },
+        // 查询器用「空 windows + error」表达软失败（端点不可用、无可用余额
+        // 等）——这是 types 契约的一半；不透传的话软失败到浏览器就成了
+        // 「该 provider 不上报额度」的绿点，失败原因蒸发。错误文本过
+        // safeMessage，与 catch 分支同一脱敏口径。
+        ...snapshot.error === undefined ? {} : { error: safeMessage(snapshot.error) },
         windows: snapshot.windows,
         fetchedAt,
       }
@@ -259,12 +264,23 @@ export class ProviderUsageRegistry extends Service {
   /** Race one query against the deadline and the caller's abort. */
   private async withDeadline(provider: string, querier: ProviderUsageQuerier): Promise<UsageSnapshot> {
     const controller = new AbortController()
-    const timer = setTimeout(() => {
-      controller.abort(new Error('query timed out'))
-    }, this.queryTimeoutMs)
-    timer.unref?.()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timedOut = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort(new Error('query timed out'))
+        reject(new Error('query timed out'))
+      }, this.queryTimeoutMs)
+    })
+    timer?.unref?.()
+    // 只 abort 不 race 是假的 deadline:queryer 是公开扩展点,第三方实现
+    // (以及不接收 signal 的 credentials 服务)未必响应 abort——await 永不
+    // settle 时 inflight 条目永久残留,该 provider 的每次轮询都被同一个
+    // 挂起 Promise 拖死。race 保证超时必然结算;late rejection 挂空 catch
+    // 兜住,不变成 unhandled rejection。
+    const work = this.resolve(provider, querier, controller.signal)
+    work.catch(() => {})
     try {
-      return await this.resolve(provider, querier, controller.signal)
+      return await Promise.race([work, timedOut])
     } finally {
       clearTimeout(timer)
     }
