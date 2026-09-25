@@ -289,8 +289,10 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
               return React.createElement("span", { key: index, className: cls, style: { display: "block" } },
                 React.createElement("span", { "aria-hidden": true }, prefix),
                 t("root" + kind.charAt(0).toUpperCase() + kind.slice(1))
-                  .replace("{n}", String(problem.line))
-                  .replace("{v}", problem.value)
+                  // 函数替换:{v} 是用户输入的原始行,字符串替换串里的 $&/$`/$'
+                  // 等特殊序列会把模板前后文拼进预览,显示的路径与实际输入不符。
+                  .replace("{n}", () => String(problem.line))
+                  .replace("{v}", () => problem.value)
               );
             })
           ) : null,
