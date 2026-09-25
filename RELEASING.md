@@ -59,6 +59,12 @@ npm 的**版本列表**：稳定线目标 = 非进行中预发布的最高版（
 变更时触发），不一致发
 warning（刻意非阻塞——提醒，不是门禁）。
 
+发布侧的强校验由 `node scripts/dsh-baseline.mjs`（发布门禁步骤
+「Verify dsh baseline」）执行：所有 dsh-* 依赖必须是 `^<版本>` 形态、
+基线一致、`dsh.host` 存在且与基线一致，任一不满足即 exit 1 阻断发布——
+`dsh.host` 是 npm 消费者可见的适配声明，发布归档的 tag 不允许带糊的状态。
+本地干跑直接执行该脚本即可（无网络、无 git 依赖，纯 manifest 校验）。
+
 ### dsh 适配归档 tag（main 专属）
 
 main 分支的每次 dsh 稳定版适配都归档为一个 git tag，**由用户手工打，CI

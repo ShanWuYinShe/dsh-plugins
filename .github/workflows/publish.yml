@@ -61,6 +61,13 @@ jobs:
       - name: Run tests
         run: bun run test:ci
 
+      # 发布基线门禁:所有 dsh-* 依赖必须是 ^<版本> 形态、基线一致、
+      # dsh.host 存在且与基线一致——发布归档的 tag 不允许带糊的状态
+      # (dsh.host 是 npm 消费者可见的适配声明,漂移/缺失此前只由每日
+      # cron 的 follow-status 非阻塞告警兜着)。规则见 scripts/dsh-baseline.mjs。
+      - name: Verify dsh baseline
+        run: node scripts/dsh-baseline.mjs
+
       # 解析本次要发的 tag：tag 推送取 ref 名，手动触发取输入。
       - name: Resolve tag
         id: tag
