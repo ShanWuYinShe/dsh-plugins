@@ -175,8 +175,11 @@ async function scanSession(persistence: SessionPersistence, sessionId: SessionId
   try {
     for (let offset = 0; ; offset += READ_CHUNK_EVENTS) {
       const { events } = await handle.read(offset, READ_CHUNK_EVENTS);
+      // 损坏/异构日志里可能混进 null 或非对象行（合法 JSON 但不是事件）——
+      // 在这里统一剔除，两个消费方（标题折叠、detail 提取）都不必各自防御；
+      // 分页终止判定仍用原始长度，空块语义不因剔除改变。
       if (events.length === 0) break;
-      onChunk(events);
+      onChunk(events.filter((event) => event !== null && typeof event === 'object'));
       if (events.length < READ_CHUNK_EVENTS) break;
     }
     return handle.header;
@@ -598,7 +601,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
           // message 可缺（损坏/异构日志）——detail 是整会话只读端点，一条
           // 畸形事件不应让整个请求 TypeError。
           const text = messageText(
-            event.type === 'user/message' ? event.data.content : event.data.message?.content,
+            event.type === 'user/message' ? event.data?.content : event.data?.message?.content,
             cfg.messagePreviewChars,
           );
           // 空文本消息（纯工具调用等）在任何位置都不计入总数——截断线两侧

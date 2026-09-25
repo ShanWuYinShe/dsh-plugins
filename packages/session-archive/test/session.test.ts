@@ -647,6 +647,35 @@ describe("session-archive host", () => {
       && detail.messages[0]!.text === "正常消息").toBe(true);
   });
 
+  it("detail:畸形事件(data 本体缺失/null 行)不炸整个请求", async () => {
+    // 回归:此前 user/message 走 event.data.content,assistant 走
+    // event.data.message?.content——data 本体为 null/undefined 时两个分支
+    // 都会 TypeError 且炸掉整个 detail;标题路径 readTitle 同样会被 null 行
+    // 炸掉(异常被 rowFor 吞掉,标题静默变 null)。scanSession 现在统一剔除
+    // 非对象/null 行,data 缺失的消息按空文本不计入。
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-mal-data-"));
+    const f = makeFixture({
+      archived: ["d1"],
+      headers: [{ id: "d1", cwd: "/proj/a", createdAt: 1000 }],
+    });
+    writeSession("d1", [
+      { type: "session/title", seq: 1, time: 5, data: { title: "畸形会话", messageSeqs: [2], source: { kind: "user" } } },
+      messageEvent(2, 10, "正常消息"),
+      // data 本体缺失的 user/message(合法 JSON 但不是官方事件形状)。
+      { type: "user/message", seq: 3, time: 20, data: undefined },
+      // 整行是 null(损坏日志里 JSON 字面量 null)。
+      null,
+    ]);
+    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const detail = await archiveHost.detail("d1");
+    expect(detail.title === "畸形会话").toBe(true);
+    expect(detail.messages.length === 1
+      && detail.messages[0]!.text === "正常消息").toBe(true);
+    // list() 的标题读取路径同样不炸,标题正常折叠。
+    const items = await archiveHost.list();
+    expect(items.items.length === 1 && items.items[0].title === "畸形会话").toBe(true);
+  });
+
   it("标题/详情分块读取:>块长的事件流不重不漏,标题(块首)与尾部消息都可达", async () => {
     // 回归:此前 read(0) 全量物化,大日志峰值内存 O(整条日志)。分块后必须
     // 仍然跨块取到全部数据——夹具 read 现在按官方契约 honor offset/length。
