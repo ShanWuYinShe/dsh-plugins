@@ -405,6 +405,14 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
               warnOnce("seatbelt-separator", "seatbelt argv has no -- separator; cannot add extra writable roots");
               return wrapped;
             }
+            // 分隔符不在期望位置(profile 后紧跟 --)同样是契约漂移:官方若在
+            // profile 与 -- 之间新增参数,整表重建会把它静默丢掉,沙盒比官方
+            // 更宽。与分隔符缺失同策略:放弃追加,保持官方 argv 原样。
+            // 漂移自检只比对 profile 文本,检不出这种形态,必须在这里挡。
+            if (sbSep !== 3) {
+              warnOnce("seatbelt-separator-position", "seatbelt argv shape changed (args between profile and --); refusing to rebuild it — bash-side extra roots stay OFF (the fs fence still grants them)");
+              return wrapped;
+            }
             wrapped.argv = [a[0], ...seatbeltProfileArgs(policy, roots), ...a.slice(sbSep + 1)];
             return wrapped;
           }
