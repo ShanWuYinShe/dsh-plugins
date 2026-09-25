@@ -659,8 +659,8 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
      * 随宿主重启）。`needsRestart` 如实返回这类"文件已删、内存仍在"的
      * id，调用方据此提示用户并刷新客户端会话列表（cold 删除即时见效）。
      *
-     * 失败语义（failed[].reason）：'not-archived' 非归档成员；'live' 内存
-     * 未归档会话；'busy' 内存中的会话日志仍在增长（活跃生成流）；
+     * 失败语义（failed[].reason）：'not-archived' 非归档成员；'busy' 内存中
+     * 的会话日志仍在增长（活跃生成流）；
      * 'unenumerable' 文件存在但持久化枚举不到（首行损坏的孤儿），或无法
      * 确认文件已消失的 ghost id；'reappeared' 删除后被生成流重建、二次
      * 删除仍压不掉；其余为底层删除错误消息。
@@ -770,10 +770,11 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
           failed.push({ sessionId, reason: 'not-archived' });
           continue;
         }
-        if (isLive(id)) {
-          failed.push({ sessionId, reason: 'live' });
-          continue;
-        }
+        // 无独立的 'live' 检查:本端点只删归档成员,而归档成员按 isLive 的
+        // 定义(内存存在且未归档)恒非 live——「内存中仍挂着的归档会话」的
+        // 删除保护由 deleteLocatedFile 的 busy 沉降观察承担(活跃生成流会
+        // 被增长判定拒绝),不是 live 判定。此前的 'live' 分支在该前置检查
+        // 之后永不可达(死代码),已删;词表保留 'busy'/'not-archived'。
         if (snapshots.get(sessionId) === undefined) {
           // ghost id(枚举不到)。"枚举不到 ≠ 文件不存在":首行损坏的日志会被
           // persistence 静默跳过;而 jsonl 后端按 cwd 分目录,ghost 探测没有
