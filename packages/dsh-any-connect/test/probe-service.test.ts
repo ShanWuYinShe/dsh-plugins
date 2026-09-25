@@ -177,8 +177,10 @@ describe('WorkBuddyProbeService', () => {
     const sent = h.calls.length
     expect(sent).toBeGreaterThan(0)
     // 再次自动检测：记录仍有效（同指纹、同账号、未过期），零新请求。
+    // 负向断言的保护力取决于观察窗口:20ms 在慢机器上可能来不及让误入队
+    // 的探针发出请求(漏报方向失效),给到 150ms——足够 stub 级探针完整跑完。
     h.service.probeMissingCandidates()
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await new Promise(resolve => setTimeout(resolve, 150))
     expect(h.calls.length).toBe(sent)
   })
 })

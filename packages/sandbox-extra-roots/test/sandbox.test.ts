@@ -133,6 +133,51 @@ describe("sandbox-extra-roots host (Seatbelt)", () => {
   });
 });
 
+describe("sandbox-extra-roots host (多挂载点引用计数)", () => {
+  // 设计目标(文件头 21-25):loader 热切换时新 entry 先 apply、旧 entry 后
+  // dispose,包装不能丢——两个挂载点共享同一底层实例,计数 +1/+1;第一次
+  // dispose 计数 2→1,包装必须保留;第二次 1→0 才真正还原。
+  it("双挂载先后 dispose:第一次退出不还原包装,最后一次才还原", async () => {
+    const fakeHome2 = mkdtempSync(join(tmpdir(), "ser-mm-"));
+    process.env.HOME = fakeHome2;
+    process.env.DSH_HOME = fakeHome2;
+    try {
+      // 两个 ctx 共享同一底层实例:STATE 挂在实例上,跨挂载点共享计数。
+      const sharedSandbox = {
+        async confine(argv: string[], policy: any) {
+          return { argv, enforcement: "full", denialSignatures: [], runnerFailureRules: [] };
+        },
+      };
+      const sharedFs = makeFsMock();
+      const ctxA = makeCtx(sharedSandbox, sharedFs);
+      const ctxB = makeCtx(sharedSandbox, sharedFs);
+      const extraRoot = mkdtempSync(join(tmpdir(), "ser-mm-root-"));
+      // apply 前捕获原始实现:mock 的 confine 是自有属性,最后一次退出时
+      // hadOwn=true 路径会把它原样恢复。
+      const originalConfine = sharedSandbox.confine;
+      await apply(ctxA, { extraWritableRoots: [extraRoot] });
+      await apply(ctxB, { extraWritableRoots: [extraRoot] });
+      expect(sharedSandbox.confine).not.toBe(originalConfine); // 两次挂载都已包装
+
+      // 第一次 dispose(ctxA 卸载):计数 2→1,包装必须保留(热切换时旧
+      // entry 后 dispose,此时新 entry 仍依赖包装——提前还原 = 额外根失效)。
+      ctxA.disposeAll();
+      expect(sharedSandbox.confine).not.toBe(originalConfine);
+
+      // 第二次 dispose(ctxB 卸载):最后一个退出才真正还原为原始实现。
+      ctxB.disposeAll();
+      expect(sharedSandbox.confine).toBe(originalConfine);
+      // STATE 清理后重新 apply 仍可用(幂等方向不因多挂载破坏)。
+      const ctxC = makeCtx(sharedSandbox, makeFsMock());
+      await apply(ctxC, { extraWritableRoots: [extraRoot] });
+      ctxC.disposeAll();
+    } finally {
+      process.env.HOME = fakeHome;
+      process.env.DSH_HOME = fakeHome;
+      rmSync(fakeHome2, { recursive: true, force: true });
+    }
+  });
+});
 describe("sandbox-extra-roots host (bwrap)", () => {
   it("bwrap 只授予存在的额外目录", async () => {
     const fakeHome2 = mkdtempSync(join(tmpdir(), "ser-fh2-"));
