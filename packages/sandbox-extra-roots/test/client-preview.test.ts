@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 // 直接导入真实客户端模块（纯函数；模块顶层的 CSS 注入有 document 守卫，
 // React 是唯一运行时依赖）。此前 analyzeRootsText 零覆盖,/private 与
 // 主目录祖先的口径漂移只能在保存失败后才发现。
-import { analyzeRootsText, hasBlockingProblems } from "../client/index.tsx";
+import { analyzeRootsText, appendRootLine, hasBlockingProblems, presetsForPlatform } from "../client/index.tsx";
 
 function kinds(lines: string): string[] {
   return analyzeRootsText(lines).map((p) => p.kind);
@@ -55,5 +55,30 @@ describe("sandbox-extra-roots client preview", () => {
     // system/duplicate 只是提示级，不禁用保存。
     expect(hasBlockingProblems(analyzeRootsText("/etc"))).toBe(false);
     expect(hasBlockingProblems(analyzeRootsText("/tmp/a\n/tmp/a"))).toBe(false);
+  });
+
+  it("一键添加：空草稿/缺换行/已存在三种形态", () => {
+    // 产品里 chip onClick 调的同一条拼接：判据漂移（比如不再补换行）用例即红。
+    expect(appendRootLine("", "~/.npm")).toBe("~/.npm\n");
+    expect(appendRootLine("/tmp/a", "~/.npm")).toBe("/tmp/a\n~/.npm\n");
+    expect(appendRootLine("/tmp/a\n", "~/.npm")).toBe("/tmp/a\n~/.npm\n");
+    // 已存在（去空格比对）原样返回，不触发 duplicate 误报。
+    expect(appendRootLine("~/.npm\n", "~/.npm")).toBe("~/.npm\n");
+    expect(appendRootLine("  ~/.npm  \n/tmp/a", "~/.npm")).toBe("  ~/.npm  \n/tmp/a");
+    expect(appendRootLine(null, "~/.npm")).toBeNull();
+  });
+
+  it("预设按平台过滤：只出现本系统合法的默认路径", () => {
+    const darwin = presetsForPlatform(true, false);
+    expect(darwin).toContain("~/Library/Caches/pip");
+    expect(darwin).not.toContain("~/.cache/pip");
+    const linux = presetsForPlatform(false, false);
+    expect(linux).toContain("~/.cache/pip");
+    expect(linux).not.toContain("~/Library/Caches/pip");
+    // 三平台共有：gradle/m2/cargo/go；Windows 没有 POSIX 专属缓存。
+    for (const list of [darwin, linux, presetsForPlatform(false, true)]) {
+      expect(list).toContain("~/.gradle");
+    }
+    expect(presetsForPlatform(false, true)).not.toContain("~/.npm");
   });
 });

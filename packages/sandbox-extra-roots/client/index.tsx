@@ -78,6 +78,36 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
     function hasBlockingProblems(problems: Array<{ kind: string }>): boolean {
       return problems.some((p) => p.kind === "invalid" || p.kind === "danger" || p.kind === "homeAncestor");
     }
+    // 一键添加的常用工具缓存预设：各工具开箱默认路径（均可被环境变量覆盖，
+    // 不适用直接改文本）。只收录“写缓存、不含凭证”的目录：含明文凭证的
+    // （~/.docker、~/.ssh、~/.aws 等）永不进预设。点选即显式 opt-in——用户
+    // 对亲手加入的负责；解除沙盒边界的条目（/、主目录等）仍会被保存
+    // 判据拒绝，不在责任口径内。
+    type RootPresetPlatform = "darwin" | "linux" | "win32";
+    interface RootPreset { path: string; platforms: RootPresetPlatform[]; }
+    const ROOT_PRESETS: RootPreset[] = [
+      { path: "~/.npm", platforms: ["darwin", "linux"] },
+      { path: "~/.cache/pip", platforms: ["linux"] },
+      { path: "~/Library/Caches/pip", platforms: ["darwin"] },
+      { path: "~/.gradle", platforms: ["darwin", "linux", "win32"] },
+      { path: "~/.m2", platforms: ["darwin", "linux", "win32"] },
+      { path: "~/.cargo", platforms: ["darwin", "linux", "win32"] },
+      { path: "~/go/pkg/mod", platforms: ["darwin", "linux", "win32"] },
+      { path: "~/.cache/ms-playwright", platforms: ["linux"] },
+      { path: "~/Library/Caches/ms-playwright", platforms: ["darwin"] },
+    ];
+    function presetsForPlatform(isDarwin: boolean, isWindows: boolean): string[] {
+      const platform: RootPresetPlatform = isDarwin ? "darwin" : isWindows ? "win32" : "linux";
+      return ROOT_PRESETS.filter((preset) => preset.platforms.includes(platform)).map((preset) => preset.path);
+    }
+    // chip 点击的纯拼接：已存在（去首尾空格比对）则原样返回，避免 duplicate
+    // 预览对“一键添加”误报；否则另起一行追加并补换行，光标行保持可继续输入。
+    function appendRootLine(draft: string | null, path: string): string | null {
+      if (draft === null) return null;
+      if (draft.split("\n").some((line) => line.trim() === path)) return draft;
+      const trimmedEnd = draft.replace(/\s+$/, "");
+      return (trimmedEnd.length === 0 ? "" : trimmedEnd + "\n") + path + "\n";
+    }
     const zh = {
       title: "沙盒额外允许目录（sandbox-extra-roots）",
       summary: "为 workspace-write 沙箱追加可写目录（在官方白名单之外）",
@@ -91,6 +121,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       loadFailed: "读取配置失败",
       loading: "加载中…",
       roots: "额外可写目录（每行一个绝对路径，支持 ~）",
+      presetsTitle: "常用工具缓存（一键添加）：",
       placeholder: "~/data\n/tmp/cache",
       rootInvalid: "第 {n} 行「{v}」不是绝对路径，保存将被拒绝",
       rootDuplicate: "第 {n} 行「{v}」与前面的行重复（host 会去重）",
@@ -111,6 +142,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       loadFailed: "Failed to load config",
       loading: "Loading…",
       roots: "Extra writable roots (one absolute path per line; ~ allowed)",
+      presetsTitle: "Common tool caches (one-tap add):",
       placeholder: "~/data\n/tmp/cache",
       rootInvalid: "Line {n} \"{v}\" is not an absolute path; saving will be rejected",
       rootDuplicate: "Line {n} \"{v}\" duplicates an earlier line (deduped by host)",
@@ -210,6 +242,28 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
           "div",
           { className: "ser_body", id: "ser-roots-body" },
           React.createElement("p", { className: "ser_hint" }, t("hint")),
+          React.createElement(
+            "div",
+            { style: { display: "flex", flexWrap: "wrap", gap: "6px", margin: "2px 0 4px", alignItems: "center" } },
+            React.createElement("span", { className: "ser_label" }, t("presetsTitle")),
+            // 预设 chips：点选即显式加入（用户对亲手加入的负责），复用保存
+            // 按钮同款 ser_action 样式；未加载/保存中禁用，与输入框同口径。
+            ...presetsForPlatform(isDarwin, isWindows).map((path) => React.createElement(
+              "button",
+              {
+                key: path,
+                className: "ser_action",
+                type: "button",
+                disabled: saving || cfg === null,
+                title: path,
+                onClick: () => {
+                  setDraftText((current: any) => appendRootLine(current, path));
+                  setStatus(null); // 同手输编辑：过期的“已保存”提示失效
+                }
+              },
+              path
+            ))
+          ),
           React.createElement(
             "label",
             { className: "ser_field" },
@@ -363,4 +417,4 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       }
     }
 
-    export { apply, inject, analyzeRootsText, hasBlockingProblems };
+    export { apply, inject, analyzeRootsText, hasBlockingProblems, appendRootLine, presetsForPlatform };
