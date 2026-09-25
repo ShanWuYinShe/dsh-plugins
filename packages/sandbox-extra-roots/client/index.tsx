@@ -89,12 +89,8 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       { path: "~/.npm", platforms: ["darwin", "linux"] },
       { path: "~/.cache/pip", platforms: ["linux"] },
       { path: "~/Library/Caches/pip", platforms: ["darwin"] },
-      { path: "~/.gradle", platforms: ["darwin", "linux", "win32"] },
-      { path: "~/.m2", platforms: ["darwin", "linux", "win32"] },
       { path: "~/.cargo", platforms: ["darwin", "linux", "win32"] },
       { path: "~/go/pkg/mod", platforms: ["darwin", "linux", "win32"] },
-      { path: "~/.cache/ms-playwright", platforms: ["linux"] },
-      { path: "~/Library/Caches/ms-playwright", platforms: ["darwin"] },
     ];
     function presetsForPlatform(isDarwin: boolean, isWindows: boolean): string[] {
       const platform: RootPresetPlatform = isDarwin ? "darwin" : isWindows ? "win32" : "linux";

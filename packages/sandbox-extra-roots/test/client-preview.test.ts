@@ -75,9 +75,10 @@ describe("sandbox-extra-roots client preview", () => {
     const linux = presetsForPlatform(false, false);
     expect(linux).toContain("~/.cache/pip");
     expect(linux).not.toContain("~/Library/Caches/pip");
-    // 三平台共有：gradle/m2/cargo/go；Windows 没有 POSIX 专属缓存。
+    // 三平台共有：cargo/go；Windows 没有 POSIX 专属缓存。
     for (const list of [darwin, linux, presetsForPlatform(false, true)]) {
-      expect(list).toContain("~/.gradle");
+      expect(list).toContain("~/.cargo");
+      expect(list).toContain("~/go/pkg/mod");
     }
     expect(presetsForPlatform(false, true)).not.toContain("~/.npm");
   });
