@@ -17,6 +17,8 @@ import { fileURLToPath } from "node:url";
 // dsh 依赖口径与包枚举统一取自 lib/dsh-deps.mjs（与 publish-gate /
 // dsh-follow-status / dsh-baseline 同源），避免四份实现各自漂移。
 import { DEP_PREFIX, DEP_SECTIONS, manifestPaths, ROOT } from "./lib/dsh-deps.mjs";
+// 与 publish-gate / dsh-follow-status 同一口径的 semver 校验（共享单一来源，见 issue #6）。
+import { VERSION_RE } from "./lib/version-checks.mjs";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
@@ -25,7 +27,7 @@ const version = args.find((a) => !a.startsWith("--"));
 // VERSION_RE 同口径。此前 ^[\w.]+$ 过松：接受下划线/大写/前导零等非法
 // 形态，一旦放行会把 5 个 manifest 的 dsh-* range 整块覆写成 npm 无法
 // 解析的 range，直到 bun install 才爆。
-if (!version || /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version) === false) {
+if (!version || !VERSION_RE.test(version)) {
   console.error("用法: node scripts/adapt-dsh.mjs <版本> [--dry-run]    例: 0.1.2-alpha.4");
   process.exit(2);
 }

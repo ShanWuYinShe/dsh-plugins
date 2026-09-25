@@ -38,6 +38,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+// semver 比较与 CHANGELOG 小节判定的共享实现（此前四份手抄曾漂移，见 issue #6）。
+import { VERSION_RE, compareVersions, isPrerelease, isStable, findChangelogSection } from "./lib/version-checks.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -48,54 +50,6 @@ const PACKAGES = readdirSync(join(ROOT, "packages"), { withFileTypes: true })
   // 读 package.json 直接 ENOENT 崩溃）
   .filter((name) => existsSync(join(ROOT, "packages", name, "package.json")))
   .sort();
-
-// 合法 semver（含 prerelease / build metadata）。非法版本号若放行，
-// compareVersions 会产出 NaN 静默通过「落后于已归档版本」比较。
-const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-
-// semver 比较（不含 prerelease 与 build metadata 以外的差异）：主/次/补丁按
-// 数值比；带 prerelease 的版本小于同号正式版；prerelease 标识符逐段比，数字
-// 段小于字母段，段数少的是前缀、更小。语义与 npm 一致。
-function compareVersions(a, b) {
-  function parse(v) {
-    const plus = v.indexOf("+");
-    const noBuild = plus === -1 ? v : v.slice(0, plus); // build metadata 不参与比较
-    const dash = noBuild.indexOf("-");
-    const core = dash === -1 ? noBuild : noBuild.slice(0, dash);
-    const [maj, min, pat] = core.split(".").map(Number);
-    return { maj, min, pat, pre: dash === -1 ? null : noBuild.slice(dash + 1).split(".") };
-  }
-  const x = parse(a);
-  const y = parse(b);
-  for (const k of ["maj", "min", "pat"]) {
-    if (x[k] !== y[k]) return x[k] - y[k];
-  }
-  if (x.pre === null && y.pre === null) return 0;
-  if (x.pre === null) return 1;
-  if (y.pre === null) return -1;
-  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
-    const xi = x.pre[i];
-    const yi = y.pre[i];
-    // 标识符段数呈前缀关系时少者更小（semver §11）。undefined 必须先拦，
-    // 否则下方 /^\d+$/.test(undefined) 恒 false 落进字母段分支得出反向结论
-    // （实测 0.3.14-alpha.1 与 0.3.14-alpha 的比较方向曾与 semver 相反）。
-    if (xi === undefined) return -1;
-    if (yi === undefined) return 1;
-    const nx = /^\d+$/.test(xi);
-    const ny = /^\d+$/.test(yi);
-    if (nx && ny) {
-      const d = Number(xi) - Number(yi);
-      if (d) return d;
-    } else if (nx) {
-      return -1;
-    } else if (ny) {
-      return 1;
-    } else if (xi !== yi) {
-      return xi < yi ? -1 : 1;
-    }
-  }
-  return 0;
-}
 
 function log(...args) {
   console.error(...args);
@@ -123,26 +77,12 @@ function gitTags() {
   return new Set(r.stdout.split("\n").filter(Boolean));
 }
 
-// 版本是否带 prerelease 后缀。与 compareVersions 的判定同口径：出现第一个
-// `-` 即 prerelease，不看标识符内容（semver 对纯数字首标识符同样视为
-// prerelease）。
-function isPrerelease(version) {
-  return version.includes("-");
-}
-
-// 版本是否属于稳定线（无 prerelease 后缀）。
-function isStable(version) {
-  return !isPrerelease(version);
-}
-
-// CHANGELOG 是否有该版本的小节（与 scripts/release-notes.mjs 同一判定）。
+// CHANGELOG 是否有该版本的小节（共享判定见 lib/version-checks.mjs）。
 // 缺失不阻断发布，但 GitHub Release 说明会退化为占位文本，提前警告。
 function changelogHasSection(dir, version) {
   const p = join(ROOT, "packages", dir, "CHANGELOG.md");
   if (!existsSync(p)) return false;
-  return readFileSync(p, "utf8")
-    .split("\n")
-    .some((l) => l === `## ${version}` || l.startsWith(`## ${version} `));
+  return findChangelogSection(readFileSync(p, "utf8").split("\n"), version) !== -1;
 }
 
 const tags = gitTags();

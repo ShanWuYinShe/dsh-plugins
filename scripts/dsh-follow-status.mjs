@@ -31,14 +31,13 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { aggregateBaseline, manifestPaths, ROOT } from "./lib/dsh-deps.mjs";
+// 与 publish-gate / adapt-dsh 同一口径的 semver 校验（共享单一来源，见 issue #6）。
+import { VERSION_RE } from "./lib/version-checks.mjs";
 
 const ci = process.argv.includes("--ci");
 // 与 publish-gate 钉定同一 registry：本地 .npmrc 指向镜像时，两个脚本对
 // 同一 npm 状态必须得出同一结论。
 const REGISTRY = "https://registry.npmjs.org";
-
-/** 合法 semver 版本号；基线若不是版本号（哨兵/不一致标记），比较无意义。 */
-const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /** 解析 dsh 版本号为可比较结构（0.1.2-alpha.5 → {n:[0,1,2], pre:["alpha",5]}）。 */
 function parseVersion(v) {

@@ -6,6 +6,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+// 小节判定与 publish-gate 的 changelogHasSection 共享同一实现（见 issue #6）。
+import { findChangelogSection } from "./lib/version-checks.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const [dir, version] = process.argv.slice(2);
@@ -20,7 +22,7 @@ const changelogPath = join(ROOT, "packages", dir, "CHANGELOG.md");
 let notes = `\`${name}\` v${version} 发布。`;
 if (existsSync(changelogPath)) {
   const lines = readFileSync(changelogPath, "utf8").split("\n");
-  const start = lines.findIndex((l) => l === `## ${version}` || l.startsWith(`## ${version} `));
+  const start = findChangelogSection(lines, version);
   if (start !== -1) {
     const body = [];
     for (let i = start + 1; i < lines.length && !/^## /.test(lines[i]); i++) body.push(lines[i]);
