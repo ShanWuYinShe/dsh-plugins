@@ -397,7 +397,58 @@ describe('WorkBuddy shim', () => {
       body: JSON.stringify({ model: 'auto', messages: [] }),
     })
     expect(res.status).toBe(401)
+    // 401 必须是 Anthropic 形错误体(SDK 靠 type 字段解析结构化错误):
+    // 回归成 OpenAI 形 writeUnauthorized 时,SDK 解析直接退化,测试必须红。
+    const errBody = JSON.parse(res.body) as { type?: string; error?: { type?: string } }
+    expect(errBody.type).toBe('error')
+    expect(errBody.error?.type).toBe('authentication_error')
     expect(harness.upstreamBodies).toHaveLength(0)
+  })
+  it('maps a credential resolution failure to 401 on both routes with kind-shaped bodies', async () => {
+    // 回归钉死:token 过期且刷新失败时用户命中的主路径——store.resolve()
+    // 抛错必须映射为各自 SDK 可解析的 401 形状(此前零覆盖,错误体形状
+    // 漂移测试仍绿)。桌面文件不存在 + 无插件副本 = resolve() 必抛。
+    const dir = await mkdtemp(join(tmpdir(), 'wb-shim-noauth-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
+      desktopPath: join(dir, 'missing.info'),
+      ownPath: join(dir, 'own.json'),
+      refresh: async () => ({ accessToken: 'unused' }),
+    })
+    const shim = createWorkBuddyShim({
+      kind: 'workbuddy',
+      store,
+      catalog: new WorkBuddyCatalog(),
+      client: {
+        async chatStream(): Promise<WorkBuddyChatResult> { throw new Error('must not reach upstream') },
+      },
+    })
+    await shim.ready
+    CLEANUP.push(() => shim.close())
+    const port = Number(new URL(shim.baseUrl()).port)
+
+    // OpenAI 形:/v1/chat/completions → 401 not_signed_in
+    const openai = await rawRequest({
+      port, method: 'POST', path: '/v1/chat/completions',
+      headers: { host: `127.0.0.1:${port}`, 'content-type': 'application/json', authorization: `Bearer ${shim.token()}` },
+      body: JSON.stringify({ model: 'auto', messages: [] }),
+    })
+    expect(openai.status).toBe(401)
+    const openaiBody = JSON.parse(openai.body) as { error?: { code?: string; message?: string } }
+    expect(openaiBody.error?.code).toBe('not_signed_in')
+
+    // Anthropic 形:/v1/messages → 401 authentication_error
+    const anthropic = await rawRequest({
+      port, method: 'POST', path: '/v1/messages',
+      headers: { host: `127.0.0.1:${port}`, 'content-type': 'application/json', 'x-api-key': shim.token() },
+      body: JSON.stringify({ model: 'auto', messages: [] }),
+    })
+    expect(anthropic.status).toBe(401)
+    const anthropicBody = JSON.parse(anthropic.body) as { type?: string; error?: { type?: string; message?: string } }
+    expect(anthropicBody.type).toBe('error')
+    expect(anthropicBody.error?.type).toBe('authentication_error')
+    expect(anthropicBody.error?.message).toContain('no signed-in')
   })
 
   it('detects [DONE] split across stream chunks (no duplicate marker on mid-flight error)', async () => {

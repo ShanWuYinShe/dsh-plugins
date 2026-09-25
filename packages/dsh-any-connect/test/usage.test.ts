@@ -170,7 +170,9 @@ describe('WorkBuddy usage querier', () => {
     const entry = registry.registered.find(candidate => candidate.provider === 'workbuddy')!
     // The registry owns the failure posture (keep last good windows, annotate
     // the error); the querier's job is to not swallow it.
-    await expect(entry.query({ provider: 'workbuddy' })).rejects.toThrow()
+    // 断言错误内容(上游 500 状态码出现在消息里)而非仅「reject 了」:
+    // querier 内部的意外 TypeError 不能与受控的计费失败混同过关。
+    await expect(entry.query({ provider: 'workbuddy' })).rejects.toThrow(/500/)
   })
 
   it('omits the limit when no package reports a size', async () => {

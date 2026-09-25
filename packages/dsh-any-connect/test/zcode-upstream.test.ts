@@ -88,6 +88,10 @@ describe('ZCode upstream and auth', () => {
 
   describe('ZCodeUpstreamClient', () => {
     it('returns fallback models', async () => {
+      // stub fetch:此用例断言的是 fallback 常量的形状,任何分支都返回
+      // this.models——不打 stub 会直连 open.bigmodel.cn(假 bearer),CI 断网
+      // 下挂满 30s deadline,有网环境产生无谓真实出口流量。
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })))
       const client = new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
       const models = await client.fetchModels(dummyCredential)
       expect(models.map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
@@ -97,6 +101,7 @@ describe('ZCode upstream and auth', () => {
       expect(models.find(m => m.id === 'glm-5.3-flash')?.contextWindow).toBe(1000000)
       expect(models.find(m => m.id === 'glm-5.3-flash')?.maxTokens).toBe(128000)
       expect(models.find(m => m.id === 'glm-5.3-flash')?.billing?.badges).toContain('夜间免费')
+      vi.unstubAllGlobals()
     })
 
     it('refreshes token as a no-op returning same accessToken', async () => {

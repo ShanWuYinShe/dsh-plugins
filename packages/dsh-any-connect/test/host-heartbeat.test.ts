@@ -46,8 +46,21 @@ describe('host heartbeat', () => {
     expect(isHeartbeatProcessAlive(heartbeat!)).toBe(true)
 
     // A fake PID that cannot exist is detected as dead.
-    const fakeHeartbeat = { ...heartbeat!, pid: 999_999 }
-    expect(isHeartbeatProcessAlive(fakeHeartbeat)).toBe(false)
+    // 不依赖「某 PID 恰好不存在」的环境巧合:Linux pid_max 可达 4194304,
+    // 真实 PID 可能被占用且启动早于 registeredAt → 断言翻转 flaky(同文件
+    // 下方已有 PID 1234 的同类抖动记录与「不依赖真实 PID」的规矩)。让
+    // kill 报 ESRCH 模拟「PID 不存在」,与 isHeartbeatProcessAlive 的分支一致。
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation((() => {
+      const e = new Error('no such process') as NodeJS.ErrnoException
+      e.code = 'ESRCH'
+      throw e
+    }) as never)
+    try {
+      const fakeHeartbeat = { ...heartbeat!, pid: 999_999 }
+      expect(isHeartbeatProcessAlive(fakeHeartbeat)).toBe(false)
+    } finally {
+      killSpy.mockRestore()
+    }
 
     // Clear removes the file.
     await clearHostHeartbeat()

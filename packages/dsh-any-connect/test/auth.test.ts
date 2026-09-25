@@ -266,6 +266,29 @@ describe('WorkBuddyCredentialStore', () => {
     const ownExists = await readFile(join(dir, 'own.json'), 'utf8').then(() => true, () => false)
     expect(ownExists, '登出后插件自有副本不得复活').toBe(false)
   })
+  it('shares one refresh across concurrent resolves (single-flight)', async () => {
+    // 回归钉死:30s 节流依赖 lastRefreshAttemptMs,而它在刷新完成后才写入
+    // ——防不住并发首击,inflight ??= 单飞是唯一防重闸。单飞失效 = 刷新
+    // 端点双打;上游做一次性 refresh token 轮换时第二个并发请求必用旧
+    // token 失败(H4 同类场景)。
+    const dir = await mkdtemp(join(tmpdir(), 'wb-store-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const desktop = join(dir, 'workbuddy-desktop.info')
+    await writeFile(desktop, nestedDoc(Date.now() - 1000))
+    let refreshes = 0
+    const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
+      desktopPath: desktop,
+      ownPath: join(dir, 'own.json'),
+      refresh: async () => {
+        refreshes += 1
+        return { accessToken: 'fresh', refreshToken: 'rt2', expiresInSec: 3600 }
+      },
+    })
+    const [a, b] = await Promise.all([store.resolve(), store.resolve()])
+    expect(refreshes, '并发 resolve 只允许一次刷新').toBe(1)
+    expect(a).toBe(b)
+  })
 
   it('does not re-refresh on every request when the upstream omits expiresIn', async () => {
     // H5 回归:缺 expiresIn 时沿用旧过期时间会让 needsRefresh 恒真,
