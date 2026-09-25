@@ -238,6 +238,31 @@ describe('ProviderUsageRegistry', () => {
     expect(sfQuerier).toHaveBeenCalledTimes(1)
     expect(snapshot?.windows).toEqual([{ id: 'sf', label: 'Balance', remain: 99, unit: 'cny' }])
   })
+
+  it('applies the query deadline to the inference resolve, not just the querier', async () => {
+    // 回归:fallback 推断路径此前裸 await resolveProvider,挂死的 resolver
+    // (credentials 服务、DeepSeek 账户接口都是真实 I/O)会把 snapshot 永远
+    // 挂住——轮询端点没有整体超时,浏览器只能干等。resolve 阶段与 querier
+    // 同受 queryTimeoutMs 约束,超时按"无推断结果"处理。
+    const { registry } = makeRegistry({ timeoutMs: 20 })
+    let aborted = false
+    registry.setResolver(async (_provider, signal) => {
+      await new Promise<void>((_, reject) => {
+        signal?.addEventListener('abort', () => {
+          aborted = true
+          reject(signal.reason ?? new Error('aborted'))
+        })
+      })
+      return { baseURL: 'https://api.siliconflow.cn/v1' }
+    })
+    const sfQuerier = vi.fn(async (): Promise<UsageSnapshot> => ({ provider: 'siliconflow', windows: [], fetchedAt: 0 }))
+    registry.register('siliconflow', sfQuerier)
+
+    const snapshot = await registry.snapshot('my-cloud')
+    expect(snapshot).toBeUndefined()
+    expect(aborted).toBe(true)
+    expect(sfQuerier).not.toHaveBeenCalled()
+  })
 })
 
 describe('safeMessage', () => {

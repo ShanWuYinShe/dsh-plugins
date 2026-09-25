@@ -62,6 +62,17 @@ interface CacheEntry {
   expiresAt: number
 }
 
+/** What the installed resolver answers for one provider (endpoint + credential). */
+type ResolverAnswer = {
+  baseURL?: string
+  apiKey?: string
+  accountWallets?: AccountWalletBalance[]
+  accountError?: string
+}
+
+/** The resolver signature; see {@link ProviderUsageRegistry.setResolver}. */
+type Resolver = (provider: string, signal: AbortSignal) => Promise<ResolverAnswer>
+
 /**
  * Registrations, resolution, and the cache, as the `ctx.providerUsage`
  * service. One instance serves the whole host; registrations are disposed with
@@ -143,9 +154,12 @@ export class ProviderUsageRegistry extends Service {
 
     // Heuristic fallback: if provider has no direct or alias registration,
     // resolve its baseURL and infer the querier (e.g. for custom providers like "my-silicon").
+    // resolve 阶段与注册路径同受 queryTimeoutMs 约束（resolveWithDeadline）：
+    // resolver 会读 settings/credentials，DeepSeek 无键路径还会发网络请求，
+    // 挂死的 resolver 若无 deadline 会把轮询端点整个拖住（route 层没有
+    // 整体超时兜底，浏览器只能干等到自身超时）。
     try {
-      const controller = new AbortController()
-      const resolved = await this.resolveProvider(provider, controller.signal)
+      const resolved = await this.resolveWithDeadline(provider)
       const inferred = inferProviderFromBaseUrl(resolved.baseURL)
       if (inferred !== undefined) {
         const inferredReg = this.registrations.get(inferred)
@@ -158,6 +172,34 @@ export class ProviderUsageRegistry extends Service {
     }
 
     return undefined
+  }
+
+  /**
+   * Run the resolver under the query deadline.
+   *
+   * 与 {@link withDeadline}（querier 路径）同预算：超时先 abort 传给
+   * resolver 的信号，再直接 reject——resolver 内部的 I/O（credentials
+   * 服务、外部账户接口）未必监听 abort，等它自己结束就失去了 deadline
+   * 的保护意义。失败（含超时）由调用方 catch 成 "无推断结果"。
+   */
+  private async resolveWithDeadline(provider: string): Promise<ResolverAnswer> {
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timedOut = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort(new Error('provider resolution timed out'))
+        reject(new Error('provider resolution timed out'))
+      }, this.queryTimeoutMs)
+    })
+    timer?.unref?.()
+    // race 先被 resolver 结算时，timedOut 稍后的 reject 会成为 unhandled
+    // rejection；挂一个空 catch 吞掉即可。
+    timedOut.catch(() => {})
+    try {
+      return await Promise.race([this.resolveProvider(provider, controller.signal), timedOut])
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   private async snapshotWithRegistration(provider: string, registration: Registration): Promise<UsageSnapshot> {
@@ -235,20 +277,10 @@ export class ProviderUsageRegistry extends Service {
    * this module stays free of settings and credentials imports: built-ins use
    * the harness directory, tests inject a stub.
    */
-  private resolveProvider: ((provider: string, signal: AbortSignal) => Promise<{
-    baseURL?: string
-    apiKey?: string
-    accountWallets?: AccountWalletBalance[]
-    accountError?: string
-  }>) = async () => ({})
+  private resolveProvider: Resolver = async () => ({})
 
   /** Install the resolver used to fill each query's endpoint and credential. */
-  setResolver(resolver: (provider: string, signal: AbortSignal) => Promise<{
-    baseURL?: string
-    apiKey?: string
-    accountWallets?: AccountWalletBalance[]
-    accountError?: string
-  }>): void {
+  setResolver(resolver: Resolver): void {
     this.resolveProvider = resolver
   }
 

@@ -137,7 +137,10 @@ describe('providerUsageHandler', () => {
 
   it('answers 500 with a redacted reason when the registry itself throws', async () => {
     const registry = makeRegistry()
-    vi.spyOn(registry, 'snapshot').mockRejectedValue(new Error('boom sk-0123456789abcdef'))
+    // registry.safeMessage 的完整规则集(含查询参数脱敏)必须在 500 路径生效:
+    // route 曾有少一条 token= 参数规则的本地副本,漂移即由此锁定。
+    vi.spyOn(registry, 'snapshot')
+      .mockRejectedValue(new Error('boom sk-0123456789abcdef ?refresh_token=zzz-secret'))
     const handler = providerUsageHandler({ registry })
     const exchange = fakeExchange({ url: '/?providers=acme' })
     await handler(exchange.req, exchange.res)
@@ -145,5 +148,7 @@ describe('providerUsageHandler', () => {
     const { status, body } = exchange.result() as { status: number; body: { error: string } }
     expect(status).toBe(500)
     expect(body.error).not.toContain('sk-0123456789abcdef')
+    expect(body.error).not.toContain('zzz-secret')
+    expect(body.error).toContain('refresh_token=[redacted]')
   })
 })

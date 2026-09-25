@@ -14,6 +14,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import { safeMessage } from './registry.js'
 import type { ProviderUsageRegistry } from './registry.js'
 import { PROVIDER_USAGE_PATH } from './types.js'
 
@@ -29,13 +30,9 @@ export interface ProviderUsageRouteOptions {
 /** Largest provider list one request may name. */
 const DEFAULT_MAX_PROVIDERS = 20
 
-/** Redact token-like content before it crosses to the browser. */
-function safeMessage(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error))
-    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted token]')
-    .replace(/\bsk-[A-Za-z0-9_-]{8,}/gu, '[redacted key]')
-    .slice(0, 500)
-}
+// 错误文本统一走 registry 导出的 safeMessage：本地曾有一份少一条
+// “token=/api_key= 查询参数”脱敏规则的旧副本，与 registry 版本漂移——
+// 同包内没有跨包独立发布的理由，必须单一来源。
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body)
