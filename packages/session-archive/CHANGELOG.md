@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.18 (2026-09-25)
+
+### 修复
+
+* **启动崩溃**：sessionQuery 可选探测改走 `ctx.get`（真实 ctx 是 Proxy，未声明 inject 的服务直接读属性即抛 `cannot get property without inject`，只有 `get()` 对缺席服务返回 undefined）；极简 ctx（无 get 方法）与 get 抛错同样回退直读。附真 Proxy 语义回归测试（变体验证：旧代码下变红）。
+
 ## 0.3.17 (2026-09-25)
 
 ### 新增

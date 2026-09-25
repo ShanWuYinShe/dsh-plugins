@@ -157,11 +157,17 @@ function makeFixture(options: {
     },
   };
   // 刻意的部分桩：只实现被测路径用到的服务面，单点断言为完整 Context。
-  const ctx = {
+  // get() 按真实 Cordis 语义实现（缺席服务返回 undefined）：可选服务探测
+  // 走 get，直读属性在真 Proxy 下会抛，没有 get 方法的极简 ctx 同样被覆盖。
+  const services: Record<string, unknown> = {
     workspaceRegistry: archiveRegistry,
     sessionPersistence: persistenceMock,
     sessions: { get: (id: string) => sessions.get(id) },
     ...(sessionQuery === undefined ? {} : { sessionQuery }),
+  };
+  const ctx = {
+    ...services,
+    get: (name: string) => services[name],
   } as unknown as Context;
   return { ctx, registryState, headers, sessions, persistenceMock, eventReads: () => eventReads, statCalls: () => statCalls, listCalls: () => listCalls, openCalls: () => openCalls, titleCalls: () => titleCalls };
 }
@@ -785,5 +791,30 @@ describe("session-archive host", () => {
     expect(fallbackItems.items.find((i) => i.sessionId === "s1")?.title).toBe("文件标题一");
     expect(fallbackItems.items.find((i) => i.sessionId === "s2")?.title).toBe("文件标题二");
     expect(f.openCalls()).toBeGreaterThan(0);
+  });
+
+  it("真 Cordis 代理语义下回退直读（未 inject 的直接属性访问抛错）", async () => {
+    // 回归：dsh web 启动曾报 cannot get property "sessionQuery" without
+    // inject——真实 ctx 是 Proxy，未声明 inject 的服务直接读属性即抛，只有
+    // ctx.get 会对缺席服务返回 undefined。可选服务探测必须走 get。
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-proxy-"));
+    const f = makeFixture({
+      archived: ["s1"],
+      headers: [{ id: "s1", cwd: "/proj/a", createdAt: 1000 }],
+    });
+    writeSession("s1", [
+      { type: "session/title", seq: 1, time: 1000, data: { title: "文件标题", messageSeqs: [], source: { kind: "user" } } },
+    ]);
+    const proxied = new Proxy(f.ctx as unknown as Record<string, unknown>, {
+      get(target, prop, receiver) {
+        if (prop === "get") return (name: string) => (target as Record<string, unknown>)[name];
+        if (prop in target) return Reflect.get(target, prop, receiver);
+        throw new Error(`cannot get property "${String(prop)}" without inject`);
+      },
+    });
+    const archiveHost = createArchiveHost(proxied as unknown as Context, baseCfg);
+    const { items } = await archiveHost.list();
+    expect(items.length).toBe(1);
+    expect(items[0]?.title).toBe("文件标题");
   });
 });

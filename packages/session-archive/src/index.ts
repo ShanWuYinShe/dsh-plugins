@@ -256,7 +256,17 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
     value?: TitleBulkValue;
   }
   const sessionQueryTitles = ((): ((ids: readonly SessionId[]) => Promise<TitleBulkResult[]>) | undefined => {
-    const query: unknown = (ctx as { sessionQuery?: unknown }).sessionQuery;
+    // 可选服务必须走 ctx.get：真实 ctx 是 Proxy，未声明 inject 的服务直接
+    // 读属性即抛 cannot get property without inject（dsh web 启动实测），
+    // 只有 get() 会对缺席服务返回 undefined。极简 ctx 可能连 get 都没有，
+    // get 抛错也一样回退——可选探测永远不得连累 host 主逻辑。
+    let query: unknown;
+    try {
+      const get = (ctx as unknown as { get?: (name: string) => unknown }).get;
+      query = typeof get === 'function' ? get.call(ctx, 'sessionQuery') : undefined;
+    } catch {
+      return undefined;
+    }
     if (query === null || typeof query !== 'object') return undefined;
     const read = (query as { readTitleSnapshots?: unknown }).readTitleSnapshots;
     if (typeof read !== 'function') return undefined;
