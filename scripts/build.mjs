@@ -11,6 +11,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PACKAGES = readdirSync(join(ROOT, "packages"), { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name)
+  // 与 publish-gate / bundle.test 同口径：包移除后的残留目录不参与枚举
+  // （有 src/ 而无 package.json 的中间状态会让 tsc 直接 ENOENT 崩溃）。
+  .filter((name) => existsSync(join(ROOT, "packages", name, "package.json")))
   .sort();
 
 function tsc(pkgDir) {

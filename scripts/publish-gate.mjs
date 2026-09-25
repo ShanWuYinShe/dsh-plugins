@@ -106,6 +106,15 @@ function revParse(ref) {
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
+// 读某个 git ref 上路径的内容（--tag 模式校验 tag 所在提交的 manifest 用）。
+// 校验工作区的 readFileSync 会漏检「tag 打错提交」——工作区版本恰好等于
+// tag 版本时（工作区已在后续提交）照样放行。CI checkout tag 时两者等价，
+// 本地复核必须读 tag 提交本身。
+function gitShow(ref, path) {
+  const r = spawnSync("git", ["show", `${ref}:${path}`], { cwd: ROOT, encoding: "utf8" });
+  return r.status === 0 ? r.stdout : null;
+}
+
 // 本仓库全部 git tag（一次调用，供所有包共用）。CI checkout 用 fetch-depth: 0
 // 拿全量 tag；本地干跑若 tag 落后于远程只会多判定「可发布」，不影响 CI。
 function gitTags() {
@@ -143,6 +152,8 @@ let failed = false;
 // `--tag <tag>` 模式：只校验该 tag 对应的包。targets 为 [{ dir, expectVersion }]，
 // expectVersion 为 null 时走全仓默认判定。
 let targets = PACKAGES.map((dir) => ({ dir, expectVersion: null }));
+/** --tag 模式下被校验的 tag 名；常规模式为 null。 */
+let tagRef = null;
 const tagFlag = process.argv.indexOf("--tag");
 if (tagFlag !== -1) {
   const onlyTag = process.argv[tagFlag + 1];
@@ -180,10 +191,19 @@ if (tagFlag !== -1) {
     process.exit(1);
   }
   targets = [{ dir: tagDir, expectVersion: tagVersion }];
+  tagRef = onlyTag;
 }
 
 for (const { dir, expectVersion } of targets) {
-  const pkgJson = JSON.parse(readFileSync(join(ROOT, "packages", dir, "package.json"), "utf8"));
+  // --tag 模式（expectVersion 非 null）读 tag 所在提交的 manifest，兑现
+  // 「防止 tag 打错提交」的承诺；常规模式读工作区。
+  const manifestSource =
+    expectVersion !== null ? gitShow(tagRef, join("packages", dir, "package.json")) : null;
+  if (expectVersion !== null && manifestSource === null) {
+    log(`✗ 无法读取 tag 指向提交里的 packages/${dir}/package.json（tag 不含该文件？）。拒绝发布。`);
+    process.exit(1);
+  }
+  const pkgJson = JSON.parse(manifestSource ?? readFileSync(join(ROOT, "packages", dir, "package.json"), "utf8"));
   const { name, version, dsh } = pkgJson;
 
   if (typeof version !== "string" || !VERSION_RE.test(version)) {

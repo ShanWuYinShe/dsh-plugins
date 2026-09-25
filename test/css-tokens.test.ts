@@ -27,7 +27,9 @@ function clientSources(): string[] {
     const clientDir = join(packagesDir, entry.name, "client");
     let files: string[] = [];
     try {
-      files = readdirSync(clientDir);
+      // 递归扫：esbuild 打包是递归的，client/ 子目录（如 components/）里的
+      // var(--*) 死拼写同样会进产物，不递归就静默逃过白名单。
+      files = readdirSync(clientDir, { recursive: true }) as string[];
     } catch {
       continue;
     }

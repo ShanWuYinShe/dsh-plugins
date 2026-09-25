@@ -298,9 +298,9 @@ done
   alpha 更新，不在搁置期 cherry-pick 到 main——搁置期 main 不开发不发布，提前
   同步只会产生两处副本与表述漂移，收敛时随整条线一次带过去即可。各包
   `packages/*/README.md` 属包内容，同样随该包走。
-- 根 `package.json` 的 `workspaces` 与 `trustedDependencies` 两分支保持一致
-  （声明是静态的，不跟随宿主基线）；各分支的依赖差异只体现在 `bun.lock`
-  里，收敛时按 main 的新基线重建，不直接搬运 lockfile。
+- 根 `package.json` 的 `workspaces` 两分支保持一致（声明是静态的，不跟随
+  宿主基线）；各分支的依赖差异只体现在 `bun.lock` 里，收敛时按 main 的新
+  基线重建，不直接搬运 lockfile。
 
 ## DSH 宿主升级适配
 
