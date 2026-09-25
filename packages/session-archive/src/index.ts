@@ -522,14 +522,22 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
       if (cached !== undefined && cached.mtimeMs === located.mtimeMs) {
         title = cached.title;
       } else {
+        let readFailed = false;
         try {
           title = await readTitle(persistence, sessionId);
-        } catch {}
-        if (titleCache.size >= TITLE_CACHE_LIMIT) {
-          const oldest = titleCache.keys().next().value;
-          if (oldest !== undefined) titleCache.delete(oldest);
+        } catch {
+          readFailed = true;
         }
-        titleCache.set(sessionId, { mtimeMs: located.mtimeMs, title });
+        // 读取失败不写缓存:归档会话文件几乎不再变化,mtime 命中条件会把
+        // 一次瞬时 I/O 失败固化为长期"(无标题)"且永不重试。本次回退 null
+        //(面板显示目录名),下次轮询自然重试。
+        if (!readFailed) {
+          if (titleCache.size >= TITLE_CACHE_LIMIT) {
+            const oldest = titleCache.keys().next().value;
+            if (oldest !== undefined) titleCache.delete(oldest);
+          }
+          titleCache.set(sessionId, { mtimeMs: located.mtimeMs, title });
+        }
       }
     } else {
       try {
@@ -687,8 +695,24 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
             (error: NodeJS.ErrnoException) => { if (error?.code === 'ENOENT') return null; throw error; },
           );
           if (fresh === null) {
-            markDeleted(sessionId);
-            return;
+            // stat 落空 ≠ 会话数据已删:jsonl 后端的格式迁移是"写临时文件 +
+            // rename",若迁移恰好落在锁外定位与本次复核之间,旧代际路径已
+            // 被 rename 走,而新代际文件仍在同一目录——直接记账会出现"已删
+            // 却仍在列表"。复扫目录:扫到实际代际文件就以它为新删除目标;
+            // 确实无任何代际文件才认定删除完成(顺带补上目录清理)。
+            const migrated = await resolveGenerationFile(dirname(path));
+            if (migrated !== null) path = migrated;
+            fresh = await stat(path).then(
+              (info) => ({ size: info.size, mtimeMs: info.mtimeMs }),
+              (error: NodeJS.ErrnoException) => { if (error?.code === 'ENOENT') return null; throw error; },
+            );
+            if (fresh === null) {
+              // 复扫后仍落空(无新代际,或迁移竞态二连/并发他删):按幂等
+              // 删除处理,列表的存在性过滤自会隐藏幽灵 id。
+              await removeSessionDirIfOwned(sessionId, path, (message) => ctx.logger?.warn?.(message));
+              markDeleted(sessionId);
+              return;
+            }
           }
           // 生成流兜底:内存中的会话且 mtime 在窗口内,沉降观察一次,文件
           // 仍在增长说明活跃写入方在 append(删除后会把半截日志写回来),

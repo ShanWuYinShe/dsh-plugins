@@ -19,6 +19,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Context } from "@deepseek-ai/cordis";
 import type { ConfigStore } from "./config-store.js";
+import { assertSessionId, assertSessionIdArray } from "./session-id.js";
 
 // 安装闭包共享 fallback:$DSH_HOME/profiles/node_modules 由 harness 启动时
 // heal 出来(symlink 镜像 harness 实际使用的依赖闭包,npm 安装与源码运行
@@ -113,22 +114,16 @@ export class SessionArchiveGateway extends TypertRemoteService {
     return this.host.count();
   }
   detail(sessionId: string) {
-    if (typeof sessionId !== "string" || sessionId.length === 0) {
-      throw new TypeError("detail expects a session id string");
-    }
+    // 与 codec 层（typert.host.ts）共享同一断言实现（session-id.ts）：
+    // 单测直调方法不经 codec，历史上两处手抄曾漂移（方法层漏了非空与上限）。
+    assertSessionId(sessionId);
     return this.host.detail(sessionId);
   }
   delete(sessionIds: string[]) {
-    if (!Array.isArray(sessionIds) || sessionIds.some((id) => typeof id !== "string")) {
-      throw new TypeError("delete expects an array of session id strings");
-    }
-    return this.host.deleteArchived(sessionIds);
+    return this.host.deleteArchived(assertSessionIdArray(sessionIds));
   }
   unarchive(sessionIds: string[]) {
-    if (!Array.isArray(sessionIds) || sessionIds.some((id) => typeof id !== "string")) {
-      throw new TypeError("unarchive expects an array of session id strings");
-    }
-    return this.host.unarchive(sessionIds);
+    return this.host.unarchive(assertSessionIdArray(sessionIds));
   }
 }
 markRemoteMethod(SessionArchiveGateway.prototype, "list");

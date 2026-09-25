@@ -14,26 +14,17 @@
  *
  * 参数（网关信任边界）用真校验：畸形输入在方法分发前即被拒绝；结果保持
  * 透传——结果由 host 端构造，校验它们只会增加与构造体的双重维护，不挡
- * 任何外部输入。方法层的同形手写检查（remote.ts）保留：单测直调网关方法
- * 不经过 codec，两处语义一致（改一处必须改另一处）。
+ * 任何外部输入。方法层的同形检查（remote.ts）保留：单测直调网关方法
+ * 不经过 codec，两处引用 session-id.ts 的同一实现，语义一致是结构保证。
  */
 
+import { assertSessionId, assertSessionIdArray } from "./session-id.js";
+
 const passthrough = (value) => value;
-/** 批量上限：面板勾选集现实中不足千级，超限直接拒绝（防网关层失控展开）。 */
-const SESSION_ID_ARRAY_LIMIT = 5000;
-const parseSessionId = (value) => {
-  if (typeof value !== 'string' || value.length === 0) {
-    throw new TypeError('sessionArchive expects a non-empty session id string');
-  }
-  return value;
-};
-const parseSessionIdArray = (value) => {
-  if (!Array.isArray(value) || value.length > SESSION_ID_ARRAY_LIMIT
-    || value.some((id) => typeof id !== 'string' || id.length === 0)) {
-    throw new TypeError('sessionArchive expects an array of non-empty session id strings');
-  }
-  return value;
-};
+// 入参断言与 remote.ts 方法层共享同一实现（session-id.ts）：历史版本两处
+// 手抄曾漂移（方法层漏了非空与上限），现抽成单一来源。
+const parseSessionId = (value) => assertSessionId(value);
+const parseSessionIdArray = (value) => assertSessionIdArray(value);
 const codec = (typeSymbol, parse = passthrough) => ({
   mode: 'strict',
   typeSymbol,
