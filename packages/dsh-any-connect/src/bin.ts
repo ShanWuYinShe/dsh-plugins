@@ -191,7 +191,15 @@ export async function run(argv: readonly string[]): Promise<number> {
   for (let index = 0; index < flags.length; index += 1) {
     const flag = flags[index]!
     if (flag === '--provider') {
-      providerId = flags[index + 1]
+      // 末尾缺值(--provider 后没有参数)必须报错而非静默回落 CN 默认:
+      // 「没传 flag」与「传了 flag 没给值」是两种意图,混同会让用户以为
+      // 查询的是别的 provider,拿到 CN 的诊断且退出码正常。
+      const value = flags[index + 1]
+      if (value === undefined) {
+        process.stderr.write(`dsh-any-connect: --provider expects a value; expected one of ${PROVIDER_VARIANTS.map(v => v.id).join(', ')}\n`)
+        return 1
+      }
+      providerId = value
       index += 1
       continue
     }

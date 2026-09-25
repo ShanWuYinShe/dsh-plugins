@@ -45,8 +45,11 @@ export interface WorkBuddyStatusRouteOptions {
   path: string
 }
 
-/** Redact token-like content before it crosses to the browser. */
-function safeMessage(error: unknown): string {
+/** Redact token-like content before it crosses to the browser.
+ * 导出供 probe-route 的 500 兜底复用:同包内错误文本过线前脱敏必须同一
+ * 口径,两份手抄曾在本仓其他包发生过规则漂移。
+ */
+export function safeMessage(error: unknown): string {
   return (error instanceof Error ? error.message : String(error))
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted token]')
     .replace(/(\b(?:code|token|refresh_token|access_token)=)[^&\s]+/giu, '$1[redacted]')

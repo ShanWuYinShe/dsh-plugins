@@ -19,26 +19,28 @@ export interface DeadlineHandle {
 type DeadlineFactory = (upstream: AbortSignal | undefined, timeoutMs: number, code: string) => DeadlineHandle;
 
 let factory: DeadlineFactory | null = null;
-let probed = false;
+let factoryPromise: Promise<DeadlineFactory | null> | null = null;
 
 async function loadFactory(): Promise<DeadlineFactory | null> {
   if (factory !== null) return factory;
-  if (probed) return null;
-  probed = true;
-  try {
-    const mod = await import('@deepseek-ai/dsh-timeout');
-    if (typeof mod.deadline === 'function') {
+  // 缓存 import 的 promise 而非「已探测」布尔:启动时多个变体并发首调
+  // deadlineSignal,布尔会让后到者不等首个 import 落地就直接落回本地
+  // 实现——同一次冷启动内超时原因部分可分类(宿主 TimeoutReason)、
+  // 部分不可(本地普通 Error)。import 失败同样缓存:生产环境 devDep 被裁
+  // 是稳定状态,重复重试只会反复抛模块解析错误。
+  factoryPromise ??= import('@deepseek-ai/dsh-timeout')
+    .then((mod) => {
+      if (typeof mod.deadline !== 'function') return null;
       // Host Deadline 的释放方法是 [Symbol.dispose]（lib 需 esnext.disposable，
       // 见 tsconfig.base.json）；这里包一层普通 dispose，调用方无感知。
       factory = (upstream, timeoutMs, code) => {
         const d = mod.deadline(upstream, timeoutMs, code);
         return { signal: d.signal, dispose: () => d[Symbol.dispose]() };
       };
-    }
-  } catch {
-    // 生产环境 devDep 被裁：下面走本地实现。
-  }
-  return factory;
+      return factory;
+    })
+    .catch(() => null);
+  return factoryPromise;
 }
 
 /**

@@ -26,6 +26,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
+import { safeMessage } from './web-status.js'
 import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_PROBE_PATH } from './status-paths.js'
 import type { WorkBuddyProbeAction } from './status-paths.js'
 
@@ -140,7 +141,9 @@ export function workBuddyProbeHandler(
       }
       json(res, 200, await deps.refresh())
     } catch (error: unknown) {
-      json(res, 500, { error: error instanceof Error ? error.message : String(error) })
+      // 与 web-status 的 500 兜底同一脱敏口径:refresh 是注入点,自定义实
+      // 现抛出的错误可能携带凭据材料,不能裸透传到浏览器。
+      json(res, 500, { error: safeMessage(error) })
     }
   }
 }

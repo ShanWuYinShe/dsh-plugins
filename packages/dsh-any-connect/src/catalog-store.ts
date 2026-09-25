@@ -121,6 +121,13 @@ export class WorkBuddyCatalogStore {
       // does not create them.
       mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 })
       await withFileLock(this.path, async () => {
+        // 锁内重读已提交状态再合并:withFileLock 的契约是「锁内执行
+        // read-render-commit 周期,后获锁者重读」,直接写内存快照会让跨
+        // 进程共享同一 DSH_HOME 的后写者用旧快照抹掉前写者刚保存的账号
+        // 目录——锁防写坏,不防丢更新。内存侧条目(刚保存的)在同 account
+        // 冲突时胜出,合并结果同步回内存缓存。
+        const committed = loadDocument(this.path)
+        this.entries = { ...committed, ...this.entries }
         await writeFileAtomic(
           this.path,
           `${JSON.stringify({ version: CATALOG_FORMAT_VERSION, entries: this.entries }, null, 2)}\n`,

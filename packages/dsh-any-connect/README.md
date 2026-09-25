@@ -73,16 +73,18 @@ dsh plugin --profile web remove @chaoset/dsh-any-connect
 包附带 `dsh-any-connect` 命令，用于排查登录与宿主健康：
 
 ```bash
-dsh-any-connect doctor     # 全面体检（凭据、令牌、宿主心跳、模型目录）
+dsh-any-connect doctor     # 全面体检（凭据、登录态、宿主心跳、内置兜底名单数量）
 dsh-any-connect status     # 当前登录态与积分
 dsh-any-connect logout     # 移除本插件的凭据副本（不动桌面 App 的登录）
 ```
 
-默认操作国内版；加 `--provider workbuddy-ai` 操作国际版：
+默认操作国内版；`--provider <id>` 切换操作对象（`workbuddy-ai` 国际版、
+`zcode`）：
 
 ```bash
 dsh-any-connect status --provider workbuddy-ai
 dsh-any-connect doctor --provider workbuddy-ai
+dsh-any-connect status --provider zcode
 ```
 
 ## 配置
