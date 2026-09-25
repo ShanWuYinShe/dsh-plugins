@@ -45,6 +45,11 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 | `deepseek` | `GET {base}/user/balance`（无 API key 时退到 OAuth 账户充值+赠送钱包） | 按币种各一行；有 key 永远走接口，不重复计数 |
 | `openrouter` | `/api/v1/key` + `/api/v1/credits` | 优先 key 自身限额，回落到账户额度 |
 | `moonshot` | `GET {base}/v1/users/me/balance` | 可用/现金/代金券 |
+| `siliconflow` | `GET {base}/v1/user/info` | 总额/可用/充值分列 |
+| `bigmodel` | `GET {base}/api/monitor/usage/quota/limit`，不可用回落 `bigmodel.cn` 订阅列表 | Coding Plan 滚动窗口；回落为订阅行 |
+| `minimax` | `GET {base}/v1/token_plan/remains` | 5 小时滚动 + 周窗口 |
+| `openai` | `GET {base}/dashboard/billing/subscription`（失败尝试 `/v1/...` 前缀） | 余额，或 hard_limit 扣当月用量 |
+| `opencode` / `opencode-go` | `GET {base}/usage`（失败尝试 `/v1/usage`） | 滚动/周/月窗口百分比 |
 
 **WorkBuddy（`workbuddy` / `workbuddy-ai`）不在本包内置**：只有
 [`@chaoset/dsh-any-connect`](../dsh-any-connect/) 知道如何读取该桌面 App 的登录态
