@@ -240,6 +240,7 @@ function WindowRow({ window, t }: { window: UsageWindow; t: ProviderUsageInjecte
 /** The stored default snapshot used before the directory has loaded. */
 const ABSENT_DIRECTORY: ModelDirectoryState = {
   current: null,
+  pending: null,
   routable: null,
   groups: [],
   failures: [],

@@ -1,6 +1,6 @@
 {
   "name": "@chaoset/provider-usage",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "DSH plugin: show the current LLM provider's remaining quota in the composer dock — a generic querier registry any provider plugin can extend",
   "engines": {
     "node": ">=22.19.0"
@@ -23,7 +23,7 @@
     "./typert": "./lib/typert.host.js"
   },
   "dsh": {
-    "host": "0.1.7-rc.1",
+    "host": "0.1.7-rc.2",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -36,20 +36,20 @@
     }
   },
   "optionalDependencies": {
-    "@deepseek-ai/dsh-llm": "^0.1.7-rc.1",
-    "@deepseek-ai/dsh-settings": "^0.1.7-rc.1",
-    "@deepseek-ai/dsh-credentials": "^0.1.7-rc.1",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.7-rc.1"
+    "@deepseek-ai/dsh-llm": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-settings": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-credentials": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.7-rc.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-api-session-controller": "^0.1.7-rc.1",
-    "@deepseek-ai/dsh-client-locale": "^0.1.7-rc.1",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.7-rc.1",
-    "@deepseek-ai/dsh-client-ui-model-selection": "^0.1.7-rc.1",
-    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.7-rc.1",
-    "@deepseek-ai/dsh-client-ui-session": "^0.1.7-rc.1",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.7-rc.1",
+    "@deepseek-ai/dsh-api-session-controller": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-locale": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-model-selection": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-session": "^0.1.7-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.7-rc.2",
     "vitest": "^4.1.11"
   },
   "scripts": {
