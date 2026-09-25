@@ -212,7 +212,13 @@ function formatBytes(bytes: any, t: any) {
   return t("sizeMB").replace("{n}", (bytes / (1024 * 1024)).toFixed(1));
 }
 function formatTime(ms: any) {
-  try { return new Date(ms).toLocaleString(); } catch { return String(ms); }
+  // new Date(不可解析值) 不抛错而是返回 Invalid Date, toLocaleString 返回
+  // 字符串 "Invalid Date"——catch 兜不住,须显式判 NaN 后回退原值。
+  // host 端 detail 的 time 标注为 unknown,契约不保证可解析。
+  try {
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? String(ms) : d.toLocaleString();
+  } catch { return String(ms); }
 }
 function shortId(id: any) {
   return id.length > 12 ? id.slice(0, 12) + "…" : id;
@@ -281,17 +287,27 @@ function ArchivePanel(props: any) {
   const [open, setOpen] = React.useState(false);
   const [closing, setClosing] = React.useState(false);
 
+  // 关闭动画的 timer 存句柄:动画进行中点徽标应是「取消关闭、重新打开」,
+  // 否则 open 仍为 true 期间的那次点击会被当成再次关闭吞掉,用户需要点
+  // 两次才能重开;卸载后也不再触发无意义的回调。
+  const closeTimerRef = React.useRef<any>(0);
   const closePanel = React.useCallback(() => {
     if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       setOpen(false);
       setClosing(false);
     } else {
       setClosing(true);
-      window.setTimeout(() => {
+      globalThis.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = globalThis.setTimeout(() => {
         setOpen(false);
         setClosing(false);
       }, 150);
     }
+  }, []);
+  const reopenPanel = React.useCallback(() => {
+    globalThis.clearTimeout(closeTimerRef.current);
+    setClosing(false);
+    setOpen(true);
   }, []);
 
   const [items, setItems] = React.useState<any[]>([]);
@@ -330,24 +346,37 @@ function ArchivePanel(props: any) {
       return pruned.length === currentSelected.size ? currentSelected : new Set(pruned);
     });
   }, []);
+  // list 请求纪元:打开态有三条并发 list 来源(30s tick、订阅事件、批量
+  // 操作的收尾 load),乱序落地时后到的旧响应会把刚删除/恢复的行「复活」
+  // 并连同过期徽标计数写回,直到下一轮刷新才自愈。落地前必须确认自己是
+  // 最新一次请求。
+  const listSeqRef = React.useRef(0);
   const load = React.useCallback(async () => {
+    const seq = ++listSeqRef.current;
     setLoading(true);
     setError(null);
     setVisibleCount(ARCHIVE_PAGE_SIZE);
     try {
       const result = await call("list");
+      if (seq !== listSeqRef.current) return;
       applyItems(Array.isArray(result.items) ? result.items : []);
     } catch (loadError: any) {
+      if (seq !== listSeqRef.current) return;
       setError(t("loadFailed") + ": " + (loadError && loadError.message || loadError));
     } finally {
       setLoading(false);
     }
   }, [call, applyItems, t]);
-  // 打开态的静默刷新：不碰 loading/error，长开面板的列表不再陈旧；
+  // 打开态的静默刷新：不碰 loading，长开面板的列表不再陈旧；
   // sameItems 比较保证数据没变时不触发任何重渲染，不打断勾选。
+  // 成功时顺带清掉旧的加载失败提示（error 一旦出现,静默刷新成功
+  // 也不清的话会长期挂在已填充的列表上方误导用户）。
   const silentList = React.useCallback(async () => {
+    const seq = ++listSeqRef.current;
     try {
       const result = await call("list");
+      if (seq !== listSeqRef.current) return;
+      setError(null);
       applyItems(Array.isArray(result.items) ? result.items : []);
     } catch {}
   }, [call, applyItems]);
@@ -650,7 +679,9 @@ function ArchivePanel(props: any) {
           ref: badgeRef,
           className: "sa_badge" + (iconOnly ? " sa_badge--collapsed" : ""),
           type: "button",
-          onClick: () => { if (open) closePanel(); else setOpen(true); },
+          // closing 动画期间的点击 = 取消关闭并重开(open 仍为 true,不处理
+          // 会被当成「再次关闭」吞掉,用户要点两次才能重开)。
+          onClick: () => { if (closing) reopenPanel(); else if (open) closePanel(); else setOpen(true); },
           "aria-expanded": open,
           "aria-label": badgeTitle,
           title: badgeTitle
