@@ -53,6 +53,18 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    # 页面渲染、插件卡片/设置行、模型列表，控制台零报错
    ```
 
+   宿主版本必须与本次适配目标一致（全局 `dsh` 常落后于最新 rc，`dsh --version`
+   或 `grep '"version"' ~/.bun/install/global/node_modules/@deepseek-ai/dsh/package.json`
+   先核对）。不一致时在 `.workwork/dsh-host/` 临时装目标版本：
+
+   ```bash
+   cd .workwork/dsh-host   # 一次性 init：echo '{"name":"dsh-verify-host","private":true}' > package.json
+   bun add @deepseek-ai/dsh@<目标版本> && bun pm trust @deepseek-ai/dsh-subprocess-local koffi
+   # ↑ bun 默认拦截 postinstall，不 trust 这两个包宿主起不来/子进程 spawn helper 缺失
+   DSH_HOME=/tmp/dsh-verify/home node node_modules/@deepseek-ai/dsh/lib/bin.js --profile web --port 3181 --no-open
+   ```
+   （2026-09-25 实测：0.1.7-rc.2 验证即用此法；根路径探测返回 401 属正常——服务在跑、只是要 token。）
+
    插件用本地路径安装（`dsh plugin --profile web add /abs/path/to/packages/<pkg>`，
    符号链接即装；`--profile` 以各包 README 的用户口径为准），**验证的是工作树
    产物，与 GitHub Release 分发的 tarball 同源**；
