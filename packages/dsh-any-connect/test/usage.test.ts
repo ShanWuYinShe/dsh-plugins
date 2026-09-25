@@ -130,25 +130,24 @@ describe('WorkBuddy usage querier', () => {
     expect(registry.registered.find(entry => entry.provider === 'zcode')?.displayName).toBe('ZCode')
   })
 
-  it('reports one window per billing package that still has credit', async () => {
+  it('reports a single total window summing live packages', async () => {
     const { registry } = await boot({ signedIn: true })
     await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })
 
     vi.stubGlobal('fetch', vi.fn(async () => billingBody([
       { PackageName: 'Monthly', CycleCapacitySize: 100, CycleCapacityRemain: 24, CapacityRemain: 24, RemainCycles: 0, Status: 0 },
       // Drained and expired grants: a real account accumulates dozens, and
-      // listing them would bury the rows that still have credit.
+      // counting them would inflate the total with dead credit.
       { PackageName: 'Old grant', CycleCapacitySize: 500, CycleCapacityRemain: 0, CapacityRemain: 0, RemainCycles: 0, Status: 3 },
       { PackageName: 'Untouched', CycleCapacitySize: 5, CycleCapacityRemain: 5, CapacityRemain: 5, RemainCycles: 1, Status: 0 },
     ])))
 
     const entry = registry.registered.find(candidate => candidate.provider === 'workbuddy')!
     const snapshot = await entry.query({ provider: 'workbuddy' })
+    // 24 + (5 + 1×5): the untouched package counts its future cycle, the
+    // drained grant counts for nothing; denominators summed for the bar.
     expect(snapshot.windows).toEqual([
-      { id: 'package-0', label: 'Monthly', remain: 24, unit: 'credits', limit: 100 },
-      // The untouched package counts its future cycle: true availability is
-      // this cycle's remainder plus every not-yet-started cycle's full grant.
-      { id: 'package-1', label: 'Untouched', remain: 10, unit: 'credits', limit: 10 },
+      { id: 'total', label: '总计', remain: 34, unit: 'credits', limit: 110 },
     ])
   })
 
@@ -173,6 +172,45 @@ describe('WorkBuddy usage querier', () => {
     // the error); the querier's job is to not swallow it.
     await expect(entry.query({ provider: 'workbuddy' })).rejects.toThrow()
   })
+
+  it('omits the limit when no package reports a size', async () => {
+    const { registry } = await boot({ signedIn: true })
+    await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })
+    vi.stubGlobal('fetch', vi.fn(async () => billingBody([
+      { PackageName: 'NoSize', CycleCapacityRemain: 3, CapacityRemain: 3, RemainCycles: 0, Status: 0 },
+    ])))
+
+    const entry = registry.registered.find(candidate => candidate.provider === 'workbuddy')!
+    const snapshot = await entry.query({ provider: 'workbuddy' })
+    expect(snapshot.windows).toEqual([
+      { id: 'total', label: '总计', remain: 3, unit: 'credits' },
+    ])
+  })
+
+describe('totalCreditsWindows / currentPlanWindow', () => {
+  it('sums live packages, skips drained ones, empties when all drained', () => {
+    expect(WorkBuddy.totalCreditsWindows([])).toEqual([])
+    expect(WorkBuddy.totalCreditsWindows([
+      { packageName: 'A', remain: 0, size: 100 },
+    ])).toEqual([])
+    expect(WorkBuddy.totalCreditsWindows([
+      { packageName: 'A', remain: 24, size: 100 },
+      { packageName: 'B', remain: 0, size: 500 },
+      { packageName: 'C', remain: 10, size: 0 },
+    ])).toEqual([{ id: 'total', label: '总计', remain: 34, unit: 'credits', limit: 100 }])
+  })
+
+  it('picks the first live plan, falling back to the first plan', () => {
+    expect(WorkBuddy.currentPlanWindow([])).toEqual([])
+    expect(WorkBuddy.currentPlanWindow([
+      { packageName: 'Dead (已过期)', remain: 0, size: 1 },
+      { packageName: 'Pro (有效)', remain: 1, size: 1, expiredAt: '2026-10-21T00:00:00.000Z' },
+    ])).toEqual([{ id: 'plan', label: 'Pro', unit: '有效', resetsAt: '2026-10-21T00:00:00.000Z' }])
+    expect(WorkBuddy.currentPlanWindow([
+      { packageName: 'Only (VALID)', remain: 0, size: 1 },
+    ])).toEqual([{ id: 'plan', label: 'Only', unit: '有效' }])
+  })
+})
 
   it('carries the variant display name through to the snapshot', async () => {
     const { registry } = await boot({ signedIn: true })

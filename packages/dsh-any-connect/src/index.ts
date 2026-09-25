@@ -18,6 +18,7 @@ import { createWorkBuddyAdapter, WORKBUDDY_PROVIDER } from './adapter.js'
 import { createWorkBuddyShim } from './shim.js'
 import type { WorkBuddyShim } from './shim.js'
 import { WorkBuddyUpstreamClient, ZCodeUpstreamClient, chatBase, isZCodeOffpeak } from './upstream.js'
+import type { WorkBuddyCreditAccount } from './upstream.js'
 import type { WorkBuddyCredential } from './auth.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebProbeSection } from './status-paths.js'
 import { WorkBuddyProbeService } from './probe-service.js'
@@ -344,6 +345,57 @@ export function applyVariantConfig(
  * out groups with no models), which keeps a sign-in that happens after startup
  * working without re-registering the provider.
  */
+/**
+ * pill 用总窗口：同币种分包求和为一个窗口（明细在配置页卡片里看）。
+ * 全耗尽返回 []（pill 渲染无额度态）——与之前“过滤耗尽包”语义一致，
+ * 只是行数永远 ≤1。跨币种/跨周期的窗口绝不在此合并：其它 provider 的
+ * 窗口各有其语义，这里的 accounts 永远是同口径 credit 点数。
+ *
+ * Exported for tests: counted directly without booting the plugin.
+ */
+export function totalCreditsWindows(accounts: readonly WorkBuddyCreditAccount[]): Array<{
+  id: string
+  label: string
+  remain: number
+  unit: string
+  limit?: number
+}> {
+  const live = accounts.filter(account => account.remain > 0)
+  if (live.length === 0) return []
+  const remain = live.reduce((sum, account) => sum + account.remain, 0)
+  const limit = live.reduce((sum, account) => sum + (account.size > 0 ? account.size : 0), 0)
+  return [{
+    id: 'total',
+    label: '总计',
+    remain,
+    unit: 'credits',
+    ...limit > 0 ? { limit } : {},
+  }]
+}
+
+/**
+ * ZCode 当前套餐窗口：只取首个仍有剩余额度（无则取第一个），与配置页卡片
+ * 的 zcodePlan 取法一致——pill 与卡片看到的是同一个“当前套餐”，而不是
+ * 一摞计划名。
+ *
+ * Exported for tests: counted directly without booting the plugin.
+ */
+export function currentPlanWindow(accounts: readonly WorkBuddyCreditAccount[]): Array<{
+  id: string
+  label: string
+  unit: string
+  resetsAt?: string
+}> {
+  const current = accounts.find(account => account.remain > 0) ?? accounts[0]
+  if (current === undefined) return []
+  return [{
+    id: 'plan',
+    label: current.packageName.replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, ''),
+    unit: '有效',
+    ...current.expiredAt ? { resetsAt: current.expiredAt } : {},
+  }]
+}
+
 export function apply(ctx: Context, config: Config): void {
   const client = new WorkBuddyUpstreamClient()
   let stopped = false
@@ -547,27 +599,9 @@ export function apply(ctx: Context, config: Config): void {
             provider: runtime.variant.id,
             displayName: runtime.variant.displayName,
             plan: isZCode ? 'Coding Plan' : undefined,
-            // One window per live billing package. For ZCode, represent the
-            // subscription state (package name + active status) rather than
-            // an arbitrary credit count.
-            windows: isZCode
-              ? credits.accounts
-                  .filter(account => account.remain > 0)
-                  .map((account, index) => ({
-                    id: `zcode-plan-${String(index)}`,
-                    label: account.packageName.replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, ''),
-                    unit: '有效',
-                    ...account.expiredAt ? { resetsAt: account.expiredAt } : {},
-                  }))
-              : credits.accounts
-                  .filter(account => account.remain > 0)
-                  .map((account, index) => ({
-                    id: `package-${String(index)}`,
-                    label: account.packageName,
-                    remain: account.remain,
-                    unit: 'credits',
-                    ...account.size > 0 ? { limit: account.size } : {},
-                  })),
+            // pill 只要总数：WorkBuddy 同币种分包求和，ZCode 只取当前套餐。
+            // 没人关心每一点的来处，明细在配置页卡片里看。
+            windows: isZCode ? currentPlanWindow(credits.accounts) : totalCreditsWindows(credits.accounts),
             fetchedAt: Date.now(),
           }
         },
