@@ -146,6 +146,28 @@ describe('WorkBuddyProbeService', () => {
     await vi.waitFor(() =>
       expect(h.store.get('probe-me', fingerprintModel(undeclaredCatalog().current()[0]!), 'uid-1:')?.validation).toBe('validating'))
   })
+  it('reports sweep probe failures through onSweepError instead of unhandled rejection', async () => {
+    // 回归:清扫入口丢弃 promise,而 credentials.current() 会因凭据区域
+    // 不匹配抛 RegionMismatchError——rejection 无人接在 Node ≥15 默认
+    // 策略下可终止宿主进程。失败必须经 onSweepError 上报。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-psvc-'))
+    const store = new WorkBuddyProbeStore({ path: join(root, '.workbuddy-probe.json'), pluginVersion: '0.0.0-test' })
+    const sweepErrors: Array<{ modelId: string; message: string }> = []
+    const service = new WorkBuddyProbeService({
+      store,
+      catalog: undeclaredCatalog(),
+      credentials: { current: async () => { throw new Error('received a WorkBuddy AI credential in its desktop file') } } as never,
+      client: {} as never,
+      account: () => 'uid-1:',
+      onSweepError: (modelId, error) => {
+        sweepErrors.push({ modelId, message: error instanceof Error ? error.message : String(error) })
+      },
+    })
+    service.probeMissingCandidates()
+    await vi.waitFor(() => {
+      expect(sweepErrors.some(e => e.modelId === 'probe-me' && e.message.includes('credential'))).toBe(true)
+    })
+  })
 
   it('skips candidates that already have a usable observation', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-psvc-'))

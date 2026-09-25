@@ -123,5 +123,21 @@ describe('ZCode signer', () => {
 
       vi.unstubAllGlobals()
     })
+
+    it('times out a hung handshake instead of hanging the whole chatStream', async () => {
+      // 回归:握手 fetch 此前无超时——端点挂死时整个 chatStream 挂到 undici
+      // 默认 headersTimeout(约 300s),调用方 signal 与 30s 头超时口径全部失效。
+      // 握手是签名器的内部细节,超时由签名器自己兜,不依赖调用方传 signal。
+      vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) =>
+        new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason))
+        }),
+      ))
+      const signer = new ZCodeClientSigner({ handshakeTimeoutMs: 20 })
+      await expect(signer.buildHeaders({ apiKey: 'testid.testsecret123456' }))
+        // 宿主 deadline 的消息是 "<code> after <ms>ms",本地回退是 "<code>: timed out after <ms>ms"——断言共同部分 code。
+        .rejects.toThrow(/ANY_CONNECT_HANDSHAKE/)
+      vi.unstubAllGlobals()
+    })
   })
 })

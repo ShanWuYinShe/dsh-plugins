@@ -11,6 +11,7 @@
 
 import crypto from 'node:crypto'
 import os from 'node:os'
+import { withTimeout } from './timeout.js'
 
 const KDF_SALT = 'WD_CLIENT_SIGN_KDF_SALT'
 const INFO_HMAC = 'getSignKey_hmac'
@@ -18,6 +19,8 @@ const INFO_PRIV = 'ed25519_priv'
 const APP_ID = 'zcode'
 const CLIENT_VERSION = '3.4.0'
 const DEFAULT_HANDSHAKE_URL = 'https://open.bigmodel.cn/api/paas/c1f3a7e2/v2/client'
+/** 握手超时:与其余上游端点的「响应头 30s」口径一致。 */
+const HANDSHAKE_TIMEOUT_MS = 30_000
 
 export interface ZCodeParsedKey {
   apiKeyId: string
@@ -76,11 +79,13 @@ export function solveClientRequestProofOfWork(options: {
 
 export class ZCodeClientSigner {
   private readonly handshakeUrl: string
+  private readonly handshakeTimeoutMs: number
   private readonly keyState = new Map<string, Buffer>()
   private readonly handshakePromises = new Map<string, Promise<Buffer>>()
 
-  constructor(options?: { handshakeUrl?: string }) {
+  constructor(options?: { handshakeUrl?: string; handshakeTimeoutMs?: number }) {
     this.handshakeUrl = options?.handshakeUrl ?? DEFAULT_HANDSHAKE_URL
+    this.handshakeTimeoutMs = options?.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS
   }
 
   async ensurePrivateKey(apiKey: string): Promise<Buffer> {
@@ -118,19 +123,26 @@ export class ZCodeClientSigner {
     hmac.update(`get_sign_key\n${parsed.apiKeyId}\n${ts}\n${nonce}`)
     const sig = hmac.digest('base64')
 
-    const res = await fetch(this.handshakeUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': parsed.credential,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        apiKey: parsed.credential,
-        nonce,
-        sig,
-        ts,
+    // 握手结果有缓存,但首个请求仍要过网络:这里若不设超时,握手端点挂死
+    // 时整个 chatStream 挂到 undici 默认 headersTimeout(约 300s),调用方
+    // 的 signal 与 30s 头超时口径全部失效——签名器自己兜住,不依赖调用方
+    // 把 signal 层层传进来。
+    const res = await withTimeout(undefined, this.handshakeTimeoutMs, 'ANY_CONNECT_HANDSHAKE', async (signal) =>
+      fetch(this.handshakeUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': parsed.credential,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          apiKey: parsed.credential,
+          nonce,
+          sig,
+          ts,
+        }),
+        signal,
       }),
-    })
+    )
 
     if (!res.ok) {
       throw new Error(`ZCode signing handshake HTTP failed: ${res.status}`)

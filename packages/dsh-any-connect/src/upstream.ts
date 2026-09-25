@@ -429,15 +429,21 @@ export function modelWithCurrentPromotion(
           },
         }
       } else {
-        // Daytime: retain the model's own daytime baseline rate, never overriding with hardcoded values
-        const daytimeCredits = model.billing?.credits && model.billing.credits !== 'x0.00'
+        // Daytime: keep the row's own baseline when it carries one. When it
+        // doesn't (missing, or `x0.00` baked in by the night window), the
+        // real daytime price is not recoverable — assert `rateUnknown`
+        // instead of inventing a hardcoded rate the upstream may have
+        // changed (same posture as expired promotions below).
+        const daytimeCredits = model.billing?.credits !== undefined && model.billing.credits !== 'x0.00'
           ? model.billing.credits
-          : 'x0.06'
+          : undefined
         return {
           ...model,
           billing: {
             ...model.billing,
-            credits: daytimeCredits,
+            // credits: undefined 显式抹掉行里被夜间窗口烙上的 x0.00——
+            // spread 不能覆盖它,留着就会继续向用户展示已失效的免费价。
+            ...daytimeCredits === undefined ? { rateUnknown: true as const, credits: undefined } : { credits: daytimeCredits },
             free: false,
             badges: (model.billing?.badges ?? []).map(b => b === '夜间免费 (生效中)' ? '夜间免费' : b),
           },
@@ -651,9 +657,23 @@ export function prepareAnthropicBody(source: string): string {
       }
       filteredMessages.push(msg)
     }
-    if (systemParts.length > 0 && typeof obj['system'] !== 'string') {
-      obj['system'] = systemParts.join('\n\n')
-      obj['messages'] = filteredMessages
+    if (systemParts.length > 0) {
+      const existing = obj['system']
+      if (existing === undefined) {
+        obj['system'] = systemParts.join('\n\n')
+        obj['messages'] = filteredMessages
+      } else if (typeof existing === 'string') {
+        // 顶层 system 已有字符串:追加合并,不能整段丢弃——否则 system/
+        // developer 消息留在 messages 里,Anthropic 端点直接拒绝请求。
+        obj['system'] = existing === '' ? systemParts.join('\n\n') : `${existing}\n\n${systemParts.join('\n\n')}`
+        obj['messages'] = filteredMessages
+      } else if (Array.isArray(existing)) {
+        // Anthropic blocks 形态的顶层 system(合法):文本块追加在数组尾,
+        // 整体覆盖会静默丢失原 system 内容。
+        obj['system'] = [...existing, ...systemParts.map(text => ({ type: 'text', text }))]
+        obj['messages'] = filteredMessages
+      }
+      // 其余畸形形态保持原样(连同 system 消息),交给上游校验给出明确错误。
     }
   }
 

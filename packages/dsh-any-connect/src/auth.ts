@@ -647,6 +647,13 @@ export class WorkBuddyCredentialStore {
 
   /** Remove the plugin-owned copy; the desktop file is untouched. */
   async logout(): Promise<void> {
+    // 先等在途刷新结束再动手:refreshNow 成功路径会无条件把刷新结果
+    // saveOwn 回插件自有副本,不等的话「登出」会被随后落盘的刷新成果
+    // 原样复活(文件回来了,用户表现为仍登录)。rejection 吞掉——刷新
+    // 失败不阻止登出,反而正该删。内存清理也放在 await 之后:refreshNow
+    // 的失败路径会把刷新结果兜底进 memoryCredential,先清会被它覆盖。
+    const inflight = this.inflight
+    if (inflight !== undefined) await inflight.catch(() => {})
     this.memoryCredential = undefined
     this.lastRefreshAttemptMs = 0
     this.lastRefreshFailureMs = 0

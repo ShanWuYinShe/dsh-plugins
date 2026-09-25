@@ -45,6 +45,14 @@ export interface WorkBuddyProbeServiceOptions {
   sentinel?: SentinelFactory
   /** Injectable for tests; defaults to the live upstream sender. */
   send?: (modelId: string) => ProbeSender
+  /**
+   * 自动清扫中的探针失败上报（清扫入口 probeMissingCandidates 丢弃
+   * promise，rejection 若无人接就是 unhandled rejection，Node ≥15 默认
+   * 策略下可终止宿主进程——credentials.current() 会因凭据区域不匹配
+   * 抛 RegionMismatchError，非 ENOENT 文件错误也会 rethrow）。缺省丢弃，
+   * host 层应接 logger.warn 让 RegionMismatch 这类可修复配置错误可见。
+   */
+  onSweepError?: (modelId: string, error: unknown) => void
 }
 
 /**
@@ -180,7 +188,13 @@ export class WorkBuddyProbeService {
       info.reasoning?.supports === true
       && (info.reasoning.supportedEfforts?.length ?? 0) === 0)
     for (const info of candidates) {
-      if (this.recordFor(info.id) === undefined) void this.probe(info.id)
+      if (this.recordFor(info.id) === undefined) {
+        // 显式 probe() 的调用方(路由)自带 catch;清扫是 fire-and-forget,
+        // 必须 recv 住 rejection,否则 unhandled rejection 打崩宿主。
+        void this.probe(info.id).catch((error: unknown) => {
+          this.options.onSweepError?.(info.id, error)
+        })
+      }
     }
   }
 }

@@ -105,8 +105,9 @@ export async function readHostHeartbeat(): Promise<WorkBuddyHostHeartbeat | unde
  * - macOS / Linux: `ps -o lstart=` prints a local-time "EEE MMM DD HH:MM:SS YYYY";
  *   `Date.parse` resolves it against the local clock, which matches how
  *   `registeredAt` (a `Date.now()` absolute value) is expressed.
- * - Windows: WMI `CreationDate` is UTC (`YYYYMMDDHHMMSS.mmm+zzzz`); parsed with
- *   `Date.UTC`, again comparable to `registeredAt`.
+ * - Windows: PowerShell `Get-CimInstance` reads the process creation time as
+ *   a UTC file time (epoch-independent, locale-free), again comparable to
+ *   `registeredAt`.
  *
  * Failures return `undefined` so callers can fall back to plain PID liveness
  * rather than mis-report a running host as dead.
@@ -130,28 +131,17 @@ export function processStartTimeMs(pid: number): number | undefined {
 }
 
 /**
- * Windows 进程启动时刻（epoch ms）。先试 WMI 的 `wmic`（旧版 Windows），
- * 失败后回退 PowerShell `Get-CimInstance`——wmic 在 Windows 11 24H2 起
- * 已被移除。回退路径取 `CreationDate.ToFileTimeUtc()`：1601 纪律的 100ns
- * 计数，纯数字输出、无区域格式差异；换算为 Unix 毫秒要减去两个纪元之间
- * 的 11644473600000 毫秒。
+ * Windows 进程启动时刻（epoch ms）。直接走 PowerShell `Get-CimInstance`
+ * 取 `CreationDate.ToFileTimeUtc()`：1601 纪元的 100ns 计数，纯数字输出、
+ * 无区域格式差异；换算为 Unix 毫秒要减去两个纪元之间的 11644473600000
+ * 毫秒。
+ *
+ * 曾有 wmic 分支在前：其正则要求 4 位 UTC 偏移后缀，而 CIM_DATETIME 的
+ * 偏移按分钟计（如 `+480`，3 位）——分支大概率从不匹配、恒走本路径，
+ * 即便匹配也把带偏移的本地时间按 UTC 解析，偏差整小时级。wmic 自
+ * Windows 11 24H2 起已被移除，该分支既错又死，已删。
  */
 function windowsProcessStartTimeMs(pid: number): number | undefined {
-  try {
-    const out = execFileSync(
-      'wmic',
-      ['process', 'where', `processid=${pid}`, 'get', 'CreationDate'],
-      { encoding: 'utf8', windowsHide: true },
-    )
-    const m = out.match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.\d+([+-]\d{4})/)
-    if (m !== null) {
-      const [, y, mo, d, h, mi, s] = m
-      const ms = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s))
-      if (Number.isFinite(ms)) return ms
-    }
-  } catch {
-    // wmic 缺失（Windows 11 24H2+）或执行失败：回退 PowerShell。
-  }
   try {
     const out = execFileSync(
       'powershell',

@@ -230,6 +230,42 @@ describe('WorkBuddyCredentialStore', () => {
     await expect(store.resolve()).resolves.toMatchObject({ accessToken: 'fresh' })
     expect(refreshes).toBe(1)
   })
+  it('waits for an in-flight refresh before deleting the owned copy on logout', async () => {
+    // 回归:logout 与在途刷新并发时,refreshNow 成功路径会无条件把刷新
+    // 结果 saveOwn 回插件自有副本——不等刷新结束就删文件,「登出」会被
+    // 随后落盘的刷新成果原样复活(文件回来,用户表现为仍登录)。
+    const dir = await mkdtemp(join(tmpdir(), 'wb-store-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const desktop = join(dir, 'workbuddy-desktop.info')
+    await writeFile(desktop, nestedDoc(Date.now() - 1000))
+    let releaseRefresh: (() => void) | undefined
+    let refreshStarted = false
+    const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
+      desktopPath: desktop,
+      ownPath: join(dir, 'own.json'),
+      refresh: async () => {
+        refreshStarted = true
+        await new Promise<void>(resolve => { releaseRefresh = resolve })
+        return { accessToken: 'fresh', refreshToken: 'rt2', expiresInSec: 3600 }
+      },
+    })
+    const resolvePromise = store.resolve()
+    await vi.waitFor(() => { expect(refreshStarted).toBe(true) })
+    const logoutPromise = store.logout()
+    // logout 必须挂在在途刷新上:刷新未完成前它不该返回。
+    let logoutSettled = false
+    void logoutPromise.then(() => { logoutSettled = true })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(logoutSettled).toBe(false)
+    releaseRefresh?.()
+    await logoutPromise
+    await resolvePromise
+    // 刷新成果曾写回 ownPath(saveOwn),但 logout 等它结束后删除——
+    // 终态必须是文件不存在,而不是被刷新成果复活。
+    const ownExists = await readFile(join(dir, 'own.json'), 'utf8').then(() => true, () => false)
+    expect(ownExists, '登出后插件自有副本不得复活').toBe(false)
+  })
 
   it('does not re-refresh on every request when the upstream omits expiresIn', async () => {
     // H5 回归:缺 expiresIn 时沿用旧过期时间会让 needsRefresh 恒真,

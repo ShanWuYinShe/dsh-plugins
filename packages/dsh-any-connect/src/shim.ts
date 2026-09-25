@@ -89,6 +89,11 @@ function writeAnthropicError(res: ServerResponse, status: number, kind: string, 
   writeJson(res, status, { type: 'error', error: { type: kind, message } })
 }
 
+/** 请求体超限的专属标记:兜底 catch 据此映射 413,而非落进 500 internal。 */
+class RequestBodyTooLarge extends Error {
+  constructor() { super('request body too large') }
+}
+
 /** Read a request body with a size cap; over-limit bodies fail the request. */
 function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -97,7 +102,7 @@ function readBody(req: IncomingMessage): Promise<Buffer> {
     req.on('data', (chunk: Buffer) => {
       size += chunk.length
       if (size > REQUEST_BODY_LIMIT) {
-        reject(new Error('request body too large'))
+        reject(new RequestBodyTooLarge())
         req.destroy()
         return
       }
@@ -191,14 +196,21 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         writeOpenAIError(res, 403, 'origin_not_allowed', 'Origin must be a loopback origin')
         return
       }
-      if (!authOk(req)) {
-        writeUnauthorized(res)
-        return
-      }
       const url = req.url ?? '/'
       // 按 pathname 匹配：SDK 会带查询串（如 ?beta=true），全等
-      // 匹配会把合法请求打成 404。
+      // 匹配会把合法请求打成 404。鉴权失败的错误体形状也依赖它,故
+      // 提前到鉴权之前计算。
       const pathname = new URL(url, 'http://127.0.0.1').pathname
+      if (!authOk(req)) {
+        // /v1/messages 的消费方是 Anthropic SDK:401 也必须是 Anthropic 形,
+        // 否则 SDK 解析不出结构化错误(与下方 415/上游错误路径同口径)。
+        if (pathname === '/v1/messages' || pathname === '/v1/messages/') {
+          writeAnthropicError(res, 401, 'authentication_error', 'missing or invalid authorization')
+        } else {
+          writeUnauthorized(res)
+        }
+        return
+      }
       if (req.method === 'GET' && (pathname === '/healthz' || pathname === '/healthz/')) {
         writeJson(res, 200, { ok: true })
         return
@@ -225,6 +237,18 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
       }
       writeOpenAIError(res, 404, 'not_found', `no such route: ${req.method} ${url}`)
     } catch (error: unknown) {
+      if (error instanceof RequestBodyTooLarge) {
+        // 超限是客户端错误:按语义回 413(probe-route 同场景同口径),
+        // 落进兜底 500 会把排障方向带偏到"服务端内部错误"。
+        if (!res.headersSent) {
+          if ((new URL(req.url ?? '/', 'http://127.0.0.1').pathname === '/v1/messages')) {
+            writeAnthropicError(res, 413, 'invalid_request_error', 'request body too large')
+          } else {
+            writeOpenAIError(res, 413, 'body_too_large', 'request body too large')
+          }
+        }
+        return
+      }
       if (!res.headersSent) {
         writeOpenAIError(res, 500, 'internal', String(error))
       } else {
