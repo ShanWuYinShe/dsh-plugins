@@ -247,6 +247,21 @@ function sameItems(a: any[], b: any[]) {
 // activeElement，返回 Tab / Shift+Tab 应跳往的元素；不需要环绕返回 undefined。
 // 行为抄宿主 Modal（只抄行为，不引用其实现——官方插件开发 skill 明令
 // 第三方插件不得 require 宿主 client 包）。
+/** 归档筛选：子串不区分大小写匹配标题/工作区路径/会话 ID；空查询返回
+ * 副本。纯函数导出供单测（client-filter.test.ts）与面板 useMemo 共用——
+ * 筛选语义改动时测试即红。 */
+export function filterArchived<T extends { title: unknown; cwd: unknown; sessionId: unknown }>(
+  items: readonly T[],
+  query: string,
+): T[] {
+  const q = query.trim().toLowerCase();
+  if (q === "") return [...items];
+  return items.filter((item) =>
+    String(item.title ?? "").toLowerCase().includes(q)
+      || String(item.cwd ?? "").toLowerCase().includes(q)
+      || String(item.sessionId ?? "").toLowerCase().includes(q));
+}
+
 function trapTarget(focusables: any[], active: any, shift: boolean): any | undefined {
   if (focusables.length === 0) return undefined;
   if (shift && active === focusables[0]) return focusables[focusables.length - 1];
@@ -518,14 +533,7 @@ function ArchivePanel(props: any) {
   // 筛选:大归档量下逐页翻找效率低,标题/工作区路径/ID 子串前端过滤
   // (列表本就全量在内存,过滤纯展示层,不发请求)。
   const [filter, setFilter] = React.useState("");
-  const filteredItems = React.useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (q === "") return items;
-    return items.filter((item) =>
-      (item.title ?? "").toLowerCase().includes(q)
-        || (item.cwd ?? "").toLowerCase().includes(q)
-        || String(item.sessionId).toLowerCase().includes(q));
-  }, [items, filter]);
+  const filteredItems = React.useMemo(() => filterArchived(items, filter), [items, filter]);
   // 筛选变化回到第一页:否则 narrowed 结果落在已翻过的页码之外,看似空列表。
   React.useEffect(() => { setVisibleCount(ARCHIVE_PAGE_SIZE); }, [filter]);
   const visibleItems = filteredItems.slice(0, visibleCount);
