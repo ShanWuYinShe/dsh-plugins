@@ -104,6 +104,7 @@ bun run build      # 全仓构建：每包 tsc 编译 src/ → lib/，esbuild �
 bun run typecheck  # tsc --noEmit（host + client 两套 tsconfig）
 bun run test       # vitest 回归（host 插件 / config-store / 上游客户端等）
 bun run test:ci    # build + typecheck + test（发布前验证）
+bun run audit      # 依赖漏洞审计（OSV.dev，命中 exit 1；发布门禁会强制执行）
 ```
 
 ## 版本管理与发布

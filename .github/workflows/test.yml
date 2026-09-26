@@ -65,3 +65,8 @@ jobs:
 
       - name: Build and test
         run: bun run test:ci
+
+      # 依赖漏洞审计（OSV.dev 公共 API）：分支推送即审计，早于发布门禁发现
+      # 问题；命中 exit 1 使本 job 红灯（安全审计宁可误报让人看一眼）。
+      - name: Audit dependencies
+        run: bun run audit
