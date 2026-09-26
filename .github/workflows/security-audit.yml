@@ -1,0 +1,33 @@
+name: Security audit (deep)
+
+# 每周一次全量依赖审计（含传递依赖）：bun run audit --deep 解析 bun 隔离
+# 安装布局（node_modules/.bun/<name@version>）覆盖全部 326 个包,批量查
+# OSV.dev。命中已知漏洞 exit 1 让本 workflow 红灯（GitHub 会发失败通知）；
+# 网络不可达同样红灯——下个周期会重试，也可手动 workflow_dispatch。日常
+# 的直接依赖审计由 test.yml（分支推送）与 publish.yml（发布门禁）覆盖；
+# 本 workflow 是传递依赖的周期性深查。脚本见 scripts/audit-deps.mjs。
+on:
+  schedule:
+    - cron: '43 2 * * 1' # 每周一 UTC 02:43（避开整点的调度高峰）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Deep audit (all transitive deps)
+        run: bun run audit -- --deep

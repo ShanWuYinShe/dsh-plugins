@@ -105,6 +105,7 @@ bun run typecheck  # tsc --noEmit（host + client 两套 tsconfig）
 bun run test       # vitest 回归（host 插件 / config-store / 上游客户端等）
 bun run test:ci    # build + typecheck + test（发布前验证）
 bun run audit      # 依赖漏洞审计（OSV.dev，命中 exit 1；发布门禁会强制执行）
+bun run audit -- --deep  # 深查全部传递依赖（326+ 包；CI 每周一自动跑一次）
 ```
 
 ## 版本管理与发布
