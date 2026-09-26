@@ -824,11 +824,12 @@ function ArchivePanel(props: any) {
           className: "sa_action",
           type: "button",
           title: t("sortByHint"),
-          onClick: () => setSortKey((current) => {
-            const at = ARCHIVE_SORT_KEYS.indexOf(current);
-            // indexOf 未命中（不该发生）时安全回退到默认排序 time。
-            return ARCHIVE_SORT_KEYS[(at + 1) % ARCHIVE_SORT_KEYS.length] ?? "time";
-          }),
+          onClick: () => {
+            // setSortKey 持久化后为值形式(非函数式更新器):从 state 读当前键
+            // 计算下一个;indexOf 未命中(不该发生)时安全回退默认排序 time。
+            const at = ARCHIVE_SORT_KEYS.indexOf(sortKey);
+            setSortKey(ARCHIVE_SORT_KEYS[(at + 1) % ARCHIVE_SORT_KEYS.length] ?? "time");
+          },
         }, t("sortBy_" + sortKey)),
       ),
       React.createElement(
