@@ -137,6 +137,10 @@ const zh = {
   cancel: "取消",
   showMore: "加载更多（剩余 {n} 个）",
   filterPlaceholder: "按标题、路径或 ID 筛选",
+  sortBy_time: "排序：最近修改",
+  sortBy_size: "排序：体积",
+  sortBy_title: "排序：标题",
+  sortByHint: "点击切换排序方式",
   noMatch: "没有匹配筛选条件的归档会话",
   noSelection: "请先勾选会话",
   view: "查看",
@@ -185,6 +189,10 @@ const en = {
   cancel: "Cancel",
   showMore: "Show more ({n} remaining)",
   filterPlaceholder: "Filter by title, path, or id",
+  sortBy_time: "Sort: recently modified",
+  sortBy_size: "Sort: size",
+  sortBy_title: "Sort: title",
+  sortByHint: "Click to cycle sort order",
   noMatch: "No archived sessions match the filter",
   noSelection: "Select sessions first",
   view: "View",
@@ -260,6 +268,35 @@ export function filterArchived<T extends { title: unknown; cwd: unknown; session
     String(item.title ?? "").toLowerCase().includes(q)
       || String(item.cwd ?? "").toLowerCase().includes(q)
       || String(item.sessionId ?? "").toLowerCase().includes(q));
+}
+
+/** 归档排序键。time=最近修改在前；size=体积大在前；title=标题字典序
+ * （不区分大小写，无标题行排最后）。 */
+export type ArchiveSortKey = "time" | "size" | "title";
+export const ARCHIVE_SORT_KEYS: readonly ArchiveSortKey[] = ["time", "size", "title"];
+
+/** 排序纯函数（不改动入参），导出供单测（client-sort.test.ts）与面板
+ * useMemo 共用。与 filterArchived 组合：先筛后排。 */
+export function sortArchived<T extends { updatedAt: unknown; size: unknown; title: unknown }>(
+  items: readonly T[],
+  key: ArchiveSortKey,
+): T[] {
+  const out = [...items];
+  if (key === "time") out.sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0));
+  else if (key === "size") out.sort((a, b) => Number(b.size ?? 0) - Number(a.size ?? 0));
+  else out.sort((a, b) => {
+    // 用小写后的 < > 比较(UTF-16 码元序,跨环境确定)而非 localeCompare:
+    // 后者的排序位置依赖宿主 ICU/locale,CI 与本机顺序可能不同——排序
+    // 测试需要确定结果。非 ASCII 标题在同语言内部仍保持稳定相对顺序。
+    const ta = String(a.title ?? "").toLowerCase();
+    const tb = String(b.title ?? "").toLowerCase();
+    if (ta === "" && tb !== "") return 1; // 无标题行排最后
+    if (tb === "" && ta !== "") return -1;
+    if (ta < tb) return -1;
+    if (ta > tb) return 1;
+    return 0;
+  });
+  return out;
 }
 
 function trapTarget(focusables: any[], active: any, shift: boolean): any | undefined {
@@ -533,13 +570,16 @@ function ArchivePanel(props: any) {
   // 筛选:大归档量下逐页翻找效率低,标题/工作区路径/ID 子串前端过滤
   // (列表本就全量在内存,过滤纯展示层,不发请求)。
   const [filter, setFilter] = React.useState("");
+  const [sortKey, setSortKey] = React.useState<ArchiveSortKey>("time");
   const filteredItems = React.useMemo(() => filterArchived(items, filter), [items, filter]);
+  // 先筛后排:排序在筛选结果上进行,「加载更多」分页按最终顺序切片。
+  const sortedItems = React.useMemo(() => sortArchived(filteredItems, sortKey), [filteredItems, sortKey]);
   // 筛选变化回到第一页:否则 narrowed 结果落在已翻过的页码之外,看似空列表。
   React.useEffect(() => { setVisibleCount(ARCHIVE_PAGE_SIZE); }, [filter]);
-  const visibleItems = filteredItems.slice(0, visibleCount);
+  const visibleItems = sortedItems.slice(0, visibleCount);
   // 全选只作用于筛选结果:用户筛出一组会话后点全选,期望选中的是
   // 「看得见的这批」,而不是藏在筛选条件之外的全部。
-  const selectable = filteredItems.filter((item) => !item.live);
+  const selectable = sortedItems.filter((item) => !item.live);
   const allSelected = selectable.length > 0 && selectable.every((item) => selected.has(item.sessionId));
 
   // 两段式删除 armed 态的 4 秒复位 timer：存 id，改勾选/执行/卸载时清掉，
@@ -759,7 +799,17 @@ function ArchivePanel(props: any) {
           "aria-label": t("filterPlaceholder"),
           value: filter,
           onChange: (e: any) => setFilter(e.target.value),
-        })
+        }),
+        React.createElement("button", {
+          className: "sa_action",
+          type: "button",
+          title: t("sortByHint"),
+          onClick: () => setSortKey((current) => {
+            const at = ARCHIVE_SORT_KEYS.indexOf(current);
+            // indexOf 未命中（不该发生）时安全回退到默认排序 time。
+            return ARCHIVE_SORT_KEYS[(at + 1) % ARCHIVE_SORT_KEYS.length] ?? "time";
+          }),
+        }, t("sortBy_" + sortKey)),
       ),
       React.createElement(
         "div",
@@ -919,12 +969,12 @@ function ArchivePanel(props: any) {
             );
           }),
           // 分页：还有未渲的行就给“加载更多”，点一次追加一页。
-          visibleCount < filteredItems.length ? React.createElement("button", {
+          visibleCount < sortedItems.length ? React.createElement("button", {
             className: "sa_action",
             type: "button",
             style: { display: "block", margin: "4px auto 0" },
             onClick: () => setVisibleCount((current) => current + ARCHIVE_PAGE_SIZE)
-          }, t("showMore").replace("{n}", String(filteredItems.length - visibleCount))) : null
+          }, t("showMore").replace("{n}", String(sortedItems.length - visibleCount))) : null
         ) : null
       )
     )) : null
