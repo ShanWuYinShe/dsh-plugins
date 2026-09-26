@@ -47,6 +47,7 @@
     "test:ci": "bun run build && bun run typecheck && vitest run",
     "gate": "node scripts/publish-gate.mjs",
     "adapt": "node scripts/adapt-dsh.mjs",
-    "dsh-status": "node scripts/dsh-follow-status.mjs"
+    "dsh-status": "node scripts/dsh-follow-status.mjs",
+    "audit": "node scripts/audit-deps.mjs"
   }
 }

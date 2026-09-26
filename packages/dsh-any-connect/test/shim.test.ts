@@ -503,18 +503,27 @@ describe('WorkBuddy shim', () => {
       refresh: async () => ({ accessToken: 'unused' }),
     })
     let entered = false
+    let seenSignal: AbortSignal | undefined
+    let calls = 0
     const shim = createWorkBuddyShim({
       kind: 'workbuddy',
       store,
       catalog: new WorkBuddyCatalog(),
       client: {
         async chatStream(_credential, _body, signal) {
+          calls += 1
           entered = true
-          await new Promise<void>((resolve) => {
-            if (signal?.aborted) resolve()
-            else signal?.addEventListener('abort', () => resolve())
-          })
-          return { ok: false, status: 0, kind: 'client' as const, message: 'client disconnected before upstream response' }
+          // 首次调用(将被断开的那次)记录 signal 并等待 abort;后续调用
+          // (断开后的存活验证)返回正常流,否则会复用等 abort 的挂起逻辑。
+          if (calls === 1) {
+            seenSignal = signal
+            await new Promise<void>((resolve) => {
+              if (signal?.aborted) resolve()
+              else signal?.addEventListener('abort', () => resolve())
+            })
+            return { ok: false, status: 0, kind: 'client' as const, message: 'client disconnected before upstream response' }
+          }
+          return { ok: true, response: new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } }) }
         },
       },
     })
@@ -543,6 +552,18 @@ describe('WorkBuddy shim', () => {
       CLEANUP.push(async () => clearInterval(abortOnceEntered))
     })
     expect(entered).toBe(true)
+    // 显式断言 abort 传导:客户端断开必须 abort 传给 chatStream 的 signal
+    // (上游依赖它取消请求),不能只靠「没崩」这种间接绊线。
+    expect(seenSignal?.aborted).toBe(true)
+    // 断开后 shim 仍健康:后续正常请求照常工作(服务存活验证,替代仅靠
+    // vitest unhandled-rejection 绊线的弱保证)。
+    const after = await fetch(`${shim.baseUrl()}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${shim.token()}` },
+      body: JSON.stringify({ model: 'auto', stream: true, messages: [{ role: 'user', content: 'again' }] }),
+    })
+    expect(after.status).toBe(200)
+    await after.text()
   })
   it('cancels the upstream stream when the client disconnects mid-flight', async () => {
     // 回归:Node ≥16 起 req 'close' 在响应开始后不再触发(那是「请求完成」
