@@ -65,6 +65,11 @@ warning（刻意非阻塞——提醒，不是门禁）。
 `dsh.host` 是 npm 消费者可见的适配声明，发布归档的 tag 不允许带糊的状态。
 本地干跑直接执行该脚本即可（无网络、无 git 依赖，纯 manifest 校验）。
 
+依赖漏洞审计由 `bun run audit`（发布门禁步骤「Audit dependencies」）
+执行：读根 node_modules 的实际安装版本批量查 OSV.dev 公共 API，命中
+已知漏洞 exit 1 阻断发布；网络不可达 exit 2 同样阻断（发布时网络异常
+应排查或重试，不带病发版）。零外部依赖，可随时本地跑。
+
 ### dsh 适配归档 tag（main 专属）
 
 main 分支的每次 dsh 稳定版适配都归档为一个 git tag，**由用户手工打，CI

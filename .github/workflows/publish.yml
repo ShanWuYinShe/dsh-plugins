@@ -68,6 +68,12 @@ jobs:
       - name: Verify dsh baseline
         run: node scripts/dsh-baseline.mjs
 
+      # 依赖漏洞审计（OSV.dev 公共 API，无需认证）：命中已知漏洞 exit 1 阻断
+      # 发布；网络不可达 exit 2 同样阻断——发布时网络异常应停下来排查或重试，
+      # 不带病发版。规则见 scripts/audit-deps.mjs。
+      - name: Audit dependencies
+        run: bun run audit
+
       # 解析本次要发的 tag：tag 推送取 ref 名，手动触发取输入。
       - name: Resolve tag
         id: tag
