@@ -54,6 +54,9 @@ async function buildClient(pkgDir, pkgName, pkgId) {
     // 设置卡片在稳定版宿主上崩溃）。
     jsx: "automatic",
     external: ["react", "react/jsx-runtime"],
+    // 压缩产物（实测体积 -37~39%）：client.cjs 是宿主加载进浏览器的分发
+    // 产物，与 npm 包发布 dist 同理不做可读性保留；调试看 client/ 源码。
+    minify: true,
     write: false,
   });
   const body = result.outputFiles[0].text;
