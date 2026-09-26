@@ -42,6 +42,9 @@ var css = [
   ".sa_iconBtn:hover{background:var(--dsw-alias-interactive-bg-hover)}",
   ".sa_iconBtn:disabled{opacity:.4;cursor:default}",
   ".sa_toolbar{flex:none;border-bottom:1px solid var(--dsw-alias-border-l2);align-items:center;gap:8px;padding:8px 16px;display:flex;flex-wrap:wrap}",
+  ".sa_filterInput{flex:1 1 100%;box-sizing:border-box;padding:5px 9px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary);font-size:12px;line-height:18px}",
+  ".sa_filterInput::placeholder{color:var(--dsw-alias-label-tertiary)}",
+  ".sa_filterInput:focus{outline:none;border-color:var(--dsw-alias-brand-primary)}",
   ".sa_check{accent-color:var(--dsw-alias-label-primary);width:14px;height:14px;flex:none;cursor:pointer}",
   ".sa_check:disabled{cursor:default;opacity:.45}",
   ".sa_toolLabel{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;user-select:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px}",
@@ -133,6 +136,8 @@ const zh = {
   deleteAcknowledge: "我确认删除这 {n} 个会话",
   cancel: "取消",
   showMore: "加载更多（剩余 {n} 个）",
+  filterPlaceholder: "按标题、路径或 ID 筛选",
+  noMatch: "没有匹配筛选条件的归档会话",
   noSelection: "请先勾选会话",
   view: "查看",
   collapse: "收起",
@@ -179,6 +184,8 @@ const en = {
   deleteAcknowledge: "I confirm deleting these {n} sessions",
   cancel: "Cancel",
   showMore: "Show more ({n} remaining)",
+  filterPlaceholder: "Filter by title, path, or id",
+  noMatch: "No archived sessions match the filter",
   noSelection: "Select sessions first",
   view: "View",
   collapse: "Collapse",
@@ -508,8 +515,23 @@ function ArchivePanel(props: any) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
-  const visibleItems = items.slice(0, visibleCount);
-  const selectable = items.filter((item) => !item.live);
+  // 筛选:大归档量下逐页翻找效率低,标题/工作区路径/ID 子串前端过滤
+  // (列表本就全量在内存,过滤纯展示层,不发请求)。
+  const [filter, setFilter] = React.useState("");
+  const filteredItems = React.useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (q === "") return items;
+    return items.filter((item) =>
+      (item.title ?? "").toLowerCase().includes(q)
+        || (item.cwd ?? "").toLowerCase().includes(q)
+        || String(item.sessionId).toLowerCase().includes(q));
+  }, [items, filter]);
+  // 筛选变化回到第一页:否则 narrowed 结果落在已翻过的页码之外,看似空列表。
+  React.useEffect(() => { setVisibleCount(ARCHIVE_PAGE_SIZE); }, [filter]);
+  const visibleItems = filteredItems.slice(0, visibleCount);
+  // 全选只作用于筛选结果:用户筛出一组会话后点全选,期望选中的是
+  // 「看得见的这批」,而不是藏在筛选条件之外的全部。
+  const selectable = filteredItems.filter((item) => !item.live);
   const allSelected = selectable.length > 0 && selectable.every((item) => selected.has(item.sessionId));
 
   // 两段式删除 armed 态的 4 秒复位 timer：存 id，改勾选/执行/卸载时清掉，
@@ -718,6 +740,19 @@ function ArchivePanel(props: any) {
               React.createElement("path", { d: "M6 6l12 12M18 6L6 18" })))
         )
       ),
+      // 筛选输入框:子串匹配标题/工作区路径/ID,前端过滤即时生效。
+      React.createElement(
+        "div",
+        { className: "sa_toolbar" },
+        React.createElement("input", {
+          className: "sa_filterInput",
+          type: "search",
+          placeholder: t("filterPlaceholder"),
+          "aria-label": t("filterPlaceholder"),
+          value: filter,
+          onChange: (e: any) => setFilter(e.target.value),
+        })
+      ),
       React.createElement(
         "div",
         { className: "sa_toolbar" },
@@ -794,6 +829,11 @@ function ArchivePanel(props: any) {
             React.createElement("line", { x1: 9, y1: 14, x2: 15, y2: 14, strokeDasharray: "2 2" })
           ),
           React.createElement("p", { className: "sa_empty", style: { margin: "12px 0" } }, t("empty"))
+        // 筛选无匹配(与「完全无归档」区分:提示调整筛选条件)。
+        ) : !loading && items.length > 0 && filteredItems.length === 0 ? React.createElement(
+          "p",
+          { className: "sa_empty", style: { margin: "12px 0" } },
+          t("noMatch")
         ) : null,
         items.length > 0 ? React.createElement(
           "ul",
@@ -871,12 +911,12 @@ function ArchivePanel(props: any) {
             );
           }),
           // 分页：还有未渲的行就给“加载更多”，点一次追加一页。
-          visibleCount < items.length ? React.createElement("button", {
+          visibleCount < filteredItems.length ? React.createElement("button", {
             className: "sa_action",
             type: "button",
             style: { display: "block", margin: "4px auto 0" },
             onClick: () => setVisibleCount((current) => current + ARCHIVE_PAGE_SIZE)
-          }, t("showMore").replace("{n}", String(items.length - visibleCount))) : null
+          }, t("showMore").replace("{n}", String(filteredItems.length - visibleCount))) : null
         ) : null
       )
     )) : null
