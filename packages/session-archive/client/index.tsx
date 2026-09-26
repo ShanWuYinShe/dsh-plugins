@@ -569,8 +569,28 @@ function ArchivePanel(props: any) {
 
   // 筛选:大归档量下逐页翻找效率低,标题/工作区路径/ID 子串前端过滤
   // (列表本就全量在内存,过滤纯展示层,不发请求)。
-  const [filter, setFilter] = React.useState("");
-  const [sortKey, setSortKey] = React.useState<ArchiveSortKey>("time");
+  // 筛选与排序持久化到 sessionStorage(标签页内跨页面重载保留):用户筛出
+  // 一组会话后打开详情/误刷新,回来不必重新输入。禁用 sessionStorage 的
+  // 环境(隐私模式)静默降级为不持久化。
+  const FILTER_STORE_KEY = "sessionArchive.filter";
+  const SORT_STORE_KEY = "sessionArchive.sort";
+  const [filter, setFilterState] = React.useState(() => {
+    try { return sessionStorage.getItem(FILTER_STORE_KEY) ?? ""; } catch { return ""; }
+  });
+  const setFilter = React.useCallback((value: string) => {
+    setFilterState(value);
+    try { sessionStorage.setItem(FILTER_STORE_KEY, value); } catch {}
+  }, []);
+  const [sortKey, setSortKeyState] = React.useState<ArchiveSortKey>(() => {
+    try {
+      const saved = sessionStorage.getItem(SORT_STORE_KEY);
+      return (ARCHIVE_SORT_KEYS as readonly string[]).includes(saved ?? "") ? (saved as ArchiveSortKey) : "time";
+    } catch { return "time"; }
+  });
+  const setSortKey = React.useCallback((next: ArchiveSortKey) => {
+    setSortKeyState(next);
+    try { sessionStorage.setItem(SORT_STORE_KEY, next); } catch {}
+  }, []);
   const filteredItems = React.useMemo(() => filterArchived(items, filter), [items, filter]);
   // 先筛后排:排序在筛选结果上进行,「加载更多」分页按最终顺序切片。
   const sortedItems = React.useMemo(() => sortArchived(filteredItems, sortKey), [filteredItems, sortKey]);
