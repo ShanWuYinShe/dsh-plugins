@@ -136,6 +136,9 @@ const zh = {
   deleteAcknowledge: "我确认删除这 {n} 个会话",
   cancel: "取消",
   showMore: "加载更多（剩余 {n} 个）",
+  exportMd: "导出 Markdown",
+  exportDone: "已导出 {n} 个会话",
+  exportPartial: "{n} 个会话导出失败",
   filterPlaceholder: "按标题、路径或 ID 筛选",
   sortBy_time: "排序：最近修改",
   sortBy_size: "排序：体积",
@@ -188,6 +191,9 @@ const en = {
   deleteAcknowledge: "I confirm deleting these {n} sessions",
   cancel: "Cancel",
   showMore: "Show more ({n} remaining)",
+  exportMd: "Export Markdown",
+  exportDone: "Exported {n} sessions",
+  exportPartial: "{n} sessions failed to export",
   filterPlaceholder: "Filter by title, path, or id",
   sortBy_time: "Sort: recently modified",
   sortBy_size: "Sort: size",
@@ -297,6 +303,52 @@ export function sortArchived<T extends { updatedAt: unknown; size: unknown; titl
     return 0;
   });
   return out;
+}
+
+/** 会话导出文件名：标题安全化（非法字符换 -，截 40 字符），无标题用 ID。 */
+export function exportFilename(item: { title: unknown; sessionId: unknown }): string {
+  const base = String(item.title ?? "").replace(/[-\\/:*?"<>|\\s]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  return "archive-" + (base || String(item.sessionId).slice(0, 12)) + ".md";
+}
+
+/** 把 detail（标题 + user/assistant 文本消息）格式化为 Markdown 文本。 */
+export function detailToMarkdown(item: { title: unknown; sessionId: unknown; cwd: unknown }, detail: {
+  sessionId?: unknown
+  messages?: Array<{ role?: unknown; text?: unknown; time?: unknown }>
+}): string {
+  const lines: string[] = [];
+  lines.push("# " + (String(item.title ?? "") || String(item.sessionId ?? "")));
+  lines.push("");
+  lines.push("- session: `" + String(item.sessionId ?? "") + "`");
+  if (item.cwd !== null && item.cwd !== undefined && item.cwd !== "") lines.push("- workspace: `" + String(item.cwd) + "`");
+  const messages = Array.isArray(detail?.messages) ? detail.messages : [];
+  lines.push("- messages: " + messages.length);
+  lines.push("");
+  for (const message of messages) {
+    const role = message?.role === "user" ? "user" : "assistant";
+    lines.push("## " + role);
+    lines.push("");
+    lines.push(String(message?.text ?? ""));
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+/** 合并多个会话的 Markdown（--- 分页线分隔），供批量导出为单个文件。 */
+export function mergeArchivedMarkdown(sections: readonly string[]): string {
+  return sections.filter((s) => s !== "").join("\n\n---\n\n");
+}
+
+/** 触发浏览器下载一段文本（Blob 一次性链接，用完即回收）。 */
+function downloadMarkdown(filename: string, text: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 function trapTarget(focusables: any[], active: any, shift: boolean): any | undefined {
@@ -662,6 +714,43 @@ function ArchivePanel(props: any) {
     }
   };
 
+  /** 批量导出勾选会话为单个 Markdown 文件：确保每个会话的详情已加载
+   * （未加载的逐个请求），逐个生成 Markdown 后合并下载。任一会话加载
+   * 失败则跳过该会话并在完成提示中说明。 */
+  const exportSelected = React.useCallback(async (): Promise<void> => {
+    const ids = [...selected].filter((id) => {
+      const item = items.find((i) => i.sessionId === id);
+      return item !== undefined && !item.live;
+    });
+    if (ids.length === 0) {
+      setNotice({ kind: "warn", text: t("noSelection") });
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    try {
+      const sections: string[] = [];
+      const failed: string[] = [];
+      for (const id of ids) {
+        const item = items.find((i) => i.sessionId === id);
+        try {
+          const detail = await call("detail", id);
+          sections.push(detailToMarkdown(item ?? { sessionId: id, title: null, cwd: null }, detail));
+        } catch (detailError: any) {
+          failed.push(String(detailError && detailError.message || detailError));
+        }
+      }
+      if (sections.length > 0) {
+        downloadMarkdown("archived-sessions-" + new Date().toISOString().slice(0, 10) + ".md", mergeArchivedMarkdown(sections));
+      }
+      setNotice(failed.length > 0
+        ? { kind: "warn", text: t("exportPartial").replace("{n}", String(failed.length)) + ": " + failed.join(t("joiner")) }
+        : { kind: "ok", text: t("exportDone").replace("{n}", String(sections.length)) });
+    } finally {
+      setBusy(false);
+    }
+  }, [selected, items, call, t]);
+
   const runBatch = async (action: any, doneKey: any, failKey: any) => {
     const ids = [...selected];
     if (ids.length === 0) {
@@ -861,7 +950,14 @@ function ArchivePanel(props: any) {
           onClick: deleteSelected
         }, confirmingDelete
           ? (selected.size > 1 ? t("confirmAll").replace("{n}", String(selected.size)) : t("deleteConfirm"))
-          : t("delete"))
+          : t("delete")),
+        React.createElement("button", {
+          className: "sa_action",
+          type: "button",
+          disabled: busy || !hasSelection || detailLoading.size > 0,
+          title: t("exportMd"),
+          onClick: () => void exportSelected(),
+        }, t("exportMd"))
       ),
       React.createElement(
         "div",
