@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
@@ -442,26 +442,42 @@ describe("session-archive host", () => {
     clearTimeout(recreate);
     expect(once.deleted.includes("r1") && !fs.existsSync(sessionPath("r1"))).toBe(true);
 
-    // 持续重建:setImmediate 逐事件轮询写回(不用定时器间隔——CI 慢机上
-    // 50ms 定时器可能被饿满整个 300ms settle 窗口,两次 stat 都扑空,曾致
-    // publish 流水假红)。事件循环只要在转,rm 后下一个轮询必写回,两次
-    // rm 都压不掉 → failed('reappeared')。
-    let writing = true;
-    void (async () => {
-      while (writing) {
-        try {
-          fs.mkdirSync(path.dirname(sessionPath("r2")), { recursive: true });
-          fs.writeFileSync(sessionPath("r2"), "{}");
-        } catch {}
-        await new Promise((resolve) => setImmediate(resolve));
-      }
-    })();
-    const repeated = await archiveHost.deleteArchived(["r2"]);
-    writing = false;
-    expect(repeated.deleted.length === 0
-      && repeated.failed.length === 1
-      && repeated.failed[0]!.sessionId === "r2"
-      && repeated.failed[0]!.reason === "reappeared").toBe(true);
+    // 持续重建(确定性):冻结宿主 delay(fake timers 只伪装 setTimeout/
+    // clearTimeout,setImmediate 与真实 fs 保持原样),测试在「rm 落定 →
+    // 复验 stat」两个同步点之间显式写回——stat 执行时文件必然存在,不再
+    // 与真实时钟竞速(50ms 定时器在 CI 慢机上可被饿满 300ms settle 窗口,
+    // 曾致 publish 流水两次假红)。若同步点推断有误,断言会带完整结果对象
+    // 明确失败,不会偶发翻转。
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      /** 等 impl 的「rm 文件 + rmdir 会话目录」整体落定(目录消失)。同步到
+       * 目录级而非文件级:写回若落在 rm 与 rmdir 的间隙里,rmdir 会以
+       * ENOTEMPTY 失败(实测即 CI 假红的真实 reason)。setImmediate 保持
+       * 真实,轮询推进真实 fs 操作;迭代上限防御挂死。 */
+      const sessionDir = path.dirname(sessionPath("r2"));
+      const waitRm = async () => {
+        for (let i = 0; i < 10000 && fs.existsSync(sessionDir); i++) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        expect(fs.existsSync(sessionDir)).toBe(false);
+      };
+      const recreate = () => {
+        fs.mkdirSync(sessionDir, { recursive: true });
+        fs.writeFileSync(sessionPath("r2"), "{}");
+      };
+      const pending = archiveHost.deleteArchived(["r2"]);
+      await waitRm();                              // rm#1 + rmdir#1 落定
+      recreate();                                  // 删除窗口内第一次重建
+      await vi.advanceTimersByTimeAsync(300);      // 复验 stat#1 → 存在 → rm#2
+      await waitRm();                              // rm#2 + rmdir#2 落定
+      recreate();                                  // 第二次重建
+      await vi.advanceTimersByTimeAsync(300);      // 复验 stat#2 → 存在
+      const repeated = await pending;
+      expect(repeated.deleted).toEqual([]);
+      expect(repeated.failed).toEqual([{ sessionId: "r2", reason: "reappeared" }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("官方契约回归:list() 快照形状 + open 句柄下归档列表与详情完整语义(bug 复现用例)", async () => {
