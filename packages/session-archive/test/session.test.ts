@@ -442,15 +442,22 @@ describe("session-archive host", () => {
     clearTimeout(recreate);
     expect(once.deleted.includes("r1") && !fs.existsSync(sessionPath("r1"))).toBe(true);
 
-    // 持续重建:每 50ms 写回一次,两次 rm 都压不掉 → failed('reappeared')。
-    const writer = setInterval(() => {
-      try {
-        fs.mkdirSync(path.dirname(sessionPath("r2")), { recursive: true });
-        fs.writeFileSync(sessionPath("r2"), "{}");
-      } catch {}
-    }, 50);
+    // 持续重建:setImmediate 逐事件轮询写回(不用定时器间隔——CI 慢机上
+    // 50ms 定时器可能被饿满整个 300ms settle 窗口,两次 stat 都扑空,曾致
+    // publish 流水假红)。事件循环只要在转,rm 后下一个轮询必写回,两次
+    // rm 都压不掉 → failed('reappeared')。
+    let writing = true;
+    void (async () => {
+      while (writing) {
+        try {
+          fs.mkdirSync(path.dirname(sessionPath("r2")), { recursive: true });
+          fs.writeFileSync(sessionPath("r2"), "{}");
+        } catch {}
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    })();
     const repeated = await archiveHost.deleteArchived(["r2"]);
-    clearInterval(writer);
+    writing = false;
     expect(repeated.deleted.length === 0
       && repeated.failed.length === 1
       && repeated.failed[0]!.sessionId === "r2"
