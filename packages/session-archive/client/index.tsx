@@ -87,10 +87,17 @@ var css = [
   ".sa_msgText{color:var(--dsw-alias-label-primary);white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:18px}",
   ".sa_msgTextUser{color:var(--dsw-alias-label-secondary)}",
   ".sa_msgBubble{max-width:85%;padding:8px 12px;border-radius:12px;font-size:12px;line-height:18px;overflow-wrap:anywhere;white-space:pre-wrap}",
-  ".sa_msgUser{align-self:flex-end;background:var(--dsw-alias-brand-primary,#1677ff);color:#fff;border-bottom-right-radius:4px}",
+  // 用户气泡是「品牌色填充面」：文字必须配 label-primary-foreground，
+  // 不能写死 #fff——浅色主题下 brand-primary 解析为 near-black（配白字尚可），
+  // 深色主题下解析为 near-white，白字压白底对比度仅 1.05:1，整条消息看不见。
+  // 该配对是宿主 Button.module.css 的 .primary 同款写法，两种主题都约 18.9:1。
+  ".sa_msgUser{align-self:flex-end;background:var(--dsw-alias-brand-primary,#1677ff);color:var(--dsw-alias-label-primary-foreground,#fff);border-bottom-right-radius:4px}",
   ".sa_msgAssistant{align-self:flex-start;background:var(--dsw-alias-bg-layer-2,rgba(0,0,0,0.04));color:var(--dsw-alias-label-primary);border-bottom-left-radius:4px}",
   ".sa_msgRoleChip{display:inline-block;font-size:10px;line-height:14px;padding:1px 6px;border-radius:4px;margin-bottom:2px}",
-  ".sa_msgRoleUser{color:rgba(255,255,255,.7);align-self:flex-end}",
+  // 角色标签是气泡上方的兄弟节点，落在行背景（.sa_row = bg-base）上而非
+  // 品牌色气泡内，所以不能用白色：浅色主题下白字压白底同样看不见。
+  // 与助手标签同用主题弱化标签色，仅靠对齐方向区分。
+  ".sa_msgRoleUser{color:var(--dsw-alias-label-secondary);align-self:flex-end}",
   ".sa_msgRoleAssistant{color:var(--dsw-alias-label-tertiary);align-self:flex-start}",
   ".sa_overlay--closing{opacity:0;transition:opacity .15s ease-out}",
   ".sa_panel--closing{opacity:0;transform:translate(-50%,-50%) scale(.97);transition:opacity .15s ease-out,transform .15s ease-out}",
@@ -1184,4 +1191,4 @@ async function apply(ctx: any) {
   }
 }
 
-export { apply, inject, trapTarget, needsDeleteAck, DELETE_ACK_THRESHOLD, ARCHIVE_PAGE_SIZE };
+export { apply, inject, trapTarget, needsDeleteAck, DELETE_ACK_THRESHOLD, ARCHIVE_PAGE_SIZE, css };
