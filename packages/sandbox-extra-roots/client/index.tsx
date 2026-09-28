@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { TypertRemoteContribution } from "@deepseek-ai/dsh-typert-protocol";
 
-var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:12px;min-width:0;overflow:hidden;transition:border-color .15s ease,box-shadow .15s ease}.ser_card[data-open=true]{border-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-shadow-lv1)}.ser_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:12px 14px;display:flex;transition:background-color .15s ease}.ser_header:hover,.ser_card[data-open=true]>.ser_header{background:var(--dsw-alias-interactive-bg-hover)}.ser_title{flex:1;min-width:0;font-size:14px;font-weight:600;line-height:20px}.ser_badge{white-space:nowrap;background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#faad14) 14%,transparent);color:var(--dsw-alias-state-warn-primary,#faad14);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;line-height:16px}.ser_body{border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-module-platform);padding:12px 14px 14px}.ser_field{flex-direction:column;gap:6px;padding:8px 0;display:flex}.ser_label{font-size:12px;font-weight:500;line-height:18px}.ser_textarea{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:8px 12px;font-size:12px;line-height:18px;resize:vertical;min-height:120px;font-family:var(--ds-font-family-code,monospace);transition:border-color .15s ease,box-shadow .15s ease}.ser_textarea:focus{outline:none;border-color:var(--dsw-alias-brand-primary,#1677ff);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary,#1677ff) 20%,transparent)}.ser_hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:11px;line-height:16px}.ser_footer{border-top:1px solid var(--dsw-alias-border-l2);justify-content:flex-end;align-items:center;gap:8px;padding:10px 0 2px;display:flex}.ser_save{font:inherit;cursor:pointer;border:1px solid transparent;border-radius:6px;padding:5px 16px;font-size:12px;font-weight:500;line-height:18px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-3);transition:all .15s ease}.ser_save:hover:not(:disabled){filter:brightness(1.1)}.ser_save:disabled{opacity:.4;cursor:default}.ser_discard{font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l1);background:0 0;color:var(--dsw-alias-label-secondary,#666);border-radius:6px;padding:5px 16px;font-size:12px;line-height:18px;transition:all .15s ease}.ser_discard:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.ser_discard:disabled{opacity:.4;cursor:default}.ser_status{flex:1;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px}.ser_warn{color:var(--dsw-alias-state-warn-primary)}.ser_danger{color:var(--dsw-alias-state-error-primary)}.ser_info{color:var(--dsw-alias-label-tertiary)}.ser_error{color:var(--dsw-alias-state-error-primary);margin:8px 0 0}.ser_spin{flex:none;width:10px;height:10px;border:1.5px solid var(--dsw-alias-border-l2);border-top-color:var(--dsw-alias-label-secondary);border-radius:50%;animation:ser-spin .8s linear infinite}@keyframes ser-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.ser_spin{animation:none}}";
+var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:14px;min-width:0;overflow:hidden;transition:border-color .15s ease,box-shadow .15s ease}.ser_card[data-open=true]{border-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-shadow-lv1)}.ser_header{appearance:none;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:12px 14px;display:flex;transition:background-color .15s ease}.ser_header:hover,.ser_card[data-open=true]>.ser_header{background:var(--dsw-alias-interactive-bg-hover)}.ser_title{flex:1;min-width:0;font-size:14px;font-weight:600;line-height:20px}.ser_badge{white-space:nowrap;background:color-mix(in srgb,var(--dsw-alias-state-warn-primary,#faad14) 14%,transparent);color:var(--dsw-alias-state-warn-primary,#faad14);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;line-height:16px}.ser_body{border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-module-platform);padding:14px 16px 16px}.ser_field{flex-direction:column;gap:6px;padding:8px 0;display:flex}.ser_label{font-size:12px;font-weight:500;line-height:18px}.ser_textarea{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);font:inherit;color:var(--dsw-alias-label-primary);border-radius:10px;padding:10px 12px;font-size:12px;line-height:20px;resize:vertical;min-height:148px;font-family:var(--ds-font-family-code,monospace);transition:border-color .15s ease,box-shadow .15s ease}.ser_textarea:focus{outline:none;border-color:var(--dsw-alias-brand-primary,#1677ff);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary,#1677ff) 20%,transparent)}.ser_textarea:disabled{opacity:.6}.ser_hint{color:var(--dsw-alias-label-secondary);margin:0;font-size:12px;line-height:18px}.ser_footer{border-top:1px solid var(--dsw-alias-border-l2);justify-content:flex-end;align-items:center;gap:10px;padding:12px 0 2px;margin-top:4px;display:flex}.ser_footer .ser_save{font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:6px 18px;font-size:12px;font-weight:600;line-height:18px;background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary,#1677ff));color:var(--dsw-alias-brand-primary-invert,var(--dsw-alias-label-primary-inverted,#fff));transition:background-color .15s ease,opacity .15s ease}.ser_footer .ser_save:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover,var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary,#1677ff)))}.ser_footer .ser_save:disabled{background:var(--dsw-alias-button-primary-dimmed,var(--dsw-alias-button-primary-fill,var(--dsw-alias-brand-primary,#1677ff)));opacity:.75;cursor:default}.ser_discard{font:inherit;cursor:pointer;border:1px solid var(--dsw-alias-border-l1);background:0 0;color:var(--dsw-alias-label-secondary,#666);border-radius:8px;padding:6px 18px;font-size:12px;font-weight:500;line-height:18px;transition:all .15s ease}.ser_discard:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}.ser_discard:disabled{opacity:.4;cursor:default}.ser_status{flex:1;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px}.ser_warn{color:var(--dsw-alias-state-warn-primary)}.ser_danger{color:var(--dsw-alias-state-error-primary)}.ser_info{color:var(--dsw-alias-label-tertiary)}.ser_error{color:var(--dsw-alias-state-error-primary);margin:8px 0 0;border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent);border-radius:8px;padding:8px 12px;font-size:12px;line-height:18px}.ser_spin{flex:none;width:10px;height:10px;border:1.5px solid var(--dsw-alias-border-l2);border-top-color:var(--dsw-alias-label-secondary);border-radius:50%;animation:ser-spin .8s linear infinite}@keyframes ser-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.ser_spin{animation:none}}.ser_header:focus-visible,.ser_action:focus-visible,.ser_save:focus-visible,.ser_discard:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#1677ff);outline-offset:2px}.ser_titleIcon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;background:color-mix(in srgb,var(--dsw-alias-brand-primary,#1677ff) 12%,transparent);color:var(--dsw-alias-brand-primary,#1677ff)}.ser_titleIcon svg{width:16px;height:16px;display:block}.ser_chev{flex:none;display:inline-flex;color:var(--dsw-alias-label-tertiary);transition:transform .15s ease}.ser_chev svg{width:14px;height:14px;display:block}.ser_card[data-open=true] .ser_chev{transform:rotate(180deg)}.ser_presets{border:1px dashed var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);border-radius:10px;padding:10px 12px;margin:10px 0 4px;display:flex;flex-direction:column;gap:8px}.ser_presetsRow{display:flex;flex-wrap:wrap;gap:8px}.ser_action{font-family:var(--ds-font-family-code,monospace);font-size:12px;line-height:18px;cursor:pointer;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);border-radius:999px;padding:4px 12px;transition:background-color .15s ease,border-color .15s ease}.ser_action:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-brand-primary,#1677ff)}.ser_action:disabled{opacity:.4;cursor:default}.ser_labelRow{display:flex;align-items:baseline;justify-content:space-between;gap:8px}.ser_count{flex:none;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}.ser_problems{display:flex;flex-direction:column;gap:6px;margin-top:8px}.ser_problem{display:block;border-radius:8px;padding:6px 10px;font-size:12px;line-height:18px;border:1px solid}.ser_problem--danger{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent)}.ser_problem--warn{color:var(--dsw-alias-state-warn-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 30%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 8%,transparent)}.ser_problem--info{color:var(--dsw-alias-label-secondary);border-color:var(--dsw-alias-border-l2);background:color-mix(in srgb,var(--dsw-alias-label-secondary) 6%,transparent)}.ser_status--ok{color:var(--dsw-alias-state-success-primary)}";
 
     var tagId = "@chaoset/sandbox-extra-roots/client.css";
     if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=\"" + tagId + "\"]") === null) {
@@ -117,7 +117,8 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       loadFailed: "读取配置失败",
       loading: "加载中…",
       roots: "额外可写目录（每行一个绝对路径，支持 ~）",
-      presetsTitle: "常用工具缓存（一键添加）：",
+      rootsCount: "共 {n} 个目录",
+      presetsTitle: "常用工具缓存（一键添加）", 
       placeholder: "~/data\n/tmp/cache",
       rootInvalid: "第 {n} 行「{v}」不是绝对路径，保存将被拒绝",
       rootDuplicate: "第 {n} 行「{v}」与前面的行重复（host 会去重）",
@@ -138,7 +139,8 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
       loadFailed: "Failed to load config",
       loading: "Loading…",
       roots: "Extra writable roots (one absolute path per line; ~ allowed)",
-      presetsTitle: "Common tool caches (one-tap add):",
+      rootsCount: "{n} roots",
+      presetsTitle: "Common tool caches (one-tap add)",
       placeholder: "~/data\n/tmp/cache",
       rootInvalid: "Line {n} \"{v}\" is not an absolute path; saving will be rejected",
       rootDuplicate: "Line {n} \"{v}\" duplicates an earlier line (deduped by host)",
@@ -230,9 +232,15 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
         React.createElement(
           "button",
           { className: "ser_header", type: "button", onClick: () => setOpen(!open), "aria-expanded": open, "aria-controls": "ser-roots-body" },
+          React.createElement("span", { className: "ser_titleIcon", "aria-hidden": true },
+            React.createElement("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+              React.createElement("path", { d: "M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z" }),
+              React.createElement("path", { d: "M9 12l2 2 4-4" }))),
           React.createElement("span", { className: "ser_title" }, t("title")),
           dirty ? React.createElement("span", { className: "ser_badge" }, t("unsaved")) : null,
-          React.createElement("span", { "aria-hidden": true }, open ? "▲" : "▼")
+          React.createElement("span", { className: "ser_chev", "aria-hidden": true },
+            React.createElement("svg", { viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+              React.createElement("path", { d: "M4 6l4 4 4-4" })))
         ),
         open ? React.createElement(
           "div",
@@ -240,10 +248,11 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
           React.createElement("p", { className: "ser_hint" }, t("hint")),
           React.createElement(
             "div",
-            { style: { display: "flex", flexWrap: "wrap", gap: "6px", margin: "2px 0 4px", alignItems: "center" } },
+            { className: "ser_presets" },
             React.createElement("span", { className: "ser_label" }, t("presetsTitle")),
-            // 预设 chips：点选即显式加入（用户对亲手加入的负责），复用保存
-            // 按钮同款 ser_action 样式；未加载/保存中禁用，与输入框同口径。
+            React.createElement("div", { className: "ser_presetsRow" },
+            // 预设 chips：点选即显式加入（用户对亲手加入的负责），未加载/保存中
+            // 禁用，与输入框同口径。
             ...presetsForPlatform(isDarwin, isWindows).map((path) => React.createElement(
               "button",
               {
@@ -258,12 +267,14 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
                 }
               },
               path
-            ))
+            )))
           ),
           React.createElement(
             "label",
             { className: "ser_field" },
-            React.createElement("span", { className: "ser_label" }, t("roots")),
+            React.createElement("div", { className: "ser_labelRow" },
+              React.createElement("span", { className: "ser_label" }, t("roots")),
+              React.createElement("span", { className: "ser_count" }, t("rootsCount").replace("{n}", String(parsedRoots.length)))),
             React.createElement("textarea", {
               className: "ser_textarea",
               value: draftText ?? "",
@@ -277,17 +288,14 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
             })
           ),
           rootProblems.length > 0 ? React.createElement(
-            "span",
-            { className: "ser_hint", role: "note", style: { display: "block", marginTop: "2px" } },
+            "div",
+            { className: "ser_problems", role: "note" },
             rootProblems.map((problem, index) => {
               const kind = problem.kind;
               const isDanger = kind === "danger" || kind === "homeAncestor" || kind === "invalid";
               const isWarn = kind === "system";
-              const prefix = isDanger ? "⛔ " : isWarn ? "⚠ " : "💡 ";
-              const cls = isDanger ? "ser_hint ser_danger" : isWarn ? "ser_hint ser_warn" : "ser_hint ser_info";
-              // emoji 前缀仅视觉编码（语义已在文案里），对读屏隐藏。
-              return React.createElement("span", { key: index, className: cls, style: { display: "block" } },
-                React.createElement("span", { "aria-hidden": true }, prefix),
+              const cls = isDanger ? "ser_problem ser_problem--danger" : isWarn ? "ser_problem ser_problem--warn" : "ser_problem ser_problem--info";
+              return React.createElement("div", { key: index, className: cls },
                 t("root" + kind.charAt(0).toUpperCase() + kind.slice(1))
                   // 函数替换:{v} 是用户输入的原始行,字符串替换串里的 $&/$`/$'
                   // 等特殊序列会把模板前后文拼进预览,显示的路径与实际输入不符。
@@ -309,7 +317,7 @@ var css = ".ser_card{border:1px solid var(--dsw-alias-border-l2);background:var(
             React.createElement(
               "span",
               {
-                className: "ser_status",
+                className: "ser_status" + (status !== null && status.kind === "ok" ? " ser_status--ok" : ""),
                 role: "status",
                 // 初次读取配置期间给出加载提示：此前只显示禁用的空白表单，
                 // 无法区分加载中与加载失败。
