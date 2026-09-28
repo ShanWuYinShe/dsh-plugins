@@ -57,15 +57,12 @@ function assistantEvent(seq: number, time: number, text: string) {
  * SessionPersistenceSnapshot 数组、open() read 句柄读事件流、事件 data
  * 为官方 SessionEventMap 形状（user/message 本体、assistant/message 包装）。
  * 默认带 locate——jsonl 后端的诊断钩子（不在抽象契约上），
- * withLocate=false 覆盖无 locate 后端的降级路径;withStat=false 覆盖
- * stat 不在契约上的宿主(四端点回退全量 list() 的降级路径)。
+ * withLocate=false 覆盖无 locate 后端的降级路径。
  */
 function makeFixture(options: {
   archived?: string[];
   headers?: Array<Record<string, any>>;
   withLocate?: boolean;
-  /** false = stat 不在契约上的宿主(四端点回退全量 list() 的降级路径)。 */
-  withStat?: boolean;
   /** sessionQuery 标题索引桩：map 给 fulfilled 标题（缺席=无标题）、
    * reject 列单行 rejected、throwAll 整单抛错。不传=无该服务（回退直读）。 */
   titles?: { map?: Record<string, string>; reject?: string[]; throwAll?: boolean };
@@ -108,8 +105,7 @@ function makeFixture(options: {
   let titleCalls = 0;
   // 官方契约 stat(id):只读该会话元数据;枚举不到(无 header 或文件已删)
   // 返回 undefined。四端点都走 stat 逐 id 定位，不做全量 list()。
-  // withStat=false 时完全不挂 stat——钉住 snapshotsByIds 的全量 list() 回退。
-  if (options.withStat !== false) persistenceMock.stat = async (id: string) => {
+  persistenceMock.stat = async (id: string) => {
     statCalls++;
     if (!headers.some((h) => h.id === id) || !fs.existsSync(sessionPath(id))) return void 0;
     const header = headerOf(id);
@@ -399,7 +395,7 @@ describe("session-archive host", () => {
     expect(fs.existsSync(path.join(saRoot, "--proj--", "s-y"))).toBe(true); // 目录保留
   });
 
-  it("unarchive:恢复仍存在文件的会话、拒绝 ghost;降级路径仅按存在性过滤", async () => {
+  it("unarchive:恢复仍存在文件的会话、拒绝 ghost", async () => {
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-un-"));
     const f = makeFixture({
       archived: ["u1", "u-ghost"],
@@ -422,15 +418,6 @@ describe("session-archive host", () => {
       && !f.registryState.archivedSessionIds.includes("u1")
       && f.registryState.archivedSessionIds.includes("u-ghost")).toBe(true);
 
-    // 降级(registry 无写入通道):列表按存在性过滤幽灵 id;恢复返回空而不崩溃。
-    const degraded = createArchiveHost({
-      ...f.ctx,
-      workspaceRegistry: { archivedSessionIds: ["u1", "u-ghost"] },
-    } as unknown as Context, baseCfg);
-    const degList = await degraded.list();
-    expect(degList.items.length === 1 && degList.items[0].sessionId === "u1").toBe(true);
-    const degUn = await degraded.unarchive(["u1"]);
-    expect(degUn.restored.length === 0 && degUn.removedFromArchive === 0).toBe(true);
   });
 
   it("TOCTOU 删除后复验:单次重建被再删掉;持续重建计入 failed('reappeared')", async () => {
@@ -522,40 +509,6 @@ describe("session-archive host", () => {
       && del.failed.length === 1
       && fs.existsSync(sessionPath("n1"))).toBe(true);
   });
-  it("无 stat 的宿主后端:四端点回退全量 list() 的降级路径", async () => {
-    // 钉住 snapshotsByIds 的降级:stat 不在契约上的宿主(老版本/异构后端)
-    // 回退一次全量 list() 按需挑出归档 id——此前该分支零覆盖,夹具恒有 stat。
-    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-nostat-"));
-    const f = makeFixture({
-      withStat: false,
-      archived: ["s1", "s2"],
-      headers: [
-        { id: "s1", cwd: "/proj/a", createdAt: 1000 },
-        { id: "s2", cwd: "/proj/b", createdAt: 2000 },
-      ],
-    });
-    writeSession("s1", [
-      { type: "session/title", seq: 1, time: 1, data: { title: "无stat一", messageSeqs: [], source: { kind: "fallback" } } },
-      messageEvent(2, 2, "内容"),
-    ]);
-    writeSession("s2", [
-      { type: "session/title", seq: 1, time: 1, data: { title: "无stat二", messageSeqs: [], source: { kind: "fallback" } } },
-    ]);
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
-
-    // list/count 走回退,行为与 stat 路径一致。
-    const listResult = await archiveHost.list();
-    expect(listResult.items.length === 2).toBe(true);
-    expect(listResult.items.find((i: any) => i.sessionId === "s1")?.title === "无stat一").toBe(true);
-    expect((await archiveHost.count()).count === 2).toBe(true);
-    expect(f.listCalls() > 0).toBe(true); // 确实走了全量 list() 回退
-
-    // delete 的 ghost 判定在回退路径下照常:文件删掉后 list() 枚举不到,
-    // 幂等删除(absent)语义与 stat 路径一致。
-    const del = await archiveHost.deleteArchived(["s2"]);
-    expect(del.deleted.length === 1 && del.deleted[0] === "s2").toBe(true);
-  });
-
   it("旧代际文件名(locate 指向当前代际落空):恢复/删除按目录扫描落到实际文件", async () => {
     // 线上故障第二形状:历史会话落盘为旧代际名 session.jsonl(.zstd),而
     // locate() 只按当前格式版本拼文件名 → stat 落空 → 恢复被判"文件不存在"
@@ -792,7 +745,7 @@ describe("session-archive host", () => {
     expect(count.count).toBe(2); // 幽灵 id 不计
     const items = await archiveHost.list();
     expect(items.items.length).toBe(2);
-    // 徽标轮询端点不该打全量枚举:stat 缺失才回退 list()。
+    // 徽标轮询端点不该打全量枚举:逐 id stat,不碰全量 list()。
     expect(f.listCalls()).toBe(0);
     expect(f.statCalls()).toBeGreaterThanOrEqual(6); // count 3 + list 3
   });

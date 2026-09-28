@@ -293,7 +293,7 @@ describe('WorkBuddy international variant', () => {
   })
 })
 
-describe('volatile configuration (DSH 0.1.7)', () => {
+describe('volatile configuration', () => {
   it('repoints each variant store from the live values', () => {
     const credentialSet: Array<string | undefined> = []
     const stores = {

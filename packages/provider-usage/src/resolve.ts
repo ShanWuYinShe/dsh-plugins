@@ -194,9 +194,10 @@ export function createProviderResolver(ctx: Context): (provider: string, signal:
     const credentials = ctx.get('credentials')
 
     if (entry !== undefined) {
-      // DSH 0.1.7 removed the namespace section read (`settings.get(ns)`): the
-      // forms service projects Loader profile entries, so the section is the
-      // resolved value of the descriptor keyed by the directory's settingsNs.
+      // The namespace section read (`settings.get(ns)`) is gone from the
+      // host: the forms service projects Loader profile entries, so the
+      // section is the resolved value of the descriptor keyed by the
+      // directory's settingsNs.
       const section = ctx.get('settings')?.describe().find(candidate => candidate.ns === entry.settingsNs)?.value
       const profile = profileOf(section, entry.settingsPath)
       baseURL = str(profile?.['baseURL'])

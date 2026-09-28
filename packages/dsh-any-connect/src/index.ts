@@ -625,7 +625,7 @@ export function apply(ctx: Context, config: Config): void {
     child.effect(() => child.settings.configure({ auto: false }, ctx.fiber))
   })
 
-  // DSH 0.1.7 commits profile edits into the volatile references without a
+  // The host commits profile edits into the volatile references without a
   // remount and dispatches `loader/volatile-update` to this fiber (values are
   // already committed when it fires). Re-read the configuration and push it
   // into every variant's stores, then re-resolve each catalog: an unchanged
@@ -831,9 +831,9 @@ export function apply(ctx: Context, config: Config): void {
             releaseDirectory = ctx.llm.registerConfigurableProviders([{
               provider: variant.id,
               displayName: variant.displayName,
-              // DSH 0.1.7: directory entries point at the Loader profile entry
-              // id; without a Loader fall back to the legacy namespace so
-              // bare-Context installs keep a stable, testable identity.
+              // Host directory entries point at the Loader profile entry id;
+              // without a Loader (bare-Context installs/tests) fall back to
+              // the plugin's own namespace for a stable, testable identity.
               settingsNs: ctx.fiber.entry?.options.id ?? variant.settingsNs,
               settingsPath: [],
               declared: false,

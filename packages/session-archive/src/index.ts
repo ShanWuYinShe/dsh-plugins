@@ -7,7 +7,7 @@
  *
  * host 端全部逻辑基于官方 service 契约类型（@deepseek-ai/dsh-workspace /
  * dsh-session / dsh-session-persistence / dsh-session-title 的官方 d.ts），
- * 面向 DSH 0.1.7-alpha 宿主线：
+ * 面向 DSH 0.2.0-rc.1 宿主线：
  *   1. list()       — archivedSessionIds ∩ 逐 id persistence.stat()，
  *                     每条附带标题（sessionQuery 批量索引优先，缺席回退
  *                     事件流分块读 + fold）、目录、创建时间、最后修改时间（文件
@@ -302,20 +302,11 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
    * 枚举不到（stat 返回 undefined 或抛错——jsonl 后端对重复 id 会抛异常）
    * 的 id 不出现在 Map 里，与 list() 时代「不在快照表里」的幽灵语义对齐：
    * list() 同样静默跳过首行损坏的日志；stat 抛错按枚举不到处理方向更保守
-   * （删除/恢复一律拒绝）。stat 不在契约上的宿主回退一次全量 list()。
+   * （删除/恢复一律拒绝）。
    */
   async function snapshotsByIds(ids: readonly string[]): Promise<Map<string, SessionPersistenceSnapshot>> {
     const result = new Map<string, SessionPersistenceSnapshot>();
     if (ids.length === 0) return result;
-    if (typeof (persistence as Partial<SessionPersistence>).stat !== 'function') {
-      const wanted = new Set(ids);
-      for (const snapshot of await persistence.list()) {
-        if (wanted.has(snapshot.header.id) && !result.has(snapshot.header.id)) {
-          result.set(snapshot.header.id, snapshot);
-        }
-      }
-      return result;
-    }
     await limitedConcurrency(8, ids.map((id) => async () => {
       try {
         const snapshot = await persistence.stat(id as SessionId);
@@ -372,14 +363,8 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
    * - confirm → unarchiveSession 段与 deleteArchived 的删除临界区经
    *   exclusive 互斥（见 exclusive）——官方写入串行只挡住其他归档集合
    *   写入者，挡不住不经过它的删除；
-   * - registry 缺失该方法（残缺 mock）时返回空：列表按存在性过滤
-   *   幽灵 id，功能仍正确。
    */
   async function removeFromArchiveSet(ids: string[], confirm?: (sessionId: string) => Promise<boolean>): Promise<string[]> {
-    const unarchiveSession = (registry as WorkspaceRegistry & {
-      unarchiveSession?: (sessionId: string) => Promise<void>;
-    }).unarchiveSession;
-    if (typeof unarchiveSession !== 'function') return []; // 降级：仅删文件，列表按存在性过滤幽灵 id
     const removedIds: string[] = [];
     for (const sessionId of new Set(ids)) {
       // confirm → 移除与 deleteArchived 的删除临界区互斥（见 exclusive）。
@@ -387,7 +372,7 @@ export function createArchiveHost(ctx: Context, cfg: Record<string, any>) {
         if (confirm !== undefined) {
           try { if (!(await confirm(sessionId))) return; } catch { return; }
         }
-        await unarchiveSession.call(registry, sessionId as SessionId);
+        await registry.unarchiveSession(sessionId as SessionId);
         removedIds.push(sessionId);
       });
     }

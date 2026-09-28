@@ -536,10 +536,10 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
         ctx.logger?.warn?.(`sandbox-extra-roots: settings gateway failed (core sandbox extension unaffected): ${(error as Error)?.message ?? String(error)}`);
       }
     }
-    // DSH 0.1.7 移除了 settings namespace 注册体系（`settings.register`
-    // 不复存在）：卡片可见性改由 Loader profile entry 与
+    // 宿主已移除 settings namespace 注册体系（`settings.register` 不复
+    // 存在）：卡片可见性改由 Loader profile entry 与
     // `plugins.bundle.config` slot 决定，卡片读写仍走上面的 config gateway。
-    // 此处不再做任何 settings 服务调用。
+    // 此处不做任何 settings 服务调用。
   } catch (error) {
     ctx.logger?.warn?.(`sandbox-extra-roots: init failed: ${(error as Error)?.message ?? String(error)}`);
   }
