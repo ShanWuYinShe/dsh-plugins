@@ -38,6 +38,13 @@ oauth:bigmodel:access_token / oauth:active_provider / zcodejwttoken ...
   需要 `bigmodel-organization` / `bigmodel-project` 身份头，个人版不需要。
 - **计划标识与发请求用的 key 解耦**：`zcodePlan`（客户端选择）标识账号，
   `accessToken`（实际 key）用于签名；不要把前者从后者推断出来。
+- **权益差异（2026-09-30 用户确认）**：
+  * **Start Plan = 普通通道 + 150% 额度，且不享受夜间免费**（23:00–09:00 免费窗
+    是 Coding Plan 专属权益）。
+  * 因此**不能只看模型行上的「夜间免费」徽标**决定要不要走夜免逻辑——那会让
+    start-plan 账号在夜间被标成「夜间免费 (生效中)」并把费率改写成 `x0.00`，
+    展示一个它拿不到的折扣（本机实测复现，见 0.4.9）。资格必须由账号计划决定：
+    `catalog.setNightFreeEligible(zcodePlan !== 'start-plan')`。
 
 ## 二、Start Plan 额度（可用）
 
