@@ -121,4 +121,35 @@ describe('Provider model parameter & billing isolation', () => {
     expect(resolvedWbHy4.billing?.credits).toBe('x0.29')
     expect(resolvedWbHy4.billing?.free).toBe(false)
   })
+
+  it('Start Plan 账号不享受夜间免费（走普通通道，只有 150% 额度）', () => {
+    // 北京时间 02:00，正是 Coding Plan 的夜免窗口。
+    const nightTime = Date.parse('2026-09-24T18:00:00Z')
+    const flash = FALLBACK_ZCODE_MODELS.find(m => m.id === 'glm-5.3-flash')!
+
+    // Coding Plan（默认资格）：夜间转免费。
+    const codingPlan = WorkBuddy.modelWithCurrentPromotion(flash, nightTime, 'zcode')
+    expect(codingPlan.billing?.free).toBe(true)
+    expect(codingPlan.billing?.credits).toBe('x0.00')
+    expect(codingPlan.billing?.badges).toContain('夜间免费 (生效中)')
+
+    // Start Plan：不享受夜免——不能转免费，也不能留着「夜间免费」徽标。
+    const startPlan = WorkBuddy.modelWithCurrentPromotion(flash, nightTime, 'zcode', false)
+    expect(startPlan.billing?.free).toBe(false)
+    expect(startPlan.billing?.credits).toBe('x0.06')
+    expect(startPlan.billing?.badges).not.toContain('夜间免费')
+    expect(startPlan.billing?.badges).not.toContain('夜间免费 (生效中)')
+    // 其余权益照常：150% 额度与白天基准价都不受影响。
+    expect(startPlan.billing?.badges).toContain('150% 额度')
+  })
+
+  it('catalog 的夜免资格开关按账号生效', () => {
+    const nightTime = Date.parse('2026-09-24T18:00:00Z')
+    const catalog = new WorkBuddyCatalog(FALLBACK_ZCODE_MODELS, 'zcode')
+    catalog.setNightFreeEligible(false)
+    const flash = catalog.current().find(m => m.id === 'glm-5.3-flash')
+    expect(flash?.billing?.free).toBe(false)
+    expect(flash?.billing?.badges ?? []).not.toContain('夜间免费 (生效中)')
+    expect(nightTime).toBeGreaterThan(0)
+  })
 })

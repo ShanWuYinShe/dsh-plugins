@@ -417,12 +417,27 @@ export function modelWithCurrentPromotion(
   model: WorkBuddyUpstreamModel,
   now = Date.now(),
   variantKind?: 'workbuddy' | 'zcode',
+  nightFreeEligible = true,
 ): WorkBuddyUpstreamModel {
   // Determine if this model belongs to ZCode (either explicitly marked or by ZCode-specific privilege badges)
   const isZCode = variantKind === 'zcode'
     || (variantKind === undefined && (model.billing?.badges?.some(b => b.includes('150% 额度')) ?? false))
 
   if (isZCode) {
+    // 夜间免费是 Coding Plan 的权益：Start Plan 走普通通道、只有 150% 额度，
+    // 不享受 23:00–09:00 免费窗。此时既不能标「夜间免费」，也不能把费率改写成
+    // x0.00——那会给用户一个它拿不到的折扣。行里自带的夜免徽标一并摘掉，
+    // 其余徽标（如 150% 额度）保留。
+    if (!nightFreeEligible) {
+      return {
+        ...model,
+        billing: {
+          ...model.billing,
+          free: false,
+          badges: (model.billing?.badges ?? []).filter(b => !b.includes('夜间免费')),
+        },
+      }
+    }
     const hasNightFreeBadge = model.billing?.badges?.some(b => b.includes('夜间免费'))
     if (hasNightFreeBadge) {
       const offpeak = isZCodeOffpeak(new Date(now))

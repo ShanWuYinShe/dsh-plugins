@@ -682,6 +682,14 @@ export function apply(ctx: Context, config: Config): void {
         // WorkBuddy 凭据带 uid/enterpriseId；RuntimeStore 的结构最小化类型
         // 只承诺 accessToken，这里按 kind 已分流的前提下还原完整形状。
         const identity = credentialIdentity(credential as unknown as Parameters<typeof credentialIdentity>[0])
+        // 夜间免费是 Coding Plan 的权益，Start Plan 不享受：账号计划取自已
+        // 解析的凭据（见 auth.ts 的 zcodePlan），刷新目录时一并告诉 catalog，
+        // 避免 start-plan 账号在 23:00~09:00 被标成免费。
+        if (variant.kind === 'zcode') {
+          catalog.setNightFreeEligible(
+            (credential as unknown as { zcodePlan?: string }).zcodePlan !== 'start-plan',
+          )
+        }
         if (identity !== runtime.lastIdentity) {
           // 账号真的换了（不是首次采用）：旧账号的探针记录不能留给新账号。
           // 首次登录不清除——那会删掉该账号自己在重启前写入的记录。

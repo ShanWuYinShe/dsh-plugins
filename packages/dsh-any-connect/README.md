@@ -108,6 +108,9 @@ profile/home 的 `cordis.patch.yml`（DSH 0.1.7 起第三方 provider 的模型�
     里**没有**自己的 key，插件回落到账户上的 coding-plan key——也就是说
     Start Plan 账号按**普通 ZCode 通道（150% 额度）**正常使用，模型与额度
     显示同一口径。
+  * **夜间免费只属于 Coding Plan**：23:00–09:00 免费窗是 Coding Plan 的权益，
+    Start Plan 不享受。选中 Start Plan 时插件不会给模型标「夜间免费」，也不会
+    把费率改写成 `x0.00`，而是保留基准价与 150% 额度标注。
   * **专属模型通道未接入**：ZCode 为 Start Plan 另开了一条
     `zcode.z.ai/api/v1/zcode-plan/anthropic`（Bearer 账号 JWT）。该通道被上游
     风控拦截（HTTP 405 `code 3012`）：真客户端、浏览器内同源页面、HTTP/1.1 与
