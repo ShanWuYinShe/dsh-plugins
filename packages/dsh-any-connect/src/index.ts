@@ -31,6 +31,16 @@ import { registerWorkBuddyStatusRoute } from './web-status.js'
 import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
 
 export { WORKBUDDY_PROVIDER, WORKBUDDY_STREAM_IDLE_TIMEOUT_MS, createWorkBuddyAdapter, type WorkBuddyAdapter } from './adapter.js'
+export {
+  ZCODE_PLAN_BALANCE_URL,
+  fetchZCodePlanCredits,
+  parseZCodePlanCredits,
+  planCredits,
+  zcodeDeviceMid,
+  type ZCodePlan,
+  type ZCodePlanBalance,
+  type ZCodePlanQueryOptions,
+} from './zcode-plan.js'
 export { createWorkBuddyShim, type WorkBuddyShim } from './shim.js'
 export {
   FALLBACK_WORKBUDDY_AI_MODELS,
@@ -53,7 +63,9 @@ export {
   desktopAuthCandidatesFor,
   parseWorkBuddyAuth,
   parseZCodeAuth,
+  parseZCodePlanSelection,
   RegionMismatchError,
+  selectZCodeAccountKey,
   WORKBUDDY_AUTH_FILE_ENV,
   WORKBUDDY_AUTH_FILENAME,
   WorkBuddyCredentialStore,
@@ -605,7 +617,10 @@ export function apply(ctx: Context, config: Config): void {
           return {
             provider: runtime.variant.id,
             displayName: runtime.variant.displayName,
-            plan: isZCode ? 'Coding Plan' : undefined,
+            // 计划名取上游回报的真实名称(如 "ZCode Trust Build"):ZCode 的
+            // 计划是按时段发放的包,activity 名会变,写死 "Coding Plan" 会把
+            // 用户没有的套餐名报给用户。拿不到名称时才退回中性占位。
+            plan: isZCode ? credits.accounts.find(account => account.planName !== undefined)?.planName ?? 'Coding Plan' : undefined,
             // pill 只要总数：WorkBuddy 同币种分包求和，ZCode 只取当前套餐。
             // 没人关心每一点的来处，明细在配置页卡片里看。
             windows: isZCode ? currentPlanWindow(credits.accounts) : totalCreditsWindows(credits.accounts),
@@ -744,17 +759,25 @@ export function apply(ctx: Context, config: Config): void {
       }
     })()
   }
-  ctx.effect(() => () => {
+  // 清理必须以 Promise 形式交回 cordis：宿主与测试都在 await 卸载完成，
+  // 而 fire-and-forget 的两处收尾（心跳删除、shim 关闭）会与调用方的后续
+  // 动作竞态——表现为临时目录删除时 ENOTEMPTY（心跳文件刚被写/删），以及
+  // 测试进程里残留的监听端口。返回 Promise 后 cordis 会等它落定。
+  ctx.effect(() => async () => {
     stopped = true
     clearInterval(sweep)
     clearInterval(catalogTimer)
     // close 期间 server 的 error 事件会 reject 该 promise,不捕获就是
     // unhandled rejection——Node 默认策略下会终止宿主进程,且恰发生在
     // dispose 路径。降级为告警日志。
-    for (const runtime of runtimes) {
-      runtime.shim.close().catch(error => ctx.logger?.warn?.(`dsh-any-connect: shim close failed: ${error}`))
-    }
-    void clearHostHeartbeat()
+    await Promise.all(runtimes.map(async runtime => {
+      try {
+        await runtime.shim.close()
+      } catch (error: unknown) {
+        ctx.logger?.warn?.(`dsh-any-connect: shim close failed: ${error}`)
+      }
+    }))
+    await clearHostHeartbeat()
   })
 
   // 身份核对：只读 current()，身份没变就什么都不做（零上游请求）。

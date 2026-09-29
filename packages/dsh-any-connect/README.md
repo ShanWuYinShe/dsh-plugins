@@ -102,6 +102,19 @@ profile/home 的 `cordis.patch.yml`（DSH 0.1.7 起第三方 provider 的模型�
 只读，字段改走补丁文件即时生效——Loader 以 volatile 引用提交，无需重装）。凭据来源的探测顺序与跨系统支持：
 - **WorkBuddy**：macOS / Linux 原生路径、Windows 的 Local → Roaming AppData、WSL 下挂载的 Windows 用户目录；亦可用 `WORKBUDDY_AUTH_FILE` / `WORKBUDDY_AI_AUTH_FILE` 环境变量显式指定。
 - **ZCode**：macOS（`~/.zcode/v2/credentials.json` 及 `Library/Application Support`）、Windows（`%USERPROFILE%\.zcode\v2\credentials.json` 及 Local/Roaming AppData）、WSL（优先通过 WSL 挂载探测 Windows 宿主用户目录与 AppData，并自动计算跨系统解密密钥，随后回落 Linux 原生目录）、Linux（`~/.zcode/v2/credentials.json` 及 `~/.config`）；亦可用 `ZCODE_AUTH_FILE` 环境变量显式指定。
+  * ZCode 账号下会有多把 key（team / individual），**以桌面端 `setting.json` 里
+    选中的账号为准**取用，而不是文件里的排列顺序；选中的计划（Start Plan /
+    off-peak 等）也一并读出。
+  * **Start Plan 额度**：账号计划按时段发放额度包（token 计），额度与活动名
+    在卡片上如实显示（例如 `ZCode Trust Build` / GLM-5.3-Flash 的剩余 token）。
+  * **Start Plan 的模型通道当前不可用**：上游对
+    `/api/v1/zcode-plan/anthropic` 施加风控（HTTP 405 `code 3012`）。实测
+    真客户端、浏览器内同源页面、HTTP/1.1 与 HTTP/2、以及签名/验证码/完整
+    身份头的各种组合均被拦截，而同刻同域的额度接口返回 200，因此本包只提供
+    可用的额度与套餐信息，不注册必然失败的模型分组。
+
+> 关于 ZCode 通道的实测证据与复现脚本，见仓库 `.workwork/zcode-startplan/`
+> （该目录不入库）。
 
 ## 发布线
 

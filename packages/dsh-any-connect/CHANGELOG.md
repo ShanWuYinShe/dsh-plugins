@@ -1,3 +1,20 @@
+## 0.4.8
+
+### 新增
+
+* **ZCode 账号计划（Start Plan）额度接入**：账号计划走的是 `zcode.z.ai/api/v1/zcode-plan/billing/balance`（Bearer 账号 JWT + `X-Device-Mid`），返回的是按时段发放的额度包（`total_units / used_units / remaining_units / expires_at`），与 Coding Plan 的积分接口是两套口径。开启该计划时额度与套餐名现在如实显示在卡片上（本机实测：`ZCode Trust Build`，GLM-5.3-Flash 100,000,000 tokens 额度）。设备 id 跟随 ZCode 桌面端注册值，未装桌面端时在 `$DSH_HOME` 生成并持久化（随机值会被服务端判为异常流量）。
+
+### 修复
+
+* **ZCode 凭据按客户端选择精确选取**：真实安装会同时存在 team 与 individual 两把 `...:api-key`（本机实测如此），旧实现取"第一个含 coding-plan 的条目"，选到哪把取决于对象插入顺序。现在读 `setting.json` 的 `providerFamilyConnectionSelections` 精确匹配；无选择信息时才回落到历史行为。
+* **计划归属以客户端选择为准**：账号计划（start-plan / off-peak）在凭据里没有对应的 api-key 条目，此时 accessToken 只能回落到别的账号的 key——那只说明"哪把 key 能用"，不说明账号属于哪个计划。此前会把回落的 key 当成计划，导致额度读到别的账号上去。
+* **计划名不再硬编码**：用量查询此前对 ZCode 固定上报 `Coding Plan`，而本机账号实际是 `GLM Coding Pro` / `ZCode Trust Build` 等活动名；现在回填上游回报的真实 `productName` / 计划名。
+* **卸载时收尾改为可等待**：dispose 里对心跳删除与 shim 关闭都是 fire-and-forget，与调用方的后续动作（宿主卸载、测试清理临时目录）竞态，表现为 `ENOTEMPTY` 偶发失败与残留监听端口；现在返回 Promise 由 cordis 等待落定。
+
+### 说明
+
+* ZCode 的 `/zcode-plan/anthropic` 模型通道当前被上游风控拦截（HTTP 405 `code 3012`）：真客户端、浏览器内同源页面、HTTP/1.1 与 HTTP/2、签名/验证码/身份头全组合实测均被拦，同刻同域的额度接口返回 200。因此本次只接入可用的额度与套餐信息，不注册必然失败的模型分组。
+
 ## 0.4.7 (2026-09-28)
 
 ### 优化

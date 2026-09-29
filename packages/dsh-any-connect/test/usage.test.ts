@@ -214,6 +214,29 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
   })
 })
 
+it('reports the upstream plan name for ZCode instead of a hardcoded label', async () => {
+    const { registry } = await boot({ signedIn: false })
+    // ZCode reads its own credentials document; point it at a stub one. The
+    // env var is read per resolution, so stubbing it after boot is the seam.
+    const credPath = join(root!, 'zcode-credentials.json')
+    await writeFile(credPath, JSON.stringify({
+      'account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:57271768622479063:api-key': 'id.secret',
+    }))
+    vi.stubEnv('ZCODE_AUTH_FILE', credPath)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      code: 200,
+      data: [{ productName: 'ZCode Trust Build', status: 'VALID', expireTime: 1_790_697_600 }],
+    }), { status: 200, headers: { 'content-type': 'application/json' } })))
+
+    const entry = registry.registered.find(candidate => candidate.provider === 'zcode')!
+    const snapshot = await entry.query({ provider: 'zcode' })
+    // 上游的计划名随活动变化(本机实测 "ZCode Trust Build"),界面必须回填它,
+    // 而不是写死 "Coding Plan" —— 那会把用户没有的套餐名报给用户。
+    expect(snapshot.displayName).toBe('ZCode')
+    expect((snapshot as { plan?: string }).plan).toBe('ZCode Trust Build')
+    expect(snapshot.windows[0]?.label).toBe('ZCode Trust Build')
+  })
+
   it('carries the variant display name through to the snapshot', async () => {
     const { registry } = await boot({ signedIn: true })
     await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })

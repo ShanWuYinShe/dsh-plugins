@@ -107,6 +107,14 @@ export interface WorkBuddyWebModelRow {
 /** One billing package and its remaining credit. */
 export interface WorkBuddyWebCreditAccount {
   packageName: string
+  /**
+   * The upstream plan this package belongs to, when it names one.
+   *
+   * Account plans (ZCode Start Plan) report an activity name that changes over
+   * time, while a coding-plan subscription reports the product name; the card
+   * shows whichever the upstream actually returned instead of a fixed label.
+   */
+  planName?: string
   remain: number
   size: number
   expiredAt?: string

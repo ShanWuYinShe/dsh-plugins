@@ -628,7 +628,12 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
   const zcodePlan = isZCode && status.credits?.accounts !== undefined
     ? (status.credits.accounts.find(a => a.remain > 0) ?? status.credits.accounts[0])
     : undefined
-  const zcodePlanName = zcodePlan ? zcodePlan.packageName.replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, '') : undefined
+  // 名称口径：账号计划（Start Plan）回报的是活动名（planName），Coding Plan
+  // 回报的是订阅名（packageName）。两者都是上游给的真实名字，谁有就用谁——
+  // 卡片此前只认 packageName，于是账号计划下显示的是额度包的展示名。
+  const zcodePlanName = zcodePlan
+    ? (zcodePlan.planName ?? zcodePlan.packageName).replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, '')
+    : undefined
   const isPlanActive = zcodePlan !== undefined && zcodePlan.remain > 0
 
   // 卡头摘要：已登录身份 + 当前积分/套餐状态，收起态下也要一眼看到。

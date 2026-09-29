@@ -12,6 +12,7 @@ import { appUserAgent, resolveAppVersion, type AppVersionInfo } from './app-vers
 import type { ProbeAttempt } from './probe.js'
 import { deadlineSignal, withTimeout } from './timeout.js'
 import { ZCodeClientSigner } from './zcode-signer.js'
+import { fetchZCodePlanCredits } from './zcode-plan.js'
 
 /** Prompt body used by every probe request; carries nothing user-specific. */
 const PROBE_PROMPT = 'ping'
@@ -143,6 +144,14 @@ export interface WorkBuddyCreditAccount {
   remain: number
   size: number
   expiredAt?: string
+  /**
+   * The upstream plan this package belongs to, when it names one.
+   *
+   * ZCode's account plans are packages, not credits: the plan's own name is the
+   * meaningful label ("ZCode Trust Build"), and a display that hardcodes
+   * "Coding Plan" would report a plan the account does not have.
+   */
+  planName?: string
 }
 
 /** Aggregated credit answer for one credential. */
@@ -1156,6 +1165,19 @@ export class WorkBuddyUpstreamClient {
   }
 }
 
+/**
+ * Whether a ZCode plan draws on the account quota service rather than on a
+ * Coding Plan subscription.
+ *
+ * Start Plan and the off-peak relay are both server-issued quota packages on
+ * the account side; only the coding-plan kinds have a subscription to read.
+ * An install whose selection cannot be read (older file, missing
+ * `setting.json`) reports `undefined` and keeps the historical behavior.
+ */
+function isZCodeAccountPlan(plan: WorkBuddyCredential['zcodePlan']): boolean {
+  return plan === 'start-plan' || plan === 'off-peak'
+}
+
 /** Options for ZCodeUpstreamClient. */
 export interface ZCodeUpstreamClientOptions {
   signer?: ZCodeClientSigner
@@ -1254,6 +1276,18 @@ export class ZCodeUpstreamClient {
   }
 
   async fetchCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
+    // 账号计划（Start Plan / off-peak）的额度在 zcode.z.ai 上按包下发，与下面
+    // 这条 bigmodel 订阅接口完全是两套口径。账号 JWT 存在且计划属于账号体系时
+    // 优先走计划额度：本机实测账号根本没有 Coding Plan 订阅，那条接口只会
+    // 401，卡片于是长期显示不到任何数字。
+    if (credential.zcodeJwtToken !== undefined && isZCodeAccountPlan(credential.zcodePlan)) {
+      try {
+        const planCredits = await fetchZCodePlanCredits({ jwt: credential.zcodeJwtToken })
+        if (planCredits.accounts.length > 0) return planCredits
+      } catch {
+        // 计划额度读不到时继续走下面的订阅查询：两条通道任一条能答就够卡片用。
+      }
+    }
     const creditsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
     try {
       const response = await fetch('https://bigmodel.cn/api/biz/subscription/list', {
@@ -1283,6 +1317,10 @@ export class ZCodeUpstreamClient {
           }
           accounts.push({
             packageName: isValid ? `${name} (有效)` : `${name} (${item.status ?? '未知'})`,
+            // 计划名单独留一份:上游的产品名就是用户看到的活动/套餐名(例如
+            // "ZCode Trust Build"),界面上的 plan 标签必须用它,而不是写死
+            // "Coding Plan"——那会把用户实际没有的套餐名报给用户。
+            planName: name,
             remain: isValid ? 1 : 0,
             size: 1,
             ...expiredAt === undefined ? {} : { expiredAt },

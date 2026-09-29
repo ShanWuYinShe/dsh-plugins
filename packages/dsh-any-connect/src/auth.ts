@@ -10,6 +10,7 @@
 
 import crypto from 'node:crypto'
 import os from 'node:os'
+import { readFileSync } from 'node:fs'
 import { readFile, rm, stat } from 'node:fs/promises'
 import { homedir, release } from 'node:os'
 import { basename, dirname, join } from 'node:path'
@@ -31,6 +32,23 @@ export interface WorkBuddyCredential {
   nickname?: string
   /** Which storage the credential was read from; refreshes are always `dsh`. */
   source: 'desktop' | 'dsh'
+  /**
+   * The account JWT from the ZCode credentials document (`zcodejwttoken`).
+   *
+   * ZCode's account channels — Start Plan and the off-peak relay — authenticate
+   * with this token instead of the account API key. Present only for a ZCode
+   * install that has one.
+   */
+  zcodeJwtToken?: string
+  /**
+   * Which plan the ZCode client has selected for this account, read from the
+   * `setting.json` beside the credentials file.
+   *
+   * The same credentials document can hold several account keys (team,
+   * individual, start plan), so the selected plan — not the document order — is
+   * what says which one a request must authenticate with.
+   */
+  zcodePlan?: ZCodePlanKind
 }
 
 /** Read-only sign-in summary for status and doctor output. */
@@ -332,8 +350,130 @@ export function decryptZCodeEncryptedKey(
   throw lastError instanceof Error ? lastError : new Error('Invalid ZCode enc:v1 credential format')
 }
 
+/** Family a ZCode account provider belongs to; mirrors the client's own enum. */
+export type ZCodeFamily = 'bigmodel' | 'zai'
+
 /**
- * Parse a ZCode credentials.json document into a WorkBuddyCredential representation.
+ * Which plan a ZCode account provider serves. Mirrors the client's own enum,
+ * so the value read out of `setting.json` is used verbatim.
+ */
+export type ZCodePlanKind = 'individual-coding-plan' | 'team-coding-plan' | 'start-plan' | 'off-peak'
+
+/** Every plan kind the desktop client can record for an account provider. */
+export const ZCODE_PLAN_KINDS: readonly ZCodePlanKind[] = [
+  'individual-coding-plan',
+  'team-coding-plan',
+  'start-plan',
+  'off-peak',
+]
+
+/** One decoded account selection, as `setting.json` records it. */
+export interface ZCodeAccountSelection {
+  family: ZCodeFamily
+  plan: ZCodePlanKind
+}
+
+/** The account-provider credential key shape the ZCode client writes. */
+const ZCODE_ACCOUNT_KEY = /^account-provider:coding-plan:account:(bigmodel|zai)-([a-z-]+):account:([^:]+):api-key$/u
+
+function isPlanKind(value: string): value is ZCodePlanKind {
+  return (ZCODE_PLAN_KINDS as readonly string[]).includes(value)
+}
+
+/**
+ * Read which account provider the ZCode client currently has selected.
+ *
+ * `setting.json` sits next to `credentials.json` and records the pick as
+ * `providerFamilyConnectionSelections: { <family>: { kind } }`, with
+ * `providerFamilyDomain` naming the active family. Both are plain JSON (the
+ * file holds no secrets), so this is a read of user configuration rather than
+ * of credential material; every failure is a miss, never an error.
+ */
+export function parseZCodePlanSelection(text: string): ZCodeAccountSelection | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
+  const settings = parsed as Record<string, unknown>
+
+  const rawDomain = settings['providerFamilyDomain']
+  const domain = typeof rawDomain === 'string' ? rawDomain.trim() : ''
+  const family: ZCodeFamily | undefined = domain === 'bigmodel' || domain === 'zai' ? domain : undefined
+
+  const selections = settings['providerFamilyConnectionSelections']
+  if (typeof selections !== 'object' || selections === null || Array.isArray(selections)) return undefined
+  const byFamily = selections as Record<string, unknown>
+
+  // The active family wins; without one, fall back to the only family that
+  // carries a selection — a single-selection document is unambiguous.
+  const candidates: ZCodeFamily[] = family !== undefined
+    ? [family, ...(family === 'bigmodel' ? ['zai'] as const : ['bigmodel'] as const)]
+    : ['bigmodel', 'zai']
+  for (const candidate of candidates) {
+    const entry = byFamily[candidate]
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue
+    const kind = (entry as Record<string, unknown>)['kind']
+    if (typeof kind === 'string' && isPlanKind(kind)) return { family: candidate, plan: kind }
+  }
+  return undefined
+}
+
+/**
+ * Pick which `...:api-key` entry of a ZCode credentials document to use.
+ *
+ * The document is a flat map keyed by provider id, and a real install holds one
+ * entry per account provider the user has ever connected — this machine carries
+ * both a team and an individual coding-plan key. Taking the first match (the
+ * historical behavior) therefore depended on object insertion order and handed
+ * the request whichever key happened to be written first. The client itself
+ * resolves through its own `setting.json` selection, so an explicit selection
+ * wins here too; only without one does this fall back to the historical scan.
+ */
+export function selectZCodeAccountKey(
+  entries: readonly (readonly [string, string])[],
+  selection?: ZCodeAccountSelection,
+): { documentKey: string; value: string; uid: string; family?: ZCodeFamily; plan?: ZCodePlanKind } | undefined {
+  const typed = entries.flatMap(([documentKey, value]) => {
+    const match = ZCODE_ACCOUNT_KEY.exec(documentKey)
+    if (match === null) return []
+    return [{ documentKey, value, family: match[1] as ZCodeFamily, plan: match[2]!, uid: match[3]! }]
+  })
+  const shape = (entry: typeof typed[number], plan: ZCodePlanKind | undefined) => ({
+    documentKey: entry.documentKey,
+    value: entry.value,
+    uid: entry.uid,
+    family: entry.family,
+    ...plan === undefined ? {} : { plan },
+  })
+  if (selection !== undefined) {
+    const picked = typed.find(entry => entry.family === selection.family && entry.plan === selection.plan)
+    if (picked !== undefined) return shape(picked, selection.plan)
+  }
+  const fallback = typed[0]
+  if (fallback === undefined) return undefined
+  return shape(fallback, isPlanKind(fallback.plan) ? fallback.plan : undefined)
+}
+
+/** Read the account selection recorded beside a ZCode credentials file. */
+function readZCodeSelection(desktopPath: string | undefined): ZCodeAccountSelection | undefined {
+  if (desktopPath === undefined) return undefined
+  try {
+    return parseZCodePlanSelection(readFileSync(join(dirname(desktopPath), 'setting.json'), 'utf8'))
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Parse a ZCode credentials.json document into a WorkBuddyCredential
+ * representation.
+ *
+ * Besides the account API key this also carries the `zcodejwttoken` used by
+ * the account (Start Plan / off-peak) channels: both live in the same document,
+ * and which one a request needs follows from the selected plan.
  */
 export function parseZCodeAuth(text: string, desktopPath?: string): WorkBuddyCredential | undefined {
   let parsed: unknown
@@ -345,21 +485,15 @@ export function parseZCodeAuth(text: string, desktopPath?: string): WorkBuddyCre
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
   const data = parsed as Record<string, unknown>
 
-  let apiKeyRaw: string | undefined
-  let uid = ''
-  for (const [key, value] of Object.entries(data)) {
-    if (typeof value === 'string' && key.includes('coding-plan') && key.endsWith(':api-key')) {
-      apiKeyRaw = value
-      const match = /account:([^:]+):api-key/.exec(key)
-      if (match) uid = match[1]!
-      break
-    }
-  }
+  const entries = Object.entries(data).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+  const selection = readZCodeSelection(desktopPath)
+  const picked = selectZCodeAccountKey(entries, selection)
 
+  let apiKeyRaw = picked?.value
+  let uid = picked?.uid ?? ''
   if (!apiKeyRaw && typeof data['apiKey'] === 'string') {
     apiKeyRaw = data['apiKey']
   }
-
   if (!apiKeyRaw) return undefined
 
   let decryptedKey: string
@@ -369,6 +503,24 @@ export function parseZCodeAuth(text: string, desktopPath?: string): WorkBuddyCre
     return undefined
   }
 
+  // The account JWT is what the Start Plan / off-peak channels authenticate
+  // with; an install that never used them simply has no such entry.
+  let zcodeJwtToken: string | undefined
+  const rawJwt = data['zcodejwttoken']
+  if (typeof rawJwt === 'string' && rawJwt !== '') {
+    try {
+      const decrypted = decryptZCodeEncryptedKey(rawJwt, { desktopPath })
+      if (decrypted !== '') zcodeJwtToken = decrypted
+    } catch {
+      // A JWT that cannot be decrypted leaves the account-key channels intact.
+    }
+  }
+
+  // 计划以**客户端的选择**为准，而不是"哪一把 key 被选中"：账号计划
+  // （start-plan / off-peak）在凭据里根本没有对应的 api-key 条目，此时
+  // accessToken 只能回落到别的账号的 key——那只说明"这条通道能用哪把 key"，
+  // 不说明账号属于哪个计划。把回落的 key 当成计划会读错额度来源。
+  const plan = selection?.plan ?? picked?.plan
   return {
     accessToken: decryptedKey,
     refreshToken: '',
@@ -377,6 +529,8 @@ export function parseZCodeAuth(text: string, desktopPath?: string): WorkBuddyCre
     uid,
     nickname: 'ZCode User',
     source: 'desktop',
+    ...zcodeJwtToken === undefined ? {} : { zcodeJwtToken },
+    ...plan === undefined ? {} : { zcodePlan: plan },
   }
 }
 
