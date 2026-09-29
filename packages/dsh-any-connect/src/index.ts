@@ -31,16 +31,6 @@ import { registerWorkBuddyStatusRoute } from './web-status.js'
 import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
 
 export { WORKBUDDY_PROVIDER, WORKBUDDY_STREAM_IDLE_TIMEOUT_MS, createWorkBuddyAdapter, type WorkBuddyAdapter } from './adapter.js'
-export {
-  ZCODE_PLAN_BALANCE_URL,
-  fetchZCodePlanCredits,
-  parseZCodePlanCredits,
-  planCredits,
-  zcodeDeviceMid,
-  type ZCodePlan,
-  type ZCodePlanBalance,
-  type ZCodePlanQueryOptions,
-} from './zcode-plan.js'
 export { createWorkBuddyShim, type WorkBuddyShim } from './shim.js'
 export {
   FALLBACK_WORKBUDDY_AI_MODELS,

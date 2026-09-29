@@ -33,20 +33,14 @@ export interface WorkBuddyCredential {
   /** Which storage the credential was read from; refreshes are always `dsh`. */
   source: 'desktop' | 'dsh'
   /**
-   * The account JWT from the ZCode credentials document (`zcodejwttoken`).
-   *
-   * ZCode's account channels — Start Plan and the off-peak relay — authenticate
-   * with this token instead of the account API key. Present only for a ZCode
-   * install that has one.
-   */
-  zcodeJwtToken?: string
-  /**
    * Which plan the ZCode client has selected for this account, read from the
    * `setting.json` beside the credentials file.
    *
    * The same credentials document can hold several account keys (team,
    * individual, start plan), so the selected plan — not the document order — is
-   * what says which one a request must authenticate with.
+   * what says which one a request must authenticate with. Account plans
+   * (`start-plan` / `off-peak`) carry no key of their own: they are served by
+   * the account's coding-plan key on the ordinary ZCode channel.
    */
   zcodePlan?: ZCodePlanKind
 }
@@ -448,10 +442,26 @@ export function selectZCodeAccountKey(
     family: entry.family,
     ...plan === undefined ? {} : { plan },
   })
+  // 只在凭据里确实存在该计划的 key 时才认这个选择。账号计划（start-plan）
+  // 从不写 api-key 条目——模型请求本来就该走它账户上的 coding-plan key
+  // （这是「按普通 ZCode 150% 额度使用」的口径），此时选择只用于识别账号，
+  // 不能让"找不到对应 key"把请求打回文件顺序。
   if (selection !== undefined) {
     const picked = typed.find(entry => entry.family === selection.family && entry.plan === selection.plan)
     if (picked !== undefined) return shape(picked, selection.plan)
   }
+  // 账号计划没有自己的 key：回落到同 family 的 coding-plan key 走普通通道。
+  // 个人版优先于团队版——团队 key 在服务端需要 bigmodel-organization /
+  // bigmodel-project 身份头（本包不发），个人版不需要，是更稳的默认；客户端
+  // 自己选中的那把若就在其中，则最先取它。
+  const pickFrom = (predicate: (entry: typeof typed[number]) => boolean): typeof typed[number] | undefined =>
+    typed.find(entry => entry.family === selection?.family && predicate(entry))
+  const preferred = selection === undefined
+    ? undefined
+    : pickFrom(entry => entry.plan === selection.plan)
+      ?? pickFrom(entry => entry.plan === 'individual-coding-plan')
+      ?? pickFrom(entry => entry.plan === 'team-coding-plan')
+  if (preferred !== undefined) return shape(preferred, preferred.plan as ZCodePlanKind)
   const fallback = typed[0]
   if (fallback === undefined) return undefined
   return shape(fallback, isPlanKind(fallback.plan) ? fallback.plan : undefined)
@@ -503,23 +513,10 @@ export function parseZCodeAuth(text: string, desktopPath?: string): WorkBuddyCre
     return undefined
   }
 
-  // The account JWT is what the Start Plan / off-peak channels authenticate
-  // with; an install that never used them simply has no such entry.
-  let zcodeJwtToken: string | undefined
-  const rawJwt = data['zcodejwttoken']
-  if (typeof rawJwt === 'string' && rawJwt !== '') {
-    try {
-      const decrypted = decryptZCodeEncryptedKey(rawJwt, { desktopPath })
-      if (decrypted !== '') zcodeJwtToken = decrypted
-    } catch {
-      // A JWT that cannot be decrypted leaves the account-key channels intact.
-    }
-  }
-
   // 计划以**客户端的选择**为准，而不是"哪一把 key 被选中"：账号计划
-  // （start-plan / off-peak）在凭据里根本没有对应的 api-key 条目，此时
-  // accessToken 只能回落到别的账号的 key——那只说明"这条通道能用哪把 key"，
-  // 不说明账号属于哪个计划。把回落的 key 当成计划会读错额度来源。
+  // （start-plan / off-peak）在凭据里根本没有对应的 api-key 条目，accessToken
+  // 只能回落到账户上的 coding-plan key——那只说明"用哪把 key 发请求"，不说明
+  // 账号属于哪个计划。两者用途不同（前者发请求，后者标识账号/展示）。
   const plan = selection?.plan ?? picked?.plan
   return {
     accessToken: decryptedKey,
@@ -529,7 +526,6 @@ export function parseZCodeAuth(text: string, desktopPath?: string): WorkBuddyCre
     uid,
     nickname: 'ZCode User',
     source: 'desktop',
-    ...zcodeJwtToken === undefined ? {} : { zcodeJwtToken },
     ...plan === undefined ? {} : { zcodePlan: plan },
   }
 }

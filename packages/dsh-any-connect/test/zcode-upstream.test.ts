@@ -100,7 +100,7 @@ it('prefers the account key the client selected, not document order', async () =
       expect(selectZCodeAccountKey(entries, { family: 'zai', plan: 'start-plan' })?.value).toBe('team-id.team-secret')
     })
 
-    it('reads the plan selection and the account JWT from the credentials document', async () => {
+    it('reads the plan selection from the credentials document', async () => {
       const parsed = parseZCodePlanSelection(JSON.stringify({
         providerFamilyDomain: 'bigmodel',
         providerFamilyConnectionSelections: {
@@ -128,10 +128,12 @@ it('prefers the account key the client selected, not document order', async () =
 
       const parsedCredential = parseZCodeAuth(JSON.stringify({
         'account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:57271768622479063:api-key': plainKey,
+        // 凭据里另有一份账号 JWT：模型请求不走它（账号计划按 coding-plan 通道
+        // 使用），插件也不应该把它解密出来带在凭据上。
         'zcodejwttoken': jwtEnc,
       }))
       expect(parsedCredential?.accessToken).toBe(plainKey)
-      expect(parsedCredential?.zcodeJwtToken).toBe('header.payload.sig')
+      expect(parsedCredential).not.toHaveProperty('zcodeJwtToken')
     })
 
 it('attributes the plan to the client selection, not to the fallback key', async () => {
@@ -151,8 +153,10 @@ it('attributes the plan to the client selection, not to the fallback key', async
 
       const parsed = parseZCodeAuth(await readFile(credPath, 'utf8'), credPath)
       expect(parsed?.zcodePlan).toBe('start-plan')
-      // 凭据里只有 team 的 key，仍按选择了读到它（请求要靠它签名）。
+      // 账号计划在凭据里没有自己的 key：请求回落到账户上的 coding-plan key。
+      // 这条回落是本包"按普通 ZCode 使用 Start Plan"的基础。
       expect(parsed?.accessToken).toBe('team-id.team-secret')
+      expect(parsed?.zcodePlan).toBe('start-plan')
 
       // 反过来：客户端选 individual 时，计划必须是 individual，不是文件里
       // 排在前面的那个。

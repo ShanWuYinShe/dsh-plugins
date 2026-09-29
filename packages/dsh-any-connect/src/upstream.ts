@@ -12,7 +12,6 @@ import { appUserAgent, resolveAppVersion, type AppVersionInfo } from './app-vers
 import type { ProbeAttempt } from './probe.js'
 import { deadlineSignal, withTimeout } from './timeout.js'
 import { ZCodeClientSigner } from './zcode-signer.js'
-import { fetchZCodePlanCredits } from './zcode-plan.js'
 
 /** Prompt body used by every probe request; carries nothing user-specific. */
 const PROBE_PROMPT = 'ping'
@@ -1165,19 +1164,6 @@ export class WorkBuddyUpstreamClient {
   }
 }
 
-/**
- * Whether a ZCode plan draws on the account quota service rather than on a
- * Coding Plan subscription.
- *
- * Start Plan and the off-peak relay are both server-issued quota packages on
- * the account side; only the coding-plan kinds have a subscription to read.
- * An install whose selection cannot be read (older file, missing
- * `setting.json`) reports `undefined` and keeps the historical behavior.
- */
-function isZCodeAccountPlan(plan: WorkBuddyCredential['zcodePlan']): boolean {
-  return plan === 'start-plan' || plan === 'off-peak'
-}
-
 /** Options for ZCodeUpstreamClient. */
 export interface ZCodeUpstreamClientOptions {
   signer?: ZCodeClientSigner
@@ -1276,18 +1262,10 @@ export class ZCodeUpstreamClient {
   }
 
   async fetchCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
-    // 账号计划（Start Plan / off-peak）的额度在 zcode.z.ai 上按包下发，与下面
-    // 这条 bigmodel 订阅接口完全是两套口径。账号 JWT 存在且计划属于账号体系时
-    // 优先走计划额度：本机实测账号根本没有 Coding Plan 订阅，那条接口只会
-    // 401，卡片于是长期显示不到任何数字。
-    if (credential.zcodeJwtToken !== undefined && isZCodeAccountPlan(credential.zcodePlan)) {
-      try {
-        const planCredits = await fetchZCodePlanCredits({ jwt: credential.zcodeJwtToken })
-        if (planCredits.accounts.length > 0) return planCredits
-      } catch {
-        // 计划额度读不到时继续走下面的订阅查询：两条通道任一条能答就够卡片用。
-      }
-    }
+    // 额度口径以「账户上的 coding-plan 订阅」为准，与客户端选了哪条账号计划
+    // 无关：模型请求本身就固定走 coding-plan 通道（Start Plan 的专属模型通道
+    // 被上游风控封锁，本包按普通 ZCode 150% 额度使用），额度显示自然也要跟
+    // 模型请求同一口径，否则卡片报的是一份用不上的余额。
     const creditsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
     try {
       const response = await fetch('https://bigmodel.cn/api/biz/subscription/list', {
