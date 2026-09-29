@@ -1,6 +1,6 @@
 ---
 name: dsh-any-connect-zcode
-description: dsh-any-connect 的 ZCode 通道事实与排障：凭据选取（team/individual/start-plan）、账号计划额度接口、plan 模型通道的风控封锁现状、反编译取证的定位手法、以及隔离实例端到端验证流程。触发：改 dsh-any-connect 的 ZCode 相关代码；排查 ZCode 额度/套餐名显示不对；判断 zcode-plan 模型通道能否使用；需要在本机反编译 ZCode 客户端或跑插件隔离实测。
+description: dsh-any-connect 的 ZCode 通道事实与排障：Coding Plan 与 Start Plan 双支持的取 key 规则（回落与优先级）、账号计划专属通道的风控封锁现状、反编译取证的定位手法、以及隔离实例端到端验证流程。触发：改 dsh-any-connect 的 ZCode 相关代码；排查 ZCode 额度/套餐名显示不对；判断 zcode-plan 模型通道能否使用；需要在本机反编译 ZCode 客户端或跑插件隔离实测。
 ---
 
 # dsh-any-connect × ZCode
@@ -31,6 +31,13 @@ oauth:bigmodel:access_token / oauth:active_provider / zcodejwttoken ...
 - `enc:v1:<iv>.<tag>.<ct>` = AES-256-GCM（base64url 三段），密钥 =
   SHA-256(`zcode-credential-fallback:<platform>:<homedir>:<username>`)，或 env
   `ZCODE_CREDENTIAL_SECRET`。
+- **双支持口径（2026-09-30 定）**：不区分账号计划都走**普通 ZCode 通道**
+  （`open.bigmodel.cn/api/anthropic` + 签名，150% 额度）。取 key 规则：
+  客户端选中的计划若有对应 key 就用它；否则（start-plan / off-peak 从不写 key）
+  回落同 family 的 coding-plan key，**个人版优先于团队版**——团队 key 在服务端
+  需要 `bigmodel-organization` / `bigmodel-project` 身份头，个人版不需要。
+- **计划标识与发请求用的 key 解耦**：`zcodePlan`（客户端选择）标识账号，
+  `accessToken`（实际 key）用于签名；不要把前者从后者推断出来。
 
 ## 二、Start Plan 额度（可用）
 
