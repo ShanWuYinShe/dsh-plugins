@@ -21,7 +21,7 @@
     },
     "packages/dsh-any-connect": {
       "name": "@chaoset/dsh-any-connect",
-      "version": "0.4.9",
+      "version": "0.4.10",
       "bin": {
         "dsh-any-connect": "./lib/bin.js",
       },
@@ -53,7 +53,7 @@
     },
     "packages/provider-usage": {
       "name": "@chaoset/provider-usage",
-      "version": "0.1.5",
+      "version": "0.1.6",
       "devDependencies": {
         "@deepseek-ai/cordis": "^4.0.4",
         "@deepseek-ai/dsh-api-session-controller": "^0.2.0-rc.2",
@@ -74,7 +74,7 @@
     },
     "packages/sandbox-extra-roots": {
       "name": "@chaoset/sandbox-extra-roots",
-      "version": "0.4.20",
+      "version": "0.4.21",
       "dependencies": {
         "@deepseek-ai/dsh-sandbox": "^0.2.0-rc.2",
       },
@@ -85,7 +85,7 @@
     },
     "packages/session-archive": {
       "name": "@chaoset/session-archive",
-      "version": "0.3.24",
+      "version": "0.3.25",
       "devDependencies": {
         "@deepseek-ai/dsh-scope": "^0.2.0-rc.2",
         "@deepseek-ai/dsh-session": "^0.2.0-rc.2",
@@ -667,23 +667,27 @@
 
     "negotiator": ["negotiator@1.1.0", "https://registry.npmmirror.com/negotiator/-/negotiator-1.1.0.tgz", { "dependencies": { "content-type": "^2.1.0" } }, "sha512-NMPBRMJgiQHjbd8phG3Vebdx4kZ1H121rbl5IkMqeOsahptB9BKo/d7oJ3zTXqTgagn2bWlNSXkh0QUGM31RYg=="],
 
-    "node-addon-native-custom-loader": ["node-addon-native-custom-loader@0.1.6", "https://registry.npmmirror.com/node-addon-native-custom-loader/-/node-addon-native-custom-loader-0.1.6.tgz", {}, "sha512-QaW7d8lTcGCXrpNVyFDtID3vrpa7vFdpcY9pql2/9FGFSe7tcSnhQOKZX+1aOWq+pB1d2ZwNnKAdQI5nD9wAXA=="],
+    "node-addon-native-custom-loader": ["node-addon-native-custom-loader@0.1.7", "https://registry.npmmirror.com/node-addon-native-custom-loader/-/node-addon-native-custom-loader-0.1.7.tgz", {}, "sha512-mny2aBXuqWZLu8xFg0Azk6HZd8tlEBbpkOMhideAY3OABE9tp38VeKo8/sw5g/qeYAAdE8oEmsmeJ5IBJd6YHg=="],
 
-    "node-addon-require-builtin": ["node-addon-require-builtin@0.1.6", "https://registry.npmmirror.com/node-addon-require-builtin/-/node-addon-require-builtin-0.1.6.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.6" }, "optionalDependencies": { "node-addon-require-builtin-darwin-arm64": "0.1.6", "node-addon-require-builtin-darwin-x64": "0.1.6", "node-addon-require-builtin-linux-arm64-gnu": "0.1.6", "node-addon-require-builtin-linux-x64-gnu": "0.1.6", "node-addon-require-builtin-win32-arm64-msvc": "0.1.6", "node-addon-require-builtin-win32-ia32-msvc": "0.1.6", "node-addon-require-builtin-win32-x64-msvc": "0.1.6" } }, "sha512-P9ZGMDkloktirLJSggfpxsJ9jog5FItE1Omxpj50UBn3LhD6TS6/yx0jEBXsCGK3P9EtW1EpQVA1QL5gb11GaQ=="],
+    "node-addon-require-builtin": ["node-addon-require-builtin@0.1.7", "https://registry.npmmirror.com/node-addon-require-builtin/-/node-addon-require-builtin-0.1.7.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.7" }, "optionalDependencies": { "node-addon-require-builtin-darwin-arm64": "0.1.7", "node-addon-require-builtin-darwin-x64": "0.1.7", "node-addon-require-builtin-linux-arm64-gnu": "0.1.7", "node-addon-require-builtin-linux-arm64-musl": "0.1.7", "node-addon-require-builtin-linux-x64-gnu": "0.1.7", "node-addon-require-builtin-linux-x64-musl": "0.1.7", "node-addon-require-builtin-win32-arm64-msvc": "0.1.7", "node-addon-require-builtin-win32-ia32-msvc": "0.1.7", "node-addon-require-builtin-win32-x64-msvc": "0.1.7" } }, "sha512-2/yiwaMEpIJdrsjwY/09IoLMLKJtyJGlPhtJd80a+B4x0+SYsnAorg5GlDyJHfTb/UgiIYzbNOgL3HHrigFaAQ=="],
 
-    "node-addon-require-builtin-darwin-arm64": ["node-addon-require-builtin-darwin-arm64@0.1.6", "https://registry.npmmirror.com/node-addon-require-builtin-darwin-arm64/-/node-addon-require-builtin-darwin-arm64-0.1.6.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.6" }, "os": "darwin", "cpu": "arm64" }, "sha512-KpaAh0mDcIScoJs7gD/mjXREcENJ023/DgWW3GrlLXFVzCE6bK6wFrTFpNfnkxZZP8yWsEWOg1o5T+uQ7olgTQ=="],
+    "node-addon-require-builtin-darwin-arm64": ["node-addon-require-builtin-darwin-arm64@0.1.7", "https://registry.npmmirror.com/node-addon-require-builtin-darwin-arm64/-/node-addon-require-builtin-darwin-arm64-0.1.7.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.7" }, "os": "darwin", "cpu": "arm64" }, "sha512-3n5SgmD6S4lCyeFPumbwfUh+YLssWiSF8GuToHdr00hBPhDikyzHCy2UV5qJUTDNNtUpfw9QuFijsC+ulnvmog=="],
 
-    "node-addon-require-builtin-darwin-x64": ["node-addon-require-builtin-darwin-x64@0.1.6", "https://registry.npmmirror.com/node-addon-require-builtin-darwin-x64/-/node-addon-require-builtin-darwin-x64-0.1.6.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.6" }, "os": "darwin", "cpu": "x64" }, "sha512-lh9o5rCvmkH8MZgBBmhyKzJRc1M1hJzgXLTFzB6iomRXNH9P1DKjN2nAJLmvGrdTij47Wcch1JVnlV5AG0cRCQ=="],
+    "node-addon-require-builtin-darwin-x64": ["node-addon-require-builtin-darwin-x64@0.1.7", "https://registry.npmmirror.com/node-addon-require-builtin-darwin-x64/-/node-addon-require-builtin-darwin-x64-0.1.7.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.7" }, "os": "darwin", "cpu": "x64" }, "sha512-ZelNDiBgGH//ZHw6FCv4VdWUxV2YwdZNa0za7nOJIYodGcow0rJX6san45iOI73/gd2qtyKBOrHgylDjnBblbg=="],
 
-    "node-addon-require-builtin-linux-arm64-gnu": ["node-addon-require-builtin-linux-arm64-gnu@0.1.6", "https://registry.npmmirror.com/node-addon-require-builtin-linux-arm64-gnu/-/node-addon-require-builtin-linux-arm64-gnu-0.1.6.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.6" }, "os": "linux", "cpu": "arm64" }, "sha512-DrQA3aS1LBn4NgrewbZkzSAWdSSRPD/fYO5AkQfvriQ/TQD3E2adB012sZ5eac6p9TAcTjUIYhk395AYVxo4Zw=="],
+    "node-addon-require-builtin-linux-arm64-gnu": ["node-addon-require-builtin-linux-arm64-gnu@0.1.7", "https://registry.npmmirror.com/node-addon-require-builtin-linux-arm64-gnu/-/node-addon-require-builtin-linux-arm64-gnu-0.1.7.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.7" }, "os": "linux", "cpu": "arm64" }, "sha512-osAdFdxBUeciYOAIMxxIZzVyPK73zex7xJvSAyfDPyY8cTxhGZVZGQnB0ZtZEy3TRQQ2psjWhu5HbcHXIXotXw=="],
 
-    "node-addon-require-builtin-linux-x64-gnu": ["node-addon-require-builtin-linux-x64-gnu@0.1.6", "https://registry.npmmirror.com/node-addon-require-builtin-linux-x64-gnu/-/node-addon-require-builtin-linux-x64-gnu-0.1.6.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.6" }, "os": "linux", "cpu": "x64" }, "sha512-8wCxrFlB2Ld5DhxIm2P+nNFnQ0wjzDE5sXF68EUhLH0X+z313B07TUQFMBKCOkyhZIIBh590dBmhHCuA43No2A=="],
+    "node-addon-require-builtin-linux-arm64-musl": ["node-addon-require-builtin-linux-arm64-musl@0.1.7", "https://registry.npmmirror.com/node-addon-require-builtin-linux-arm64-musl/-/node-addon-require-builtin-linux-arm64-musl-0.1.7.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.7" }, "os": "linux", "cpu": "arm64" }, "sha512-pN027xk8o64/i1evlncK3VoPGdnflHzMgD+MQ+vApMpu2U6XKc9KAqKiImTpMd+mtGxElkkhD/AXNybF0MscZw=="],
 
-    "node-addon-require-builtin-win32-arm64-msvc": ["node-addon-require-builtin-win32-arm64-msvc@0.1.6", "https://registry.npmmirror.com/node-addon-require-builtin-win32-arm64-msvc/-/node-addon-require-builtin-win32-arm64-msvc-0.1.6.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.6" }, "os": "win32", "cpu": "arm64" }, "sha512-NET6DiLnKrK2DHuO4NNN+zJz0CFas+RwpJlGY0d3A3A3tc5dJQqZXgw8DzLOn4cSTAQCaDq6+LbPyYX7jE2F3Q=="],
+    "node-addon-require-builtin-linux-x64-gnu": ["node-addon-require-builtin-linux-x64-gnu@0.1.7", "https://registry.npmmirror.com/node-addon-require-builtin-linux-x64-gnu/-/node-addon-require-builtin-linux-x64-gnu-0.1.7.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.7" }, "os": "linux", "cpu": "x64" }, "sha512-HedJA3MGD7I3rH/mPuPIaGTTtSm61L5uHv/90xHPy0tHGlP5cxC9Dt9l/5iwIrTE04LrT0woiG8Ef2Eg2sRyuA=="],
 
-    "node-addon-require-builtin-win32-ia32-msvc": ["node-addon-require-builtin-win32-ia32-msvc@0.1.6", "https://registry.npmmirror.com/node-addon-require-builtin-win32-ia32-msvc/-/node-addon-require-builtin-win32-ia32-msvc-0.1.6.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.6" }, "os": "win32", "cpu": "ia32" }, "sha512-oj4G51r81kJ3E2t5KknKhBNb8TmTWzc/t9x7jkBF9JeRd+1a0kr99mVJVYwJNxq9d3jpt7dgBdI8mxaomuXOEQ=="],
+    "node-addon-require-builtin-linux-x64-musl": ["node-addon-require-builtin-linux-x64-musl@0.1.7", "https://registry.npmmirror.com/node-addon-require-builtin-linux-x64-musl/-/node-addon-require-builtin-linux-x64-musl-0.1.7.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.7" }, "os": "linux", "cpu": "x64" }, "sha512-4SkkvMTQqwFRkNzWp8Jc+1e/wMzA893YYX6lhRFFXWcb+igpXq/KD92JEWI0RHr9rrQkwF51/9odyt0Jk9WnDA=="],
 
-    "node-addon-require-builtin-win32-x64-msvc": ["node-addon-require-builtin-win32-x64-msvc@0.1.6", "https://registry.npmmirror.com/node-addon-require-builtin-win32-x64-msvc/-/node-addon-require-builtin-win32-x64-msvc-0.1.6.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.6" }, "os": "win32", "cpu": "x64" }, "sha512-ZQ+6thVzQBOFamW7s3t2YqHsw99EEPBNH1uAjvCx4QfnjFJTsu6I/H3prpN8i6cSt6gjnQtArfWc2LXN2ufcJQ=="],
+    "node-addon-require-builtin-win32-arm64-msvc": ["node-addon-require-builtin-win32-arm64-msvc@0.1.7", "https://registry.npmmirror.com/node-addon-require-builtin-win32-arm64-msvc/-/node-addon-require-builtin-win32-arm64-msvc-0.1.7.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.7" }, "os": "win32", "cpu": "arm64" }, "sha512-nooBYRrieUMClXU3HBM+9yfOEXC0EJS3kFGJzu7oXocOgADKmAwt3xpF3YunjnyN9bty9/QaoZRlHG5EBX4Usg=="],
+
+    "node-addon-require-builtin-win32-ia32-msvc": ["node-addon-require-builtin-win32-ia32-msvc@0.1.7", "https://registry.npmmirror.com/node-addon-require-builtin-win32-ia32-msvc/-/node-addon-require-builtin-win32-ia32-msvc-0.1.7.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.7" }, "os": "win32", "cpu": "ia32" }, "sha512-i3/cymlUwzReJTtFLC75m+Gabi1RWa4ym4KgVThGLySy4/EJ0QldTv5VWHg3i7HP/g8gIWXwFrxTFk5v2DGchA=="],
+
+    "node-addon-require-builtin-win32-x64-msvc": ["node-addon-require-builtin-win32-x64-msvc@0.1.7", "https://registry.npmmirror.com/node-addon-require-builtin-win32-x64-msvc/-/node-addon-require-builtin-win32-x64-msvc-0.1.7.tgz", { "dependencies": { "node-addon-native-custom-loader": "0.1.7" }, "os": "win32", "cpu": "x64" }, "sha512-iwYELawC0J+nKFTIfJumU53VzTVDshSFUZCU6oUb4Uw+JAfsXCCA2WaSQbtmHng6ub0HEFqWgfh/Wp+qsEVtNg=="],
 
     "node-domexception": ["node-domexception@1.0.0", "https://registry.npmmirror.com/node-domexception/-/node-domexception-1.0.0.tgz", {}, "sha512-/jKZoMpw0F8GRwl4/eLROPA3cfcXtLApP0QzLmUT/HuPCZWyB7IY9ZrMeKw2O/nFIqPQB3PVM9aYm0F312AXDQ=="],
 
@@ -751,7 +755,7 @@
 
     "tinyglobby": ["tinyglobby@0.2.17", "https://registry.npmmirror.com/tinyglobby/-/tinyglobby-0.2.17.tgz", { "dependencies": { "fdir": "^6.5.0", "picomatch": "^4.0.4" } }, "sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g=="],
 
-    "tinyrainbow": ["tinyrainbow@3.1.1", "https://registry.npmmirror.com/tinyrainbow/-/tinyrainbow-3.1.1.tgz", {}, "sha512-yau8yJdTt989Mm0Bd/236QnzEiPf2xLLTqUZRUJOo/3CB078LSwzei343DgtJVmfJKJE3TMINY1u42SQsP6mXw=="],
+    "tinyrainbow": ["tinyrainbow@3.2.0", "https://registry.npmmirror.com/tinyrainbow/-/tinyrainbow-3.2.0.tgz", {}, "sha512-LgO3D9yZJjApUiuUfl9iFAwrtaX4+lok3wJIqttGoKCHlWUqHqbQpnxCf82L8FjgKsh4iGo78hqJwgL8F6To2A=="],
 
     "tldts": ["tldts@7.4.16", "https://registry.npmmirror.com/tldts/-/tldts-7.4.16.tgz", { "dependencies": { "tldts-core": "^7.4.16" }, "bin": { "tldts": "bin/cli.js" } }, "sha512-QwBER5KMR86IIjpIiO7H/Z3IMJPsZ1A6RKPAqzTTgOyUQUSt9FdnKcqhTaJmkY6HVrgouZHZR0ncK5QxvmnQeg=="],
 

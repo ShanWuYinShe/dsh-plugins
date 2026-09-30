@@ -7,7 +7,7 @@
  *
  * host 端全部逻辑基于官方 service 契约类型（@deepseek-ai/dsh-workspace /
  * dsh-session / dsh-session-persistence / dsh-session-title 的官方 d.ts），
- * 面向 DSH 0.2.0-rc.1 宿主线：
+ * 面向 DSH 0.2.0-rc.2 宿主线：
  *   1. list()       — archivedSessionIds ∩ 逐 id persistence.stat()，
  *                     每条附带标题（sessionQuery 批量索引优先，缺席回退
  *                     事件流分块读 + fold）、目录、创建时间、最后修改时间（文件

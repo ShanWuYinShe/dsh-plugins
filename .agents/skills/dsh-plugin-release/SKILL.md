@@ -65,6 +65,23 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    ```
    （2026-09-25 实测：0.1.7-rc.2 验证即用此法；根路径探测返回 401 属正常——服务在跑、只是要 token。）
 
+   **沙盒下 bun 装包要先重定向缓存（2026-09-30 实测）**：新 rc 的包尚未进本机
+   bun 缓存时，`bun install` 需要写工作区外的默认缓存目录，在 `workspace-write`
+   下报 `error: bun is unable to write files to tempdir: EPERM`（重定向 `TMPDIR`
+   无效，报错指的是缓存而非临时目录）。解法是给它一个工作区内的缓存目录：
+
+   ```bash
+   BUN_INSTALL_CACHE_DIR=<repo>/.workwork/bun-cache bun install
+   ```
+
+   **适配 rc 时务必检查传递依赖的版本漂移**：`adapt-dsh` 只改 `@deepseek-ai/dsh-*`
+   的 range，**不会动第三方依赖**。若宿主新增/升级了某个被插件直接依赖的库
+   （如 `@earendil-works/pi-ai`），会出现两版并存、同名类型互不兼容，`typecheck`
+   报一大段 `TS2322 ... is not assignable to ...`（报错里能看到两个版本号路径）。
+   解法：把插件的 range 提到宿主依赖的同一版本，`bun install` 后确认
+   `node_modules/.bun` 下只剩一份。2026-09-30 rc.2 适配即为此（pi-ai `^0.85.1`
+   → `^0.87.1`，宿主 `dsh-llm-pi-ai` 依赖后者）。
+
    插件用本地路径安装（`dsh plugin --profile web add /abs/path/to/packages/<pkg>`，
    符号链接即装；`--profile` 以各包 README 的用户口径为准），**验证的是工作树
    产物，与 GitHub Release 分发的 tarball 同源**；
