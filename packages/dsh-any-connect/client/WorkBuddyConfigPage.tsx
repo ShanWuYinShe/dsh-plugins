@@ -10,6 +10,8 @@ import {
   WORKBUDDY_PROBE_PATH,
   WORKBUDDY_STATUS_PATH,
   ZCODE_PROBE_PATH,
+  ZCODE_SP_PROBE_PATH,
+  ZCODE_SP_STATUS_PATH,
   ZCODE_STATUS_PATH,
 } from '../src/status-paths.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
@@ -81,6 +83,16 @@ const CARD_VARIANTS: readonly WorkBuddyCardVariant[] = [
     titleKey: 'titleZCode',
     introKey: 'introZCode',
     signedOutHintKey: 'signedOutHintZCode',
+  },
+  {
+    // Start Plan 是与 Coding Plan 完全独立的连接：独立分组、独立名单、
+    // 独立额度池（专属通道、当日有效），不是同一张卡上的可切换模式。
+    id: 'anyconnect-zcode-sp',
+    statusPath: ZCODE_SP_STATUS_PATH,
+    probePath: ZCODE_SP_PROBE_PATH,
+    titleKey: 'titleZCodeSP',
+    introKey: 'introZCodeSP',
+    signedOutHintKey: 'signedOutHintZCodeSP',
   },
 ]
 
@@ -225,6 +237,12 @@ const privilegeChipStyle: CSSProperties = {
   border: '1px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #1677ff) 20%, transparent)',
 }
 const planMetaStyle: CSSProperties = { fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)' }
+const planChipOffStyle: CSSProperties = {
+  ...privilegeChipStyle,
+  background: 'var(--dsw-alias-bg-layer-3, rgba(128, 128, 128, 0.12))',
+  color: 'var(--dsw-alias-label-tertiary)',
+  borderColor: 'transparent',
+}
 
 function formatExpiry(iso?: string): string {
   if (iso === undefined || iso === '') return ''
@@ -624,24 +642,28 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
     ? t('signedInAs', { nickname: '' }).replace(/[:：]\s*$/, '')
     : t('signedInAs', { nickname: status.nickname })
 
-  const isZCode = variant.id === 'anyconnect-zcode'
+  // 两个 ZCode 变体是完全独立的连接：coding 走普通通道扣订阅，start 走专属
+  // 通道扣当日有效的专属余额——卡片呈现随变体而定，没有可切换的"模式"。
+  const zcodeSide = variant.id === 'anyconnect-zcode' ? 'coding' : variant.id === 'anyconnect-zcode-sp' ? 'start' : undefined
+  const isZCode = zcodeSide !== undefined
+  const isStartPlanCard = zcodeSide === 'start'
   const zcodePlan = isZCode && status.credits?.accounts !== undefined
     ? (status.credits.accounts.find(a => a.remain > 0) ?? status.credits.accounts[0])
     : undefined
-  // 名称口径：账号计划（Start Plan）回报的是活动名（planName），Coding Plan
-  // 回报的是订阅名（packageName）。两者都是上游给的真实名字，谁有就用谁——
-  // 卡片此前只认 packageName，于是账号计划下显示的是额度包的展示名。
+  // 名称口径：Start Plan 卡报活动名（如 "ZCode Trust Build"），Coding Plan 卡
+  // 报订阅名（如 "GLM Coding Pro"）。都是上游给的真实名字，谁有就用谁。
   const zcodePlanName = zcodePlan
     ? (zcodePlan.planName ?? zcodePlan.packageName).replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, '')
     : undefined
   const isPlanActive = zcodePlan !== undefined && zcodePlan.remain > 0
+  const displayPlanName = isStartPlanCard ? (zcodePlanName ?? t('startPlanLabel')) : zcodePlanName
 
   // 卡头摘要：已登录身份 + 当前积分/套餐状态，收起态下也要一眼看到。
   const headerSummary = isZCode
     ? [
         label,
-        zcodePlanName !== undefined
-          ? `${zcodePlanName} · ${t(isPlanActive ? 'codingPlanActive' : 'codingPlanExpired')}`
+        displayPlanName !== undefined
+          ? `${displayPlanName} · ${t(isPlanActive ? 'codingPlanActive' : 'codingPlanExpired')}`
           : (status.credits !== undefined ? t('codingPlanActive') : undefined),
       ].filter(part => part !== undefined).join(' · ')
     : [
@@ -685,7 +707,7 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
               <div style={planCardStyle}>
                 <div style={planTitleRowStyle}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                    <span style={planNameStyle}>{zcodePlanName ?? t('codingPlanLabel')}</span>
+                    <span style={planNameStyle}>{displayPlanName ?? t('codingPlanLabel')}</span>
                     <span style={isPlanActive ? chipStyle : { ...chipStyle, background: 'var(--dsw-alias-bg-layer-3, rgba(128, 128, 128, 0.12))', color: 'var(--dsw-alias-label-tertiary)' }}>
                       {t(isPlanActive ? 'codingPlanActive' : 'codingPlanExpired')}
                     </span>
@@ -701,14 +723,33 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                   </button>
                 </div>
                 <div style={planBadgeRowStyle}>
-                  <span style={privilegeChipStyle}><span aria-hidden="true">⚡</span> {t('codingPlanExtraQuota')}</span>
-                  <span style={privilegeChipStyle}><span aria-hidden="true">🌙</span> {t('codingPlanNightFree')}</span>
+                  {isStartPlanCard ? (
+                    <span style={privilegeChipStyle}><span aria-hidden="true">🎯</span> {t('planDedicatedQuota')}</span>
+                  ) : (
+                    <span style={privilegeChipStyle}><span aria-hidden="true">⚡</span> {t('codingPlanExtraQuota')}</span>
+                  )}
+                  {isStartPlanCard
+                    ? <span style={planChipOffStyle}><span aria-hidden="true">🌙</span> {t('planNightFreeOff')}</span>
+                    : <span style={privilegeChipStyle}><span aria-hidden="true">🌙</span> {t('codingPlanNightFree')}</span>}
                 </div>
+                {isStartPlanCard && zcodePlan !== undefined && zcodePlan.size > 0 ? (
+                  <span style={planMetaStyle}>
+                    {t('planQuotaLine', { remain: formatNumber(zcodePlan.remain), size: formatNumber(zcodePlan.size) })}
+                  </span>
+                ) : null}
+                {/* 当日一次性池子：余额不会结转，必须显式说明——否则每日重置
+                    会被读成"攒着的额度"，用户会按不存在的余额做计划。判据取上游
+                    回报的 sameDay，而不是"这张卡是 Start Plan"：口径来自数据，
+                    上游哪天改成可累积也会如实跟着变。 */}
+                {isStartPlanCard && zcodePlan?.sameDay === true
+                  ? <span style={planMetaStyle}>{t('planNoCarryOver')}</span>
+                  : null}
                 {zcodePlan?.expiredAt ? (
                   <span style={planMetaStyle}>
                     {t('codingPlanExpiresAt', { date: formatExpiry(zcodePlan.expiredAt) })}
                   </span>
                 ) : null}
+                {isStartPlanCard ? <span style={planMetaStyle}>{t('planStartNote')}</span> : null}
               </div>
             </>
           ) : (

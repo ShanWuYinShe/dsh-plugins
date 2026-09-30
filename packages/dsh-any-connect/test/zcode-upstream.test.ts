@@ -6,12 +6,16 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   FALLBACK_ZCODE_MODELS,
+  FALLBACK_ZCODE_START_PLAN_MODELS,
   ZCodeUpstreamClient,
   decryptZCodeEncryptedKey,
   parseZCodeAuth,
   parseZCodePlanSelection,
   prepareAnthropicBody,
+  prepareStartPlanBody,
   selectZCodeAccountKey,
+  ZCODE_CLIENT_IDENTITY,
+  ZCODE_CLIENT_PREFIX,
   type WorkBuddyCredential,
 } from '../src/index.js'
 import type { ZCodeClientSigner } from '../src/zcode-signer.js'
@@ -128,12 +132,15 @@ it('prefers the account key the client selected, not document order', async () =
 
       const parsedCredential = parseZCodeAuth(JSON.stringify({
         'account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:57271768622479063:api-key': plainKey,
-        // 凭据里另有一份账号 JWT：模型请求不走它（账号计划按 coding-plan 通道
-        // 使用），插件也不应该把它解密出来带在凭据上。
+        // 凭据里另有一份账号 JWT：按 2026-09-30 口径解密携带（Start Plan 专属
+        // 通道的鉴权材料），是否使用由生效计划决定——这里与客户端选择无关，
+        // 只要文档里有就带上。
         'zcodejwttoken': jwtEnc,
       }))
       expect(parsedCredential?.accessToken).toBe(plainKey)
-      expect(parsedCredential).not.toHaveProperty('zcodeJwtToken')
+      expect(parsedCredential?.zcodeJwtToken).toBe('header.payload.sig')
+      // 设备号同步解析（专属通道硬要求 X-Device-Mid）。
+      expect(parsedCredential?.zcodeDeviceMid).toEqual(expect.any(String))
     })
 
 it('attributes the plan to the client selection, not to the fallback key', async () => {
@@ -422,5 +429,174 @@ it('attributes the plan to the client selection, not to the fallback key', async
       expect(output.system).toBe(42)
       expect(output.messages).toHaveLength(2)
     })  })
+})
+
+describe('Start Plan 专属通道（额度绝不与 Coding Plan 混用）', () => {
+  const startPlanCredential: WorkBuddyCredential = {
+    accessToken: 'ind-id.ind-secret',
+    refreshToken: '',
+    expiresAtMs: Number.MAX_SAFE_INTEGER,
+    domain: 'bigmodel.cn',
+    uid: 'test-id',
+    nickname: 'ZCode User',
+    source: 'desktop',
+    zcodePlan: 'start-plan',
+    zcodeJwtToken: 'jwt-token',
+    zcodeDeviceMid: 'mid-1',
+  }
+
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('start-plan 生效计划路由到 zcode-plan/anthropic，鉴权用 JWT+设备号（无 V4 签名）', async () => {
+    const mockFetch = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response('event: ok', { status: 200 }))
+    vi.stubGlobal('fetch', mockFetch)
+    const client = new ZCodeUpstreamClient()
+    const result = await client.chatStream(startPlanCredential, JSON.stringify({ model: 'glm-5.3-flash', max_tokens: 1, messages: [] }))
+    expect(result.ok).toBe(true)
+    expect(mockFetch.mock.calls[0]![0]).toBe('https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages')
+    const headers = ((mockFetch.mock.calls[0]![1] ?? {}) as RequestInit).headers as Record<string, string>
+    expect(headers['Authorization']).toBe('Bearer jwt-token')
+    expect(headers['X-Device-Mid']).toBe('mid-1')
+    expect(headers['X-Client-Sig']).toBeUndefined()
+  })
+
+  it('start-plan 请求体带上官方客户端指纹，Harness 自己的 system 提示词接在其后', async () => {
+    const mockFetch = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response('event: ok', { status: 200 }))
+    vi.stubGlobal('fetch', mockFetch)
+    const client = new ZCodeUpstreamClient()
+    const ownPrompt = 'You are DSH, the DeepSeek Harness coding agent.'
+    await client.chatStream(startPlanCredential, JSON.stringify({
+      model: 'glm-5.3-flash',
+      max_tokens: 1,
+      system: ownPrompt,
+      messages: [{ role: 'user', content: 'hi' }],
+    }))
+    const sent = JSON.parse(String(((mockFetch.mock.calls[0]![1] ?? {}) as RequestInit).body)) as {
+      system: Array<{ type: string; text: string }>
+    }
+    expect(sent.system[0]?.text).toBe(ZCODE_CLIENT_IDENTITY)
+    expect(sent.system[1]?.text).toBe(ZCODE_CLIENT_PREFIX)
+    // 指纹之外自己的提示词必须原样保留——否则就是拿官方身份顶掉了 DSH 的指令。
+    expect(sent.system[2]?.text).toBe(ownPrompt)
+  })
+
+  it('已带指纹的请求体不重复叠加（重试/重放安全）', async () => {
+    const mockFetch = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response('event: ok', { status: 200 }))
+    vi.stubGlobal('fetch', mockFetch)
+    const client = new ZCodeUpstreamClient()
+    const body = prepareStartPlanBody(JSON.stringify({ model: 'glm-5.3-flash', max_tokens: 1, messages: [] }))
+    await client.chatStream(startPlanCredential, body)
+    const sent = JSON.parse(String(((mockFetch.mock.calls[0]![1] ?? {}) as RequestInit).body)) as {
+      system: Array<{ text: string }>
+    }
+    expect(sent.system).toHaveLength(2)
+  })
+
+  it('coding-plan 生效计划即使携带 zcodejwttoken 仍走普通通道', async () => {
+    const mockFetch = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response('event: ok', { status: 200 }))
+    vi.stubGlobal('fetch', mockFetch)
+    const mockSigner = { buildHeaders: async () => ({ 'x-mock-signer': '1' }) } as unknown as ZCodeClientSigner
+    const client = new ZCodeUpstreamClient({ signer: mockSigner })
+    const result = await client.chatStream({ ...startPlanCredential, zcodePlan: 'individual-coding-plan' }, '{}')
+    expect(result.ok).toBe(true)
+    expect(mockFetch.mock.calls[0]![0]).toBe('https://open.bigmodel.cn/api/anthropic/v1/messages')
+  })
+
+  it('缺 zcodejwttoken 时明确报错且不发请求', async () => {
+    const mockFetch = vi.fn()
+    vi.stubGlobal('fetch', mockFetch)
+    const client = new ZCodeUpstreamClient()
+    const result = await client.chatStream({ ...startPlanCredential, zcodeJwtToken: undefined }, '{}')
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.message).toContain('zcodejwttoken')
+    }
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('3012 风控拦截映射为明确报错（说明未消耗额度、且不谎称通道被封），绝不回落普通通道', async () => {
+    const mockFetch = vi.fn(async () => new Response(
+      JSON.stringify({ code: 3012, msg: 'request has been blocked due to unusual activity.' }),
+      { status: 405 },
+    ))
+    vi.stubGlobal('fetch', mockFetch)
+    const client = new ZCodeUpstreamClient()
+    const result = await client.chatStream(startPlanCredential, '{}')
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.message).toContain('3012')
+      expect(result.message).toContain('未消耗任何额度')
+      expect(result.message).toContain('请求体指纹')
+      expect(result.message).toContain('Coding Plan')
+    }
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('start-plan 额度查 billing/balance 并映射 token 数与活动名', async () => {
+    const mockFetch = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      code: 0,
+      data: {
+        plans: [{ name: 'ZCode Trust Build', plan_id: 'zcode-v3-start-plan-trust-0930', ends_at: 1790784000 }],
+        balances: [{
+          show_name: 'GLM-5.3-Flash',
+          plan_id: 'zcode-v3-start-plan-trust-0930',
+          total_units: 100000000,
+          used_units: 5701561,
+          remaining_units: 94298439,
+          expires_at: 1790784000,
+        }],
+      },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', mockFetch)
+    const credits = await new ZCodeUpstreamClient().fetchCredits(startPlanCredential)
+    expect(credits.total).toBe(94298439)
+    expect(credits.accounts[0]?.planName).toBe('ZCode Trust Build')
+    expect(credits.accounts[0]?.remain).toBe(94298439)
+    expect(credits.accounts[0]?.size).toBe(100000000)
+    expect(credits.accounts[0]?.expiredAt).toBe(new Date(1790784000 * 1000).toISOString())
+    // 当日一次性池子：卡片据此声明"不结转"，而不是让它读成可累积余额。
+    expect(credits.accounts[0]?.sameDay).toBe(true)
+    const headers = ((mockFetch.mock.calls[0]![1] ?? {}) as RequestInit).headers as Record<string, string>
+    expect(headers['Authorization']).toBe('Bearer jwt-token')
+    expect(headers['X-Device-Mid']).toBe('mid-1')
+  })
+
+  it('模型名单按活动 entitlements 派生：只登记活动实际放行的模型', async () => {
+    const mockFetch = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      code: 0,
+      data: {
+        plans: [{
+          plan_id: 'zcode-v3-start-plan-trust-0930',
+          name: 'ZCode Trust Build',
+          status: 'active',
+          entitlements: [
+            { entitlement_id: 'e1', show_name: 'GLM-5.3-Flash', capabilities: ['model:glm-5.3-flash'] },
+          ],
+        }],
+        balances: [],
+      },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', mockFetch)
+    const models = await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_START_PLAN_MODELS })
+      .fetchModels(startPlanCredential)
+    // 实测：Trust Build 只放行 GLM-5.3-Flash，另外两个内置候选 400 code 3006。
+    expect(models.map(model => model.id)).toEqual(['glm-5.3-flash'])
+    expect(models[0]?.name).toBe('GLM-5.3-Flash')
+    const headers = ((mockFetch.mock.calls[0]![1] ?? {}) as RequestInit).headers as Record<string, string>
+    expect(headers['Authorization']).toBe('Bearer jwt-token')
+    expect(headers['X-Device-Mid']).toBe('mid-1')
+  })
+
+  it('授权信息拿不到时退回已注册名单，而不是让分组消失', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })))
+    const models = await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_START_PLAN_MODELS })
+      .fetchModels(startPlanCredential)
+    expect(models.map(model => model.id)).toEqual(FALLBACK_ZCODE_START_PLAN_MODELS.map(model => model.id))
+  })
+
+  it('额度查询失败如实抛错，绝不拿 Coding Plan 的订阅状态冒充', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })))
+    await expect(new ZCodeUpstreamClient().fetchCredits(startPlanCredential)).rejects.toThrow('Start Plan 额度查询失败')
+  })
 })
 

@@ -59,7 +59,7 @@ beforeEach(() => {
   // 各变体拉取 status：默认国内版返回已登录文档，国际版与 ZCode 返回未登录。
   vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
     const url = String(input)
-    if (url.includes('/ai/') || url.includes('/zcode/')) {
+    if (url.includes('/ai/') || url.includes('/zcode/') || url.includes('/zcode-sp/')) {
       return { ok: true, status: 200, json: async () => ({ status: 'signed-out' }) }
     }
     return { ok: true, status: 200, json: async () => STATUS_DOC }

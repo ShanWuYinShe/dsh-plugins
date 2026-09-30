@@ -12,6 +12,9 @@ import { appUserAgent, resolveAppVersion, type AppVersionInfo } from './app-vers
 import type { ProbeAttempt } from './probe.js'
 import { deadlineSignal, withTimeout } from './timeout.js'
 import { ZCodeClientSigner } from './zcode-signer.js'
+import { prepareStartPlanBody } from './zcode-plan-prompt.js'
+import { startPlanModelsFromEntitlements } from './zcode-plan-models.js'
+import type { StartPlanActivity } from './zcode-plan-models.js'
 
 /** Prompt body used by every probe request; carries nothing user-specific. */
 const PROBE_PROMPT = 'ping'
@@ -151,6 +154,16 @@ export interface WorkBuddyCreditAccount {
    * "Coding Plan" would report a plan the account does not have.
    */
   planName?: string
+  /**
+   * This pool is granted for one day and expires the same day — an unconsumed
+   * remainder is not carried over.
+   *
+   * Set for ZCode Start Plan quota (measured 2026-09-30: `period: "one_time"`,
+   * `expires_at` pinned to the day's end). The card must say so: a balance that
+   * silently resets reads as "use it or lose it", and a user who thinks it
+   * accumulates would budget against credit that does not exist.
+   */
+  sameDay?: true
 }
 
 /** Aggregated credit answer for one credential. */
@@ -1199,12 +1212,19 @@ export class ZCodeUpstreamClient {
     this.models = options.models ?? []
   }
 
-  /** POST the BigModel Anthropic messages endpoint; a successful answer is the raw SSE response. */
+  /** POST the BigModel Anthropic messages endpoint; a successful answer is the raw SSE response.
+   *
+   * 生效计划为 Start Plan 时走其专属通道（zcode-plan/anthropic + 账号 JWT），
+   * 额度扣 Start Plan 专属余额——普通通道扣的是 Coding Plan 订阅，两者绝不
+   * 混用（2026-09-30 口径）。 */
   async chatStream(
     credential: WorkBuddyCredential,
     bodyJson: string,
     signal?: AbortSignal,
   ): Promise<WorkBuddyChatResult> {
+    if (credential.zcodePlan === 'start-plan') {
+      return this.chatStreamStartPlan(credential, bodyJson, signal)
+    }
     // 头超时与调用方取消经宿主 deadline 融合（同上，与 WorkBuddy 线同口径）。
     const headersTimeout = await deadlineSignal(signal, CHAT_HEADER_TIMEOUT_MS, 'ANY_CONNECT_HEADERS')
     let response: Response
@@ -1249,6 +1269,13 @@ export class ZCodeUpstreamClient {
   }
 
   async fetchModels(credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
+    // Start Plan 的名单以**当前活动的 entitlements** 为准，而不是客户端内置目录：
+    // 内置目录只是候选，服务端按活动放行（实测 Trust Build 只授权 GLM-5.3-Flash，
+    // 另外两个 400 code 3006 model not allowed）。拿不到授权信息时回退已注册名单
+    // ——一次上游抖动不该让整组模型从选择器里消失。
+    if (credential.zcodePlan === 'start-plan') {
+      return this.fetchStartPlanModels(credential)
+    }
     // 超时同样走宿主 deadline：外层 try/catch 的降级语义（失败回退已有模型）不变。
     const modelsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
     try {
@@ -1276,7 +1303,100 @@ export class ZCodeUpstreamClient {
     }
   }
 
+  /**
+   * Start Plan 专属通道：`zcode-plan/anthropic` + 账号 JWT（`zcodejwttoken`）
+   * + 设备号。额度扣 Start Plan 专属余额（一次性、当日有效），与 Coding Plan
+   * 订阅互不占用。
+   *
+   * 该通道校验**请求体指纹**：`system` 必须以官方客户端的固定提示词开头
+   * （见 `zcode-plan-prompt` 与其中的实测记录），否则一律 405 `code 3012`。
+   * 指纹是请求体内容，与传输层/请求头/签名无关，所以这里把指纹前置、把
+   * Harness 自己的 system 提示词接在其后——实测模型仍按后者回答。仍被拦
+   * （例如上游又加了新条件）时如实报错，绝不回落到普通通道，那会把请求偷偷
+   * 记到 Coding Plan 头上。
+   */
+  private async chatStreamStartPlan(
+    credential: WorkBuddyCredential,
+    bodyJson: string,
+    signal?: AbortSignal,
+  ): Promise<WorkBuddyChatResult> {
+    if (credential.zcodeJwtToken === undefined || credential.zcodeJwtToken === '') {
+      return {
+        ok: false,
+        status: 0,
+        kind: 'client',
+        message: 'Start Plan 专属通道缺少凭据（凭据文档中没有 zcodejwttoken）——请在 ZCode 客户端登录一次后重试',
+      }
+    }
+    const headersTimeout = await deadlineSignal(signal, CHAT_HEADER_TIMEOUT_MS, 'ANY_CONNECT_HEADERS')
+    let response: Response
+    try {
+      response = await fetch('https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${credential.zcodeJwtToken}`,
+          'X-Device-Mid': credential.zcodeDeviceMid ?? '',
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+          'anthropic-version': '2023-06-01',
+        },
+        body: prepareStartPlanBody(prepareAnthropicBody(bodyJson)),
+        signal: headersTimeout.signal,
+      })
+    } catch (error: unknown) {
+      headersTimeout.dispose()
+      if (signal?.aborted) {
+        return { ok: false, status: 0, kind: 'client', message: 'client disconnected before upstream response' }
+      }
+      return { ok: false, status: 0, kind: 'server', message: `transport error: ${String(error)}` }
+    }
+    if (response.ok) {
+      headersTimeout.dispose()
+      return { ok: true, response }
+    }
+    let text: string
+    try {
+      text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
+    } catch {
+      return { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)' }
+    } finally {
+      headersTimeout.dispose()
+    }
+    if (text.includes('"code":3012')) {
+      // 指纹已在请求体里（见 prepareStartPlanBody），走到这里说明上游改了判据
+      // 或加了新条件——如实报告并说明"前置指纹仍不够"，不要谎称通道被封。
+      return {
+        ok: false,
+        status: response.status,
+        kind: classifyUpstreamError(response.status, text),
+        message: 'Start Plan 请求被上游风控拦截（code 3012），本次请求未消耗任何额度。'
+          + '插件已按官方客户端的请求体指纹发送，仍被拦说明上游新增了判据——请报告此情况，不要改扣 Coding Plan。',
+      }
+    }
+    if (response.status === 401) {
+      return {
+        ok: false,
+        status: response.status,
+        kind: 'client',
+        message: 'Start Plan 凭据失效（HTTP 401）——请在 ZCode 客户端重新登录一次',
+      }
+    }
+    return {
+      ok: false,
+      status: response.status,
+      kind: classifyUpstreamError(response.status, text),
+      message: text,
+    }
+  }
+
   async fetchCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
+    // 额度来源跟生效计划走：Start Plan 查专属余额（billing/balance，当日有效的
+    // 一次性 token 包），其余计划查 coding-plan 订阅（subscription/list）。两个
+    // 口径绝不混报——Start Plan 档显示订阅余额、或 Coding Plan 档显示专属余额，
+    // 都会让用户对着错误的池子做决定。
+    if (credential.zcodePlan === 'start-plan') {
+      return this.fetchStartPlanCredits(credential)
+    }
     // 额度口径以「账户上的 coding-plan 订阅」为准，与客户端选了哪条账号计划
     // 无关：模型请求本身就固定走 coding-plan 通道（Start Plan 的专属模型通道
     // 被上游风控封锁，本包按普通 ZCode 150% 额度使用），额度显示自然也要跟
@@ -1337,6 +1457,106 @@ export class ZCodeUpstreamClient {
       }
     } finally {
       creditsTimeout.dispose()
+    }
+  }
+
+  /**
+   * Start Plan 的模型名单：读当前活动（`billing/balance` 的 `data.plans[]`）
+   * 的 entitlements，按活动实际放行的模型派生。
+   *
+   * 与 {@link fetchStartPlanCredits} 共用同一个端点但**语义不同**：那里问的是
+   * 还剩多少额度、失败必须如实抛错；这里问的是"活动授权了哪些模型"，失败只
+   * 回退到已注册名单——目录拉取失败不该让用户失去一个本来能用的分组。
+   */
+  private async fetchStartPlanModels(credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
+    if (credential.zcodeJwtToken === undefined || credential.zcodeJwtToken === '') {
+      return this.models
+    }
+    const modelsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+    try {
+      const response = await fetch('https://zcode.z.ai/api/v1/zcode-plan/billing/balance', {
+        headers: {
+          'Authorization': `Bearer ${credential.zcodeJwtToken}`,
+          'X-Device-Mid': credential.zcodeDeviceMid ?? '',
+          'Accept': 'application/json',
+        },
+        signal: modelsTimeout.signal,
+      })
+      if (!response.ok) return this.models
+      const json = await response.json() as { data?: { plans?: readonly StartPlanActivity[] } }
+      const active = (json.data?.plans ?? []).filter(plan => plan.status === undefined || plan.status === 'active')
+      const derived = startPlanModelsFromEntitlements(active.flatMap(plan => plan.entitlements ?? []))
+      return derived.length > 0 ? derived : this.models
+    } catch {
+      return this.models
+    } finally {
+      modelsTimeout.dispose()
+    }
+  }
+
+  /**
+   * Start Plan 专属额度（`billing/balance`）：`data.plans[]` 给活动名与有效期
+   * （一次性包，当日过期），`data.balances[]` 给 token 级的总量/已用/剩余。
+   * 查询失败如实抛错（卡片转 creditsError），绝不拿 Coding Plan 的订阅状态
+   * 冒充 Start Plan 的额度。
+   */
+  private async fetchStartPlanCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
+    if (credential.zcodeJwtToken === undefined || credential.zcodeJwtToken === '') {
+      throw new Error('Start Plan 额度查询缺少凭据（凭据文档中没有 zcodejwttoken）')
+    }
+    const balanceTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+    try {
+      const response = await fetch('https://zcode.z.ai/api/v1/zcode-plan/billing/balance', {
+        headers: {
+          'Authorization': `Bearer ${credential.zcodeJwtToken}`,
+          'X-Device-Mid': credential.zcodeDeviceMid ?? '',
+          'Accept': 'application/json',
+        },
+        signal: balanceTimeout.signal,
+      })
+      if (!response.ok) {
+        throw new Error(`Start Plan 额度查询失败（HTTP ${response.status}）`)
+      }
+      const json = await response.json() as {
+        data?: {
+          plans?: Array<{ name?: string; plan_id?: string; ends_at?: number }>
+          balances?: Array<{
+            show_name?: string
+            plan_id?: string
+            total_units?: number
+            remaining_units?: number
+            expires_at?: number
+          }>
+        }
+      }
+      const plans = json.data?.plans ?? []
+      // 额度是**当日一次性池子**：活动当天发放、当天到期、余额不结转（实测
+      // `period: "one_time"` + `expires_at` 固定当日 16:00Z）。所以卡片与 pill
+      // 报的都是"这个池子此刻还剩多少"，而不是任何可累积的订阅余额。
+      const accounts: WorkBuddyCreditAccount[] = (json.data?.balances ?? []).map(balance => {
+        const plan = plans.find(entry => entry.plan_id !== undefined && entry.plan_id === balance.plan_id)
+        let expiredAt: string | undefined
+        if (typeof balance.expires_at === 'number' && balance.expires_at > 0) {
+          const d = new Date(balance.expires_at * 1000)
+          if (!Number.isNaN(d.getTime())) expiredAt = d.toISOString()
+        }
+        return {
+          packageName: `${balance.show_name ?? 'Start Plan'} (有效)`,
+          // 活动名（如 "ZCode Trust Build"）是用户看到的套餐名。
+          planName: plan?.name ?? balance.show_name ?? 'Start Plan',
+          // 该池子当日有效、不结转：到期时间就是它的"清零时刻"。
+          sameDay: true,
+          remain: typeof balance.remaining_units === 'number' ? balance.remaining_units : 0,
+          size: typeof balance.total_units === 'number' ? balance.total_units : 0,
+          ...expiredAt === undefined ? {} : { expiredAt },
+        }
+      })
+      return {
+        total: accounts.reduce((acc, cur) => acc + cur.remain, 0),
+        accounts,
+      }
+    } finally {
+      balanceTimeout.dispose()
     }
   }
 

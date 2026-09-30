@@ -24,6 +24,12 @@ export const ZCODE_STATUS_PATH = '/plugins/dsh-any-connect/zcode/status'
 /** ZCode variant probe route. */
 export const ZCODE_PROBE_PATH = '/plugins/dsh-any-connect/zcode/probe'
 
+/** ZCode Start Plan variant status route. */
+export const ZCODE_SP_STATUS_PATH = '/plugins/dsh-any-connect/zcode-sp/status'
+
+/** ZCode Start Plan variant probe route. */
+export const ZCODE_SP_PROBE_PATH = '/plugins/dsh-any-connect/zcode-sp/probe'
+
 /** One model's recorded probe observation, as the card displays it. */
 export interface WorkBuddyWebProbeModel {
   id: string
@@ -118,6 +124,11 @@ export interface WorkBuddyWebCreditAccount {
   remain: number
   size: number
   expiredAt?: string
+  /**
+   * The pool is granted for one day and does not carry over — the card says so
+   * instead of letting a daily reset read as an accumulating balance.
+   */
+  sameDay?: true
 }
 
 /** Aggregated credit answer rendered by the plugin card. */

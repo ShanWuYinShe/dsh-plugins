@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url'
 import { WorkBuddyCredentialStore, workbuddyOwnAuthPath, WORKBUDDY_AUTH_FILE_ENV } from './auth.js'
 import { WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
 import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS } from './catalog.js'
-import { CN_VARIANT, variantFor, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_VARIANT } from './variants.js'
+import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
+import { CN_VARIANT, variantFor, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { isHeartbeatProcessAlive, readHostHeartbeat, workbuddyHostHeartbeatPath } from './host-heartbeat.js'
@@ -52,6 +53,7 @@ const FALLBACK_COUNT_BY_ID = new Map<string, number>([
   [CN_VARIANT.id, FALLBACK_WORKBUDDY_MODELS.length],
   [WORKBUDDY_VARIANTS[1]!.id, FALLBACK_WORKBUDDY_AI_MODELS.length],
   [ZCODE_VARIANT.id, FALLBACK_ZCODE_MODELS.length],
+  [ZCODE_START_PLAN_VARIANT.id, FALLBACK_ZCODE_START_PLAN_MODELS.length],
 ])
 
 function fallbackFor(variant: WorkBuddyVariant): number {

@@ -19,6 +19,8 @@ import {
   WORKBUDDY_PROBE_PATH,
   WORKBUDDY_STATUS_PATH,
   ZCODE_PROBE_PATH,
+  ZCODE_SP_PROBE_PATH,
+  ZCODE_SP_STATUS_PATH,
   ZCODE_STATUS_PATH,
 } from './status-paths.js'
 import type { WorkBuddyRegion } from './upstream.js'
@@ -59,6 +61,16 @@ export interface WorkBuddyVariant {
   statusPath: string
   /** Same-origin probe-control route consumed by this variant's card. */
   probePath: string
+  /**
+   * ZCode variants only: which account plan this variant IS. The two ZCode
+   * plans are separate products, not modes of one connection (2026-09-30
+   * 口径) — each variant pins its own plan semantics end to end: model
+   * channel (dedicated `zcode-plan/anthropic` vs ordinary BigModel), quota
+   * pool (same-day token bucket vs coding-plan subscription), and night-free
+   * eligibility. Both variants read the same desktop credentials document;
+   * the store's transform folds the plan into every credential they read.
+   */
+  zcodePlanMode?: 'coding' | 'start'
 }
 
 /** CN WorkBuddy first: the existing provider keeps its id, paths, and copy. */
@@ -95,7 +107,7 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
   },
 ]
 
-/** ZCode provider variant. */
+/** ZCode (Coding Plan) provider variant: the ordinary BigModel channel. */
 export const ZCODE_VARIANT: WorkBuddyVariant = {
   id: 'zcode',
   kind: 'zcode',
@@ -109,12 +121,37 @@ export const ZCODE_VARIANT: WorkBuddyVariant = {
   settingsNs: 'anyconnect-zcode' as SettingsNamespace,
   statusPath: ZCODE_STATUS_PATH,
   probePath: ZCODE_PROBE_PATH,
+  zcodePlanMode: 'coding',
+}
+
+/**
+ * ZCode Start Plan provider variant: the account-plan's own dedicated channel
+ * and quota pool. A separate product, not a mode of {@link ZCODE_VARIANT} —
+ * it shares the desktop credentials document (the plan's material lives in
+ * the same file: `zcodejwttoken`, device id) but nothing else: own routes,
+ * own card, own model roster, own catalog/probe files.
+ */
+export const ZCODE_START_PLAN_VARIANT: WorkBuddyVariant = {
+  id: 'zcode-start-plan',
+  kind: 'zcode',
+  displayName: 'ZCode Start Plan',
+  appName: 'ZCode',
+  env: 'ZCODE_AUTH_FILE',
+  desktopFilename: 'credentials.json',
+  ownFilename: '.zcode-sp-auth.json',
+  probeFilename: '.zcode-sp-probe.json',
+  catalogFilename: '.zcode-sp-catalog.json',
+  settingsNs: 'anyconnect-zcode-sp' as SettingsNamespace,
+  statusPath: ZCODE_SP_STATUS_PATH,
+  probePath: ZCODE_SP_PROBE_PATH,
+  zcodePlanMode: 'start',
 }
 
 /** All provider variants, in registration order. */
 export const PROVIDER_VARIANTS: readonly WorkBuddyVariant[] = [
   ...WORKBUDDY_VARIANTS,
   ZCODE_VARIANT,
+  ZCODE_START_PLAN_VARIANT,
 ]
 
 /** The CN variant; the plugin's long-standing default and compatibility anchor. */

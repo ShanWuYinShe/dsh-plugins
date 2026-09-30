@@ -74,11 +74,27 @@ describe('ZCode 账号计划与编码计划共存', () => {
     expect(parsed?.accessToken).toBe('team-id.team-secret')
   })
 
-  it('额度查询始终打 coding-plan 订阅接口，与计划无关', async () => {
+  it('额度来源跟生效计划走：coding 查订阅、start-plan 查专属余额，互不混报', async () => {
     const calls: string[] = []
     const originalFetch = globalThis.fetch
     globalThis.fetch = (async (url: string | URL) => {
       calls.push(String(url))
+      if (String(url).includes('zcode-plan/billing/balance')) {
+        return new Response(JSON.stringify({
+          code: 0,
+          data: {
+            plans: [{ name: 'ZCode Trust Build', plan_id: 'p1', ends_at: 1790784000 }],
+            balances: [{
+              show_name: 'GLM-5.3-Flash',
+              plan_id: 'p1',
+              total_units: 100000000,
+              used_units: 5701561,
+              remaining_units: 94298439,
+              expires_at: 1790784000,
+            }],
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
       return new Response(JSON.stringify({ code: 200, data: [{ productName: 'GLM Coding Pro', status: 'VALID' }] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -94,13 +110,24 @@ describe('ZCode 账号计划与编码计划共存', () => {
         uid: 'u',
         source: 'desktop',
       }
-      for (const plan of ['individual-coding-plan', 'start-plan'] as const) {
+      // coding 语义的计划查 coding-plan 订阅。
+      for (const plan of ['individual-coding-plan', 'team-coding-plan'] as const) {
         calls.length = 0
         const credits = await client.fetchCredits({ ...base, zcodePlan: plan })
-        // 模型请求固定走 coding-plan 通道，额度显示必须同口径。
         expect(calls).toEqual(['https://bigmodel.cn/api/biz/subscription/list'])
         expect(credits.accounts[0]?.planName).toBe('GLM Coding Pro')
       }
+      // start-plan 查专属额度（billing/balance，token 数）——两条额度口径绝不混报。
+      calls.length = 0
+      const startCredits = await client.fetchCredits({
+        ...base,
+        zcodePlan: 'start-plan',
+        zcodeJwtToken: 'jwt-token',
+        zcodeDeviceMid: 'mid-1',
+      })
+      expect(calls).toEqual(['https://zcode.z.ai/api/v1/zcode-plan/billing/balance'])
+      expect(startCredits.accounts[0]?.planName).toBe('ZCode Trust Build')
+      expect(startCredits.accounts[0]?.remain).toBe(94298439)
     } finally {
       globalThis.fetch = originalFetch
     }

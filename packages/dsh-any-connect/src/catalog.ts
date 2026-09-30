@@ -135,7 +135,6 @@ export const FALLBACK_ZCODE_MODELS: readonly WorkBuddyModelInfo[] = [
   },
 ]
 
-
 /** Mutable catalog shared by the shim's `/v1/models` and the adapter.
  *
  * Visibility gates the whole roster: a signed-out variant is *empty* rather

@@ -2,6 +2,19 @@
 
 ### 修复
 
+* **Start Plan 专属通道打通（前一版误判为"上游风控封锁"）**：该通道校验的是**请求体指纹**——`system` 须以官方客户端提示词开头（第 0 块为身份行，第 1 块以官方 agent 提示词的**前 1211 字符**开头；边界实测精确到字符：1210 仍拦、1211 通过）。此前把 405 `code 3012` 归因为不可解的"官方客户端指纹封锁"，于是把这条通道判死、文案劝用户切到 Coding Plan——前提是错的。现在请求体前置该指纹、Harness 自己的 system 提示词接在其后：实测同一请求从 405 变 **200**，模型仍按 DSH 的身份与指令回答（问"你是什么产品"答"我是 DSH"），扣的确实是 Start Plan 专属池（`used_units` 实测 +369）。指纹是请求体常量，与传输层/请求头/V4 签名无关（这些变量已逐一排除）。
+* **Start Plan 模型名单改为按活动 entitlements 派生**：此前写死客户端内置目录的三个模型，但服务端按活动放行——实测 Trust Build 只授权 GLM-5.3-Flash，另两个返回 `400 code 3006 model not allowed`，选中即错。现在从 `billing/balance` 的 `entitlements[].capabilities`（`model:<id>`）派生；拿不到授权信息时退回兜底名单，而不是让整组模型消失。行元数据（1M/128K、200K/64K 等）改按客户端 `config/provider/zcode-builtin.json` 的 `modelConfigRules` 取，并遵守服务端 `max_tokens ≤ 131072` 的硬上限。
+* **Start Plan 额度按"每日发放、当日清零、不结转"呈现**：新增 `WorkBuddyCreditAccount.sameDay`，卡片与说明明确"当日没用完不结转"，不再让每日重置读成可累积余额。
+* **3012 的报错文案不再谎称"通道被封"**：指纹已在请求体里，再被拦说明上游新增了判据——如实这么说，而不是把用户劝去 Coding Plan。
+
+### 新增
+
+* **ZCode Start Plan 拆分为独立连接**：Start Plan 与 Coding Plan 是完全不同的两个产品，不再作为同一连接的模式混在一起——新增独立变体 `zcode-start-plan`，与既有 `zcode` 各自有模型分组、模型名单、额度池与通道，共享同一份桌面凭据文档但互不掺用材料：
+  * `zcode-start-plan` 走 Start Plan 专属通道（`zcode-plan/anthropic` + 账号 JWT + 设备号），扣其专属额度（**每天发放、当天到期、不结转**的 token 池），卡片展示当日余额与到期时间；模型名单按活动 entitlements 派生，不带 150% 与夜间免费徽标。绝不静默回落普通通道——那会把请求记到 Coding Plan 头上。
+  * `zcode`（Coding Plan）恒按 coding 语义走普通通道（150% 额度、夜间免费）扣订阅——即使桌面客户端当前选中的是 Start Plan，本变体也不改走专属通道。
+
+### 修复
+
 * **Start Plan 账号不再显示夜间免费**：23:00–09:00 免费是 Coding Plan 的权益，Start Plan 走普通通道、只有 150% 额度，不享受该窗口。此前插件只看模型行上带不带「夜间免费」徽标，于是 start-plan 账号在夜间会被标成「夜间免费 (生效中)」并把费率改写成 `x0.00`——展示的是一个它拿不到的折扣。现在夜免资格由账号计划决定（`setting.json` 的选择），Start Plan 下该徽标被摘除且费率保持基准价。
 
 ## 0.4.8
@@ -17,7 +30,7 @@
 
 ### 说明
 
-* ZCode 为 Start Plan 另开的专属模型通道（`/api/v1/zcode-plan/anthropic`，Bearer 账号 JWT）被上游风控拦截：HTTP 405 `code 3012`。真客户端、浏览器内同源页面、HTTP/1.1 与 HTTP/2、签名/验证码/完整身份头的各种组合实测均被拦，同刻同域的额度接口返回 200。本包因此不走这条通道，Start Plan 账号统一按普通 ZCode 使用。
+* ZCode 为 Start Plan 另开的专属模型通道（`/api/v1/zcode-plan/anthropic`，Bearer 账号 JWT）当时被判为"被上游风控拦截"：HTTP 405 `code 3012`，且真客户端、浏览器内同源页面、HTTP/1.1 与 HTTP/2、签名/验证码/完整身份头的各种组合实测均被拦。**该结论已在 0.4.9 修正**：拦的是请求体指纹（`system` 须以官方提示词开头），而那是可精确满足的常量；当时把"我发得不像官方客户端"误读成了"通道对第三方关闭"。
 
 ## 0.4.7 (2026-09-28)
 

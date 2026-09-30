@@ -10,7 +10,7 @@
 
 import crypto from 'node:crypto'
 import os from 'node:os'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { readFile, rm, stat } from 'node:fs/promises'
 import { homedir, release } from 'node:os'
 import { basename, dirname, join } from 'node:path'
@@ -34,15 +34,31 @@ export interface WorkBuddyCredential {
   source: 'desktop' | 'dsh'
   /**
    * Which plan the ZCode client has selected for this account, read from the
-   * `setting.json` beside the credentials file.
+   * `setting.json` beside the credentials file — then normalized by the
+   * store's plan-override hook, so this field is the plan **in force**: the
+   * value every consumer (model routing, quota source, night-free
+   * eligibility) branches on.
    *
    * The same credentials document can hold several account keys (team,
-   * individual, start plan), so the selected plan — not the document order — is
-   * what says which one a request must authenticate with. Account plans
+   * individual, start plan), so the selected plan — not the document order —
+   * is what says which one a request must authenticate with. Account plans
    * (`start-plan` / `off-peak`) carry no key of their own: they are served by
    * the account's coding-plan key on the ordinary ZCode channel.
    */
   zcodePlan?: ZCodePlanKind
+  /**
+   * The decrypted `zcodejwttoken`: the account-plan credential that
+   * authenticates the Start Plan–specific channel (dedicated quota, same-day
+   * validity). Present when the credentials document carries one, regardless
+   * of the plan in force.
+   */
+  zcodeJwtToken?: string
+  /**
+   * Stable per-install device id (`X-Device-Mid`) read from the desktop
+   * client's telemetry state beside the credentials file; the account-plan
+   * endpoints hard-require it.
+   */
+  zcodeDeviceMid?: string
 }
 
 /** Read-only sign-in summary for status and doctor output. */
@@ -77,6 +93,14 @@ export interface WorkBuddyStoreOptions {
   /** Non-fatal warning channel (e.g. the owned-copy save failing after a
    * successful refresh); defaults to `console.warn`. */
   onWarning?: (message: string) => void
+  /**
+   * Final normalization applied to every credential this store hands out
+   * (desktop, plugin copy, or in-memory). The ZCode variant uses it to fold
+   * the card's plan override into the credential, so every consumer sees the
+   * plan actually in force. Must stay pure; failures here would poison every
+   * read.
+   */
+  transformCredential?: (credential: WorkBuddyCredential) => WorkBuddyCredential
 }
 
 /** A credential belonging to the other product was refused. Callers treat it
@@ -477,13 +501,51 @@ function readZCodeSelection(desktopPath: string | undefined): ZCodeAccountSelect
   }
 }
 
+/** Basename of the fallback device-id file inside the Harness home. */
+export const ZCODE_DEVICE_MID_FILENAME = '.zcode-device-mid'
+
+/**
+ * Resolve the stable device id the account-plan endpoints require
+ * (`X-Device-Mid`). The desktop client's own value (telemetry state beside the
+ * credentials file) wins — requests then look like that install's. Without
+ * one, a random UUIDv4 is generated and persisted under `$DSH_HOME` so at
+ * least it is stable across requests; per-request randomness is rejected by
+ * the upstream (400 code 3001 / 429).
+ */
+export function resolveZCodeDeviceMid(desktopPath: string | undefined): string {
+  if (desktopPath !== undefined) {
+    try {
+      const telemetry = JSON.parse(readFileSync(join(dirname(desktopPath), 'telemetry-state.json'), 'utf8')) as Record<string, unknown>
+      if (typeof telemetry['deviceMid'] === 'string' && telemetry['deviceMid'] !== '') return telemetry['deviceMid']
+    } catch {
+      // absent or unreadable telemetry state — fall through
+    }
+  }
+  const fallbackPath = join(resolveDshHome(), ZCODE_DEVICE_MID_FILENAME)
+  try {
+    const persisted = readFileSync(fallbackPath, 'utf8').trim()
+    if (persisted !== '') return persisted
+  } catch {
+    // no persisted fallback yet — generate one
+  }
+  const generated = crypto.randomUUID()
+  try {
+    writeFileSync(fallbackPath, `${generated}\n`, { mode: 0o600 })
+  } catch {
+    // 不落盘也只是退化为每次进程内稳定（内存调用方各自读取时会再生成）；
+    // 上游只要求同值复用，尽力而为。
+  }
+  return generated
+}
+
 /**
  * Parse a ZCode credentials.json document into a WorkBuddyCredential
  * representation.
  *
- * Besides the account API key this also carries the `zcodejwttoken` used by
- * the account (Start Plan / off-peak) channels: both live in the same document,
- * and which one a request needs follows from the selected plan.
+ * Besides the account API key this carries the decrypted `zcodejwttoken` and
+ * the device id for the account-plan (Start Plan) channel: both live in the
+ * same document / directory, and which credential a request needs follows
+ * from the plan in force (see {@link WorkBuddyCredential.zcodePlan}).
  */
 export function parseZCodeAuth(text: string, desktopPath?: string): WorkBuddyCredential | undefined {
   let parsed: unknown
@@ -518,6 +580,19 @@ export function parseZCodeAuth(text: string, desktopPath?: string): WorkBuddyCre
   // 只能回落到账户上的 coding-plan key——那只说明"用哪把 key 发请求"，不说明
   // 账号属于哪个计划。两者用途不同（前者发请求，后者标识账号/展示）。
   const plan = selection?.plan ?? picked?.plan
+  // Start Plan 专属通道的凭据材料，与计划解耦提取：文档里有 zcodejwttoken
+  // 就带上（解不开只影响该通道，普通通道不受影响），通道是否用它由
+  // zcodePlan（生效计划）决定。
+  let zcodeJwtToken: string | undefined
+  const rawJwt = data['zcodejwttoken']
+  if (typeof rawJwt === 'string' && rawJwt !== '') {
+    try {
+      const decryptedJwt = decryptZCodeEncryptedKey(rawJwt, { desktopPath })
+      if (decryptedJwt !== '') zcodeJwtToken = decryptedJwt
+    } catch {
+      // 解不开就缺省
+    }
+  }
   return {
     accessToken: decryptedKey,
     refreshToken: '',
@@ -527,6 +602,8 @@ export function parseZCodeAuth(text: string, desktopPath?: string): WorkBuddyCre
     nickname: 'ZCode User',
     source: 'desktop',
     ...plan === undefined ? {} : { zcodePlan: plan },
+    ...zcodeJwtToken === undefined ? {} : { zcodeJwtToken },
+    zcodeDeviceMid: resolveZCodeDeviceMid(desktopPath),
   }
 }
 
@@ -637,6 +714,7 @@ export class WorkBuddyCredentialStore {
   private readonly refreshMarginMs: number
   private readonly ownPath: string
   private readonly onWarning: (message: string) => void
+  private readonly transformCredential?: WorkBuddyStoreOptions['transformCredential']
   private desktopPathOverride: string | undefined
   private inflight: Promise<WorkBuddyCredential> | undefined
   /** 落盘失败时的内存兜底:承载着可能已被上游轮换的 refresh token,
@@ -659,6 +737,7 @@ export class WorkBuddyCredentialStore {
     this.ownPath = options.ownPath ?? workbuddyOwnAuthPath(options.variant.ownFilename)
     this.desktopPathOverride = options.desktopPath
     this.onWarning = options.onWarning ?? (message => console.warn(message))
+    this.transformCredential = options.transformCredential
   }
 
   /**
@@ -728,11 +807,12 @@ export class WorkBuddyCredentialStore {
       : own === undefined ? desktop : (own.expiresAtMs > desktop.expiresAtMs ? own : desktop)
     // 落盘失败期间的内存兜底:它承载着可能已轮换的 refresh token,比磁盘
     // 副本新时优先;桌面端此后若刷新出更新的凭据则自然回落桌面文件。
-    if (this.memoryCredential !== undefined
-      && (stored === undefined || this.memoryCredential.expiresAtMs > stored.expiresAtMs)) {
-      return this.memoryCredential
-    }
-    return stored
+    const effective = this.memoryCredential !== undefined
+      && (stored === undefined || this.memoryCredential.expiresAtMs > stored.expiresAtMs)
+      ? this.memoryCredential
+      : stored
+    if (effective === undefined) return undefined
+    return this.transformCredential === undefined ? effective : this.transformCredential(effective)
   }
 
   /**

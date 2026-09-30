@@ -5,19 +5,26 @@ import {
   PROVIDER_VARIANTS,
   variantFor,
   WORKBUDDY_VARIANTS,
+  ZCODE_START_PLAN_VARIANT,
   ZCODE_VARIANT,
 } from '../src/variants.js'
 
 describe('AnyConnect variants', () => {
   it('declares the provider variants', () => {
     expect(WORKBUDDY_VARIANTS.map(v => v.id)).toEqual(['workbuddy', 'workbuddy-ai'])
-    expect(PROVIDER_VARIANTS.map(v => v.id)).toEqual(['workbuddy', 'workbuddy-ai', 'zcode'])
+    expect(PROVIDER_VARIANTS.map(v => v.id)).toEqual(['workbuddy', 'workbuddy-ai', 'zcode', 'zcode-start-plan'])
     expect(CN_VARIANT.kind).toBe('workbuddy')
     expect(CN_VARIANT.region).toBe('cn')
     expect(AI_VARIANT.kind).toBe('workbuddy')
     expect(AI_VARIANT.region).toBe('global')
     expect(ZCODE_VARIANT.kind).toBe('zcode')
     expect(ZCODE_VARIANT.id).toBe('zcode')
+    expect(ZCODE_START_PLAN_VARIANT.kind).toBe('zcode')
+    expect(ZCODE_START_PLAN_VARIANT.zcodePlanMode).toBe('start')
+    // 两个 ZCode 变体共享同一份桌面凭据文档（同名 env/desktopFilename），
+    // 但对外是完全独立的连接：各自的文件与路由必须互异。
+    expect(ZCODE_VARIANT.env).toBe(ZCODE_START_PLAN_VARIANT.env)
+    expect(ZCODE_START_PLAN_VARIANT.statusPath).toBe('/plugins/dsh-any-connect/zcode-sp/status')
   })
 
   it('keeps the providers on disjoint files, env vars, and routes', () => {

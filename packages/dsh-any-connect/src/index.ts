@@ -12,6 +12,7 @@ import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-attachment'
 import { RegionMismatchError, WorkBuddyCredentialStore } from './auth.js'
 import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS, WorkBuddyCatalog } from './catalog.js'
+import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import { WorkBuddyCatalogStore, credentialIdentity, workbuddyCatalogPath } from './catalog-store.js'
 import { createWorkBuddyAdapter, WORKBUDDY_PROVIDER } from './adapter.js'
@@ -19,13 +20,14 @@ import { createWorkBuddyShim } from './shim.js'
 import type { WorkBuddyShim } from './shim.js'
 import { WorkBuddyUpstreamClient, ZCodeUpstreamClient, chatBase, isZCodeOffpeak } from './upstream.js'
 import type { WorkBuddyCreditAccount } from './upstream.js'
-import type { WorkBuddyCredential } from './auth.js'
+import type { WorkBuddyCredential, ZCodePlanKind } from './auth.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebProbeSection } from './status-paths.js'
+import { applyZCodePlanOverride, isNightFreeEligiblePlan } from './zcode-plan-store.js'
 import { WorkBuddyProbeService } from './probe-service.js'
 import { newestFirst, workbuddyProbePath, WorkBuddyProbeStore } from './probe-store.js'
 import { createProbeKey, registerWorkBuddyProbeRoute } from './probe-route.js'
 import { ANYCONNECT_VERSION } from './version.js'
-import { AI_VARIANT, CN_VARIANT, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_VARIANT } from './variants.js'
+import { AI_VARIANT, CN_VARIANT, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { registerWorkBuddyStatusRoute } from './web-status.js'
 import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
@@ -39,6 +41,22 @@ export {
   WorkBuddyCatalog,
   type WorkBuddyModelInfo,
 } from './catalog.js'
+export {
+  FALLBACK_ZCODE_START_PLAN_MODELS,
+  startPlanModelInfo,
+  startPlanModelsFromEntitlements,
+  type StartPlanActivity,
+  type StartPlanEntitlement,
+} from './zcode-plan-models.js'
+export {
+  prepareStartPlanBody,
+  withStartPlanPrefix,
+  hasStartPlanPrefix,
+  ZCODE_CLIENT_IDENTITY,
+  ZCODE_CLIENT_PREFIX,
+  ZCODE_CLIENT_PREFIX_LENGTH,
+  type AnthropicTextBlock,
+} from './zcode-plan-prompt.js'
 export {
   WorkBuddyCatalogStore,
   WORKBUDDY_CATALOG_FILENAME,
@@ -64,6 +82,11 @@ export {
   type WorkBuddyAuthStatus,
   type WorkBuddyCredential,
 } from './auth.js'
+export {
+  applyZCodePlanOverride,
+  effectiveZCodePlan,
+  isNightFreeEligiblePlan,
+} from './zcode-plan-store.js'
 export {
   AI_VARIANT,
   CN_VARIANT,
@@ -294,6 +317,7 @@ const FALLBACK_BY_ID = new Map<string, readonly WorkBuddyModelInfo[]>([
   [CN_VARIANT.id, FALLBACK_WORKBUDDY_MODELS],
   [AI_VARIANT.id, FALLBACK_WORKBUDDY_AI_MODELS],
   [ZCODE_VARIANT.id, FALLBACK_ZCODE_MODELS],
+  [ZCODE_START_PLAN_VARIANT.id, FALLBACK_ZCODE_START_PLAN_MODELS],
 ])
 
 function fallbackFor(variant: WorkBuddyVariant): readonly WorkBuddyModelInfo[] {
@@ -304,7 +328,9 @@ function fallbackFor(variant: WorkBuddyVariant): readonly WorkBuddyModelInfo[] {
 const AUTH_FILE_FIELD_BY_ID = new Map<string, 'authFile' | 'authFileAI' | 'authFileZCode'>([
   [CN_VARIANT.id, 'authFile'],
   [AI_VARIANT.id, 'authFileAI'],
+  // 两个 ZCode 变体读同一份桌面凭据文档（各自取用专属材料）。
   [ZCODE_VARIANT.id, 'authFileZCode'],
+  [ZCODE_START_PLAN_VARIANT.id, 'authFileZCode'],
 ])
 
 function configuredAuthFile(values: Options, variant: WorkBuddyVariant): string | undefined {
@@ -420,12 +446,20 @@ export function apply(ctx: Context, config: Config): void {
     const configured = configuredAuthFile(current(), variant)
 
     if (variant.kind === 'zcode') {
-      const zcodeClient = new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
+      // Start Plan 是独立变体，走专属模型名单；两个变体的 transform 各自把
+      // 自己的计划语义固定进读出的凭据（credential.zcodePlan 恒为该变体的
+      // 计划）——模型路由（专属 vs 普通通道）、额度来源、夜免资格都只看这
+      // 一个字段。共享同一份桌面凭据文档，互不掺用对方的材料。
+      const zcodeClient = new ZCodeUpstreamClient({
+        models: variant.zcodePlanMode === 'start' ? FALLBACK_ZCODE_START_PLAN_MODELS : FALLBACK_ZCODE_MODELS,
+      })
       const credentialStore = new WorkBuddyCredentialStore({
         variant,
         ...configured === undefined ? {} : { desktopPath: configured },
         refresh: credential => zcodeClient.refreshToken(credential),
         onWarning: message => ctx.logger?.warn?.(message),
+        transformCredential: credential =>
+          applyZCodePlanOverride(credential, variant.zcodePlanMode === 'start' ? 'start-plan' : 'coding-plan'),
       })
       const catalogStore = new WorkBuddyCatalogStore({ path: workbuddyCatalogPath(variant.catalogFilename) })
       const shim = createWorkBuddyShim({ kind: 'zcode', store: credentialStore, client: zcodeClient, catalog, logger: ctx.logger })
@@ -607,10 +641,14 @@ export function apply(ctx: Context, config: Config): void {
           return {
             provider: runtime.variant.id,
             displayName: runtime.variant.displayName,
-            // 计划名取上游回报的真实名称(如 "ZCode Trust Build"):ZCode 的
-            // 计划是按时段发放的包,activity 名会变,写死 "Coding Plan" 会把
-            // 用户没有的套餐名报给用户。拿不到名称时才退回中性占位。
-            plan: isZCode ? credits.accounts.find(account => account.planName !== undefined)?.planName ?? 'Coding Plan' : undefined,
+            // 套餐标签跟变体走（凭据 transform 已固定 zcodePlan）：Start Plan
+            // 变体报 "Start Plan"（专属通道 + 专属额度），Coding Plan 变体报
+            // 上游订阅的真实名称。两条额度口径互不混报。
+            plan: isZCode
+              ? (credential.zcodePlan === 'start-plan'
+                ? 'Start Plan'
+                : credits.accounts.find(account => account.planName !== undefined)?.planName ?? 'Coding Plan')
+              : undefined,
             // pill 只要总数：WorkBuddy 同币种分包求和，ZCode 只取当前套餐。
             // 没人关心每一点的来处，明细在配置页卡片里看。
             windows: isZCode ? currentPlanWindow(credits.accounts) : totalCreditsWindows(credits.accounts),
@@ -682,12 +720,11 @@ export function apply(ctx: Context, config: Config): void {
         // WorkBuddy 凭据带 uid/enterpriseId；RuntimeStore 的结构最小化类型
         // 只承诺 accessToken，这里按 kind 已分流的前提下还原完整形状。
         const identity = credentialIdentity(credential as unknown as Parameters<typeof credentialIdentity>[0])
-        // 夜间免费是 Coding Plan 的权益，Start Plan 不享受：账号计划取自已
-        // 解析的凭据（见 auth.ts 的 zcodePlan），刷新目录时一并告诉 catalog，
-        // 避免 start-plan 账号在 23:00~09:00 被标成免费。
+        // 夜间免费是 Coding Plan 的权益，Start Plan 不享受。两个 ZCode 变体
+        // 是独立产品，各自的凭据 transform 已固定 zcodePlan，资格随之而定。
         if (variant.kind === 'zcode') {
           catalog.setNightFreeEligible(
-            (credential as unknown as { zcodePlan?: string }).zcodePlan !== 'start-plan',
+            (credential as unknown as { zcodePlan?: ZCodePlanKind }).zcodePlan !== 'start-plan',
           )
         }
         if (identity !== runtime.lastIdentity) {
