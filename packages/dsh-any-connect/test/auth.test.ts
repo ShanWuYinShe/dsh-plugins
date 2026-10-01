@@ -12,7 +12,11 @@ import {
   WORKBUDDY_AUTH_FILE_ENV,
   type WorkBuddyCredential,
 } from '../src/auth.js'
-import { AI_VARIANT, CN_VARIANT, ZCODE_VARIANT } from '../src/variants.js'
+import { AI_VARIANT, CN_VARIANT, electronProfileFor, ZCODE_VARIANT } from '../src/variants.js'
+import {
+  defaultWorkBuddyElectronPath,
+  WORKBUDDY_ELECTRON_BIN_ENV,
+} from '../src/desktop-credential-protection.js'
 
 // node:os's ESM namespace rejects vi.spyOn (non-configurable), so homedir is
 // mocked at the module level; unset state falls through to the real one.
@@ -804,6 +808,94 @@ describe('ZCode Linux native default desktop path probing', () => {
         '/home/bob/.config/.zcode/v2/credentials.json',
       ])
     })
+  })
+})
+
+describe('WorkBuddy 5.6 at-rest key helper wiring', () => {
+  it('resolves the platform Electron binary for WorkBuddy variants and none for ZCode', () => {
+    const saved = process.env[WORKBUDDY_ELECTRON_BIN_ENV]
+    delete process.env[WORKBUDDY_ELECTRON_BIN_ENV]
+    try {
+      const workbuddy = new WorkBuddyCredentialStore({
+        variant: CN_VARIANT,
+        refresh: async credential => ({ accessToken: credential.accessToken }),
+      })
+      expect(workbuddy.atRestHelperPath()).toBe(defaultWorkBuddyElectronPath(electronProfileFor(CN_VARIANT)))
+      const zcode = new WorkBuddyCredentialStore({
+        variant: ZCODE_VARIANT,
+        refresh: async credential => ({ accessToken: credential.accessToken }),
+      })
+      // ZCode 的凭据文档是明文,没有 Electron helper 可言。
+      expect(zcode.atRestHelperPath()).toBeUndefined()
+    } finally {
+      if (saved === undefined) delete process.env[WORKBUDDY_ELECTRON_BIN_ENV]
+      else process.env[WORKBUDDY_ELECTRON_BIN_ENV] = saved
+    }
+  })
+
+  it('keeps uid, enterpriseId and nickname through a plugin-owned copy', async () => {
+    // 回归:自有副本平铺序列化凭据,读回时必须仍带身份字段——丢了 uid,
+    // 上游请求会退化成 X-No-User-Id,目录归属键也变成 ":"。
+    const dir = await mkdtemp(join(tmpdir(), 'wb-own-identity-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const ownPath = join(dir, 'own.json')
+    await writeFile(ownPath, JSON.stringify({
+      version: 1,
+      credential: {
+        accessToken: 'own-access',
+        refreshToken: 'own-refresh',
+        expiresAtMs: Date.now() + 3_600_000,
+        domain: 'www.codebuddy.cn',
+        uid: 'uid-own',
+        enterpriseId: 'ent-own',
+        nickname: '自有副本',
+        source: 'dsh',
+      },
+    }))
+    const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
+      desktopPath: join(dir, 'absent.info'),
+      ownPath,
+      refresh: async credential => ({ accessToken: credential.accessToken }),
+    })
+    await expect(store.current()).resolves.toMatchObject({
+      accessToken: 'own-access',
+      uid: 'uid-own',
+      enterpriseId: 'ent-own',
+      nickname: '自有副本',
+      source: 'dsh',
+    })
+  })
+
+  it('prefers the desktop file when its identity differs from a newer own copy', async () => {
+    // 账号在桌面端切换后,自有副本可能属于上一个账号且过期更晚;身份不同时
+    // 必须以桌面文件为准,否则会把旧账号的 token 与 uid 发给上游。
+    const dir = await mkdtemp(join(tmpdir(), 'wb-own-switch-'))
+    CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+    const desktop = join(dir, 'workbuddy-desktop.info')
+    await writeFile(desktop, JSON.stringify({
+      auth: { accessToken: 'new-account-access', refreshToken: 'rt', expiresAt: Date.now() + 60_000, domain: 'www.codebuddy.cn' },
+      account: { uid: 'uid-new', enterpriseId: 'ent-1' },
+    }))
+    await writeFile(join(dir, 'own.json'), JSON.stringify({
+      version: 1,
+      credential: {
+        accessToken: 'old-account-access',
+        refreshToken: 'old-rt',
+        expiresAtMs: Date.now() + 3_600_000,
+        domain: 'www.codebuddy.cn',
+        uid: 'uid-old',
+        enterpriseId: 'ent-1',
+        source: 'dsh',
+      },
+    }))
+    const store = new WorkBuddyCredentialStore({
+      variant: CN_VARIANT,
+      desktopPath: desktop,
+      ownPath: join(dir, 'own.json'),
+      refresh: async credential => ({ accessToken: credential.accessToken }),
+    })
+    await expect(store.current()).resolves.toMatchObject({ accessToken: 'new-account-access', uid: 'uid-new', source: 'desktop' })
   })
 })
 

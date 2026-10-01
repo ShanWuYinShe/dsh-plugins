@@ -5,13 +5,20 @@
  * The effective credential is whichever of the two expires later, so a
  * refresh by either side wins.
  *
+ * Since WorkBuddy 5.6 the desktop file's `accessToken`/`refreshToken` fields
+ * are sealed in `$wbEncrypted` envelopes, so a present file can still yield no
+ * plaintext credential. Such a document is opened with the app's own at-rest
+ * key (see `desktop-credential-protection.ts`) instead of being read as
+ * signed-out; failing to open it is reported as a diagnosis, never as
+ * "nobody is signed in".
+ *
  * @module dsh-any-connect/auth
  */
 
 import crypto from 'node:crypto'
 import os from 'node:os'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { readFile, rm, stat } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { homedir, release } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
@@ -19,6 +26,21 @@ import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { regionOf } from './upstream.js'
 import type { WorkBuddyRefreshOutcome } from './upstream.js'
 import type { WorkBuddyVariant } from './variants.js'
+import {
+  atRestKeyProviderFor,
+  classifyDesktopAuthDocument,
+  keyIdsOf,
+  openAuthField,
+  reasonCodeOf,
+  unwrapDesktopAuthDocument,
+  WorkBuddyElectronPathError,
+} from './desktop-credential-protection.js'
+import type {
+  DesktopAuthClassification,
+  DesktopAuthFormat,
+  WorkBuddyAtRestKeyProvider,
+  WorkBuddySignedOutReasonCode,
+} from './desktop-credential-protection.js'
 
 /** Normalized WorkBuddy credential, timestamps in epoch milliseconds. */
 export interface WorkBuddyCredential {
@@ -71,10 +93,16 @@ export interface WorkBuddyAuthStatus {
   source?: 'desktop' | 'dsh'
   /**
    * Why no credential is usable, when that is diagnosable rather than simply
-   * "nobody signed in" — a region mismatch being the case that matters.
-   * Present only on `signed-out`, and never a substitute for fixing the file.
+   * "nobody signed in" — a region mismatch, an unreadable 5.6 envelope, or a
+   * missing Electron helper being the cases that matter. Present only on
+   * `signed-out`, and never a substitute for fixing the file.
    */
   reason?: string
+  /**
+   * Machine-readable companion to {@link reason}, for callers that must branch
+   * on the cause. Never derived by matching `reason` text.
+   */
+  reasonCode?: WorkBuddySignedOutReasonCode
 }
 
 /** Constructor options; {@link refresh} and {@link variant} are required. */
@@ -101,6 +129,15 @@ export interface WorkBuddyStoreOptions {
    * read.
    */
   transformCredential?: (credential: WorkBuddyCredential) => WorkBuddyCredential
+  /**
+   * Resolver for WorkBuddy 5.6's at-rest protector key, needed when the
+   * desktop file stores its token fields in `$wbEncrypted` envelopes.
+   * Defaults to the real provider for WorkBuddy variants — which spawns the
+   * app's own Electron binary — so the plugin host and the CLI can never
+   * disagree about which binary a variant resolves. Tests stand in a stub, and
+   * the ZCode variants never read an encrypted document.
+   */
+  keyProvider?: Pick<WorkBuddyAtRestKeyProvider, 'protectorKeyFor' | 'helperPath'>
 }
 
 /** A credential belonging to the other product was refused. Callers treat it
@@ -689,7 +726,11 @@ function parseOwnDocument(text: string): WorkBuddyCredential | undefined {
     'expiresAt': raw['expiresAtMs'],
     ...'refreshExpiresAtMs' in raw ? { 'refreshExpiresAt': raw['refreshExpiresAtMs'] } : {},
   }
-  const credential = parseWorkBuddyAuth(JSON.stringify({ auth: authLike }))
+  // 自有副本把 WorkBuddyCredential 平铺序列化,身份字段(uid / enterpriseId /
+  // nickname)与 auth 字段同层;而 parseWorkBuddyAuth 只从 account 段读身份,
+  // 因此这一层包装必须同时充当 auth 与 account——否则副本读回后 uid 恒为空串,
+  // 上游请求退化成 X-No-User-Id,目录归属键变成 ":"(账号身份丢失)。
+  const credential = parseWorkBuddyAuth(JSON.stringify({ auth: authLike, account: authLike }))
   if (credential === undefined) return undefined
   return { ...credential, source: 'dsh' }
 }
@@ -715,6 +756,11 @@ export class WorkBuddyCredentialStore {
   private readonly ownPath: string
   private readonly onWarning: (message: string) => void
   private readonly transformCredential?: WorkBuddyStoreOptions['transformCredential']
+  /**
+   * Resolver for WorkBuddy 5.6's at-rest protector key. Absent for the ZCode
+   * variants, whose credentials document is plaintext and never encrypted.
+   */
+  private readonly keyProvider: WorkBuddyStoreOptions['keyProvider']
   private desktopPathOverride: string | undefined
   private inflight: Promise<WorkBuddyCredential> | undefined
   /** 落盘失败时的内存兜底:承载着可能已被上游轮换的 refresh token,
@@ -738,6 +784,12 @@ export class WorkBuddyCredentialStore {
     this.desktopPathOverride = options.desktopPath
     this.onWarning = options.onWarning ?? (message => console.warn(message))
     this.transformCredential = options.transformCredential
+    // Defaulting here (rather than requiring every composition root to pass it)
+    // is what keeps the plugin host and the CLI identical: both build a store
+    // the same way, so `doctor` can never describe a different binary than the
+    // one the provider would actually spawn.
+    this.keyProvider = options.keyProvider
+      ?? (options.variant.kind === 'workbuddy' ? atRestKeyProviderFor(options.variant) : undefined)
   }
 
   /**
@@ -802,15 +854,24 @@ export class WorkBuddyCredentialStore {
         }
       }
     }
+    // 桌面文件是「现在是谁登录」的权威:自有副本可能属于上一个账号——它甚至
+    // 可能因为插件刷新过而过期更晚,只按过期时间择优会把上一个账号的 token
+    // (连同一个 uid)发给上游。身份不一致时一律以桌面文件为准,与时间无关。
+    const identityDiffers = desktop !== undefined && own !== undefined
+      && (desktop.uid !== own.uid || desktop.enterpriseId !== own.enterpriseId)
     const stored = desktop === undefined
       ? own
-      : own === undefined ? desktop : (own.expiresAtMs > desktop.expiresAtMs ? own : desktop)
+      : own === undefined || identityDiffers ? desktop : (own.expiresAtMs > desktop.expiresAtMs ? own : desktop)
     // 落盘失败期间的内存兜底:它承载着可能已轮换的 refresh token,比磁盘
-    // 副本新时优先;桌面端此后若刷新出更新的凭据则自然回落桌面文件。
-    const effective = this.memoryCredential !== undefined
-      && (stored === undefined || this.memoryCredential.expiresAtMs > stored.expiresAtMs)
-      ? this.memoryCredential
-      : stored
+    // 副本新时优先;但同样只在身份一致时——账号已在桌面端切换后,内存里的
+    // 旧账号凭据不得盖过新身份。桌面端此后若刷新出更新的凭据则自然回落。
+    const memoryCredential = this.memoryCredential
+    const memoryUsable = memoryCredential !== undefined
+      && (stored === undefined
+        || (memoryCredential.uid === stored.uid
+          && memoryCredential.enterpriseId === stored.enterpriseId
+          && memoryCredential.expiresAtMs > stored.expiresAtMs))
+    const effective = memoryUsable ? memoryCredential : stored
     if (effective === undefined) return undefined
     return this.transformCredential === undefined ? effective : this.transformCredential(effective)
   }
@@ -858,7 +919,7 @@ export class WorkBuddyCredentialStore {
   async status(): Promise<WorkBuddyAuthStatus> {
     try {
       const credential = await this.current()
-      if (credential === undefined) return { state: 'signed-out' }
+      if (credential === undefined) return { state: 'signed-out', reasonCode: 'no-credential' }
       return {
         state: 'signed-in',
         expiresAtMs: credential.expiresAtMs,
@@ -868,10 +929,17 @@ export class WorkBuddyCredentialStore {
         source: credential.source,
       }
     } catch (error: unknown) {
-      // A refused credential (wrong region) is a report, not a plain
-      // signed-out: the card renders the reason in place of the generic hint.
-      if (error instanceof RegionMismatchError) return { state: 'signed-out', reason: error.message }
-      return { state: 'signed-out' }
+      // 每个可诊断的失败都是一份报告,而不是笼统的 signed-out:区域不符、5.6
+      // 信封解不开、WorkBuddy 的 Electron 定位不到,各自有可执行的修法,卡片
+      // 直接渲染 reason;reasonCode 让调用方按成因分支而不必匹配文案。
+      const reasonCode = error instanceof RegionMismatchError
+        ? 'credential-region-mismatch' as const
+        : reasonCodeOf(error)
+      return {
+        state: 'signed-out',
+        reason: error instanceof Error ? error.message : String(error),
+        ...reasonCode === undefined ? {} : { reasonCode },
+      }
     }
   }
 
@@ -957,24 +1025,68 @@ export class WorkBuddyCredentialStore {
   }
 
   /**
-   * Read the first desktop candidate that exists. Only an absent file
-   * (ENOENT) falls through to the next candidate; a file that is present
-   * but unparsable is authoritative for its slot, so a stale older-version
-   * file never silently wins over a broken newer one.
+   * Read the first desktop candidate that exists.
+   *
+   * Only an absent file (ENOENT) falls through to the next candidate: a file
+   * that is present is authoritative for its slot, so a stale older-version
+   * file never silently wins over a broken newer one. Since WorkBuddy 5.6 a
+   * token field may arrive in an at-rest envelope, so the text is classified
+   * before the regular parser sees it — an encrypted document is *opened*,
+   * never skipped, and one this plugin cannot decode fails loudly instead of
+   * being papered over by the plugin-owned copy (which may belong to whatever
+   * account was signed in when it was last refreshed).
    */
   private async readDesktop(): Promise<WorkBuddyCredential | undefined> {
     for (const desktopPath of this.resolveDesktopCandidates()) {
+      let text: string
       try {
-        const text = await readFile(desktopPath, 'utf8')
-        if (this.variant.kind === 'zcode') {
-          return parseZCodeAuth(text, desktopPath)
-        }
-        return parseWorkBuddyAuth(text)
+        text = await readFile(desktopPath, 'utf8')
       } catch (error: unknown) {
         if (!isENOENT(error)) throw error
+        continue
       }
+      if (this.variant.kind === 'zcode') return parseZCodeAuth(text, desktopPath)
+      const classification = classifyDesktopAuthDocument(text)
+      if (classification.format === 'plaintext') return parseWorkBuddyAuth(text)
+      // 空文件(尚未写入/被截断)不构成「凭据在这里」,让下一个候选继续探测。
+      if (classification.format === 'absent') continue
+      if (classification.format === 'unrecognized') {
+        throw new Error(
+          `the desktop auth file at ${desktopPath} exists but is unreadable`
+          + ' (neither a plaintext credential nor a decodable WorkBuddy 5.6 envelope);'
+          + ' fix or remove the file — it outranks the plugin-owned credential copy',
+        )
+      }
+      return await this.openEncryptedDesktop(classification)
     }
     return undefined
+  }
+
+  /** Open a 5.6 encrypted desktop document into the regular credential shape. */
+  private async openEncryptedDesktop(
+    classification: Extract<DesktopAuthClassification, { format: 'encrypted' }>,
+  ): Promise<WorkBuddyCredential | undefined> {
+    const keyProvider = this.keyProvider
+    if (keyProvider === undefined) {
+      throw new WorkBuddyElectronPathError(
+        'encrypted-credential-unreadable',
+        'the desktop credential is encrypted but this provider has no at-rest key resolver',
+      )
+    }
+    const key = await keyProvider.protectorKeyFor(keyIdsOf(classification.wrapped.fields))
+    const text = unwrapDesktopAuthDocument(classification, field => {
+      const plaintext = openAuthField(key, field.envelope)
+      if (plaintext === undefined) {
+        throw new WorkBuddyElectronPathError(
+          'encrypted-credential-unreadable',
+          `the encrypted desktop credential's ${field.field} could not be decrypted`
+          + ` (envelope key id ${field.envelope.keyId});`
+          + ' the WorkBuddy app may hold a different at-rest key — open it once to reseal the sign-in',
+        )
+      }
+      return plaintext
+    })
+    return parseWorkBuddyAuth(text)
   }
 
   private async readOwn(): Promise<WorkBuddyCredential | undefined> {
@@ -988,15 +1100,61 @@ export class WorkBuddyCredentialStore {
     }
   }
 
-  /** Whether any desktop-file candidate exists as a regular file; diagnostics only. */
-  async desktopFilePresent(): Promise<boolean> {
+  /**
+   * The first desktop candidate authentication would actually read from;
+   * `undefined` when none carries content. Diagnostics only, and deliberately
+   * the same skip rule as {@link readDesktop}: an empty file is passed over, so
+   * a report names the file that really answers rather than a stale
+   * placeholder beside it.
+   */
+  async resolvedDesktopAuthPath(): Promise<string | undefined> {
     for (const desktopPath of this.resolveDesktopCandidates()) {
+      let text: string
       try {
-        if ((await stat(desktopPath)).isFile()) return true
+        text = await readFile(desktopPath, 'utf8')
       } catch {
-        // absent or not a regular file — try the next candidate
+        // absent, unreadable, or not a regular file — try the next candidate
+        continue
       }
+      if (text.trim() === '') continue
+      return desktopPath
     }
-    return false
+    return undefined
+  }
+
+  /**
+   * How the first desktop candidate that carries content is stored:
+   * `plaintext`, the 5.6 `encrypted` envelope form, `unrecognized`, or
+   * `absent`. Diagnostics only — it never spawns the key helper and never
+   * decrypts, so `doctor` can describe the file without opening it.
+   */
+  async desktopAuthFormat(): Promise<DesktopAuthFormat> {
+    for (const desktopPath of this.resolveDesktopCandidates()) {
+      let text: string
+      try {
+        text = await readFile(desktopPath, 'utf8')
+      } catch {
+        // absent, unreadable, or not a regular file — try the next candidate
+        continue
+      }
+      const format = classifyDesktopAuthDocument(text).format
+      if (format !== 'absent') return format
+    }
+    return 'absent'
+  }
+
+  /**
+   * The Electron binary the at-rest key helper would run, for diagnostics;
+   * `undefined` when this variant has no helper. Never triggers a discovery
+   * search — it reports the path an explicit setting or the platform default
+   * already names.
+   */
+  atRestHelperPath(): string | undefined {
+    return this.keyProvider?.helperPath()
+  }
+
+  /** Whether a desktop-file candidate with content exists; diagnostics only. */
+  async desktopFilePresent(): Promise<boolean> {
+    return await this.resolvedDesktopAuthPath() !== undefined
   }
 }

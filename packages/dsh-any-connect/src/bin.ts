@@ -11,6 +11,7 @@ import { CN_VARIANT, variantFor, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_ST
 import type { WorkBuddyVariant } from './variants.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { isHeartbeatProcessAlive, readHostHeartbeat, workbuddyHostHeartbeatPath } from './host-heartbeat.js'
+import { WORKBUDDY_ELECTRON_BIN_ENV } from './desktop-credential-protection.js'
 
 type Action = 'doctor' | 'logout' | 'status'
 
@@ -64,6 +65,12 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
   const store = makeWorkBuddyStore(variant)
   const status = await store.status()
   const desktopPresent = await store.desktopFilePresent()
+  const desktopPath = await store.resolvedDesktopAuthPath()
+  // 关键诊断三者:文件在不在(desktopFilePresent)、是不是 5.6 加密信封
+  // (desktopFormat)、以及加密时要去执行哪个二进制取密钥(helper)。凭据
+  // 存在却仍未登录,只可能是后两者之一。
+  const desktopFormat = await store.desktopAuthFormat()
+  const helperPath = store.atRestHelperPath()
   const heartbeat = await readHostHeartbeat()
   const hostAlive = heartbeat !== undefined && isHeartbeatProcessAlive(heartbeat)
   const report = {
@@ -73,9 +80,11 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
     provider: variant.id,
     node: process.version,
     desktopAuthFile: {
-      path: store.desktopAuthPath() ?? `(no platform default; set ${variant.env ?? WORKBUDDY_AUTH_FILE_ENV})`,
+      path: desktopPath ?? store.desktopAuthPath() ?? `(no platform default; set ${variant.env ?? WORKBUDDY_AUTH_FILE_ENV})`,
       present: desktopPresent,
+      format: desktopFormat,
     },
+    atRestHelper: helperPath ?? `(not configured; set ${variant.electron?.envVar ?? '(no helper for this variant)'})`,
     ownAuthFile: workbuddyOwnAuthPath(variant.ownFilename),
     hostHeartbeat: {
       path: workbuddyHostHeartbeatPath(),
@@ -89,6 +98,9 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
     hints: [
       ...status.state === 'signed-in' ? [] : [`Sign in once in the ${variant.appName} desktop app, then run status again.`],
       ...desktopPresent ? [] : [`No ${variant.appName} desktop auth file at the expected path; set ${variant.env ?? WORKBUDDY_AUTH_FILE_ENV} if it lives elsewhere.`],
+      ...desktopFormat !== 'encrypted' || helperPath !== undefined
+        ? []
+        : [`The desktop credential is encrypted (WorkBuddy 5.6+) and no ${variant.appName} Electron binary was found; set ${variant.electron?.envVar ?? WORKBUDDY_ELECTRON_BIN_ENV} to the app's executable.`],
       ...hostAlive ? [] : ['Host bundle not running in this DSH profile (or the process exited). The browser card and provider are unavailable until DSH starts the plugin.'],
     ],
   }
@@ -98,8 +110,11 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
     process.stdout.write([
       `${variant.displayName} Connect ${ANYCONNECT_VERSION} on ${process.version}`,
       `Desktop auth file: ${report.desktopAuthFile.present ? 'present' : 'missing'} (${report.desktopAuthFile.path})`,
+      `Desktop credential format: ${report.desktopAuthFile.format}`,
+      `At-rest key helper: ${report.atRestHelper}`,
       `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : heartbeat !== undefined ? 'stale heartbeat (process exited)' : 'not started'}`,
       `Sign-in state: ${report.signIn}`,
+      ...status.reason === undefined ? [] : [`Sign-in reason: ${status.reason}`],
       `Static fallback models: ${report.fallbackModels}`,
       ...report.hints.map(hint => `Hint: ${hint}`),
       '',

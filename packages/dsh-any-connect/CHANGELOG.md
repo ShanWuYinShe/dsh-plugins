@@ -1,3 +1,16 @@
+## 0.4.11 (2026-10-01)
+
+### 修复
+
+* **WorkBuddy 5.6+ 的加密桌面凭据现在能正常解开（此前一律判定为"未登录"）**：桌面端自 5.6 起把 `accessToken` / `refreshToken` 以 `$wbEncrypted` 信封加密落盘（`buildPolicy: "fields"`），字段不再是明文字符串。插件此前只认明文，于是"凭据文件存在、桌面端已登录"也读成未登录——macOS 与 Windows 同样受影响。现在按 5.6 的信封格式（suite 1 / `WBEV1` 帧、AES-256-GCM + 应用自身派生的 AAD）解出字段，再交给既有解析器读身份与有效期；解不开时如实报出可执行的诊断，而不是静默 signed-out。
+* **加密凭据的解密助手按产品定位（国内版 / 国际版互不串用）**：`atRestSecretKey` 只存在于 WorkBuddy 自己的 Electron 进程内，插件以 `ELECTRON_RUN_AS_NODE=1` 执行该二进制一次取得。macOS 按各自 bundle id 经 Spotlight 检索并校验身份（装在 `/Applications` 之外也能找到）；Windows 先看默认安装目录 `%LOCALAPPDATA%\Programs\WorkBuddy\WorkBuddy.exe`，再查 HKCU/HKLM 卸载注册表（覆盖用户自选目录），候选须同时通过产品身份（DisplayName / exe 名）与 Electron 目录布局（`version` 文件 + `resources\app.asar`）校验才会被执行。两个产品各有独立环境变量 `WORKBUDDY_ELECTRON_BIN` / `WORKBUDDY_AI_ELECTRON_BIN`。
+* **插件自有副本读回时不再丢身份字段**：`parseOwnDocument` 以前只把副本当作 `auth` 段解析，而 `uid` / `enterpriseId` / `nickname` 与 auth 字段同层、只从 `account` 段读——刷新过一次之后副本读回的 uid 恒为空串，上游请求退化为 `X-No-User-Id`、目录归属键变成 `":"`。
+* **账号在桌面端切换后不再继续用旧账号**：自有副本可能属于上一个账号、且因插件刷新过而过期更晚，此前只按过期时间择优，会把旧账号的 token（连同旧 uid）发给上游。现在身份（`uid` / `enterpriseId`）不一致时一律以桌面文件为准；落盘失败期间的内存兜底同样只在身份一致时生效。
+
+### 新增
+
+* `doctor` 增加 `desktopAuthFile.format` 与 `atRestHelper` 两项诊断，文本输出同时打印凭据格式、助手路径与 `signInReason`——"凭据在却未登录"从此可以一次问清是格式问题还是助手定位问题。
+
 ## 0.4.10 (2026-09-30)
 
 ### 优化

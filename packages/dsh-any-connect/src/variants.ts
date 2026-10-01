@@ -28,6 +28,42 @@ import type { WorkBuddyRegion } from './upstream.js'
 /** Which upstream family a variant talks to; selects the per-kind wiring. */
 export type VariantKind = 'workbuddy' | 'zcode'
 
+/**
+ * How one WorkBuddy product's Electron binary is identified and located, and
+ * which env var names an explicit one (ported from corrinehu/dsh-workbuddy-connect,
+ * MIT; upstream issues #59/#60).
+ *
+ * Identity is per product — bundle id, uninstall-registry DisplayName, exe
+ * basename — so a search for one app can never execute the other's binary.
+ * WorkBuddy 5.6 encrypts its desktop credential fields, and the at-rest key
+ * only exists inside the app's own Electron, so this is what the credential
+ * store needs to unlock a signed-in desktop app (see
+ * {@link WorkBuddyCredentialStore}).
+ */
+export interface WorkBuddyElectronProduct {
+  /** Product name for helper diagnostics and error copy, e.g. `WorkBuddy AI`. */
+  productName: string
+  /** Env var naming an explicit Electron binary for this product alone. */
+  envVar: string
+  /** macOS identity and default install layout, verified per product. */
+  macOS: {
+    bundleId: string
+    defaultPath: string
+  }
+  /**
+   * Windows identity from the uninstall registry and the exe it names.
+   * `defaultPathSegments` exists only where the default install location has
+   * been measured (CN); the international app has only been seen in
+   * user-chosen locations, so it stays registry-only — an unverified default
+   * is a guess, and guessing is how the wrong app gets executed.
+   */
+  windows: {
+    displayNamePattern: RegExp
+    exeBasename: string
+    defaultPathSegments?: readonly string[]
+  }
+}
+
 /** One provider variant. */
 export interface WorkBuddyVariant {
   /** Provider id registered with DSH, e.g. `workbuddy-ai`. */
@@ -42,6 +78,14 @@ export interface WorkBuddyVariant {
   region?: WorkBuddyRegion
   /** Env var overriding the desktop auth-file location. */
   env?: string
+  /**
+   * How this variant's Electron helper is located, for the WorkBuddy 5.6
+   * at-rest credential format. Absent for the ZCode variants, which read a
+   * plaintext credentials document and never need the helper; resolution for
+   * descriptors assembled elsewhere falls back by variant id (see
+   * {@link electronProfileFor}).
+   */
+  electron?: WorkBuddyElectronProduct
   /** Basename of the desktop app's own auth file in the shared auth directory. */
   desktopFilename?: string
   /** Basename of the plugin-owned credential copy under `$DSH_HOME`. */
@@ -82,6 +126,20 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
     appName: 'WorkBuddy',
     region: 'cn',
     env: 'WORKBUDDY_AUTH_FILE',
+    electron: {
+      productName: 'WorkBuddy',
+      envVar: 'WORKBUDDY_ELECTRON_BIN',
+      macOS: {
+        bundleId: 'com.tencent.workbuddy.mac',
+        defaultPath: '/Applications/WorkBuddy.app/Contents/MacOS/Electron',
+      },
+      windows: {
+        displayNamePattern: /^WorkBuddy(?:[ ][0-9]+(?:[.][0-9]+)+(?:[-+][0-9A-Za-z.-]+)?)?$/u,
+        exeBasename: 'workbuddy.exe',
+        // Measured 5.6.2 install layout: %LOCALAPPDATA%/Programs/WorkBuddy.
+        defaultPathSegments: ['Programs', 'WorkBuddy', 'WorkBuddy.exe'],
+      },
+    },
     desktopFilename: 'workbuddy-desktop.info',
     ownFilename: '.workbuddy-auth.json',
     probeFilename: '.workbuddy-probe.json',
@@ -97,6 +155,21 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
     appName: 'WorkBuddy AI',
     region: 'global',
     env: 'WORKBUDDY_AI_AUTH_FILE',
+    electron: {
+      productName: 'WorkBuddy AI',
+      envVar: 'WORKBUDDY_AI_ELECTRON_BIN',
+      macOS: {
+        bundleId: 'com.workbuddy.workbuddy-ai',
+        defaultPath: '/Applications/WorkBuddy AI.app/Contents/MacOS/Electron',
+      },
+      windows: {
+        // The CN pattern cannot match this value ("AI" is not a version) and
+        // this pattern cannot match the CN record (missing the literal " AI"),
+        // so the two records never feed each other's discovery.
+        displayNamePattern: /^WorkBuddy AI(?:[ ][0-9]+(?:[.][0-9]+)+(?:[-+][0-9A-Za-z.-]+)?)?$/u,
+        exeBasename: 'workbuddyai.exe',
+      },
+    },
     desktopFilename: 'workbuddy-desktop-ai.info',
     ownFilename: '.workbuddy-ai-auth.json',
     probeFilename: '.workbuddy-ai-probe.json',
@@ -163,4 +236,17 @@ export const AI_VARIANT: WorkBuddyVariant = WORKBUDDY_VARIANTS[1]!
 /** Look up a variant by provider id. */
 export function variantFor(id: string): WorkBuddyVariant | undefined {
   return PROVIDER_VARIANTS.find(variant => variant.id === id)
+}
+
+/**
+ * The Electron profile a WorkBuddy variant resolves its at-rest key helper
+ * with.
+ *
+ * A descriptor assembled outside this module may omit `electron`; resolution
+ * then falls back by variant id, so an unknown custom variant stays on the CN
+ * product. The ZCode variants never reach this: they read a plaintext
+ * credential document and have no Electron helper.
+ */
+export function electronProfileFor(variant: Pick<WorkBuddyVariant, 'id' | 'electron'> | undefined): WorkBuddyElectronProduct {
+  return variant?.electron ?? (variant?.id === AI_VARIANT.id ? AI_VARIANT : CN_VARIANT).electron!
 }

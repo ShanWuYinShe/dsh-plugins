@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { run } from '../src/bin.js'
+import { deriveProtectorKey, sealAuthFieldForTest } from '../src/desktop-credential-protection.js'
 
 let root: string | undefined
 
@@ -41,6 +42,45 @@ describe('dsh-any-connect CLI --provider', () => {
     try {
       expect(await run(['status', '--provider=workbuddy-ai'])).toBe(1)
       expect(out.join('')).toContain('signed out')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  // POSIX 假 helper:被测代码用 execFile 直接执行它,不需要 Electron。Windows
+  // 上没有可直接执行的无扩展名脚本,该用例按平台跳过(与模块内的平台判定一致)。
+  it.skipIf(process.platform === 'win32')('doctor unlocks a 5.6 encrypted credential through the helper and reports it', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-bin-'))
+    vi.stubEnv('DSH_HOME', root)
+    const secret = Buffer.alloc(32, 11).toString('base64')
+    const key = deriveProtectorKey(secret)
+    const desktop = join(root, 'workbuddy-desktop.info')
+    await writeFile(desktop, JSON.stringify({
+      auth: {
+        accessToken: sealAuthFieldForTest(key, 'cli-access-token'),
+        refreshToken: sealAuthFieldForTest(key, 'cli-refresh-token'),
+        expiresAt: Date.now() + 3_600_000,
+        domain: 'www.codebuddy.cn',
+      },
+      account: { uid: 'uid-cli', nickname: 'CLI' },
+    }))
+    const helper = join(root, 'fake-workbuddy-electron')
+    await writeFile(helper, `#!/bin/sh
+printf '%s' '${JSON.stringify({ version: 1, atRestSecretKey: secret })}'
+`, { mode: 0o755 })
+    vi.stubEnv('WORKBUDDY_AUTH_FILE', desktop)
+    vi.stubEnv('WORKBUDDY_ELECTRON_BIN', helper)
+    const out: string[] = []
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out.push(String(chunk))
+      return true
+    })
+    try {
+      expect(await run(['doctor', '--json'])).toBe(0)
+      const report = JSON.parse(out.join('')) as Record<string, unknown>
+      expect(report['signIn']).toBe('signed-in')
+      expect((report['desktopAuthFile'] as Record<string, unknown>)['format']).toBe('encrypted')
+      expect(report['atRestHelper']).toBe(helper)
     } finally {
       spy.mockRestore()
     }

@@ -101,6 +101,8 @@ dsh-any-connect status --provider zcode
 profile/home 的 `cordis.patch.yml`（DSH 0.1.7 起第三方 provider 的模型设置表单
 只读，字段改走补丁文件即时生效——Loader 以 volatile 引用提交，无需重装）。凭据来源的探测顺序与跨系统支持：
 - **WorkBuddy**：macOS / Linux 原生路径、Windows 的 Local → Roaming AppData、WSL 下挂载的 Windows 用户目录；亦可用 `WORKBUDDY_AUTH_FILE` / `WORKBUDDY_AI_AUTH_FILE` 环境变量显式指定。
+  * **WorkBuddy 5.6+ 的加密凭据**：桌面端自 5.6 起把 `accessToken` / `refreshToken` 以 `$wbEncrypted` 信封加密落盘，解密密钥只存在于它自己的 Electron 进程内。插件因此要定位 App 的可执行文件当解密助手：macOS 按各自的 bundle id 检索并校验身份，Windows 先看默认安装目录（`%LOCALAPPDATA%\Programs\WorkBuddy\WorkBuddy.exe`）再查卸载注册表。自动定位不成功时，用 `WORKBUDDY_ELECTRON_BIN`（国内版）或 `WORKBUDDY_AI_ELECTRON_BIN`（国际版）显式指定 App 主程序；插件在构造时读取该变量，**设置后需完全退出并重启 DSH**。两个产品只按各自的 App 身份（bundle id / 注册表名 / 可执行文件名）定位，不会互相误选。
+  * **卡片显示未登录、但桌面端明明已登录时**：`dsh-any-connect doctor --json` 给出三件事——`desktopAuthFile.present`（文件在不在）、`desktopAuthFile.format`（`plaintext` / `encrypted` / `unrecognized`）、`atRestHelper`（加密时要去执行哪个二进制）。`format: "encrypted"` 而 `atRestHelper` 为空或不可执行，就是需要按上一条设置环境变量的情形；`signInReason` 里写着可直接照做的修法。
 - **ZCode**：macOS（`~/.zcode/v2/credentials.json` 及 `Library/Application Support`）、Windows（`%USERPROFILE%\.zcode\v2\credentials.json` 及 Local/Roaming AppData）、WSL（优先通过 WSL 挂载探测 Windows 宿主用户目录与 AppData，并自动计算跨系统解密密钥，随后回落 Linux 原生目录）、Linux（`~/.zcode/v2/credentials.json` 及 `~/.config`）；亦可用 `ZCODE_AUTH_FILE` 环境变量显式指定。
   * **同时支持 Coding Plan 与 Start Plan**：账号下会有多把 key（team /
     individual），**以桌面端 `setting.json` 里选中的账号计划为准**取用，
