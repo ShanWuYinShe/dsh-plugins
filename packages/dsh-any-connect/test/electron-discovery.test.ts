@@ -10,7 +10,10 @@ import {
   deriveProtectorKey,
   reasonCodeOf,
 } from '../src/desktop-credential-protection.js'
-import type { WorkBuddyDiscoveryTools } from '../src/desktop-credential-protection.js'
+import type {
+  WorkBuddyAtRestKeyProviderOptions,
+  WorkBuddyDiscoveryTools,
+} from '../src/desktop-credential-protection.js'
 import { WorkBuddyCredentialStore } from '../src/auth.js'
 import { CN_VARIANT, AI_VARIANT , electronProfileFor} from '../src/variants.js'
 
@@ -34,6 +37,19 @@ const SECRET = Buffer.alloc(32, 9).toString('base64')
 const PAYLOAD_TEXT = JSON.stringify({ version: 1, atRestSecretKey: SECRET })
 const KEY = deriveProtectorKey(SECRET)
 const KEY_ID = createHash('sha256').update(KEY).digest('hex').slice(0, 16)
+
+/**
+ * A provider pinned to macOS.
+ *
+ * The macOS flow must not depend on the host platform: this repo's CI runs on
+ * Linux, so without a pinned platform every case below would stop at
+ * "no Electron binary is configured for this platform" instead of exercising
+ * discovery. Every seam (Spotlight, plutil, spawn) is injected as well, so the
+ * cases are identical on any runner.
+ */
+function macProvider(options: WorkBuddyAtRestKeyProviderOptions): WorkBuddyAtRestKeyProvider {
+  return new WorkBuddyAtRestKeyProvider({ platform: 'darwin', ...options })
+}
 
 /** A discovery-tool stand-in that records every call. */
 function fakeTools(overrides: Partial<WorkBuddyDiscoveryTools> = {}): WorkBuddyDiscoveryTools & { calls: string[] } {
@@ -88,7 +104,7 @@ async function fakeApp(name: string): Promise<{ bundlePath: string, electronPath
 describe('#48 explicit configuration is authoritative', () => {
   it('never falls back when an explicit option points at a missing binary', async () => {
     const tools = fakeTools()
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       // The default path exists and discovery would find an app: neither may
       // be consulted, because the caller named a binary and it is unusable.
@@ -105,7 +121,7 @@ describe('#48 explicit configuration is authoritative', () => {
   it('never falls back when WORKBUDDY_ELECTRON_BIN points at a missing binary', async () => {
     vi.stubEnv(WORKBUDDY_ELECTRON_BIN_ENV, '/nonexistent/from-env')
     const tools = fakeTools()
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: await executableAt('default-Electron'),
@@ -116,7 +132,7 @@ describe('#48 explicit configuration is authoritative', () => {
   })
 
   it('classifies an unusable explicit path as electron-path-invalid', async () => {
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       electronPath: '/nonexistent/workbuddy-electron',
       discovery: 'macos-workbuddy',
@@ -131,7 +147,7 @@ describe('#48 discovery runs only after the default path fails', () => {
   it('does not call the discovery tools when the default path works', async () => {
     const tools = fakeTools()
     const defaultPath = await executableAt('default-Electron')
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: defaultPath,
@@ -150,7 +166,7 @@ describe('#48 discovery runs only after the default path fails', () => {
       findApps: counting(async () => [app.bundlePath], calls, 'mdfind'),
       bundleIdentifier: counting(async () => CN_BUNDLE_ID, calls, 'plutil-id'),
     })
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -166,7 +182,7 @@ describe('#48 discovery runs only after the default path fails', () => {
     const tools = fakeTools()
     // Constructing must not spawn anything: discovery lives in the async
     // payload path, so a plugin load never pays for it.
-    new WorkBuddyAtRestKeyProvider({ product: electronProfileFor(CN_VARIANT), discovery: 'macos-workbuddy', tools })
+    macProvider({ product: electronProfileFor(CN_VARIANT), discovery: 'macos-workbuddy', tools })
     expect(tools.calls).toEqual([])
   })
 })
@@ -174,7 +190,7 @@ describe('#48 discovery runs only after the default path fails', () => {
 describe('#48 identity is proved before execution', () => {
   it('rejects a candidate whose bundle id is another product', async () => {
     const app = await fakeApp('NotWorkBuddy.app')
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -193,7 +209,7 @@ describe('#48 identity is proved before execution', () => {
     // Present but not executable: identity alone is not enough to execute it.
     await mkdir(join(bundlePath, 'Contents', 'MacOS'), { recursive: true })
     await writeFile(join(bundlePath, 'Contents', 'MacOS', 'Electron'), '#!/bin/sh\n', { mode: 0o644 })
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -208,7 +224,7 @@ describe('#48 identity is proved before execution', () => {
 describe('#48 candidate counting', () => {
   it('uses the only candidate found', async () => {
     const app = await fakeApp('WorkBuddy.app')
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -219,7 +235,7 @@ describe('#48 candidate counting', () => {
   })
 
   it('reports not-found when the search completes with no candidate', async () => {
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -232,7 +248,7 @@ describe('#48 candidate counting', () => {
   it('refuses to choose between two distinct apps, and lists them', async () => {
     const first = await fakeApp('WorkBuddy.app')
     const second = await fakeApp('WorkBuddy 2.app')
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -249,7 +265,7 @@ describe('#48 candidate counting', () => {
     const app = await fakeApp('WorkBuddy.app')
     // Spotlight can list one bundle several times; the same real path twice
     // must not read as two installations.
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -262,7 +278,7 @@ describe('#48 candidate counting', () => {
 
 describe('#48 an unfinished check is not an absent app', () => {
   it('reports incomplete when the search tool cannot run', async () => {
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -280,7 +296,7 @@ describe('#48 an unfinished check is not an absent app', () => {
     // identity cannot be read. That is "we could not check this one", which
     // must not be silently dropped.
     const unreadable = await fakeApp('Broken.app')
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -314,7 +330,7 @@ describe('#48 an unfinished check is not an absent app', () => {
         return CN_BUNDLE_ID
       },
     })
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -341,8 +357,8 @@ describe('#48 an unfinished check is not an absent app', () => {
     await mkdir(unreadable, { recursive: true })
     await chmod(deniedParent, 0o000)
     try {
-      const provider = new WorkBuddyAtRestKeyProvider({
-      product: electronProfileFor(CN_VARIANT),
+      const provider = macProvider({
+        product: electronProfileFor(CN_VARIANT),
         discovery: 'macos-workbuddy',
         defaultElectronPath: join(root, 'absent', 'Electron'),
         tools: fakeTools({
@@ -375,7 +391,7 @@ describe('#48 an unfinished check is not an absent app', () => {
         return [app.bundlePath]
       },
     })
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -390,7 +406,7 @@ describe('#48 an unfinished check is not an absent app', () => {
     // The app was found and ran; "go look for the app" is not the fix, so the
     // code must not be one of the electron-binary-* ones.
     const app = await fakeApp('WorkBuddy.app')
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -403,7 +419,7 @@ describe('#48 an unfinished check is not an absent app', () => {
 
   it('classifies a key-id mismatch as a decryption failure, not a path failure', async () => {
     const app = await fakeApp('WorkBuddy.app')
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -420,7 +436,7 @@ describe('#48 discoverability is a per-variant setting', () => {
   it('never discovers, and never takes the CN default, for a none-discovery provider', async () => {
     const tools = fakeTools({ findApps: async () => { throw new Error('must not be called') } })
     const defaultPath = await executableAt('default-Electron')
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'none',
       defaultElectronPath: defaultPath,
@@ -437,7 +453,7 @@ describe('#48 discoverability is a per-variant setting', () => {
   it('still honours an explicit env path for a none-discovery provider', async () => {
     const binary = await executableAt('user-supplied-Electron')
     vi.stubEnv(WORKBUDDY_ELECTRON_BIN_ENV, binary)
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'none',
       tools: fakeTools({ findApps: async () => { throw new Error('must not be called') } }),
@@ -454,7 +470,7 @@ describe('#48 a failed discovery is retried, a successful one is cached', () => 
     let found = false
     const app = await fakeApp('WorkBuddy.app')
     const calls: string[] = []
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -478,7 +494,7 @@ describe('#48 a failed discovery is retried, a successful one is cached', () => 
   it('re-checks a cached discovery path and re-discovers when it went away', async () => {
     const app = await fakeApp('WorkBuddy.app')
     let searches = 0
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -506,7 +522,7 @@ describe('#48 discovery failures reach the status document as reasonCode', () =>
       desktopPath: join(root, 'workbuddy-desktop.info'),
       ownPath: join(root, 'own.json'),
       refresh: async credential => ({ accessToken: credential.accessToken }),
-      keyProvider: new WorkBuddyAtRestKeyProvider({
+      keyProvider: macProvider({
         product: electronProfileFor(CN_VARIANT),
         discovery: 'macos-workbuddy',
         defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -525,7 +541,7 @@ describe('#48 discovery failures reach the status document as reasonCode', () =>
       desktopPath: join(root, 'workbuddy-desktop-ai.info'),
       ownPath: join(root, 'own-ai.json'),
       refresh: async credential => ({ accessToken: credential.accessToken }),
-      keyProvider: new WorkBuddyAtRestKeyProvider({ product: electronProfileFor(AI_VARIANT), discovery: 'none' }),
+      keyProvider: macProvider({ product: electronProfileFor(AI_VARIANT), discovery: 'none' }),
     })
     await writeFile(join(root, 'workbuddy-desktop-ai.info'), encryptedEnvelopeFixture())
     const status = await store.status()
@@ -559,7 +575,7 @@ describe('#59/#60 the international app on macOS', () => {
     // AI provider must resolve the AI default without any discovery at all.
     const cnDefault = await fakeApp('WorkBuddy.app')
     const aiDefault = await fakeApp('WorkBuddy AI.app')
-    const ai = new WorkBuddyAtRestKeyProvider({
+    const ai = macProvider({
       product: electronProfileFor(AI_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: aiDefault.electronPath,
@@ -581,7 +597,7 @@ describe('#59/#60 the international app on macOS', () => {
     const cn = await fakeApp('WorkBuddy.app')
     const spawn = async (path: string): Promise<string> =>
       JSON.stringify({ version: 1, atRestSecretKey: path === ai.electronPath ? aiSecret : SECRET })
-    const aiProvider = new WorkBuddyAtRestKeyProvider({
+    const aiProvider = macProvider({
       product: electronProfileFor(AI_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -595,7 +611,7 @@ describe('#59/#60 the international app on macOS', () => {
     })
     await expect(aiProvider.protectorKeyFor([aiKeyId])).resolves.toEqual(aiKey)
     expect(aiProvider.helperPath()).toBe(ai.electronPath)
-    const cnProvider = new WorkBuddyAtRestKeyProvider({
+    const cnProvider = macProvider({
       product: electronProfileFor(CN_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -611,7 +627,7 @@ describe('#59/#60 the international app on macOS', () => {
 
   it('rejects the CN bundle when searching for the AI app', async () => {
     const cn = await fakeApp('WorkBuddy.app')
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(AI_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),
@@ -625,7 +641,7 @@ describe('#59/#60 the international app on macOS', () => {
   })
 
   it('points its diagnostics at the AI variable', async () => {
-    const provider = new WorkBuddyAtRestKeyProvider({
+    const provider = macProvider({
       product: electronProfileFor(AI_VARIANT),
       discovery: 'macos-workbuddy',
       defaultElectronPath: join(root, 'absent', 'Electron'),

@@ -1,4 +1,4 @@
-## 0.4.11 (2026-10-01)
+## 0.4.12 (2026-10-01)
 
 ### 修复
 
@@ -9,7 +9,11 @@
 
 ### 新增
 
-* `doctor` 增加 `desktopAuthFile.format` 与 `atRestHelper` 两项诊断，文本输出同时打印凭据格式、助手路径与 `signInReason`——"凭据在却未登录"从此可以一次问清是格式问题还是助手定位问题。
+* `doctor` 增加 `desktopAuthFile.format` 与 `atRestHelper` 两项诊断，文本输出同时打印凭证格式、助手路径与 `signInReason`——"凭据在却未登录"从此可以一次问清是格式问题还是助手定位问题。
+
+### 测试
+
+* **macOS 发现链路的用例不再依赖宿主平台**：本仓 CI 跑在 Linux，移植过来的 macOS Electron 发现用例此前用宿主 `process.platform` 判定，在 Linux 上会在"该平台没有配置解密程序"处提前失败（0.4.11 的发布流水即因此中断，未产出 Release）。现在这些用例显式把 provider 的 `platform` 钉成 `darwin`，Spotlight/plutil/spawn 三个接缝本就全部注入，因此同一批断言在任何 runner 上都跑完整流程。
 
 ## 0.4.10 (2026-09-30)
 
