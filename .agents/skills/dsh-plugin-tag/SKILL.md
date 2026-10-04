@@ -82,9 +82,9 @@ gh run list --workflow=publish.yml --branch <tag> \
 ```
 
 **第 5 步的确认输出为空 = 没触发 push 流水，必须停下排查，不要继续推下一个**
-（多半是批量推送超限或流水被顶掉，通用机制见全局 `git-workflow`）。`--branch` 接受 tag 名（实测 `gh 2.101.0`
-对 `--branch session-archive-v0.3.15` 能返回该 tag 的 push 流水，真 tag 与不存在
-的 tag 也能正确区分），这一条就是"该 tag 到底有没有触发 CI"的权威判据。
+（多半是批量推送超限或流水被顶掉，通用机制见全局 `git-workflow`）。`--branch` 接受 tag 名
+（实测对真 tag 能返回该 tag 的 push 流水、不存在的 tag 返回空，能正确区分），
+这一条就是"该 tag 到底有没有触发 CI"的权威判据。
 
 拿到 run id 后 `gh run watch <run-id> --exit-status` 跟随到结束（失败时以非零
 码退出，便于脚本判定），**确认 success 再推下一个 tag**——既守住本条纪律，也顺带
@@ -102,13 +102,8 @@ for t in <目录1>-v<版本1> <目录2>-v<版本2>; do
 done
 ```
 
-**已推过的 tag 重复执行 `git push origin <tag>` 是安全的空操作**（实测输出
-`Everything up-to-date`，退出码 0）：远程已有该 ref 且内容一致时什么都不发生，
-所以循环可以无脑重跑。也正因如此，重推**不会**补触发当初漏掉的 CI——漏了只能
-按「打错处理」情形 B 删 tag 重来。
-
-**分支推送永远用 plain `git push`，不用 `--follow-tags`**：该选项会把
-annotated tags 顺带推出，让"显式打 tag"形同虚设，也绕过本节纪律。
+**已推过的 tag 重复推送是安全空操作，但不会补触发 CI**（通用机制见全局 `git-workflow`「打 tag 与推送纪律」），
+所以上面的循环可以无脑重跑；漏触发只能按「打错处理」情形 B 删 tag 重来。分支推送不用 `--follow-tags`（同见该节）。
 
 ## 打错处理（按情形）
 
