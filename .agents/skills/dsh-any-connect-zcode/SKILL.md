@@ -329,7 +329,32 @@ handle.replace([providerId])           // 同路由替换 = 广播"拓扑变了"
    交付前必须真跑 `bun run test:ci`（它含 build + typecheck + test），
    只跑 `vitest` 会漏掉这一类。
 
-## 六、反编译取证手法（比 grep 全文快得多）
+## 六、宿主线适配（`bun run adapt`）的三个已知缺口（2026-10-04 实测）
+
+适配 DSH 新预发布线时 `adapt` **只改 `@deepseek-ai/dsh-*` 的 range**，以下三处要手工补，
+否则 `bun install` 或 `typecheck` 直接失败。先跑 `adapt --dry-run` 看它打算改什么。
+
+1. **`adapt` 会盲目 bump 宿主线已删除的包**。实测 `@deepseek-ai/dsh-invariants` 被指到
+   `^0.2.1-alpha.1`，但该包最新只到 `0.2.0-rc.2`（新线已不再依赖它）→ `bun install` 报
+   `No version matching ... (but package exists)`。
+   判据：`npm view <pkg>@<新线版本> version` 为空即该包不在新线上。
+   处理：若本仓从未 import（`grep -rn <pkg> src/ client/ test/` 为空）就直接删该依赖，
+   不要 pin 一个不存在的版本。
+2. **基础包 cordis / schemastery 要跟着一起前移**。`adapt` 不碰它们，但新宿主线常同时前移：
+   0.2.1-alpha.1 要求 `cordis ~4.0.5-alpha.1`、`schemastery ~3.18.5-alpha.1`。
+   继续 pin `^4.0.4` 会解析出**另一份 cordis 实例**，而 `dsh-settings` 的 `Context.settings`
+   声明 augment 的是宿主选中的那份 → `typecheck` 报
+   `Property 'settings' does not exist on type 'Context'`（运行时同样是两个容器）。
+   判据：`ls -d node_modules/.bun/@deepseek-ai+cordis@*` 出现多个**不同版本**即重复；
+   同版本多副本是 peer 变体解析，正常。
+3. **版本号形态必须与 `dsh.host` 一致**：alpha 线用 `-alpha.N`（prerelease Release），
+   待命期用纯 semver。发布门禁会校验，待命期发 `-alpha.N` 会被直接拒绝。
+
+> 另：worktree 里跑 `bun run test:ci` 前必须先 `bun install`——worktree 有自己的目录，
+> 缺 `node_modules` 时 build 会报 `spawnSync .../node_modules/.bin/tsc ENOENT`。
+> 沙盒下装包要带 `BUN_INSTALL_CACHE_DIR=<repo>/.workwork/bun-cache`。
+
+## 七、反编译取证手法（比 grep 全文快得多）
 
 `app.asar` 有 300+MB，`grep` 全文会跑到超时。用字节偏移定位：
 
