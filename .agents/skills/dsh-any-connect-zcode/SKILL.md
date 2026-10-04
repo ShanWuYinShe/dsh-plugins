@@ -354,6 +354,26 @@ handle.replace([providerId])           // 同路由替换 = 广播"拓扑变了"
 > 缺 `node_modules` 时 build 会报 `spawnSync .../node_modules/.bin/tsc ENOENT`。
 > 沙盒下装包要带 `BUN_INSTALL_CACHE_DIR=<repo>/.workwork/bun-cache`。
 
+### 宿主接口审计结论：三处「已评估、有意不采用」（2026-10-04，防重复报缺口）
+
+对 0.2.1-alpha.1 的接口使用做过完整审计，以下三项**是有意不做**，后续审计不要再当缺口报：
+
+1. **直连 fetch 不加 `attributionHeaders()`**。宿主契约（`LlmAdapter` 类文档）要求 provider
+   HTTP 请求带 attribution——这一跳由 pi-ai 覆盖（chat 路径 `lib/index.js` 的 `requestHeaders()`、
+   探测路径 `attributionHeaders()` 直设，且 attribution 是保留名、优先于部署头）。插件自己直连的
+   14 个 fetch 分两类：模拟官方客户端的（`CLIENT_UA`、App 形 UA、ZCode 指纹）**UA 本身就是网关的
+   产品分流契约**（实测：`WorkBuddyAI/<v>` 无空格才有完整 App 文档，空格形式 400），加 attribution
+   会破坏功能；账号/额度类的（preview/claim/balance）实测容忍额外头，但语义上就是以客户端身份
+   发出（`zcodejwttoken` + `X-Device-Mid`），标 harness 身份自相矛盾，收益为零、风控风险不为零。
+2. **不注册 `registerModelDiscovery`**。它探测的是「用户正在编辑、尚未存储的 draft endpoint」，
+   而本插件是 profile 自带路由（`declared:false`）+ 自有目录刷新链路，用户从不填 endpoint；
+   且网关（copilot.tencent.com / zcode.z.ai）不是标准 OpenAI/Anthropic 列模型端点，
+   会落进 `DISCOVERY_UNSUPPORTED`。不注册是正确行为。
+3. **四变体合在一张 `plugins.bundle.config` 卡内，不拆 `plugins.row.config`**。
+   两种 slot 都合法（slot-contract 明示 bundle 配置归属两者之一），用户拍板保持现形态
+   （一张包卡内四张变体卡，2026-10-04 实测截图确认观感）。
+
+
 ## 七、反编译取证手法（比 grep 全文快得多）
 
 `app.asar` 有 300+MB，`grep` 全文会跑到超时。用字节偏移定位：
