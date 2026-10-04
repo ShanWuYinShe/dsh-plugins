@@ -1,3 +1,11 @@
+## 0.4.14-alpha.1 (2026-10-04)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.1-alpha.1` 预发布线**：依赖范围与 `dsh.host` 对齐 `~0.2.1-alpha.1`。
+* **对齐 `cordis` 到 `4.0.5-alpha.1`、`schemastery` 到 `3.18.5-alpha.1`**：新宿主线把这两个基础包一起前移了。此前的 `^4.0.4` 会解析出另一份 `cordis` 实例，而 `dsh-settings` 的服务声明（`Context.settings`）声明的是宿主选中的那一份，于是类型检查报「Property settings does not exist on type Context」——运行时同样是两个容器。对齐后与宿主共用同一份。
+* **移除 `@deepseek-ai/dsh-invariants` devDependency**：新宿主线不再提供该包（其最新只到 `0.2.0-rc.2`），且本仓从未 import 过它——它是历史遗留的 peer devDep，继续 pin 会让 `bun install` 直接失败。
+
 ## 0.4.13 (2026-10-04)
 
 ### 修复
