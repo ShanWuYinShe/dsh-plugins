@@ -123,24 +123,54 @@ export function startPlanModelInfo(
 }
 
 /**
+ * 活动是否仍然有效：`ends_at`（秒级 epoch）早于 `now` 即为过期。
+ *
+ * `ends_at` 缺失时按**有效**处理：名单宁可多给一次（上游会回明确的配额错误），
+ * 也不能因为字段缺失就让用户丢掉整组模型。`now` 默认取真实时钟，测试可显式传入。
+ *
+ * 注意：**当日额度用尽 ≠ 活动过期**。这里只看活动本身的有效期与状态；"今天还没
+ * 领取/还没发放" 是另一回事（表现为活动列表里根本没有条目），不在这里判定。
+ */
+export function isStartPlanActivityActive(
+  activity: { status?: string; ends_at?: number },
+  now: number = Date.now(),
+): boolean {
+  // status 缺失视为 active（上游省略该字段时不该当作失效），非 active 一律排除。
+  if (activity.status !== undefined && activity.status !== 'active') return false
+  const endsAt = activity.ends_at
+  if (typeof endsAt !== 'number' || !Number.isFinite(endsAt)) return true
+  return endsAt * 1000 >= now
+}
+
+/** One activity's entitlements, as {@link startPlanModelsFromEntitlements} takes them. */
+export type StartPlanEntitlements = readonly {
+  show_name?: string
+  capabilities?: readonly string[]
+  entitlement_id?: string
+}[]
+
+/**
  * 由当前活动的 entitlements 派生 Start Plan 的可用模型名单。
  *
  * 授权形状来自 `billing/balance` 的 `data.plans[].entitlements[]`：每个条目用
  * `capabilities: ["model:glm-5.3-flash"]` 声明它放行的模型，`show_name` 是展示
- * 名。只有 `status` 为 active 的活动参与派生；活动列表为空或没有可解析的模型
- * 时返回 `fallback`——**不返回空名单**，否则一次上游抖动就会让整个 Start Plan
- * 分组从 DSH 里消失。
+ * 名。
+ *
+ * 返回值有**两种含义**，调用方必须区分（这正是"过期活动仍显示模型"那个 bug 的
+ * 根源）：
+ * - **非空**：这是活动实际放行的名单，就是最终结果。
+ * - **空**：`granted` 为 `true` 时是"已确认没有任何授权"（例：查到了活动列表，
+ *   但没有一个活动在有效期内）——调用方应当据此**给出空名单**，不要回退兜底；
+ *   `granted` 为 `false`（默认）时沿用历史语义"没有可用授权信息"，调用方应当
+ *   回退 `fallback`，否则一次上游抖动就会让整个 Start Plan 分组从 DSH 里消失。
  *
  * 额度用尽与否不影响登记：余额是当日一次性池子（见卡片），额度耗尽应由上游
  * 给出明确的配额错误，而不是让模型在选择器里凭空消失。
  */
 export function startPlanModelsFromEntitlements(
-  entitlements: readonly {
-    show_name?: string
-    capabilities?: readonly string[]
-    entitlement_id?: string
-  }[],
+  entitlements: StartPlanEntitlements,
   fallback: readonly WorkBuddyModelInfo[] = FALLBACK_ZCODE_START_PLAN_MODELS,
+  granted = false,
 ): readonly WorkBuddyModelInfo[] {
   const ids: string[] = []
   const push = (raw: string | undefined): void => {
@@ -156,7 +186,9 @@ export function startPlanModelsFromEntitlements(
   if (ids.length === 0) {
     for (const entitlement of entitlements) push(entitlement.show_name)
   }
-  if (ids.length === 0) return fallback
+  // granted 表示"活动确实存在且已验证有效，只是没有任何可解析的模型"，此时空
+  // 名单是**事实**而不是信息缺失——回退兜底会凭空造出用户没有被授权的模型。
+  if (ids.length === 0) return granted ? [] : fallback
   return ids.map(id => startPlanModelInfo(id, fallback))
 }
 

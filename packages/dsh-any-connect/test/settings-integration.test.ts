@@ -174,6 +174,61 @@ describe('WorkBuddy Host settings integration', () => {
     }
   })
 
+  it('空名单不落盘：重启后仍服务上次真正加载过的名单，而不是空目录', async () => {
+    // catalogStore 是"上次真正加载过的名单"，不是"最后一次观测"。Start Plan
+    // 今日未领取时上游查询成功但没有有效活动，fetchModels 返回空名单——这在本轮
+    // 是**正确的降级**（空目录即 DSH 隐藏该分组），但它绝不能写进 saved：否则
+    // 下次启动的 saved 分支会把空目录当已知好状态发布，一旦那时 live 拉取再失败，
+    // 用户就长期看不到分组——而 saved 存在的目的恰恰是"重启后别落回内置名单"。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-empty-roster-'))
+    vi.stubEnv('DSH_HOME', root)
+    const desktop = join(root, 'workbuddy-desktop.info')
+    await writeFile(desktop, JSON.stringify({
+      auth: { accessToken: 'at', refreshToken: 'rt', expiresAt: Date.now() + 3600_000, domain: 'www.codebuddy.cn' },
+      account: { uid: 'uid-1', nickname: '昵称' },
+    }))
+    // 第一程：拉取成功 → 落盘，saved 里是真实名单。
+    const okSpy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+      .mockImplementation(async () => [{ id: 'saved-only', name: 'Saved Only', contextWindow: 100, maxTokens: 10, supportsImages: false }])
+    const ctx1 = new Context()
+    try {
+      await ctx1.plugin(LlmRuntime)
+      await ctx1.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+      await vi.waitFor(async () => {
+        expect((await ctx1.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
+      })
+      const { existsSync } = await import('node:fs')
+      await vi.waitFor(() => {
+        expect(existsSync(join(root as string, '.workbuddy-catalog.json'))).toBe(true)
+      })
+    } finally {
+      okSpy.mockRestore()
+      await ctx1.fiber.dispose()
+    }
+    // 第二程：同账号、拉取返回**空名单**（模拟 Start Plan 今日未领取）。
+    // 分组必须立刻隐藏，但盘上的 saved 不能被空名单覆盖。
+    const emptySpy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+      .mockImplementation(async () => [])
+    try {
+      const ctx = new Context()
+      context = ctx
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+      await vi.waitFor(async () => {
+        expect(await ctx.llm.listModels('workbuddy')).toEqual([])
+      })
+    } finally {
+      emptySpy.mockRestore()
+    }
+    // 盘上仍是第一程的名单：空观测没有被持久化。
+    const { readFile } = await import('node:fs/promises')
+    const saved = JSON.parse(await readFile(join(root as string, '.workbuddy-catalog.json'), 'utf8')) as {
+      entries: Record<string, { models: Array<{ id: string }> }>
+    }
+    const models = Object.values(saved.entries)[0]?.models.map(m => m.id)
+    expect(models).toEqual(['saved-only'])
+  })
+
   it('retries the model catalog refresh after failures, then stops', async () => {
     // 目录重试回归:启动拉取失败后曾永不重试,目录(费率/徽章)会一直停在
     // fallback 快照。失败后应按 60s 间隔有限次重试,耗尽即停,不再打扰。

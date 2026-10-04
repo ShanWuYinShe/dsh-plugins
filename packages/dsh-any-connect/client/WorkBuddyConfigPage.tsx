@@ -14,7 +14,7 @@ import {
   ZCODE_SP_STATUS_PATH,
   ZCODE_STATUS_PATH,
 } from '../src/status-paths.js'
-import type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStatus } from '../src/status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStartPlanClaim, WorkBuddyWebStatus } from '../src/status-paths.js'
 import type { WorkBuddySettingsKey } from './locales.js'
 
 const WB_STYLE_ID = '@chaoset/dsh-any-connect/config.css'
@@ -127,7 +127,9 @@ export function isCatalogLive(catalog: WorkBuddyWebCatalog | undefined): boolean
  * 用户处境,必须可分辨（status-paths 的 WorkBuddyWebCatalog 契约）。 */
 function catalogSourceKey(catalog: WorkBuddyWebCatalog | undefined): WorkBuddySettingsKey {
   if (catalog === undefined) return 'catalogSourceFallback'
-  if (catalog.source === 'live') return 'catalogSourceLive'
+  // 「拉取成功但零模型」与「拉取成功且有模型」是两种结论，不能共用一句话——
+  // 前者用户看到的是"刚拉取成功"+0 个模型，不说清楚就像插件坏了。
+  if (catalog.source === 'live') return catalog.empty === true ? 'catalogSourceEmpty' : 'catalogSourceLive'
   if (catalog.source === 'saved') return 'catalogSourceSaved'
   return 'catalogSourceFallback'
 }
@@ -237,6 +239,33 @@ const privilegeChipStyle: CSSProperties = {
   border: '1px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #1677ff) 20%, transparent)',
 }
 const planMetaStyle: CSSProperties = { fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)' }
+/** 今日待领取：唯一需要用户动作的状态，给一块带边框的提示区。 */
+const claimBoxStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+  marginTop: 10,
+  padding: '10px 12px',
+  borderRadius: 8,
+  border: '1px solid var(--dsw-alias-state-warn-primary)',
+  background: 'var(--dsw-alias-bg-layer-2)',
+}
+/**
+ * 探测失败（unknown）：与 available 同样可见，但用中性样式——它是"没测到"，
+ * 不是"有东西等你领"，用警告色会误导用户以为有待办。
+ */
+const claimUnknownBoxStyle: CSSProperties = {
+  ...claimBoxStyle,
+  border: '1px solid var(--dsw-alias-border-l2)',
+  background: 'var(--dsw-alias-bg-layer-2)',
+}
+const claimTitleStyle: CSSProperties = { fontSize: 13, lineHeight: '20px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }
+const claimIdRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }
+const claimCodeStyle: CSSProperties = {
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: 11,
+  wordBreak: 'break-all',
+}
 const planChipOffStyle: CSSProperties = {
   ...privilegeChipStyle,
   background: 'var(--dsw-alias-bg-layer-3, rgba(128, 128, 128, 0.12))',
@@ -546,6 +575,8 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
   const [notice, setNotice] = useState<string | undefined>(undefined)
   // 模型清单默认收起：它是最长的一段，而卡片的常看信息只有积分本身。
   const [modelsOpen, setModelsOpen] = useState(false)
+  // 「已复制」是短暂反馈：复制成功给一次确认，2s 后自行复原，不留陈旧状态。
+  const [copiedPlanId, setCopiedPlanId] = useState(false)
   const mounted = useRef(true)
 
   useEffect(() => {
@@ -555,6 +586,25 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
 
   const probe: WorkBuddyWebProbeSection | undefined = status.probe
   const probeKey = status.probeKey
+  /** 今日 Start Plan 待领取探测结果；只有 Start Plan 变体的 status 会带。 */
+  const startPlanClaim: WorkBuddyWebStartPlanClaim | undefined = status.startPlanClaim
+
+  /**
+   * 把 plan_id 复制到剪贴板（用户要拿着它去客户端核对领取的活动）。
+   *
+   * 剪贴板在非安全上下文/无权限时会 reject，所以失败只当作"没复制"静默处理：
+   * 这个按钮是便利功能，不该因为浏览器权限弹错误打断卡片。
+   */
+  const copyPlanId = useCallback(async (planId: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(planId)
+      if (!mounted.current) return
+      setCopiedPlanId(true)
+      window.setTimeout(() => { if (mounted.current) setCopiedPlanId(false) }, 2000)
+    } catch {
+      // 复制失败不改状态：plan_id 本身已经显示在卡片上，用户仍可手动选中复制。
+    }
+  }, [])
 
   /** Re-read the status document; failures degrade to an inline notice — with
    * data already on screen a transient failure must not blank the card. */
@@ -751,6 +801,36 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
                 ) : null}
                 {isStartPlanCard ? <span style={planMetaStyle}>{t('planStartNote')}</span> : null}
               </div>
+              {/* 今日待领取提示：只有 Start Plan 变体的 status 才带 startPlanClaim。
+                  available 是唯一需要用户动作的状态，所以只有它给醒目提示；none 是
+                  "已领"（无需动作，不打扰）；unknown **绝不渲染成 none**——探测失败
+                  时说"没得领"会让用户白丢一次领取机会。 */}
+              {startPlanClaim !== undefined && startPlanClaim.state !== 'none' ? (
+                <div style={startPlanClaim.state === 'available' ? claimBoxStyle : claimUnknownBoxStyle}>
+                  {startPlanClaim.state === 'available' ? (
+                    <>
+                      <span style={claimTitleStyle}>
+                        <span aria-hidden="true">🎁</span> {t('claimAvailable')}
+                      </span>
+                      <span style={planMetaStyle}>
+                        {t('claimAvailableHint', { name: startPlanClaim.planName ?? t('startPlanLabel') })}
+                      </span>
+                      {startPlanClaim.planId !== undefined ? (
+                        <span style={claimIdRowStyle}>
+                          <span style={planMetaStyle}>{t('claimPlanIdLabel')}: <code style={claimCodeStyle}>{startPlanClaim.planId}</code></span>
+                          <button type="button" className="wb-btn" style={buttonStyle} onClick={() => { void copyPlanId(startPlanClaim.planId ?? '') }}>
+                            {copiedPlanId ? t('claimCopied') : t('claimCopy')}
+                          </button>
+                        </span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span style={planMetaStyle}>
+                      {t('claimUnknown', { reason: startPlanClaim.reason ?? t('requestFailed') })}
+                    </span>
+                  )}
+                </div>
+              ) : null}
             </>
           ) : (
             <>
@@ -779,6 +859,15 @@ function VariantCard({ t, variant, status, open, onToggle, fetchStatus, applySta
             ? <p style={{ ...errorStyle, fontSize: 12 }}>{t('creditsError', { message: status.creditsError })}</p>
             : null}
 
+          {/* 空名单说明：live + 刚刚拉取 + 0 个模型，原本与"插件坏了"长得一模一样。
+              现在 source=live 时明确说"上游答了空名单"——这是正常结论，不是故障；
+              Start Plan 还多一句"去客户端领取后自己会更新"（快通道，≤60s）。 */}
+          {status.models !== undefined && status.models.length === 0
+            && status.catalog?.empty === true && status.catalog.error === undefined ? (
+              <p style={summaryNoteStyle}>
+                {isStartPlanCard ? t('catalogEmptyRosterStartPlan') : t('catalogEmptyRoster')}
+              </p>
+            ) : null}
           {status.models !== undefined && status.models.length > 0 ? (
             <>
               <hr style={dividerStyle} />

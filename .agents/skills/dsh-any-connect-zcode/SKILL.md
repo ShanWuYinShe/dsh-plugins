@@ -85,7 +85,33 @@ GET https://zcode.z.ai/api/v1/zcode-plan/billing/balance[?app_version=<ver>]
   取值优先级：`~/.zcode/v2/telemetry-state.json` 的 `deviceMid` →
   `$DSH_HOME/.zcode-device-mid`（自生成并持久化）。
 - 同族端点都可读：`billing/current`、`billing/preview`；`billing/claim` 需要
-  阿里云验证码（无码 → `400 code 3007 captcha verify failed`）。
+  阿里云验证码（无码 → `400 code 3007 captcha verify failed`，2026-10-04 复现）。
+
+### 2.1 每日领取（preview / claim）——**全自动领取不可能，这是硬约束**
+
+2026-10-04 从 `app.asar` 偏移 **271347225**（`claimManualPlan`）取证并实测：
+
+    GET  /api/v1/zcode-plan/billing/preview?app_version=<v>&platform=<p>
+         Authorization: Bearer <zcodejwttoken>          # 纯 HTTP，无需 captcha
+         -> data.plans[] = **今日可领取**清单（今日已领过则 []）
+    POST /api/v1/zcode-plan/billing/claim
+         Authorization: Bearer <zcodejwttoken>
+         Content-Type: application/json
+         X-Aliyun-Captcha-Verify-Param: <captchaVerifyParam>   # 必需
+         X-ZCode-App-Version: <v>   X-Platform: <p>
+         body: {"plan_id": "<id>"}
+
+- `preview` 可在 Node 侧直接调用（本机实测 200 + `plans: []`）——**这是插件能自动化的上限**。
+- `claim` 的 captcha 由渲染进程 `window.AliyunCaptcha`（阿里云 SDK）签发，
+  客户端走 `startTracelessVerification()` 无感验证。token 由阿里云服务端签发并与
+  浏览器指纹绑定，**纯 Node/HTTP 侧无法生成**；实测不带该头一律
+  `HTTP 400 {"code":3007,"msg":"captcha verify failed"}`。
+- 结论：**「探测自动、领取手动」**。插件实现见 `src/zcode-plan-claim.ts`；
+  `claimStartPlan` 在无 captcha 时**根本不发请求**，直接短路为 `captcha-required`
+  （一等公民状态，不是笼统 failed），绝不伪装成已领取。
+- 判定三态必须分清：探测成功有清单=`available`；探测成功清单为空=`none`（今日已领）；
+  **探测失败/超时/401=`unknown`，绝不塌成 `none`**——塌成 none 会让用户以为
+  "今天没得领"而白丢一次领取。字段透出在 Start Plan 变体的 status（`startPlanClaim`）。
 
 ## 三、plan 模型通道：Start Plan 的生产通道，**拦的是请求体指纹（已被破解）**
 
@@ -163,7 +189,27 @@ const res = await fetch('https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messa
 实际放行的模型。内置目录（`account:bigmodel-start-plan` 的 builtinModelIds）只是候选：
 实测 Trust Build 期间内置目录列三个，活动只授权 **GLM-5.3-Flash**，另两个返回
 `400 code 3006 model not allowed`。所以注册名单必须由 entitlements 派生
-（`src/zcode-plan-models.ts`），拿不到授权信息时退回兜底名单而不是空名单。
+（`src/zcode-plan-models.ts`）。
+
+**2026-10-04 修正：「拿不到授权就退回兜底名单」是个会骗人的坑。** 必须区分三态，
+否则会在"过期/今日未领取"时显示出根本不授权的模型（用户选中即 400 code 3006）：
+
+| 状态 | 判据 | 正确返回 |
+|---|---|---|
+| A 有有效活动且解析出模型 | 见下 | 该名单 |
+| B 查询**成功**但无有效活动（未领取/已过期） | `plans` 过滤后为空 | **空名单**（分组隐藏） |
+| C 查询**失败**（HTTP 非 ok / 抛错） | — | `this.models` 兜底 |
+
+- 有效期判据：`ends_at`（**秒级** epoch）× 1000 < now 即过期；`ends_at` 缺失按
+  **有效**处理（不能因字段缺失让用户丢名单）；`status` 非 `active` 一律排除、
+  缺失视为 active。实现 `isStartPlanActivityActive`。
+- **已确认有有效活动时，名单唯一真源就是它的 entitlements**：解析不出模型要返回空，
+  **不许**回退 `this.models`。对 start-plan 变体而言 `this.models` 就是那三个幻影模型
+  （`index.ts` 用 `FALLBACK_ZCODE_START_PLAN_MODELS` 构造 client），回退等于让
+  "活动有效但授权字段漂移"重新长出"看起来能用、一用就报错"的假名单。
+- **空名单是合法降级信号**：`catalog.ts` 里"空目录即 DSH 隐藏该分组"是既有设计。
+  但空名单**不可持久化**——`index.ts` 的 `refreshCatalog` 必须 `models.length > 0`
+  才 `catalogStore.save()`，否则下次启动的 saved 分支会把空目录当已知好状态发布。
 
 每模型的窗口/输出上限/档位以客户端 `config/provider/zcode-builtin.json` 的
 `modelConfigRules` 为准（GLM-5.3-Flash 1M/128K、GLM-5.2 1M/128K、GLM-5-Turbo
@@ -189,7 +235,101 @@ curl -sS "http://127.0.0.1:8932/plugins/dsh-any-connect/zcode-sp/status" -H "Hos
 - 真客户端的行为可用 `node /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs --help` 观察；
   headless prompt（`-p`）需要先解决模型选择（见下），不是判断通道可用性的可靠手段。
 
-## 五、反编译取证手法（比 grep 全文快得多）
+### 4.1 已知测试 flake：`usage.test.ts` 的 ENOTEMPTY（**与本插件改动无关**）
+
+2026-10-04 实测：全量 `vitest run` 偶发
+
+    FAIL packages/dsh-any-connect/test/usage.test.ts
+    Error: ENOTEMPTY: directory not empty, rmdir '.../dsh-any-connect-usage-XXXX'
+
+**判据（已做过对照实验，不要误判成自己改坏了）**：
+- `usage.test.ts` 的 `afterEach` 在 `context.fiber.dispose()` 后立即
+  `rm(root, {recursive:true, force:true})`，插件的异步收尾可能仍在写该目录 → 竞态。
+- 单跑该文件 3/3 通过；全量**串行**连跑 5/5 通过。
+- **在未改动的 pristine `main`（git stash 全部改动）上，两个 vitest 进程并行跑时同样复现**
+  ——证明是仓库既有竞态，不是本次改动引入。
+- 结论：遇到它先单跑该文件确认，再串行重跑全量；不要为此改业务代码。
+
+## 五、模型目录「自动更新」与选择框实时刷新（2026-10-04 实测）
+
+用户需求是「所有 provider 都自动更新 + 聊天页选择框实时更新」。查这部分时先分清
+**两条独立的链**，它们坏起来表现一样（"名单是旧的"），但修法完全不同。
+
+### 5.1 拉取链：定时刷新（插件侧主动拉）
+
+- 启动时 `refreshCatalog(runtime, 'startup')`；每 **60s** `sweep` 做身份核对
+  （身份变了才真拉，稳态零上游请求）；每 **60 分钟** `catalogTimer` 全量重拉。
+- 四个变体（workbuddy / workbuddy-ai / zcode / zcode-start-plan）**都**接上了这三条，
+  没有变体被条件跳过（audit 实测确认）。
+
+**🔴 陷阱一：`ZCodeUpstreamClient.fetchModels` 的 coding 分支曾是"假自动更新"。**
+原实现三个分支全部 `return this.models`，上游 `json.data` 只用来判断非空随后丢弃
+——该 provider 每小时刷新的唯一效果是"证明凭据还活着"，名单永远是编译期常量
+`FALLBACK_ZCODE_MODELS`。2026-10-04 已改为**并集 join**：上游给 id、本地给已验证参数
+（128K / 费率 / 徽章），未收录 id 走 `defaultZCodeModelInfo` 保守默认（200K/32K）。
+实测收益：上游真实列表 11 个模型，此前只有 2 个可见，**9 个永远看不到**。
+> 写这类"采用上游名单"的测试时注意：若本地目录恰好等于上游名单，旧实现也能碰巧通过
+> ——用例必须用**与编译期常量不同**的本地目录，并断言顺序与数量，否则是假绿。
+
+**🔴 陷阱二：`zcode-start-plan` 空名单的恢复延迟。**
+今日未领取 → 空名单 → 分组隐藏；用户领取后要等**最长 60 分钟**（小时刷新）才恢复，
+因为 60s sweep 只比对凭据身份，领取不改变身份。
+
+### 5.2 推送链：选择框实时刷新（宿主侧被动通知）
+
+**这是"实时"的真正瓶颈，且极容易被忽略。**
+客户端 `dsh-client-ui-model-selection/lib/client.js` 的
+`ModelCatalogDirectory.load()` **命中缓存直接返回**：
+```js
+if (state.status === "ready" && state.value !== null) return Promise.resolve(state.value)
+```
+它只在 `invalidate()/refresh()` 时重拉，而 refresh 由四个远程事件触发：
+`llm/adapters-updated` / `settings/document-updated` / `credentials/record-updated` /
+`credentials/reference-updated`。
+
+**插件能触发的只有 `llm/adapters-updated`**。它由 `dsh-llm` 的
+`LlmRuntime.commitRoutes` 发布，`emitAdaptersUpdated` 是 **private**，插件不能直接调。
+公开的正式手段是 `AdapterRegistrationHandle.replace(providers)`
+（`dsh-llm/lib/types/index.d.ts`，其 JSDoc 明说路由集唯一的变更点就是发布该事件的地方）：
+
+```js
+const handle = ctx.llm.registerAdapter([providerId], adapter)
+handle.replace([providerId])           // 同路由替换 = 广播"拓扑变了"
+```
+本机实测：registerAdapter 后事件计数 1，`replace` 后变 2。**不要另造事件。**
+
+- **必须只在内容真的变了时调用**：宿主每小时重拉，多数时候名单一样，无条件
+  `replace` 会让所有打开的客户端每小时白重拉+白重渲染。用内容指纹比较
+  （id/name/contextWindow/maxTokens/supportsImages/reasoning/billing），
+  **不要用数组引用**——每次刷新都重建整份数组。
+- **空名单也是合法变化**（Start Plan 未领取 → 分组隐藏），必须通知。
+- `replace` 在注册已释放时抛 `LlmError REGISTRATION_DISPOSED`，必须 try/catch 吞掉。
+  > 有意思的实测结论：**不吞并不会崩进程**——`refreshCatalog` 是 fire-and-forget async，
+  > 异常会被它自己的泛 catch 接住，误判成"上游目录不可用"→ 打警告并对**已到手的新名单
+  > 再重试 3 次**无谓上游请求。所以吞掉是必须的，但理由是"避免误判成拉取失败"，
+  > 不是"避免崩溃"。
+
+### 5.3 测试这类改动时的四个坑（实测）
+
+1. `ctx.llm` 是 cordis Proxy：**直接给 `ctx.llm.registerAdapter` 赋 own property 拦不住**
+   插件内部的调用，测试会静默变成永远为真的空断言。必须
+   `Object.defineProperty(Object.getPrototypeOf(ctx.llm), 'registerAdapter', ...)`。
+2. 客户端样式只能引用 `test/css-token-whitelist.txt` 里的 `var(--*)`。**凭记忆写变量名
+   必挂**：规范名是 `--dsw-alias-state-warn-primary`（不是 `warning`）、
+   `--dsw-alias-border-l2`（不是 `border-tertiary`）。写新样式前先 grep 白名单。
+3. **"单跑绿、全量红" 的用例几乎都是跨文件状态污染**，不要当 flake 放过。
+   实测案例：`catalog-refresh.test.ts` 断言全局 `llm/adapters-updated` 事件计数，
+   单跑 5/5 绿、跑 5 个挂载插件的文件子集 29/29 绿，但
+   `bun x vitest run packages/dsh-any-connect` **确定性红**（expected 18 to be 17）。
+   根因是它订阅的是**宿主全局事件**，同一 worker 里别的插件实例发布的事件也被计入。
+   修法：断言只对本测试自己的实例敏感（按 provider 过滤 / 用可注入计数器），
+   或修掉真正泄漏的那个文件的清理。**判据：单跑与全量结果不一致 = 隔离 bug，不是运气。**
+4. **vitest 不做类型检查**：测试里写错的类型（如 `provide('x', {...})` 少传参数）
+   单测照样绿，但 `bun run typecheck` / `bun run test:ci` 会挂。
+   交付前必须真跑 `bun run test:ci`（它含 build + typecheck + test），
+   只跑 `vitest` 会漏掉这一类。
+
+## 六、反编译取证手法（比 grep 全文快得多）
 
 `app.asar` 有 300+MB，`grep` 全文会跑到超时。用字节偏移定位：
 

@@ -187,6 +187,100 @@ describe('workBuddyWebStatus', () => {
   })
 })
 
+/**
+ * 今日 Start Plan 领取提示（task-3）。
+ *
+ * 这个字段挂在卡片每 60s 轮询的读路径上，判据只有一条：**探测失败绝不能
+ * 塌成 none**。none 是"今天已领取"的确定结论，用户读到就会收工；unknown 才是
+ * "没探到"。两者混同 = 让用户白丢一次本可以完成的领取。
+ */
+describe('workBuddyWebStatus startPlanClaim', () => {
+  const base = {
+    store: storeWith(CREDENTIAL),
+    fetchCredits: clientWith(Promise.resolve({ total: 1, accounts: [] })),
+    models: () => [],
+    catalog: () => ({ source: 'live' as const }),
+    probeKey: 'test-key',
+    path: '/workbuddy-status-test',
+  }
+
+  it('有待领取项 -> available，带 planId/planName，且标注需要验证码', async () => {
+    const status = (await workBuddyWebStatus({
+      ...base,
+      fetchStartPlanClaim: async () => ({
+        status: 'ok',
+        plans: [{ planId: 'zcode-v3-start-plan-trust-0930', name: 'ZCode Trust Build', priority: 9 }],
+      }),
+    }) as WorkBuddySignedInStatus) as WorkBuddySignedInStatus & { startPlanClaim?: unknown }
+    expect(status.startPlanClaim).toEqual({
+      state: 'available',
+      planId: 'zcode-v3-start-plan-trust-0930',
+      planName: 'ZCode Trust Build',
+      captchaRequired: true,
+    })
+  })
+
+  it('探测成功但清单为空 -> none（今日已领取，是确定结论）', async () => {
+    const status = (await workBuddyWebStatus({
+      ...base,
+      fetchStartPlanClaim: async () => ({ status: 'ok', plans: [] }),
+    }) as WorkBuddySignedInStatus) as WorkBuddySignedInStatus & { startPlanClaim?: { state: string } }
+    expect(status.startPlanClaim).toEqual({ state: 'none' })
+  })
+
+  it('探测失败 -> unknown 且带原因，绝不塌成 none', async () => {
+    const status = (await workBuddyWebStatus({
+      ...base,
+      fetchStartPlanClaim: async () => ({ status: 'failed', message: 'preview 失败（HTTP 502）' }),
+    }) as WorkBuddySignedInStatus) as WorkBuddySignedInStatus & { startPlanClaim?: { state: string; reason?: string } }
+    expect(status.startPlanClaim?.state).toBe('unknown')
+    expect(status.startPlanClaim?.reason).toContain('502')
+  })
+
+  it('auth-failed 也归 unknown（登录态问题不是"没得领"）', async () => {
+    const status = (await workBuddyWebStatus({
+      ...base,
+      fetchStartPlanClaim: async () => ({ status: 'auth-failed', message: '登录态已失效' }),
+    }) as WorkBuddySignedInStatus) as WorkBuddySignedInStatus & { startPlanClaim?: { state: string; reason?: string } }
+    expect(status.startPlanClaim?.state).toBe('unknown')
+    expect(status.startPlanClaim?.reason).toContain('登录态已失效')
+  })
+
+  it('探测器抛错不炸整份文档：收敛成 unknown，credits 与 models 照常', async () => {
+    const status = (await workBuddyWebStatus({
+      ...base,
+      models: () => [model({ id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', contextWindow: 1000000 })],
+      fetchStartPlanClaim: async () => { throw new Error('socket hang up') },
+    }) as WorkBuddySignedInStatus) as WorkBuddySignedInStatus & { startPlanClaim?: { state: string; reason?: string } }
+    expect(status.startPlanClaim?.state).toBe('unknown')
+    expect(status.startPlanClaim?.reason).toContain('socket hang up')
+    expect(status.credits).toEqual({ total: 1, accounts: [] })
+    expect(status.models).toHaveLength(1)
+  })
+
+  it('未提供探测器（其余变体）-> 字段整个不出现，不是 unknown', async () => {
+    const status = await workBuddyWebStatus({ ...base })
+    expect('startPlanClaim' in status).toBe(false)
+  })
+
+  it('已登录但这一拍读不到凭据 -> unknown 且不调用探测器', async () => {
+    const fetchStartPlanClaim = vi.fn(async () => ({ status: 'ok' as const, plans: [] }))
+    // status() 报已登录、current() 却返回 undefined：凭据文件瞬态不可读。
+    // 此时报 none 会骗用户"今天没得领"，报 unknown 才对。
+    const flakyStore = {
+      status: async () => ({ state: 'signed-in' as const, expiresAtMs: 1234, source: 'desktop' as const }),
+      current: async () => undefined,
+    }
+    const status = (await workBuddyWebStatus({
+      ...base,
+      store: flakyStore as unknown as WorkBuddyStatusRouteOptions['store'],
+      fetchStartPlanClaim,
+    }) as WorkBuddySignedInStatus) as WorkBuddySignedInStatus & { startPlanClaim?: { state: string; reason?: string } }
+    expect(status.startPlanClaim?.state).toBe('unknown')
+    expect(fetchStartPlanClaim).not.toHaveBeenCalled()
+  })
+})
+
 describe('workBuddyWebStatus context', () => {
   it('lists working budgets and larger options for every served model', async () => {
     const status = (await workBuddyWebStatus({

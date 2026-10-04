@@ -7,14 +7,21 @@
  * @module dsh-any-connect/upstream
  */
 
+import os from 'node:os'
 import type { WorkBuddyCredential } from './auth.js'
-import { appUserAgent, resolveAppVersion, type AppVersionInfo } from './app-version.js'
+import { FALLBACK_APP_VERSION, appUserAgent, resolveAppVersion, type AppVersionInfo } from './app-version.js'
 import type { ProbeAttempt } from './probe.js'
 import { deadlineSignal, withTimeout } from './timeout.js'
 import { ZCodeClientSigner } from './zcode-signer.js'
 import { prepareStartPlanBody } from './zcode-plan-prompt.js'
-import { startPlanModelsFromEntitlements } from './zcode-plan-models.js'
+import {
+  FALLBACK_ZCODE_START_PLAN_MODELS,
+  isStartPlanActivityActive,
+  startPlanModelsFromEntitlements,
+} from './zcode-plan-models.js'
 import type { StartPlanActivity } from './zcode-plan-models.js'
+import { previewStartPlan } from './zcode-plan-claim.js'
+import type { StartPlanClaimCredential, StartPlanPlatformInfo, StartPlanPreviewResult } from './zcode-plan-claim.js'
 
 /** Prompt body used by every probe request; carries nothing user-specific. */
 const PROBE_PROMPT = 'ping'
@@ -1192,10 +1199,35 @@ export class WorkBuddyUpstreamClient {
   }
 }
 
+/**
+ * 上游新出现、本地目录尚未收录的模型 id 的保守默认行。
+ *
+ * 与 Start Plan 的 `startPlanModelInfo` 同口径：宁可报小不可虚报——200K 窗口、
+ * 32K 输出、不支持图像、思考可关、x1.00 基准费率、不带任何促销徽标。参数报小
+ * 顶多少用一点上下文，报大了会让上游直接拒绝请求；费率同理，凭空打折或加价都
+ * 是错的。真实值等官方目录收录后随发版修正。
+ *
+ * 名字保留上游原样（只做 id 小写归一）——展示名由上游 id 推导比编造一个更好。
+ */
+function defaultZCodeModelInfo(id: string): WorkBuddyUpstreamModel {
+  return {
+    id: id.toLowerCase(),
+    name: id,
+    contextWindow: 200000,
+    maxTokens: 32000,
+    supportsImages: false,
+    reasoning: { supports: true, onlyReasoning: false, canDisableThinking: true },
+    billing: { credits: 'x1.00', free: false },
+  }
+}
+
 /** Options for ZCodeUpstreamClient. */
 export interface ZCodeUpstreamClientOptions {
   signer?: ZCodeClientSigner
   models?: readonly WorkBuddyUpstreamModel[]
+  /** Resolves the client app version sent as `app_version`/`X-ZCode-App-Version`
+   * on the account-plan endpoints; injectable so tests never touch the real FS. */
+  resolveAppVersion?: () => Promise<AppVersionInfo>
 }
 
 /**
@@ -1206,10 +1238,12 @@ export interface ZCodeUpstreamClientOptions {
 export class ZCodeUpstreamClient {
   private readonly signer: ZCodeClientSigner
   private readonly models: readonly WorkBuddyUpstreamModel[]
+  private readonly resolveAppVersion: () => Promise<AppVersionInfo>
 
   constructor(options: ZCodeUpstreamClientOptions = {}) {
     this.signer = options.signer ?? new ZCodeClientSigner()
     this.models = options.models ?? []
+    this.resolveAppVersion = options.resolveAppVersion ?? (() => resolveAppVersion())
   }
 
   /** POST the BigModel Anthropic messages endpoint; a successful answer is the raw SSE response.
@@ -1289,13 +1323,39 @@ export class ZCodeUpstreamClient {
       if (!response.ok) {
         return this.models
       }
-      const json = await response.json() as { data?: Array<{ id: string }> }
-      if (!Array.isArray(json.data) || json.data.length === 0) {
+      const json = await response.json() as { data?: Array<{ id?: string }> }
+      const upstreamIds = Array.isArray(json.data)
+        ? json.data.map(row => typeof row?.id === 'string' ? row.id.trim() : '').filter(id => id !== '')
+        : []
+      if (upstreamIds.length === 0) {
         return this.models
       }
       // BigModel connection and API credentials verified; Coding Plan subscriber
       // models are preserved with their verified parameters (128K max tokens, custom rates).
-      return this.models
+      //
+      // 上游给出"有哪些 id"，本地给出"这些 id 的已验证参数"，两者是**并集**：
+      // - 上游列出的 id：本地收录过的沿用整行（128K/费率/徽章都不丢），没收录过
+      //   的走保守默认——新模型能出现，但不虚报窗口与费率；
+      // - 本地收录、上游没列的：照 WorkBuddy 线的口径保留（目录接口可能只列一部分，
+      //   上面那行注释说的就是这件事），丢掉等于把已验证可用的模型从选择器里抹掉。
+      // 失败/空响应仍回退 this.models（上面的两个 return），语义不变。
+      const known = new Map(this.models.map(model => [model.id.toLowerCase(), model]))
+      const merged: WorkBuddyUpstreamModel[] = []
+      const seen = new Set<string>()
+      for (const rawId of upstreamIds) {
+        const key = rawId.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        const hit = known.get(key)
+        merged.push(hit ?? defaultZCodeModelInfo(rawId))
+      }
+      for (const model of this.models) {
+        const key = model.id.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        merged.push(model)
+      }
+      return merged
     } catch {
       return this.models
     } finally {
@@ -1465,8 +1525,19 @@ export class ZCodeUpstreamClient {
    * 的 entitlements，按活动实际放行的模型派生。
    *
    * 与 {@link fetchStartPlanCredits} 共用同一个端点但**语义不同**：那里问的是
-   * 还剩多少额度、失败必须如实抛错；这里问的是"活动授权了哪些模型"，失败只
-   * 回退到已注册名单——目录拉取失败不该让用户失去一个本来能用的分组。
+   * 还剩多少额度、失败必须如实抛错；这里问的是"活动授权了哪些模型"。
+   *
+   * 三种状态必须分开（混在一起就是"过期活动仍列出未授权模型"那个 bug）：
+   * - 查到活动且解析出模型 -> 返回该名单；
+   * - 查询**成功**但没有有效活动（未领取/已过期）-> 返回**空名单**，分组如实隐藏；
+   * - 查询**失败**（HTTP 非 ok / 抛错）-> 回退已注册名单 this.models，一次上游
+   *   抖动不该让用户失去一个本来能用的分组。
+   *
+   * **有有效活动但一个模型都解析不出来同样返回空名单**：走到那一步已经确认活动
+   * 存在且有效，名单的权威来源就是它的 entitlements；此时若回退 this.models（对
+   * start-plan 变体就是兜底那三个模型），等于让授权字段漂移重新长出"看起来能用、
+   * 一用就 400 code 3006"的幻影名单——与"未领取却显示模型"是同一个用户可见症状。
+   * 空名单 = "今天拿不到"（可恢复），幻影名单 = "以为能用"（更糟）。
    */
   private async fetchStartPlanModels(credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
     if (credential.zcodeJwtToken === undefined || credential.zcodeJwtToken === '') {
@@ -1484,14 +1555,79 @@ export class ZCodeUpstreamClient {
       })
       if (!response.ok) return this.models
       const json = await response.json() as { data?: { plans?: readonly StartPlanActivity[] } }
-      const active = (json.data?.plans ?? []).filter(plan => plan.status === undefined || plan.status === 'active')
-      const derived = startPlanModelsFromEntitlements(active.flatMap(plan => plan.entitlements ?? []))
-      return derived.length > 0 ? derived : this.models
+      // 有效期以 ends_at（秒级 epoch）判定：过期活动放行的模型服务端已经不认，
+      // 登记上去只会得到 400 code 3006 model not allowed。ends_at 缺失按有效处理。
+      const now = Date.now()
+      const active = (json.data?.plans ?? []).filter(plan => isStartPlanActivityActive(plan, now))
+      if (active.length === 0) {
+        // B：查询成功、但此刻没有任何有效活动（今天还没领取 / 活动已过期）——
+        // 今日确实没有可用模型，返回空名单让分组隐藏。
+        //
+        // 这里**不再回退 this.models**：兜底名单里的 GLM-5.2 / GLM-5-Turbo 上游
+        // 并不放行，选中只会失败（实测 400 code 3006），等于把"无模型"伪装成
+        // "有三个模型"。分组隐藏后，用户重新领取活动即可恢复。
+        return []
+      }
+      // 走到这里说明**已确认有有效活动**，名单的权威来源就是该活动的
+      // entitlements：解析不出模型时返回空（分组隐藏），绝不回退 this.models。
+      // 对 start-plan 变体而言 this.models 就是那三个幻影模型（index.ts 用
+      // FALLBACK_ZCODE_START_PLAN_MODELS 构造 client），回退等于让"活动有效但
+      // 授权字段漂移"重新长出"看起来能用、一用就 400 code 3006"的假名单。
+      // 空 = "今天拿不到"（可恢复），幻影名单 = "以为能用"（更糟）。
+      return startPlanModelsFromEntitlements(
+        active.flatMap(plan => plan.entitlements ?? []),
+        FALLBACK_ZCODE_START_PLAN_MODELS,
+        true,
+      )
     } catch {
       return this.models
     } finally {
       modelsTimeout.dispose()
     }
+  }
+
+  /**
+   * 今日 Start Plan 待领取探测（`billing/preview`）：纯 HTTP、**不需要验证码**，
+   * 因此可以自动跑。返回的清单就是"今天还能领什么"，为空表示今日已领取。
+   *
+   * 这是**提示性**信息，不是额度也不是名单，所以失败语义照 {@link fetchStartPlanModels}：
+   * 绝不抛错（探不到就让调用方按 unknown 处理），也绝不因此影响分组可用性——
+   * 探测失败不该让用户失去一个本来能用的连接。
+   *
+   * 接入点说明（能力边界）：本方法只做 preview。真正的 claim 需要
+   * `X-Aliyun-Captcha-Verify-Param`，该 token 由客户端渲染进程的阿里云 SDK
+   * 签发、与浏览器指纹绑定，纯 Node 侧无法生成（实测无 captcha 一律 400
+   * code 3007），所以**全自动领取做不到**——插件做到的是"自动探测 + 提示用户
+   * 去客户端点一次领取"，见 `zcode-plan-claim` 模块头部。
+   *
+   * `options.signal` 用于把本探测**限制在很短的窗口内**：status 路由是卡片每
+   * 60s 轮询的读路径，一个挂死的上游不能把 status 拖住。超时/取消都会落进
+   * catch，降级成 failed。
+   */
+  async fetchStartPlanClaimPreview(
+    credential: WorkBuddyCredential,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<StartPlanPreviewResult> {
+    const claimCredential: StartPlanClaimCredential = {
+      ...credential.zcodeJwtToken === undefined ? {} : { zcodeJwtToken: credential.zcodeJwtToken },
+      ...credential.zcodeDeviceMid === undefined ? {} : { zcodeDeviceMid: credential.zcodeDeviceMid },
+    }
+    // 平台拼法照抄 zcode-signer 的 'X-Platform'（`<os>-<arch>`），不另造一套；
+    // 账号计划端点按它分流客户端版本，拼错会拿到与真客户端不同的响应。
+    const platform = `${process.platform}-${os.arch()}`
+    if (credential.zcodeJwtToken === undefined || credential.zcodeJwtToken === '') {
+      return { status: 'auth-failed', message: '未登录：凭据文档中没有 zcodejwttoken' }
+    }
+    let appVersion: string
+    try {
+      appVersion = (await this.resolveAppVersion()).version
+    } catch {
+      // 版本解析只影响查询参数与头，拿不到就走编译期兜底；让它把探测打挂
+      // 是轻重倒置（与 WorkBuddyUpstreamClient.fetchModels 的降级同思路）。
+      appVersion = FALLBACK_APP_VERSION
+    }
+    const info: StartPlanPlatformInfo = { appVersion, platform }
+    return previewStartPlan(claimCredential, info, options.signal)
   }
 
   /**

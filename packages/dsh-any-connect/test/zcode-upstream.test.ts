@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  FALLBACK_APP_VERSION,
   FALLBACK_ZCODE_MODELS,
   FALLBACK_ZCODE_START_PLAN_MODELS,
   ZCodeUpstreamClient,
@@ -224,6 +225,122 @@ it('attributes the plan to the client selection, not to the fallback key', async
       expect(models.find(m => m.id === 'glm-5.3-flash')?.contextWindow).toBe(1000000)
       expect(models.find(m => m.id === 'glm-5.3-flash')?.maxTokens).toBe(128000)
       expect(models.find(m => m.id === 'glm-5.3-flash')?.billing?.badges).toContain('夜间免费')
+      vi.unstubAllGlobals()
+    })
+
+    /**
+     * 上游名单是登记来源，本地目录只当元数据表。此前三个分支全返回 this.models，
+     * 上游 data 只被用来判断非空后丢弃——每小时刷新的唯一效果是"证明凭据还活着"，
+     * 上游上新/下线模型都反映不出来，只能发版改代码。
+     */
+    it('采用上游返回的新模型 id，并走保守默认参数', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        code: 200,
+        data: [{ id: 'brand-new-model' }],
+      }), { status: 200 })))
+      const client = new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
+      const models = await client.fetchModels(dummyCredential)
+      // 新 id 出现（不再被编译期常量吞掉）
+      expect(models.map(m => m.id)).toContain('brand-new-model')
+      // 保守默认：不虚报窗口/输出，不带促销徽标
+      const fresh = models.find(m => m.id === 'brand-new-model')
+      expect(fresh?.contextWindow).toBe(200000)
+      expect(fresh?.maxTokens).toBe(32000)
+      expect(fresh?.supportsImages).toBe(false)
+      expect(fresh?.billing?.credits).toBe('x1.00')
+      expect(fresh?.billing?.badges).toBeUndefined()
+      vi.unstubAllGlobals()
+    })
+
+    it('上游列出的本地已收录 id 沿用其已验证参数与费率', async () => {
+      // 断言 join 的保真度：本地行带着 128K/自定义费率/徽章，上游只给 id。
+      // 这里也断言**顺序与数量**跟上游一致，否则旧实现（无条件返回本地整表）
+      // 会碰巧通过。
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        code: 200,
+        data: [{ id: 'glm-5.3-flash' }, { id: 'glm-5.3' }],
+      }), { status: 200 })))
+      const client = new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
+      const models = await client.fetchModels(dummyCredential)
+      // 上游顺序被保留（flash 在前），不是本地常量顺序。
+      expect(models.map(m => m.id)).toEqual(['glm-5.3-flash', 'glm-5.3'])
+      const glm53 = models.find(m => m.id === 'glm-5.3')
+      // join 不能把 128K 与自定义费率弄丢
+      expect(glm53?.contextWindow).toBe(1000000)
+      expect(glm53?.maxTokens).toBe(128000)
+      expect(glm53?.billing?.credits).toBe('x1.00')
+      expect(glm53?.billing?.badges).toContain('150% 额度')
+      const flash = models.find(m => m.id === 'glm-5.3-flash')
+      expect(flash?.contextWindow).toBe(1000000)
+      expect(flash?.maxTokens).toBe(128000)
+      expect(flash?.billing?.credits).toBe('x0.06')
+      expect(flash?.billing?.badges).toContain('夜间免费')
+      vi.unstubAllGlobals()
+    })
+
+    it('保留本地已收录但上游未列出的模型（并集，不因上游只列一部分而消失）', async () => {
+      // 与 WorkBuddy 线口径一致：上游响应里没有该 id 不代表模型不可用。
+      // 用一个与编译期常量不同的本地目录，才能把"真的做了并集"与"直接返回常量"
+      // 区分开——若沿用 FALLBACK_ZCODE_MODELS，旧实现（无条件 return this.models）
+      // 会碰巧满足断言，用例就抓不到 bug。
+      const local = [
+        { id: 'local-kept', name: 'Local Kept', contextWindow: 1000000, maxTokens: 128000, supportsImages: true },
+        { id: 'local-dropped-by-upstream', name: 'Local Only', contextWindow: 500000, maxTokens: 64000, supportsImages: false },
+      ]
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        code: 200,
+        data: [{ id: 'local-kept' }, { id: 'fresh-from-upstream' }],
+      }), { status: 200 })))
+      const models = await new ZCodeUpstreamClient({ models: local }).fetchModels(dummyCredential)
+      // 上游在前（沿用本地已验证参数）、本地补充在后，保序去重。
+      expect(models.map(m => m.id)).toEqual(['local-kept', 'fresh-from-upstream', 'local-dropped-by-upstream'])
+      // 上游列出的已收录 id 必须沿用本地参数（不能因 join 丢失）。
+      expect(models.find(m => m.id === 'local-kept')?.contextWindow).toBe(1000000)
+      expect(models.find(m => m.id === 'local-kept')?.maxTokens).toBe(128000)
+      // 上游未列的本地模型必须保留其原始行。
+      expect(models.find(m => m.id === 'local-dropped-by-upstream')?.contextWindow).toBe(500000)
+      vi.unstubAllGlobals()
+    })
+
+    it('上游返回空/null/非数组时回退 this.models', async () => {
+      for (const data of [[], null, 'nope', undefined]) {
+        vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 200, data }), { status: 200 })))
+        const models = await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
+          .fetchModels(dummyCredential)
+        expect(models.map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+      }
+      vi.unstubAllGlobals()
+    })
+
+    it('上游请求失败（非 ok / 抛错）时回退 this.models', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })))
+      expect((await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
+        .fetchModels(dummyCredential)).map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down') }))
+      expect((await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
+        .fetchModels(dummyCredential)).map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+      vi.unstubAllGlobals()
+    })
+
+    it('上游返回的 id 大小写归一、空 id 忽略、重复不产生重复行', async () => {
+      // 本地收录 GLM-5.3（大写 id），上游同时给大小写两种写法与一个空 id：
+      // 归一后只应产生一行，且沿用本地参数。旧实现无条件返回本地整表，
+      // 会少掉 new-dup 之外的行，抓得到 bug。
+      const local = [
+        { id: 'GLM-5.3', name: 'GLM-5.3', contextWindow: 1000000, maxTokens: 128000, supportsImages: true },
+        { id: 'local-extra', name: 'Local Extra', contextWindow: 300000, maxTokens: 32000, supportsImages: false },
+      ]
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        code: 200,
+        data: [{ id: 'GLM-5.3' }, { id: 'glm-5.3' }, { id: '  ' }, { id: 'fresh-new' }],
+      }), { status: 200 })))
+      const models = await new ZCodeUpstreamClient({ models: local }).fetchModels(dummyCredential)
+      // 大小写不同的同一个 id 只留一行（匹配时不区分大小写，命中本地行则沿用
+      // 本地行原样，含它自己的 id 拼写），空 id 不产生行；上游新 id 出现，
+      // 本地未被上游列出的 local-extra 保留在末尾。
+      expect(models.map(m => m.id)).toEqual(['GLM-5.3', 'fresh-new', 'local-extra'])
+      expect(models.find(m => m.id === 'GLM-5.3')?.contextWindow).toBe(1000000)
       vi.unstubAllGlobals()
     })
 
@@ -594,9 +711,252 @@ describe('Start Plan 专属通道（额度绝不与 Coding Plan 混用）', () =
     expect(models.map(model => model.id)).toEqual(FALLBACK_ZCODE_START_PLAN_MODELS.map(model => model.id))
   })
 
+  /**
+   * 状态 B：查询**成功**但此刻没有任何有效活动。今日确实一个模型都没授权，
+   * 必须如实返回空名单让分组隐藏。
+   *
+   * 回退兜底名单会造出三个上游根本不放行的模型（实测 GLM-5.2 / GLM-5-Turbo
+   * 返回 `400 code 3006 model not allowed`），把"今日无模型"伪装成"有三个模型"。
+   */
+  it('查询成功但没有有效活动（今日未领取）返回空名单，不回退兜底名单', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      data: { plans: [], balances: [] },
+    }), { status: 200 })))
+    const models = await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_START_PLAN_MODELS })
+      .fetchModels(startPlanCredential)
+    expect(models).toEqual([])
+  })
+
+  it('活动已过期（ends_at 秒级已过）同样返回空名单', async () => {
+    const endedAtSec = Math.floor(Date.now() / 1000) - 60
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      data: {
+        plans: [{
+          plan_id: 'zcode-v3-start-plan-trust-0930',
+          name: 'ZCode Trust Build',
+          status: 'active',
+          ends_at: endedAtSec,
+          entitlements: [
+            { entitlement_id: 'e1', show_name: 'GLM-5.3-Flash', capabilities: ['model:glm-5.3-flash'] },
+          ],
+        }],
+        balances: [],
+      },
+    }), { status: 200 })))
+    const models = await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_START_PLAN_MODELS })
+      .fetchModels(startPlanCredential)
+    expect(models).toEqual([])
+  })
+
+  it('过期活动与有效活动混在一起时，只登记有效活动放行的模型', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      data: {
+        plans: [
+          {
+            plan_id: 'expired', name: '旧活动', status: 'active', ends_at: nowSec - 60,
+            entitlements: [{ show_name: 'GLM-5.2', capabilities: ['model:glm-5.2'] }],
+          },
+          {
+            plan_id: 'live', name: '当前活动', status: 'active', ends_at: nowSec + 3600,
+            entitlements: [{ show_name: 'GLM-5.3-Flash', capabilities: ['model:glm-5.3-flash'] }],
+          },
+        ],
+        balances: [],
+      },
+    }), { status: 200 })))
+    const models = await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_START_PLAN_MODELS })
+      .fetchModels(startPlanCredential)
+    // 过期活动放行的 glm-5.2 必须被剔除。
+    expect(models.map(model => model.id)).toEqual(['glm-5.3-flash'])
+  })
+
+  it('状态非 active 的活动不参与派生；ends_at 缺失时保守按有效处理', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      data: {
+        plans: [{
+          name: '已下线活动', status: 'expired',
+          entitlements: [{ show_name: 'GLM-5.2', capabilities: ['model:glm-5.2'] }],
+        }],
+        balances: [],
+      },
+    }), { status: 200 })))
+    expect(await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_START_PLAN_MODELS })
+      .fetchModels(startPlanCredential)).toEqual([])
+
+    // ends_at 缺失：不能因为字段缺失就让用户丢名单。
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      data: {
+        plans: [{
+          name: '无 ends_at 活动', status: 'active',
+          entitlements: [{ show_name: 'GLM-5.3-Flash', capabilities: ['model:glm-5.3-flash'] }],
+        }],
+        balances: [],
+      },
+    }), { status: 200 })))
+    expect((await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_START_PLAN_MODELS })
+      .fetchModels(startPlanCredential)).map(model => model.id)).toEqual(['glm-5.3-flash'])
+  })
+
+  /**
+   * 活跃活动但零可解析模型：走到这一步说明**已确认有有效活动**，名单的权威来源
+   * 就是该活动的 entitlements。此时回退 this.models 对 start-plan 变体而言就是回退
+   * 兜底那三个模型（index.ts 用 FALLBACK_ZCODE_START_PLAN_MODELS 构造 client），
+   * 于是授权字段漂移会重新长出"看起来能用、一用就 400 code 3006"的幻影名单——
+   * 与"未领取却显示模型"是同一个用户可见症状，只是触发条件更窄。
+   */
+  it('活动有效但 entitlements 为空数组时返回空名单，不回退幻影名单', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      data: {
+        plans: [{
+          plan_id: 'zcode-v3-start-plan-trust-0930',
+          name: 'ZCode Trust Build',
+          status: 'active',
+          ends_at: nowSec + 3600,
+          entitlements: [],
+        }],
+        balances: [],
+      },
+    }), { status: 200 })))
+    const models = await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_START_PLAN_MODELS })
+      .fetchModels(startPlanCredential)
+    expect(models).toEqual([])
+  })
+
+  it('活动有效但 capabilities 全为非 model: 项时返回空名单，不回退幻影名单', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      data: {
+        plans: [{
+          plan_id: 'zcode-v3-start-plan-trust-0930',
+          name: 'ZCode Trust Build',
+          status: 'active',
+          ends_at: nowSec + 3600,
+          entitlements: [
+            { entitlement_id: 'e1', show_name: '   ', capabilities: ['meter:usage'] },
+          ],
+        }],
+        balances: [],
+      },
+    }), { status: 200 })))
+    const models = await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_START_PLAN_MODELS })
+      .fetchModels(startPlanCredential)
+    expect(models).toEqual([])
+  })
+
+  it('状态 C：查询抛错（网络失败）仍回退已注册名单', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down') }))
+    const models = await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_START_PLAN_MODELS })
+      .fetchModels(startPlanCredential)
+    expect(models.map(model => model.id)).toEqual(FALLBACK_ZCODE_START_PLAN_MODELS.map(model => model.id))
+  })
+
+  it('响应体不是 JSON（解析失败）仍回退已注册名单', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>gateway</html>', { status: 200 })))
+    const models = await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_START_PLAN_MODELS })
+      .fetchModels(startPlanCredential)
+    expect(models.map(model => model.id)).toEqual(FALLBACK_ZCODE_START_PLAN_MODELS.map(model => model.id))
+  })
+
   it('额度查询失败如实抛错，绝不拿 Coding Plan 的订阅状态冒充', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })))
     await expect(new ZCodeUpstreamClient().fetchCredits(startPlanCredential)).rejects.toThrow('Start Plan 额度查询失败')
+  })
+
+  /**
+   * 今日待领取探测（task-3）。它是**提示性**信息而非名单/额度，所以失败一律
+   * 降级成结果值、绝不抛错：挂在卡片每 60s 轮询的读路径上，一次上游抖动不能
+   * 把整份 status 文档打挂。
+   */
+  describe('fetchStartPlanClaimPreview', () => {
+    const appVersionStub = { resolveAppVersion: async () => ({ version: '3.4.0', source: 'fallback' as const }) }
+
+    it('查到可领取项：带回 plan_id/name，请求带上 app_version 与 platform', async () => {
+      const mockFetch = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response(JSON.stringify({
+        code: 0,
+        data: {
+          plans: [
+            { plan_id: 'low', name: '次要活动', priority: 1 },
+            { plan_id: 'zcode-v3-start-plan-trust-0930', name: 'ZCode Trust Build', priority: 9 },
+          ],
+        },
+      }), { status: 200 }))
+      vi.stubGlobal('fetch', mockFetch)
+      const result = await new ZCodeUpstreamClient(appVersionStub).fetchStartPlanClaimPreview(startPlanCredential)
+      expect(result.status).toBe('ok')
+      if (result.status !== 'ok') return
+      // priority 高者在前：卡片提示的就是用户最该先领的那个。
+      expect(result.plans.map(plan => plan.planId)).toEqual(['zcode-v3-start-plan-trust-0930', 'low'])
+      const url = String(mockFetch.mock.calls[0]![0])
+      expect(url).toContain('/api/v1/zcode-plan/billing/preview')
+      expect(url).toContain('app_version=3.4.0')
+      expect(url).toContain(`platform=${process.platform}-${os.arch()}`)
+      const headers = ((mockFetch.mock.calls[0]![1] ?? {}) as RequestInit).headers as Record<string, string>
+      expect(headers['Authorization']).toBe('Bearer jwt-token')
+      expect(headers['X-Device-Mid']).toBe('mid-1')
+      // 探测不需要验证码：绝不带 captcha 头，否则就是在伪造验证结果。
+      expect(headers['X-Aliyun-Captcha-Verify-Param']).toBeUndefined()
+    })
+
+    it('今日已领取（plans 为空）返回 ok + 空清单，不是失败', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 0, data: { plans: [] } }), { status: 200 })))
+      const result = await new ZCodeUpstreamClient(appVersionStub).fetchStartPlanClaimPreview(startPlanCredential)
+      expect(result).toEqual({ status: 'ok', plans: [] })
+    })
+
+    it('上游 500 降级为 failed 结果值，不抛错', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })))
+      const result = await new ZCodeUpstreamClient(appVersionStub).fetchStartPlanClaimPreview(startPlanCredential)
+      expect(result.status).toBe('failed')
+    })
+
+    it('网络抛错同样降级为 failed，绝不冒泡给 status 路由', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down') }))
+      const result = await new ZCodeUpstreamClient(appVersionStub).fetchStartPlanClaimPreview(startPlanCredential)
+      expect(result.status).toBe('failed')
+    })
+
+    it('401 归 auth-failed（与"没得领"区分）', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 3001, msg: 'unauthorized' }), { status: 401 })))
+      const result = await new ZCodeUpstreamClient(appVersionStub).fetchStartPlanClaimPreview(startPlanCredential)
+      expect(result.status).toBe('auth-failed')
+    })
+
+    it('缺 zcodejwttoken 时直接 auth-failed 且不发请求', async () => {
+      const mockFetch = vi.fn()
+      vi.stubGlobal('fetch', mockFetch)
+      const result = await new ZCodeUpstreamClient(appVersionStub)
+        .fetchStartPlanClaimPreview({ ...startPlanCredential, zcodeJwtToken: undefined })
+      expect(result.status).toBe('auth-failed')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('版本解析失败时退回编译期兜底版本，探测照常发出', async () => {
+      const mockFetch = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response(JSON.stringify({ code: 0, data: { plans: [] } }), { status: 200 }))
+      vi.stubGlobal('fetch', mockFetch)
+      const result = await new ZCodeUpstreamClient({
+        resolveAppVersion: async () => { throw new Error('no plist') },
+      }).fetchStartPlanClaimPreview(startPlanCredential)
+      expect(result.status).toBe('ok')
+      expect(String(mockFetch.mock.calls[0]![0])).toContain(`app_version=${FALLBACK_APP_VERSION}`)
+    })
+
+    it('外部 signal 已中止时降级为 failed（status 读路径靠它限时）', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('aborted') }))
+      const controller = new AbortController()
+      controller.abort(new Error('status read budget exceeded'))
+      const result = await new ZCodeUpstreamClient(appVersionStub)
+        .fetchStartPlanClaimPreview(startPlanCredential, { signal: controller.signal })
+      expect(result.status).toBe('failed')
+    })
   })
 })
 

@@ -8,6 +8,7 @@
 import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import z from '@deepseek-ai/schemastery'
+import type { AdapterRegistrationHandle } from '@deepseek-ai/dsh-llm'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-attachment'
 import { RegionMismatchError, WorkBuddyCredentialStore } from './auth.js'
@@ -30,6 +31,7 @@ import { ANYCONNECT_VERSION } from './version.js'
 import { AI_VARIANT, CN_VARIANT, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { registerWorkBuddyStatusRoute } from './web-status.js'
+import type { StartPlanPreviewResult } from './zcode-plan-claim.js'
 import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
 
 export { WORKBUDDY_PROVIDER, WORKBUDDY_STREAM_IDLE_TIMEOUT_MS, createWorkBuddyAdapter, type WorkBuddyAdapter } from './adapter.js'
@@ -43,11 +45,30 @@ export {
 } from './catalog.js'
 export {
   FALLBACK_ZCODE_START_PLAN_MODELS,
+  isStartPlanActivityActive,
   startPlanModelInfo,
   startPlanModelsFromEntitlements,
   type StartPlanActivity,
   type StartPlanEntitlement,
+  type StartPlanEntitlements,
 } from './zcode-plan-models.js'
+export {
+  CAPTCHA_FAILED_CODE,
+  buildClaimBody,
+  buildClaimHeaders,
+  buildPreviewHeaders,
+  buildPreviewUrl,
+  claimStartPlan,
+  parseClaimResponse,
+  parsePreviewBody,
+  previewStartPlan,
+  probeAndClaimStartPlan,
+  type StartPlanClaimCredential,
+  type StartPlanClaimResult,
+  type StartPlanPlatformInfo,
+  type StartPlanPreviewItem,
+  type StartPlanPreviewResult,
+} from './zcode-plan-claim.js'
 export {
   prepareStartPlanBody,
   withStartPlanPrefix,
@@ -250,6 +271,49 @@ const IDENTITY_SWEEP_MS = 60_000
  */
 const CATALOG_REFRESH_INTERVAL_MS = 60 * 60_000
 
+/** 目录行里"会被渲染出来"的字段，按固定顺序取——顺序固定才谈得上稳定指纹。 */
+const CATALOG_FINGERPRINT_BILLING_KEYS = ['credits', 'badges', 'free', 'rateUnknown'] as const
+
+/** 一行目录参与指纹的展示字段（顺序即拼接顺序）。 */
+function catalogFingerprintRow(model: WorkBuddyModelInfo): string {
+  return [
+    model.id,
+    model.name,
+    String(model.contextWindow),
+    String(model.maxTokens),
+    model.supportsImages === true ? '1' : '0',
+    JSON.stringify(model.reasoning ?? null),
+    JSON.stringify(CATALOG_FINGERPRINT_BILLING_KEYS.map(key => model.billing?.[key] ?? null)),
+  ].join('\u0001')
+}
+
+/**
+ * 一份**已发布目录**的内容指纹：可见性 + 每行的展示字段。
+ *
+ * 用于判断"这次刷新到底改没改用户看得见的东西"。取内容而非对象引用，因为
+ * 每次刷新都会重建整份数组——引用比较会让每一轮定时刷新都被判成变化。
+ *
+ * 覆盖三件用户可见的事：某行被增删/改名/换窗口与输出上限/换图片能力/换档位
+ * 集合（选择器的档位子菜单）、billing 徽标与费率（名称后缀），以及**整组是否
+ * 可见**（未登录时空目录；Start Plan 今日未领取 → 空名单 → DSH 隐藏该分组）。
+ * 后两者正是"名单看起来不对"最常见的两种形态，都必须通知出去。
+ *
+ * 刻意**不**放 `maxInputTokens` / `supportedContextWindows` / `promotions`：
+ * 它们不在模型的展示名里，纳进来只会让无谓的广播变多，而"只在变化时通知"
+ * 正是这条线的硬要求。
+ *
+ * @param models - 目录里即将发布的内容（{@link WorkBuddyCatalog.current} 的返回）。
+ * @param visible - 该分组对用户是否可见。
+ * @returns 稳定可比较的字符串指纹。
+ */
+export function catalogFingerprint(
+  models: readonly WorkBuddyModelInfo[],
+  visible = true,
+): string {
+  if (!visible) return 'hidden'
+  return models.map(catalogFingerprintRow).join('\u0002')
+}
+
 /**
  * Structural minimum every variant's credential store satisfies. Credentials
  * travel opaquely (WorkBuddy OAuth fields) — only the WorkBuddy paths ever
@@ -271,8 +335,26 @@ interface VariantRuntime {
   catalogSource: WorkBuddyWebCatalog['source']
   catalogFetchedAtMs: number | undefined
   catalogError: string | undefined
+  /**
+   * 最近一次 live 拉取**成功但零模型**（Start Plan 今日未领取/活动已过期）。
+   *
+   * 空名单本身是有效观测，但它与「插件坏了」在卡片上原本无法区分——两者都是
+   * source=live + 刚拉取 + 0 个模型。这个标记让卡片能如实说明原因（见
+   * {@link WorkBuddyWebCatalog.empty}）。
+   */
+  catalogEmpty: boolean
   /** 上次发布过目录的账号（`uid:enterpriseId`），或 undefined。 */
   lastIdentity: string | undefined
+  /**
+   * 该变体上一次通知给宿主的"已发布目录"指纹。
+   *
+   * 只在目录内容**真的变了**时才通知（见 {@link publishCatalog}）：宿主每小时
+   * 会重拉一次目录，多数时候名单一模一样，无条件通知会让每个打开的聊天页白
+   * 重拉一次目录、白重渲染一次模型选择框。
+   *
+   * 初始值无关紧要：第一轮 refresh 一定经过一次 {@link publishCatalog}。
+   */
+  publishedCatalog: string
   /** WorkBuddy-only parts: live catalog lifecycle, refresh, probe. */
   client?: WorkBuddyUpstreamClient | ZCodeUpstreamClient
   credentialStore?: WorkBuddyCredentialStore
@@ -337,6 +419,24 @@ function configuredAuthFile(values: Options, variant: WorkBuddyVariant): string 
   const field = AUTH_FILE_FIELD_BY_ID.get(variant.id)
   return field === undefined ? undefined : values[field]
 }
+
+/**
+ * 是否是 ZCode Start Plan 变体。
+ *
+ * 判据取 `zcodePlanMode === 'start'`（变体自带的语义），而不是比对 id 字符串：
+ * 计划语义在 `variants.ts` 里就是这一个字段，照它判定才不会被将来重命名 id
+ * 悄悄改掉行为。Start Plan 是唯一有"每日领取"这回事的变体。
+ */
+function variantIsStartPlan(variant: WorkBuddyVariant): boolean {
+  return variant.kind === 'zcode' && variant.zcodePlanMode === 'start'
+}
+
+/**
+ * status 读路径上探测"今日待领取"的超时：卡片每 60s 轮询一次，探测只是一条
+ * 提示性信息，绝不能让它拖住整份文档。3s 足够一次正常的上游往返（其余 JSON
+ * 端点用的是 30s，那是**调用方等待**的场景，这里不是）。
+ */
+const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
 
 /**
  * Push configuration values into one variant's credential stores (no catalog
@@ -472,6 +572,11 @@ export function apply(ctx: Context, config: Config): void {
         catalogFetchedAtMs: undefined,
         catalogError: undefined,
         lastIdentity: undefined,
+        // 指纹来自 catalog 的构造参数（各变体的兜底名单），所以初始值不能是
+        // 'hidden'——未登录时分组本就隐藏，那会让第一次 refresh 误判成"没变"
+        // 而漏掉通知。见 createRuntime 里的说明。
+        publishedCatalog: '',
+        catalogEmpty: false,
       }
       return runtime
     }
@@ -496,6 +601,9 @@ export function apply(ctx: Context, config: Config): void {
       catalogFetchedAtMs: undefined,
       catalogError: undefined,
       lastIdentity: undefined,
+      // 与 ZCode 分支同理：初始指纹必须是"绝不可能等于首次发布"的哨兵。
+      publishedCatalog: '',
+      catalogEmpty: false,
     }
     runtime.probeService = new WorkBuddyProbeService({
       store: probeStore,
@@ -521,6 +629,13 @@ export function apply(ctx: Context, config: Config): void {
 
   /** Per-process key authorizing probe control writes; handed to the cards. */
   const probeKey = createProbeKey()
+
+  /**
+   * 每个 provider 的适配器注册句柄（{@link AdapterRegistrationHandle}）：
+   * 既是释放函数，也带着 `replace()` —— 目录变化时用它通知宿主（{@link notifyCatalogChanged}）。
+   * 注册与释放在 shim 就绪回调里成对发生，这里只留"当前活着的那一个"。
+   */
+  const adapterHandles = new Map<string, AdapterRegistrationHandle>()
 
   /**
    * Compact probe state for one card: sweep progress and observations.
@@ -557,8 +672,79 @@ export function apply(ctx: Context, config: Config): void {
     return {
       source: runtime.catalogSource,
       ...runtime.catalogFetchedAtMs === undefined ? {} : { fetchedAt: runtime.catalogFetchedAtMs },
+      // 与 error 互斥：error 表示「没拉到、保留旧名单」，empty 表示「拉到了、就是空的」。
+      ...runtime.catalogEmpty && runtime.catalogError === undefined ? { empty: true as const } : {},
       ...runtime.catalogError === undefined ? {} : { error: runtime.catalogError },
     }
+  }
+
+  /**
+   * Start Plan 的「上拍还可领、这拍已领走」标记（每变体一份）。
+   *
+   * 只用于**跳变判定**，不作为任何展示判断——false 既可能是「已领取」也可能是
+   * 「没探到」（探测失败不写它）。
+   */
+  const claimWasAvailable = new Map<string, boolean>()
+
+  /**
+   * Start Plan 的廉价状态翻转快通道：目录为空时探一次「今天还能不能领」
+   * （{@link claimPreviewFor}，纯 HTTP、无 captcha、3s 超时），返回「是否刚刚
+   * 从可领翻到不可领」——那正是**用户刚领完**的唯一信号。
+   *
+   * 为什么需要它：用户领取既不改变凭据身份、也不落在夜免边界上，身份 sweep 的
+   * shouldRefresh 恒为假；而 Start Plan 专属通道的模型名单就是「今天领到了什么」
+   * （见 zcode-plan-models），没领时上游返回空。于是「今日未领取 → 用户在客户端
+   * 领取」这段时间里分组会一直空着，直到下一次小时刷新——用户以为要等一小时。
+   * 这条快通道把恢复压到一拍（≤60s）。
+   *
+   * **稳态零额外请求**：目录非空就完全不探测。目录非空 = 今天已经领到了，
+   * 常规的小时刷新足够覆盖上游漂移，不需要在这里再问一次。
+   *
+   * 探测失败（含超时/无凭据/上游报错）一律当作**没探到**：既不触发刷新，也不
+   * 改动标记——避免一次网络抖动既打无谓的上游请求、又把下一拍的判断搅乱。
+   * 异常绝不冒泡：sweep 里其它变体与身份核对照常进行。
+   */
+  async function claimFlipChanged(runtime: VariantRuntime): Promise<boolean> {
+    const { variant } = runtime
+    if (!variantIsStartPlan(variant)) return false
+    // 有模型 = 今天已经领到，快通道无事可做（也就零额外请求）。
+    if (runtime.catalog.current().length > 0) {
+      claimWasAvailable.delete(variant.id)
+      return false
+    }
+    let preview: StartPlanPreviewResult
+    try {
+      const signedIn = await runtime.store.current()
+      if (signedIn === undefined) return false
+      const credential = await runtime.store.resolve() as WorkBuddyCredential
+      preview = await claimPreviewFor(runtime)(credential)
+    } catch {
+      // 凭据读不到 / 探测抛错 / 超时：一律「没探到」，不刷新也不改标记。
+      return false
+    }
+    if (preview.status !== 'ok') return false
+    const available = preview.plans.length > 0
+    const previous = claimWasAvailable.get(variant.id)
+    claimWasAvailable.set(variant.id, available)
+    // 上一拍还能领、这一拍不能领了 = 用户刚完成领取。
+    return previous === true && !available
+  }
+
+  /**
+   * Start Plan 变体的领取提示探测器。
+   *
+   * **必须短超时**：它挂在卡片每 60s 轮询的 status 读路径上，一个挂死的上游
+   * 不能让整份文档等着。所以这里先包一层 `AbortSignal.timeout`——探不到就是
+   * `unknown`（web-status 收敛），而不是把 status 拖成 500。
+   *
+   * 每次探测都**重新读凭据**：用户刚在客户端登录/换号后，卡片最多一拍即能
+   * 看到新的可领状态，不需要重载插件。
+   */
+  function claimPreviewFor(runtime: VariantRuntime): (credential: WorkBuddyCredential) => Promise<StartPlanPreviewResult> {
+    const zcodeClient = runtime.client as ZCodeUpstreamClient
+    return credential => zcodeClient.fetchStartPlanClaimPreview(credential, {
+      signal: AbortSignal.timeout(START_PLAN_CLAIM_PROBE_TIMEOUT_MS),
+    })
   }
 
   /** 无可用凭据：分组隐藏（空目录），而不是展示点选必错的兜底名单。
@@ -572,6 +758,57 @@ export function apply(ctx: Context, config: Config): void {
     runtime.catalogSource = 'fallback'
     runtime.catalogFetchedAtMs = undefined
     runtime.catalogError = undefined
+    // 未登录不是「上游说没有模型」：那张卡片该说的是「去登录」，不是空名单说明。
+    runtime.catalogEmpty = false
+    publishCatalog(runtime)
+  }
+
+  /**
+   * 目录内容变化 → 通知宿主"适配器拓扑变了"，正在开着的聊天页当场重拉模型
+   * 选择框的名单。这是"模型列表实时更新"的全部接线，见 {@link notifyCatalogChanged}。
+   *
+   * **只在内容真的变了时通知**：宿主每小时都会重拉一次目录
+   * （{@link CATALOG_REFRESH_INTERVAL_MS}），多数时候名单一模一样；无条件通知会让
+   * 每个打开的客户端每小时白重拉一次目录、白重渲染一次选择框。指纹取内容
+   * （{@link catalogFingerprint}），不能用数组引用——每次刷新都会重建整份数组。
+   *
+   * 快照取 `current()`：可见 → 与适配器此刻服务给宿主的行完全一致；不可见 → 空，
+   * 与宿主看到的空分组一致（这正是"Start Plan 今日未领取就该隐藏分组"那次变化）。
+   * 必须在本次发布**之后**调用，否则会把刚写进去的内容判成"没变"而漏掉通知。
+   */
+  function publishCatalog(runtime: VariantRuntime): void {
+    const visible = runtime.catalog.isVisible()
+    const fingerprint = catalogFingerprint(visible ? runtime.catalog.current() : [], visible)
+    if (fingerprint === runtime.publishedCatalog) return
+    runtime.publishedCatalog = fingerprint
+    notifyCatalogChanged(runtime.variant.id)
+  }
+
+  /**
+   * 通知宿主「该 provider 的目录内容变了」，正在打开的客户端随之重拉模型列表。
+   *
+   * 为什么走 `handle.replace()`：客户端（dsh-client-ui-model-selection 的
+   * `ModelCatalogDirectory`）只在四个远程事件上重拉目录，其中
+   * `llm/adapters-updated` 是我们能触发的那个；而它**缓存命中即直接返回**，
+   * 收不到事件就一直展示打开页面那一刻的旧名单，直到用户刷新页面。
+   * 该事件由 `dsh-llm` 私有的 `emitAdaptersUpdated` 发布，插件不能直接调——但
+   * `AdapterRegistrationHandle.replace` 的 JSDoc 明说路由集唯一的变更点正是
+   * 发布该事件的地方，所以"用同样的路由替换自己"就是公开的正式通知手段
+   * （空数组也是合法替换，而初始注册不接受空列表）。**不要另造事件**。
+   *
+   * 容错：插件卸载、或注册与通知之间的竞态，都会让 `replace` 抛
+   * `LlmError REGISTRATION_DISPOSED`（注册已释放，路由没了）。这是正常路径，
+   * 吞掉即可——为一次目录通知打断 refreshCatalog 才是错的。
+   */
+  function notifyCatalogChanged(provider: string): void {
+    // shim 还没监听、或注册已释放：这条目录等注册那次通知自己可见，不额外补一发。
+    const handle = adapterHandles.get(provider)
+    if (handle === undefined) return
+    try {
+      handle.replace([provider])
+    } catch (error: unknown) {
+      ctx.logger?.debug?.(`dsh-any-connect: ${provider} adapter registration is gone; catalog update not announced: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   // Same-origin status routes backing each Plugin-configuration card; the
@@ -586,6 +823,9 @@ export function apply(ctx: Context, config: Config): void {
         catalog: () => catalogSection(runtime),
         // 探针区与档位检测只属于 WorkBuddy 变体。
         probe: () => probeSection(runtime),
+        // 「今日 Start Plan 待领取」只对 Start Plan 变体探测：Coding Plan 变体
+        // 没有账号计划可领，报一个恒为 none 的字段只会误导。
+        ...variantIsStartPlan(runtime.variant) ? { fetchStartPlanClaim: claimPreviewFor(runtime) } : {},
         probeKey,
       })
       registerWorkBuddyProbeRoute(webCtx, {
@@ -746,7 +986,11 @@ export function apply(ctx: Context, config: Config): void {
             runtime.catalogFetchedAtMs = undefined
           }
           runtime.catalogError = undefined
+          // 这一拍是 saved/fallback 先行发布，不是上游的答案：空名单说明只对
+          // 「live 拉取成功但零模型」成立，随后那次 live 会自己改写它。
+          runtime.catalogEmpty = false
           catalog.setVisible(true)
+          publishCatalog(runtime)
           // saved/fallback 目录先行发布时同样补齐缺失检测：行与旧目录不同
           // 的候选（fingerprint 失效）在这里入队；随后 live 拉取成功会再触
           // 发一次，pending 去重保证同一模型不重复跑。
@@ -759,15 +1003,27 @@ export function apply(ctx: Context, config: Config): void {
         if (generation !== runtime.lastIdentity) return
         catalog.set([...models])
         catalog.setVisible(true)
+        // 本次刷新真正落到用户眼前的那一行：内容变了才通知宿主（见 publishCatalog）。
+        publishCatalog(runtime)
         runtime.catalogSource = 'live'
         runtime.catalogFetchedAtMs = Date.now()
         runtime.catalogError = undefined
-        await catalogStore!.save({
-          account: identity,
-          source: variant.kind === 'zcode' ? 'https://open.bigmodel.cn' : chatBase(credential as unknown as Parameters<typeof chatBase>[0]),
-          fetchedAtMs: runtime.catalogFetchedAtMs,
-          models: [...models],
-        })
+        // 上游明确答「什么都没有」：这不是错误，是要如实说出来的结论。
+        runtime.catalogEmpty = models.length === 0
+        // 空名单是**有效的降级观测**（Start Plan 今日未领取/活动已过期：上游查询
+        // 成功但没有任何有效活动），它只该影响本轮的 UI——空目录即 DSH 隐藏该分组。
+        // 但它**不是可持久化的观测**：catalogStore 是"上次真正加载过的名单"，
+        // 存下空名单会让下次启动的 saved 分支把空目录当已知好状态发布，一旦那时
+        // live 拉取再失败（catch 停在 saved），用户就长期看不到这个分组——而这
+        // 恰恰是 saved 存在的目的（重启后别落回内置名单）。所以空名单不写盘。
+        if (models.length > 0) {
+          await catalogStore!.save({
+            account: identity,
+            source: variant.kind === 'zcode' ? 'https://open.bigmodel.cn' : chatBase(credential as unknown as Parameters<typeof chatBase>[0]),
+            fetchedAtMs: runtime.catalogFetchedAtMs,
+            models: [...models],
+          })
+        }
         // 目录落地即补齐缺失的档位检测（仅当用户开启过自动检测）：新模型、
         // 行变化导致旧记录失效的模型，都在这里自动入队。
         runtime.probeService?.probeMissingCandidates()
@@ -782,6 +1038,8 @@ export function apply(ctx: Context, config: Config): void {
           return
         }
         const message = error instanceof Error ? error.message : String(error)
+        // 拉取失败 = 没拉到（保留上一份名单），不是「拉到了空的」。
+        runtime.catalogEmpty = false
         runtime.catalogError = message.slice(0, 300)
         ctx.logger?.warn?.(
           `dsh-any-connect: dynamic model catalog unavailable (${variant.id}; ${reason}); serving the last-known list`,
@@ -838,6 +1096,11 @@ export function apply(ctx: Context, config: Config): void {
           const shouldRefresh = identity !== runtime.lastIdentity || (offpeakChanged && runtime.variant.kind === 'zcode')
           if (shouldRefresh && !stopped) {
             refreshCatalog(runtime, offpeakChanged ? 'offpeak boundary crossed' : 'identity sweep')
+            return
+          }
+          // Start Plan「领取后恢复」快通道。见 claimFlipRefreshes。
+          if (!stopped && await claimFlipChanged(runtime)) {
+            refreshCatalog(runtime, 'start-plan claim flipped')
           }
         } catch (error: unknown) {
           if (error instanceof RegionMismatchError) {
@@ -882,7 +1145,7 @@ export function apply(ctx: Context, config: Config): void {
             resolveAttachments: () => ctx.get('attachments'),
           })
 
-          let releaseAdapter: (() => void) | undefined
+          let releaseAdapter: AdapterRegistrationHandle | undefined
           let releaseDirectory: (() => void) | undefined
           try {
             releaseAdapter = ctx.llm.registerAdapter([variant.id], adapter.adapter)
@@ -903,17 +1166,25 @@ export function apply(ctx: Context, config: Config): void {
               releaseDirectory?.()
             }
           }
+          // 注册成功：记下句柄，目录变化时靠它通知宿主（见 notifyCatalogChanged）。
+          // 与下面的释放严格成对——不记的话就是一条挂在已释放注册上的 replace。
+          adapterHandles.set(variant.id, releaseAdapter)
           try {
             ctx.effect(() => () => {
+              adapterHandles.delete(variant.id)
               releaseAdapter?.()
               releaseDirectory?.()
             })
           } catch {
             // The plugin was disposed during registration; release immediately —
             // the plugin-level disposer already closed the shim.
+            adapterHandles.delete(variant.id)
             releaseAdapter?.()
             releaseDirectory?.()
           }
+          // 注册本身就会发布 llm/adapters-updated，所以这一次通知不是多余的：
+          // 客户端在启动到注册之间可能已打开过页面，缓存里存的是空目录。
+          publishCatalog(runtime)
 
           // The host bundle is live: write a heartbeat so the status CLI can
           // report host health without a browser. Cleared on disposal; a stale

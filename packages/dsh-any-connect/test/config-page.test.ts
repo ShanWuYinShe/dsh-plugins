@@ -202,4 +202,72 @@ describe('WorkBuddy 配置卡片', () => {
     await act(async () => { (retry as HTMLButtonElement).click() })
     expect(calls.length).toBeGreaterThan(before)
   })
+
+  /**
+   * Start Plan 的「今日待领取」提示。
+   *
+   * 判据来自 status 里的 `startPlanClaim`（只有 Start Plan 变体会带）。三条用例
+   * 钉住最关键的一点：**unknown 绝不能渲染成 none**——探测失败时说「已领取」，
+   * 用户就会以为今天没事可做，白丢一次领取机会。
+   */
+  describe('Start Plan 今日待领取提示', () => {
+    /** 让 /zcode-sp/status 返回带指定 startPlanClaim 的已登录文档。 */
+    function stubStartPlanClaim(claim: unknown): void {
+      vi.stubGlobal('fetch', vi.fn(async (input: unknown) => ({
+        ok: true,
+        status: 200,
+        json: async () => String(input).includes('/zcode-sp/status')
+          ? {
+              status: 'signed-in',
+              nickname: 'sp-tester',
+              credits: { total: 100, accounts: [{ packageName: 'ZCode Trust Build (有效)', planName: 'ZCode Trust Build', remain: 100, size: 100, sameDay: true }] },
+              models: [],
+              ...claim === undefined ? {} : { startPlanClaim: claim },
+            }
+          : { status: 'signed-out' },
+      })))
+    }
+
+    it('available：提示去客户端领取，并给出 plan_id 与复制入口', async () => {
+      stubStartPlanClaim({
+        state: 'available',
+        planId: 'zcode-v3-start-plan-trust-1004',
+        planName: 'ZCode Trust Build',
+        captchaRequired: true,
+      })
+      await mount()
+      const content = text()
+      expect(content).toContain('今日 Start Plan 待领取')
+      // 必须点明"要在客户端点一次验证"，否则用户会以为插件漏做了。
+      expect(content).toContain('请到 ZCode 桌面客户端领取 ZCode Trust Build')
+      expect(content).toContain('验证码')
+      expect(content).toContain('zcode-v3-start-plan-trust-1004')
+      expect(content).toContain('复制')
+    })
+
+    it('unknown：如实说"未知"并给出原因，绝不渲染成"已领取"', async () => {
+      stubStartPlanClaim({ state: 'unknown', reason: 'preview 失败（HTTP 502）' })
+      await mount()
+      const content = text()
+      expect(content).toContain('领取状态未知')
+      expect(content).toContain('preview 失败（HTTP 502）')
+      // 这条是关键：探测失败被读成"已领取"会让用户放弃一次领取。
+      expect(content).not.toContain('今日 Start Plan 已领取')
+      expect(content).not.toContain('今日 Start Plan 待领取')
+    })
+
+    it('none：已领取是无事可做的正常态，不出现待领取提示', async () => {
+      stubStartPlanClaim({ state: 'none' })
+      await mount()
+      expect(text()).not.toContain('今日 Start Plan 待领取')
+      expect(text()).not.toContain('领取状态未知')
+    })
+
+    it('非 Start Plan 变体不带该字段时，不渲染任何领取提示', async () => {
+      // 国内版正常登录、无 startPlanClaim：卡片不该凭空出现领取区块。
+      await mount()
+      expect(text()).not.toContain('今日 Start Plan 待领取')
+      expect(text()).not.toContain('今日 Start Plan 已领取')
+    })
+  })
 })
