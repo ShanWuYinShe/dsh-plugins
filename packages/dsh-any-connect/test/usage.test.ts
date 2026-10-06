@@ -212,6 +212,34 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
       { packageName: 'Only (VALID)', remain: 0, size: 1 },
     ])).toEqual([{ id: 'plan', label: 'Only', unit: '有效' }])
   })
+
+  it('Start Plan 的当日 token 池带真实数字,pill 才有剩余额度可显示', () => {
+    // billing/balance 的实测形状(2026-10-06):remain/size 是真实 token 数,
+    // sameDay: true。窗口缺 remain 时 pill 只渲染「套餐名: 有效」——数字被
+    // 丢掉等于用户在聊天框下方看不到剩余额度。
+    expect(WorkBuddy.currentPlanWindow([
+      { packageName: 'GLM-5.3-Flash (有效)', planName: 'ZCode Trust Build', remain: 91_464_568, size: 100_000_000, sameDay: true, expiredAt: '2026-10-06T16:00:00.000Z' },
+    ])).toEqual([{
+      id: 'plan',
+      label: 'GLM-5.3-Flash',
+      remain: 91_464_568,
+      limit: 100_000_000,
+      unit: 'tokens',
+      resetsAt: '2026-10-06T16:00:00.000Z',
+    }])
+    // 当日用完(remain=0):照样带数字——红色空条正是「今天用完了」的语义。
+    expect(WorkBuddy.currentPlanWindow([
+      { packageName: 'GLM-5.3-Flash (有效)', remain: 0, size: 100_000_000, sameDay: true },
+    ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 0, limit: 100_000_000, unit: 'tokens' }])
+    // size = 0(理论不应出现)防御:退回「有效」展示,避免 limit 0 的除零与无意义进度条。
+    expect(WorkBuddy.currentPlanWindow([
+      { packageName: 'Odd (有效)', remain: 5, size: 0, sameDay: true },
+    ])).toEqual([{ id: 'plan', label: 'Odd', unit: '有效' }])
+    // Coding Plan 订阅(无 sameDay,remain/size=1 的有效性标志)维持原样。
+    expect(WorkBuddy.currentPlanWindow([
+      { packageName: 'GLM Coding Pro (有效)', planName: 'GLM Coding Pro', remain: 1, size: 1 },
+    ])).toEqual([{ id: 'plan', label: 'GLM Coding Pro', unit: '有效' }])
+  })
 })
 
 it('reports the upstream plan name for ZCode instead of a hardcoded label', async () => {

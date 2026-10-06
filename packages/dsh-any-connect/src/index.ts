@@ -506,19 +506,41 @@ export function totalCreditsWindows(accounts: readonly WorkBuddyCreditAccount[])
  * 的 zcodePlan 取法一致——pill 与卡片看到的是同一个“当前套餐”，而不是
  * 一摞计划名。
  *
+ * Start Plan 的当日 token 池数字是真实的（billing/balance 的 remain/size），
+ * 窗口必须带上它们——composer dock 的 pill 在窗口缺 remain 时只渲染
+ * 「套餐名: 有效」，用户在聊天框下方就看不到剩余额度（2026-10-06 用户报告）。
+ * Coding Plan 订阅的 remain/size 恒为 1，只是有效性标志而非用量，没有数字
+ * 概念，维持「有效」展示；明细看配置页卡片。
+ *
  * Exported for tests: counted directly without booting the plugin.
  */
 export function currentPlanWindow(accounts: readonly WorkBuddyCreditAccount[]): Array<{
   id: string
   label: string
+  remain?: number
+  limit?: number
   unit: string
   resetsAt?: string
 }> {
   const current = accounts.find(account => account.remain > 0) ?? accounts[0]
   if (current === undefined) return []
+  const label = current.packageName.replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, '')
+  // sameDay 是 Start Plan 当日池的特有标志（fetchStartPlanCredits 恒置）；
+  // size > 0 才有进度条可画。remain = 0（当日用完）照样带数字——红色空条
+  // 正是「今天用完了」的正确语义。
+  if (current.sameDay === true && current.size > 0) {
+    return [{
+      id: 'plan',
+      label,
+      remain: current.remain,
+      limit: current.size,
+      unit: 'tokens',
+      ...current.expiredAt ? { resetsAt: current.expiredAt } : {},
+    }]
+  }
   return [{
     id: 'plan',
-    label: current.packageName.replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, ''),
+    label,
     unit: '有效',
     ...current.expiredAt ? { resetsAt: current.expiredAt } : {},
   }]
