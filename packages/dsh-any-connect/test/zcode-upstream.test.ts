@@ -20,6 +20,7 @@ import {
   type WorkBuddyCredential,
 } from '../src/index.js'
 import type { ZCodeClientSigner } from '../src/zcode-signer.js'
+import { codingPlanWhitelistFromConfig, readZcodeCodingPlanWhitelist } from '../src/zcode-builtin-catalog.js'
 
 const CLEANUP: (() => Promise<void>)[] = []
 
@@ -37,6 +38,9 @@ describe('ZCode upstream and auth', () => {
     nickname: 'ZCode User',
     source: 'desktop',
   }
+
+  /** 注入的白名单构造器：与生产默认实现（读本机客户端文件）隔离，测试不依赖真实安装。 */
+  const whitelistOf = (ids: readonly string[]) => () => new Set(ids.map(id => id.toLowerCase()))
 
   describe('ZCode credential parsing and decryption', () => {
     it('decrypts encrypted key with machine fallback secret', () => {
@@ -216,7 +220,10 @@ it('attributes the plan to the client selection, not to the fallback key', async
       // this.models——不打 stub 会直连 open.bigmodel.cn(假 bearer),CI 断网
       // 下挂满 30s deadline,有网环境产生无谓真实出口流量。
       vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })))
-      const client = new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
+      const client = new ZCodeUpstreamClient({
+        models: FALLBACK_ZCODE_MODELS,
+        resolveCodingPlanWhitelist: whitelistOf(['glm-5.3', 'glm-5.3-flash']),
+      })
       const models = await client.fetchModels(dummyCredential)
       expect(models.map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
       expect(models.find(m => m.id === 'glm-5.3')?.contextWindow).toBe(1000000)
@@ -229,18 +236,21 @@ it('attributes the plan to the client selection, not to the fallback key', async
     })
 
     /**
-     * 上游名单是登记来源，本地目录只当元数据表。此前三个分支全返回 this.models，
-     * 上游 data 只被用来判断非空后丢弃——每小时刷新的唯一效果是"证明凭据还活着"，
-     * 上游上新/下线模型都反映不出来，只能发版改代码。
+     * 上游 paas 目录只作存在性参考，产品面由客户端内置目录的白名单圈定；本地
+     * 目录当元数据表。此前三个分支全返回 this.models，上游 data 只被用来判断
+     * 非空后丢弃——每小时刷新的唯一效果是"证明凭据还活着"。
      */
-    it('采用上游返回的新模型 id，并走保守默认参数', async () => {
+    it('白名单内的上游新 id 采用保守默认参数', async () => {
       vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
         code: 200,
         data: [{ id: 'brand-new-model' }],
       }), { status: 200 })))
-      const client = new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
+      const client = new ZCodeUpstreamClient({
+        models: FALLBACK_ZCODE_MODELS,
+        resolveCodingPlanWhitelist: whitelistOf(['glm-5.3', 'glm-5.3-flash', 'brand-new-model']),
+      })
       const models = await client.fetchModels(dummyCredential)
-      // 新 id 出现（不再被编译期常量吞掉）
+      // 新 id 出现（官方收录 + 上游在列，不再被编译期常量吞掉）
       expect(models.map(m => m.id)).toContain('brand-new-model')
       // 保守默认：不虚报窗口/输出，不带促销徽标
       const fresh = models.find(m => m.id === 'brand-new-model')
@@ -252,6 +262,22 @@ it('attributes the plan to the client selection, not to the fallback key', async
       vi.unstubAllGlobals()
     })
 
+    it('官方白名单外的上游 id 不展示（端点放行 ≠ 订阅覆盖）', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        code: 200,
+        data: [{ id: 'brand-new-model' }, { id: 'glm-5.3' }],
+      }), { status: 200 })))
+      const client = new ZCodeUpstreamClient({
+        models: FALLBACK_ZCODE_MODELS,
+        resolveCodingPlanWhitelist: whitelistOf(['glm-5.3', 'glm-5.3-flash']),
+      })
+      const models = await client.fetchModels(dummyCredential)
+      // 白名单外的开放平台模型被拦下；白名单内的照常出现——包括上游未列出、
+      // 但本地已验证且仍在白名单内的 glm-5.3-flash（并集保留行）。
+      expect(models.map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+      vi.unstubAllGlobals()
+    })
+
     it('上游列出的本地已收录 id 沿用其已验证参数与费率', async () => {
       // 断言 join 的保真度：本地行带着 128K/自定义费率/徽章，上游只给 id。
       // 这里也断言**顺序与数量**跟上游一致，否则旧实现（无条件返回本地整表）
@@ -260,7 +286,10 @@ it('attributes the plan to the client selection, not to the fallback key', async
         code: 200,
         data: [{ id: 'glm-5.3-flash' }, { id: 'glm-5.3' }],
       }), { status: 200 })))
-      const client = new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
+      const client = new ZCodeUpstreamClient({
+        models: FALLBACK_ZCODE_MODELS,
+        resolveCodingPlanWhitelist: whitelistOf(['glm-5.3-flash', 'glm-5.3']),
+      })
       const models = await client.fetchModels(dummyCredential)
       // 上游顺序被保留（flash 在前），不是本地常量顺序。
       expect(models.map(m => m.id)).toEqual(['glm-5.3-flash', 'glm-5.3'])
@@ -279,7 +308,7 @@ it('attributes the plan to the client selection, not to the fallback key', async
     })
 
     it('保留本地已收录但上游未列出的模型（并集，不因上游只列一部分而消失）', async () => {
-      // 与 WorkBuddy 线口径一致：上游响应里没有该 id 不代表模型不可用。
+      // 上游目录可能只列一部分：本地收录且仍在白名单内的模型不因上游缺席而消失。
       // 用一个与编译期常量不同的本地目录，才能把"真的做了并集"与"直接返回常量"
       // 区分开——若沿用 FALLBACK_ZCODE_MODELS，旧实现（无条件 return this.models）
       // 会碰巧满足断言，用例就抓不到 bug。
@@ -291,7 +320,10 @@ it('attributes the plan to the client selection, not to the fallback key', async
         code: 200,
         data: [{ id: 'local-kept' }, { id: 'fresh-from-upstream' }],
       }), { status: 200 })))
-      const models = await new ZCodeUpstreamClient({ models: local }).fetchModels(dummyCredential)
+      const models = await new ZCodeUpstreamClient({
+        models: local,
+        resolveCodingPlanWhitelist: whitelistOf(['local-kept', 'fresh-from-upstream', 'local-dropped-by-upstream']),
+      }).fetchModels(dummyCredential)
       // 上游在前（沿用本地已验证参数）、本地补充在后，保序去重。
       expect(models.map(m => m.id)).toEqual(['local-kept', 'fresh-from-upstream', 'local-dropped-by-upstream'])
       // 上游列出的已收录 id 必须沿用本地参数（不能因 join 丢失）。
@@ -302,11 +334,32 @@ it('attributes the plan to the client selection, not to the fallback key', async
       vi.unstubAllGlobals()
     })
 
+    it('本地保留行的存废也由白名单定：白名单外的新 id 不出现', async () => {
+      // 同样的上游响应，白名单不含 fresh-from-upstream：新 id 被拦下，两个本地行
+      // 照常保留——本地保留行的存废由产品面白名单定，不由上游列表定。
+      const local = [
+        { id: 'local-kept', name: 'Local Kept', contextWindow: 1000000, maxTokens: 128000, supportsImages: true },
+        { id: 'local-dropped-by-upstream', name: 'Local Only', contextWindow: 500000, maxTokens: 64000, supportsImages: false },
+      ]
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        code: 200,
+        data: [{ id: 'local-kept' }, { id: 'fresh-from-upstream' }],
+      }), { status: 200 })))
+      const models = await new ZCodeUpstreamClient({
+        models: local,
+        resolveCodingPlanWhitelist: whitelistOf(['local-kept', 'local-dropped-by-upstream']),
+      }).fetchModels(dummyCredential)
+      expect(models.map(m => m.id)).toEqual(['local-kept', 'local-dropped-by-upstream'])
+      vi.unstubAllGlobals()
+    })
+
     it('上游返回空/null/非数组时回退 this.models', async () => {
       for (const data of [[], null, 'nope', undefined]) {
         vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 200, data }), { status: 200 })))
-        const models = await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
-          .fetchModels(dummyCredential)
+        const models = await new ZCodeUpstreamClient({
+          models: FALLBACK_ZCODE_MODELS,
+          resolveCodingPlanWhitelist: whitelistOf(['glm-5.3', 'glm-5.3-flash']),
+        }).fetchModels(dummyCredential)
         expect(models.map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
       }
       vi.unstubAllGlobals()
@@ -314,12 +367,16 @@ it('attributes the plan to the client selection, not to the fallback key', async
 
     it('上游请求失败（非 ok / 抛错）时回退 this.models', async () => {
       vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })))
-      expect((await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
-        .fetchModels(dummyCredential)).map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+      expect((await new ZCodeUpstreamClient({
+        models: FALLBACK_ZCODE_MODELS,
+        resolveCodingPlanWhitelist: whitelistOf(['glm-5.3', 'glm-5.3-flash']),
+      }).fetchModels(dummyCredential)).map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
 
       vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down') }))
-      expect((await new ZCodeUpstreamClient({ models: FALLBACK_ZCODE_MODELS })
-        .fetchModels(dummyCredential)).map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+      expect((await new ZCodeUpstreamClient({
+        models: FALLBACK_ZCODE_MODELS,
+        resolveCodingPlanWhitelist: whitelistOf(['glm-5.3', 'glm-5.3-flash']),
+      }).fetchModels(dummyCredential)).map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
       vi.unstubAllGlobals()
     })
 
@@ -335,12 +392,32 @@ it('attributes the plan to the client selection, not to the fallback key', async
         code: 200,
         data: [{ id: 'GLM-5.3' }, { id: 'glm-5.3' }, { id: '  ' }, { id: 'fresh-new' }],
       }), { status: 200 })))
-      const models = await new ZCodeUpstreamClient({ models: local }).fetchModels(dummyCredential)
+      const models = await new ZCodeUpstreamClient({
+        models: local,
+        resolveCodingPlanWhitelist: whitelistOf(['GLM-5.3', 'fresh-new', 'local-extra']),
+      }).fetchModels(dummyCredential)
       // 大小写不同的同一个 id 只留一行（匹配时不区分大小写，命中本地行则沿用
       // 本地行原样，含它自己的 id 拼写），空 id 不产生行；上游新 id 出现，
       // 本地未被上游列出的 local-extra 保留在末尾。
       expect(models.map(m => m.id)).toEqual(['GLM-5.3', 'fresh-new', 'local-extra'])
       expect(models.find(m => m.id === 'GLM-5.3')?.contextWindow).toBe(1000000)
+      vi.unstubAllGlobals()
+    })
+
+    it('白名单不可得（undefined）时回退 this.models，且不请求上游', async () => {
+      const fetchSpy = vi.fn(async () => new Response(JSON.stringify({
+        code: 200,
+        data: [{ id: 'brand-new-model' }],
+      }), { status: 200 }))
+      vi.stubGlobal('fetch', fetchSpy)
+      const models = await new ZCodeUpstreamClient({
+        models: FALLBACK_ZCODE_MODELS,
+        resolveCodingPlanWhitelist: () => undefined,
+      }).fetchModels(dummyCredential)
+      // 产品面真源不可得 → 保守回退已注册名单；此时上游目录不可信，
+      // 不值得为它发请求（白名单是闸门，不是事后过滤器）。
+      expect(models.map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+      expect(fetchSpy).not.toHaveBeenCalled()
       vi.unstubAllGlobals()
     })
 
@@ -443,6 +520,83 @@ it('attributes the plan to the client selection, not to the fallback key', async
       }
 
       vi.unstubAllGlobals()
+    })
+  })
+
+  describe('ZCode Coding Plan whitelist from client builtin config', () => {
+    it('从客户端 providerRules 中提取 bigmodel coding-plan 的 builtinModelIds', () => {
+      // 形状取自实测 revision 30:zai 系与 start-plan 条目共存于同一列表,
+      // 但白名单只并 bigmodel 的 coding-plan 两个条目。
+      const config = {
+        config: {
+          providerConfigRules: {
+            providerRules: [
+              { providerId: 'account:zai-individual-coding-plan', config: { access: { type: 'zhipu-account', mode: 'individual-coding-plan', accountType: 'zai' }, builtinModelIds: ['GLM-5.3', 'GLM-5.3-Flash'] } },
+              { providerId: 'account:bigmodel-individual-coding-plan', providerName: 'BigModel Individual Coding Plan', config: { access: { type: 'zhipu-account', mode: 'individual-coding-plan', accountType: 'bigmodel' }, builtinModelIds: ['GLM-5.3', 'GLM-5.3-Flash'] } },
+              { providerId: 'account:bigmodel-team-coding-plan', providerName: 'BigModel Team Coding Plan', config: { access: { type: 'zhipu-account', mode: 'team-coding-plan', accountType: 'bigmodel' }, builtinModelIds: ['GLM-5.3'] } },
+              { providerId: 'account:bigmodel-start-plan', providerName: 'Start Plan', config: { access: { type: 'zhipu-account', mode: 'start-plan', accountType: 'bigmodel' }, builtinModelIds: ['GLM-5.3-Flash', 'GLM-5.2', 'GLM-5-Turbo'] } },
+            ],
+          },
+        },
+      }
+      const whitelist = codingPlanWhitelistFromConfig(config)
+      expect([...(whitelist ?? [])].sort()).toEqual(['glm-5.3', 'glm-5.3-flash'])
+    })
+
+    it('id 大小写与首尾空白容忍', () => {
+      const config = {
+        config: {
+          providerConfigRules: {
+            providerRules: [
+              { providerId: 'account:bigmodel-individual-coding-plan', config: { access: { accountType: 'bigmodel' }, builtinModelIds: [' GLM-5.3 ', 'GLM-5.3-Flash'] } },
+            ],
+          },
+        },
+      }
+      expect([...(codingPlanWhitelistFromConfig(config) ?? [])]).toEqual(['glm-5.3', 'glm-5.3-flash'])
+    })
+
+    it('找不到条目/结构缺失/字段缺失/accountType 不符一律 undefined（降级语义）', () => {
+      expect(codingPlanWhitelistFromConfig(undefined)).toBeUndefined()
+      expect(codingPlanWhitelistFromConfig({})).toBeUndefined()
+      expect(codingPlanWhitelistFromConfig({ config: { providerConfigRules: { providerRules: [] } } })).toBeUndefined()
+      // builtinModelIds 缺失:更像客户端结构演进,降级而不是显示空分组。
+      expect(codingPlanWhitelistFromConfig({
+        config: { providerConfigRules: { providerRules: [
+          { providerId: 'account:bigmodel-individual-coding-plan', config: { access: { accountType: 'bigmodel' } } },
+        ] } },
+      })).toBeUndefined()
+      // accountType 不是 bigmodel（Z.AI 系走另一条通道）。
+      expect(codingPlanWhitelistFromConfig({
+        config: { providerConfigRules: { providerRules: [
+          { providerId: 'account:bigmodel-individual-coding-plan', config: { access: { accountType: 'zai' }, builtinModelIds: ['glm-5.3'] } },
+        ] } },
+      })).toBeUndefined()
+    })
+
+    it('ZCODE_BUILTIN_CONFIG 覆盖口：显式路径优先于平台候选', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'zcode-builtin-'))
+      CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+      const file = join(dir, 'zcode-builtin.json')
+      await writeFile(file, JSON.stringify({
+        config: { providerConfigRules: { providerRules: [
+          { providerId: 'account:bigmodel-team-coding-plan', config: { access: { accountType: 'bigmodel' }, builtinModelIds: ['GLM-5.3'] } },
+        ] } },
+      }))
+      vi.stubEnv('ZCODE_BUILTIN_CONFIG', file)
+      try {
+        const whitelist = readZcodeCodingPlanWhitelist()
+        expect([...(whitelist ?? [])]).toEqual(['glm-5.3'])
+      } finally {
+        vi.unstubAllEnvs()
+      }
+    })
+
+    it.skipIf(process.platform !== 'darwin')('本机 ZCode 客户端（若安装）解析出官方 GLM 白名单', () => {
+      const whitelist = readZcodeCodingPlanWhitelist()
+      if (whitelist === undefined) return // 未安装 ZCode 的 macOS：无可断言，跳过语义
+      expect(whitelist.has('glm-5.3')).toBe(true)
+      expect(whitelist.has('glm-5.3-flash')).toBe(true)
     })
   })
 

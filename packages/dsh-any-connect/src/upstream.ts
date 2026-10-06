@@ -14,6 +14,7 @@ import type { ProbeAttempt } from './probe.js'
 import { deadlineSignal, withTimeout } from './timeout.js'
 import { ZCodeClientSigner } from './zcode-signer.js'
 import { prepareStartPlanBody } from './zcode-plan-prompt.js'
+import { readZcodeCodingPlanWhitelist } from './zcode-builtin-catalog.js'
 import {
   FALLBACK_ZCODE_START_PLAN_MODELS,
   isStartPlanActivityActive,
@@ -1228,6 +1229,10 @@ export interface ZCodeUpstreamClientOptions {
   /** Resolves the client app version sent as `app_version`/`X-ZCode-App-Version`
    * on the account-plan endpoints; injectable so tests never touch the real FS. */
   resolveAppVersion?: () => Promise<AppVersionInfo>
+  /** Coding Plan 的官方模型白名单（小写 id 集合）；undefined = 客户端产品面不可得。
+   * 默认实现读本机 ZCode 客户端的 zcode-builtin.json（见 zcode-builtin-catalog），
+   * 注入口让测试不依赖测试机的真实安装。 */
+  resolveCodingPlanWhitelist?: () => ReadonlySet<string> | undefined
 }
 
 /**
@@ -1239,11 +1244,13 @@ export class ZCodeUpstreamClient {
   private readonly signer: ZCodeClientSigner
   private readonly models: readonly WorkBuddyUpstreamModel[]
   private readonly resolveAppVersion: () => Promise<AppVersionInfo>
+  private readonly resolveCodingPlanWhitelist: () => ReadonlySet<string> | undefined
 
   constructor(options: ZCodeUpstreamClientOptions = {}) {
     this.signer = options.signer ?? new ZCodeClientSigner()
     this.models = options.models ?? []
     this.resolveAppVersion = options.resolveAppVersion ?? (() => resolveAppVersion())
+    this.resolveCodingPlanWhitelist = options.resolveCodingPlanWhitelist ?? readZcodeCodingPlanWhitelist
   }
 
   /** POST the BigModel Anthropic messages endpoint; a successful answer is the raw SSE response.
@@ -1310,6 +1317,13 @@ export class ZCodeUpstreamClient {
     if (credential.zcodePlan === 'start-plan') {
       return this.fetchStartPlanModels(credential)
     }
+    // Coding Plan 的名单真源是客户端内置 provider 目录（产品面），不是开放平台的
+    // paas 目录：白名单拿不到（客户端未装/结构演进）就回已注册名单，不把未经验证
+    // 的模型带进选择器（端点放行 ≠ 订阅覆盖，2026-10-06 实测见 zcode-builtin-catalog）。
+    const whitelist = this.resolveCodingPlanWhitelist()
+    if (whitelist === undefined) {
+      return this.models
+    }
     // 超时同样走宿主 deadline：外层 try/catch 的降级语义（失败回退已有模型）不变。
     const modelsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
     try {
@@ -1333,18 +1347,21 @@ export class ZCodeUpstreamClient {
       // BigModel connection and API credentials verified; Coding Plan subscriber
       // models are preserved with their verified parameters (128K max tokens, custom rates).
       //
-      // 上游给出"有哪些 id"，本地给出"这些 id 的已验证参数"，两者是**并集**：
-      // - 上游列出的 id：本地收录过的沿用整行（128K/费率/徽章都不丢），没收录过
-      //   的走保守默认——新模型能出现，但不虚报窗口与费率；
-      // - 本地收录、上游没列的：照 WorkBuddy 线的口径保留（目录接口可能只列一部分，
-      //   上面那行注释说的就是这件事），丢掉等于把已验证可用的模型从选择器里抹掉。
-      // 失败/空响应仍回退 this.models（上面的两个 return），语义不变。
+      // 三方合流，白名单是总闸：
+      // - 上游 paas 目录给"开放平台有哪些 id"，只作存在性参考；id 必须先过客户端
+      //   产品面白名单，官方未收录的模型不展示——那不是本订阅的名单；
+      // - 白名单内的 id：本地收录过的沿用整行（128K/费率/徽章都不丢），没收录过
+      //   的走保守默认（官方上新时新模型能出现，但不虚报窗口与费率）；
+      // - 本地收录、上游没列的：仍在白名单内才保留（目录接口可能只列一部分；
+      //   官方从产品面下架的模型则随之消失，不再靠本地行续命）。
+      // 失败/空响应仍回退 this.models（上面的 return），语义不变。
       const known = new Map(this.models.map(model => [model.id.toLowerCase(), model]))
       const merged: WorkBuddyUpstreamModel[] = []
       const seen = new Set<string>()
       for (const rawId of upstreamIds) {
         const key = rawId.toLowerCase()
         if (seen.has(key)) continue
+        if (!whitelist.has(key)) continue
         seen.add(key)
         const hit = known.get(key)
         merged.push(hit ?? defaultZCodeModelInfo(rawId))
@@ -1352,6 +1369,7 @@ export class ZCodeUpstreamClient {
       for (const model of this.models) {
         const key = model.id.toLowerCase()
         if (seen.has(key)) continue
+        if (!whitelist.has(key)) continue
         seen.add(key)
         merged.push(model)
       }

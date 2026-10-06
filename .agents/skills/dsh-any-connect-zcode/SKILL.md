@@ -271,6 +271,28 @@ curl -sS "http://127.0.0.1:8932/plugins/dsh-any-connect/zcode-sp/status" -H "Hos
 > 写这类"采用上游名单"的测试时注意：若本地目录恰好等于上游名单，旧实现也能碰巧通过
 > ——用例必须用**与编译期常量不同**的本地目录，并断言顺序与数量，否则是假绿。
 
+**🔴 但并集的来源选错了目录（2026-10-06 取证并已修复）：`/api/paas/v4/models` 是
+BigModel 开放平台 API 的模型目录，不是 Coding Plan 订阅的产品面。** 实测该端点对
+coding-plan key 返回 11 个 id（glm-4.5 / glm-4.5-air / glm-4.6 / glm-4.7 / glm-5 /
+glm-5-turbo / glm-5.1 / glm-5.2 / glm-5.3 / glm-5.3-flash / glm-5.3-flashx），而官方
+客户端 `zcode-builtin.json` 绑定到 coding-plan provider 的只有 `builtinModelIds`
+2 个（GLM-5.3、GLM-5.3-Flash）+ `builtinProviderModelRules` 里的 GLM-5.2、
+GLM-5-Turbo。那 7 个多余模型（glm-4.5/4.5-air/4.6/4.7/5/5.1/5.3-flashx）在客户端
+配置里**完全没有绑定到 coding-plan**；探针实测 glm-4.5 在 `open.bigmodel.cn/api/anthropic`
+也能 200（max_tokens=16），即端点层放行，但订阅内的费率/额度语义未经验证（可能扣
+API 余额而非订阅）——「分组里出现」本身就是一个未经验证的主张，与 Start Plan
+三态纪律（名单必须来自授权真源）同一条红线。
+
+**修复（2026-10-06，`zcode-builtin-catalog.ts`）**：名单真源改为读本机客户端的
+`zcode-builtin.json`（权威来源，随客户端发版更新），`fetchModels` 先取白名单再
+过滤上游并集**和本地保留行**；白名单不可得（客户端未装/文件不可读/结构演进）时
+回退已注册名单且**不发上游请求**（白名单是闸门，不是事后过滤器）。实测收敛
+11 → 2，已验证参数（128K/费率/徽章）不受影响。路径口：macOS 标准安装位置 +
+`ZCODE_BUILTIN_CONFIG` 环境变量覆盖；其余平台未经实测不猜路径，一律降级。
+白名单口径是 `builtinModelIds`（客户端展示面，最严格）；GLM-5.2/5-Turbo 在
+rules 里配了参数但没进 builtinModelIds，探针 200 也不展示——要放宽只需并上
+rules 绑定的模型 id，一行改动。
+
 **🔴 陷阱二：`zcode-start-plan` 空名单的恢复延迟。**
 今日未领取 → 空名单 → 分组隐藏；用户领取后要等**最长 60 分钟**（小时刷新）才恢复，
 因为 60s sweep 只比对凭据身份，领取不改变身份。
