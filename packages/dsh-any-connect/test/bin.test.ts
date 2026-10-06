@@ -102,4 +102,41 @@ printf '%s' '${JSON.stringify({ version: 1, atRestSecretKey: secret })}'
       spy.mockRestore()
     }
   })
+
+  // Start Plan 的额度口径与 WorkBuddy 点数不同:total 是当日 token 池的数字,
+  // 人读行必须照 pill 的语义写(带单位与上限),而不是裸的 credits 计数。
+  it.skipIf(process.platform === 'win32')('reports Start Plan quota as a token pool, not a credit count', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-bin-'))
+    vi.stubEnv('DSH_HOME', root)
+    const credPath = join(root, 'zcode-credentials.json')
+    await writeFile(credPath, JSON.stringify({
+      'account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:57271768622479063:api-key': 'id.secret',
+      zcodejwttoken: 'cli-jwt',
+    }))
+    vi.stubEnv('ZCODE_AUTH_FILE', credPath)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: {
+        plans: [{ name: 'ZCode Trust Build', plan_id: 'p1', ends_at: Math.floor(Date.now() / 1000) + 3600 }],
+        balances: [{ show_name: 'GLM-5.3-Flash', plan_id: 'p1', total_units: 100000000, remaining_units: 57798755, expires_at: Math.floor(Date.now() / 1000) + 7200 }],
+      },
+    }), { status: 200 })))
+    const out: string[] = []
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out.push(String(chunk))
+      return true
+    })
+    try {
+      expect(await run(['status', '--json', '--provider', 'zcode-start-plan'])).toBe(0)
+      const report = JSON.parse(out.join('')) as { credits?: number; quotaWindows?: Array<{ unit?: string; remain?: number; limit?: number }> }
+      // --json:窗口带真实 token 数字(与 pill 同口径),不再是裸 total。
+      expect(report.quotaWindows?.[0]).toMatchObject({ unit: 'tokens', remain: 57798755, limit: 100000000 })
+      // 人读模式:带单位与上限,而不是「Remaining credit: 57798755」。
+      out.length = 0
+      expect(await run(['status', '--provider', 'zcode-start-plan'])).toBe(0)
+      expect(out.join('')).toMatch(/Start Plan quota: [\d,]+ \/ [\d,]+ tokens/)
+    } finally {
+      spy.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
 })

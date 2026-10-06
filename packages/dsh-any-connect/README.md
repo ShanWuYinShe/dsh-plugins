@@ -79,12 +79,13 @@ dsh-any-connect logout     # 移除本插件的凭据副本（不动桌面 App �
 ```
 
 默认操作国内版；`--provider <id>` 切换操作对象（`workbuddy-ai` 国际版、
-`zcode`）：
+`zcode`、`zcode-start-plan`）：
 
 ```bash
 dsh-any-connect status --provider workbuddy-ai
 dsh-any-connect doctor --provider workbuddy-ai
 dsh-any-connect status --provider zcode
+dsh-any-connect status --provider zcode-start-plan
 ```
 
 ## 配置
@@ -104,21 +105,33 @@ profile/home 的 `cordis.patch.yml`（DSH 0.1.7 起第三方 provider 的模型�
   * **WorkBuddy 5.6+ 的加密凭据**：桌面端自 5.6 起把 `accessToken` / `refreshToken` 以 `$wbEncrypted` 信封加密落盘，解密密钥只存在于它自己的 Electron 进程内。插件因此要定位 App 的可执行文件当解密助手：macOS 按各自的 bundle id 检索并校验身份，Windows 先看默认安装目录（`%LOCALAPPDATA%\Programs\WorkBuddy\WorkBuddy.exe`）再查卸载注册表。自动定位不成功时，用 `WORKBUDDY_ELECTRON_BIN`（国内版）或 `WORKBUDDY_AI_ELECTRON_BIN`（国际版）显式指定 App 主程序；插件在构造时读取该变量，**设置后需完全退出并重启 DSH**。两个产品只按各自的 App 身份（bundle id / 注册表名 / 可执行文件名）定位，不会互相误选。
   * **卡片显示未登录、但桌面端明明已登录时**：`dsh-any-connect doctor --json` 给出三件事——`desktopAuthFile.present`（文件在不在）、`desktopAuthFile.format`（`plaintext` / `encrypted` / `unrecognized`）、`atRestHelper`（加密时要去执行哪个二进制）。`format: "encrypted"` 而 `atRestHelper` 为空或不可执行，就是需要按上一条设置环境变量的情形；`signInReason` 里写着可直接照做的修法。
 - **ZCode**：macOS（`~/.zcode/v2/credentials.json` 及 `Library/Application Support`）、Windows（`%USERPROFILE%\.zcode\v2\credentials.json` 及 Local/Roaming AppData）、WSL（优先通过 WSL 挂载探测 Windows 宿主用户目录与 AppData，并自动计算跨系统解密密钥，随后回落 Linux 原生目录）、Linux（`~/.zcode/v2/credentials.json` 及 `~/.config`）；亦可用 `ZCODE_AUTH_FILE` 环境变量显式指定。
-  * **同时支持 Coding Plan 与 Start Plan**：账号下会有多把 key（team /
-    individual），**以桌面端 `setting.json` 里选中的账号计划为准**取用，
-    而不是文件里的排列顺序。选中 Start Plan（或 off-peak）时，该计划在凭据
-    里**没有**自己的 key，插件回落到账户上的 coding-plan key——也就是说
-    Start Plan 账号按**普通 ZCode 通道（150% 额度）**正常使用，模型与额度
-    显示同一口径。
+  * **Coding Plan 与 Start Plan 是两个独立连接**：`zcode`（Coding Plan）与
+    `zcode-start-plan`（Start Plan）各自有模型分组、模型名单、额度池与请求
+    通道，互不掺用；共享同一份桌面凭据文档，各取所需材料（api-key vs 账号
+    JWT + 设备号）。账号下会有多把 key（team / individual），**以桌面端
+    `setting.json` 里选中的账号计划为准**取用，而不是文件里的排列顺序。
+    Start Plan（或 off-peak）在凭据里没有自己的 key，`zcode` 连接回落到
+    账户上的 coding-plan key；`zcode-start-plan` 连接只用账号 JWT 走专属
+    通道，绝不借用 coding-plan 的 key。
+  * **模型名单（Coding Plan）**：以本机 ZCode 客户端内置目录
+    （`zcode-builtin.json` 的 `builtinModelIds`）为白名单，随客户端发版自动
+    更新——实测当前为 GLM-5.3、GLM-5.3-Flash 两个。开放平台 API 的模型目录
+    比 Coding Plan 的产品面大（端点能调通 ≠ 订阅覆盖），越界模型不展示。
+    客户端装在非标准位置或非 macOS 平台时，可用 `ZCODE_BUILTIN_CONFIG`
+    环境变量显式指定该文件路径；白名单不可得时回退内置名单（仍可用，只是
+    不跟随客户端更新）。
+  * **模型名单（Start Plan）**：以当前活动的 entitlements 为准——今日未领取
+    或已过期时分组如实隐藏（而不是展示点选必错的名单），领取后约 60 秒内
+    自动恢复。
+  * **Start Plan 专属通道与每日领取**：`zcode-start-plan` 走
+    `zcode.z.ai/api/v1/zcode-plan/anthropic`（Bearer 账号 JWT + 设备号），
+    额度扣**当日有效的一次性 token 包**（不结转，过期清零），请求失败如实
+    报错、绝不静默回落到 Coding Plan 通道。每日领取必须通过 ZCode 客户端
+    （领取需客户端渲染进程签发的验证码，纯 HTTP 侧无法生成——插件每天自动
+    探测可领活动并在卡片提示，领取动作为手动）。
   * **夜间免费只属于 Coding Plan**：23:00–09:00 免费窗是 Coding Plan 的权益，
-    Start Plan 不享受。选中 Start Plan 时插件不会给模型标「夜间免费」，也不会
-    把费率改写成 `x0.00`，而是保留基准价与 150% 额度标注。
-  * **专属模型通道未接入**：ZCode 为 Start Plan 另开了一条
-    `zcode.z.ai/api/v1/zcode-plan/anthropic`（Bearer 账号 JWT）。该通道被上游
-    风控拦截（HTTP 405 `code 3012`）：真客户端、浏览器内同源页面、HTTP/1.1 与
-    HTTP/2、以及签名/验证码/完整身份头的各种组合实测均被拦，而同刻同域的额度
-    接口返回 200。因此插件不走这条通道，Start Plan 账号统一按普通 ZCode 使用；
-    上游解除限制后，用同一条请求即可探针确认。
+    Start Plan 不享受。Start Plan 的模型不会标「夜间免费」，也不会把费率
+    改写成 `x0.00`，而是保留基准价与 150% 额度标注。
 
 > 关于 ZCode 通道的实测证据与复现脚本，见仓库 `.workwork/zcode-startplan/`
 > （该目录不入库）。
