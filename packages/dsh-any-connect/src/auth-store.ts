@@ -15,19 +15,15 @@ import type { WorkBuddyVariant } from './variants.js'
 import {
   atRestKeyProviderFor,
   classifyDesktopAuthDocument,
-  keyIdsOf,
-  openAuthField,
   reasonCodeOf,
-  unwrapDesktopAuthDocument,
-  WorkBuddyElectronPathError,
-  type DesktopAuthClassification,
   type DesktopAuthFormat,
 } from './desktop-credential-protection.js'
 import { RegionMismatchError } from './auth-types.js'
 import type { WorkBuddyCredential, WorkBuddyAuthStatus, WorkBuddyStoreOptions } from './auth-types.js'
 import { WORKBUDDY_AUTH_FILE_ENV, workbuddyOwnAuthPath, desktopAuthCandidatesFor } from './auth-paths.js'
 import { parseZCodeAuth } from './auth-zcode.js'
-import { parseWorkBuddyAuth, ownDocument, parseOwnDocument, isENOENT } from './auth-document.js'
+import { ownDocument, parseOwnDocument } from './auth-document.js'
+import { readDesktopCredential } from './auth-desktop-read.js'
 
 /** 刷新响应缺 expiresIn 时新 access token 的保守寿命下限(10 分钟):
  * 沿用旧过期时间会让 needsRefresh 恒真、每条请求都打一次刷新端点。 */
@@ -341,57 +337,12 @@ export class WorkBuddyCredentialStore {
    * being papered over by the plugin-owned copy (which may belong to whatever
    * account was signed in when it was last refreshed).
    */
-  private async readDesktop(): Promise<WorkBuddyCredential | undefined> {
-    for (const desktopPath of this.resolveDesktopCandidates()) {
-      let text: string
-      try {
-        text = await readFile(desktopPath, 'utf8')
-      } catch (error: unknown) {
-        if (!isENOENT(error)) throw error
-        continue
-      }
-      if (this.variant.kind === 'zcode') return parseZCodeAuth(text, desktopPath)
-      const classification = classifyDesktopAuthDocument(text)
-      if (classification.format === 'plaintext') return parseWorkBuddyAuth(text)
-      // 空文件(尚未写入/被截断)不构成「凭据在这里」,让下一个候选继续探测。
-      if (classification.format === 'absent') continue
-      if (classification.format === 'unrecognized') {
-        throw new Error(
-          `the desktop auth file at ${desktopPath} exists but is unreadable`
-          + ' (neither a plaintext credential nor a decodable WorkBuddy 5.6 envelope);'
-          + ' fix or remove the file — it outranks the plugin-owned credential copy',
-        )
-      }
-      return await this.openEncryptedDesktop(classification)
-    }
-    return undefined
-  }
-
-  /** Open a 5.6 encrypted desktop document into the regular credential shape. */
-  private async openEncryptedDesktop(
-    classification: Extract<DesktopAuthClassification, { format: 'encrypted' }>,
-  ): Promise<WorkBuddyCredential | undefined> {
-    const keyProvider = this.keyProvider
-    if (keyProvider === undefined) {
-      throw new WorkBuddyElectronPathError(
-        'encrypted-credential-unreadable',
-        'the desktop credential is encrypted but this provider has no at-rest key resolver',
-      )
-    }
-    const key = await keyProvider.protectorKeyFor(keyIdsOf(classification.wrapped.fields))
-    const text = unwrapDesktopAuthDocument(classification, field => {
-      const plaintext = openAuthField(key, field.envelope)
-      if (plaintext === undefined) {
-        throw new WorkBuddyElectronPathError(
-          'encrypted-credential-unreadable',
-          `the encrypted desktop credential's ${field.field} could not be decrypted`
-          + ` (envelope key id ${field.envelope.keyId});`
-          + ' the WorkBuddy app may hold a different at-rest key — open it once to reseal the sign-in',
-        )
-      }
-      return plaintext
+  private readDesktop(): Promise<WorkBuddyCredential | undefined> {
+    return readDesktopCredential({
+      variant: this.variant,
+      candidates: () => this.resolveDesktopCandidates(),
+      keyProvider: this.keyProvider,
     })
-    return parseWorkBuddyAuth(text)
   }
 
   private async readOwn(): Promise<WorkBuddyCredential | undefined> {
