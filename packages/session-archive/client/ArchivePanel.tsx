@@ -13,6 +13,7 @@ import { ARCHIVE_SORT_KEYS, ARCHIVE_PAGE_SIZE, needsDeleteAck } from './archive-
 import { useArchivePanel } from './useArchivePanel.js'
 import { ArchiveRow } from './ArchiveRow.js'
 import { ArchiveBadge } from './ArchiveBadge.js'
+import { ArchiveHeader } from './ArchiveHeader.js'
 import { ArchiveToolbar } from './ArchiveToolbar.js'
 import { ArchiveDeleteAck } from './ArchiveDeleteAck.js'
 
@@ -74,22 +75,7 @@ export function ArchivePanel(props: any) {
       React.createElement(
       "div",
       { className: "sa_panel" + (closing ? " sa_panel--closing" : ""), role: "dialog", "aria-modal": true, "aria-label": t("panelTitle"), tabIndex: -1, ref: panelRef },
-      React.createElement(
-        "div",
-        { className: "sa_header" },
-        React.createElement("span", { className: "sa_titleWrap" },
-          React.createElement("span", { className: "sa_title" }, t("panelTitle")),
-          React.createElement("span", { className: "sa_countPill", "aria-hidden": true },
-            filter.trim() !== "" ? String(sortedItems.length) + "/" + String(items.length) : String(items.length))),
-        React.createElement(
-          "span",
-          { className: "sa_headerActions" },
-          React.createElement("button", { className: "sa_refresh", type: "button", title: t("refresh"), disabled: busy || loading, onClick: load }, t("refresh")),
-          React.createElement("button", { className: "sa_iconBtn", type: "button", title: t("close"), "aria-label": t("close"), disabled: busy, onClick: closePanel },
-            React.createElement("svg", { viewBox: "0 0 24 24", width: 14, height: 14, fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", "aria-hidden": true },
-              React.createElement("path", { d: "M6 6l12 12M18 6L6 18" })))
-        )
-      ),
+      React.createElement(ArchiveHeader, { t, closePanel, items, loading, busy, load, filter, sortedItems }),
       // 筛选输入框:子串匹配标题/工作区路径/ID,前端过滤即时生效。
       React.createElement(ArchiveToolbar, { t, selected, detailLoading, busy, confirmingDelete, deleteAcked, filter, setFilter, sortKey, setSortKey, selectable, allSelected, toggleAll, exportSelected, restoreSelected, deleteSelected, hasSelection }),
       React.createElement(

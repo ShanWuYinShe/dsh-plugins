@@ -7,9 +7,9 @@
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * - index.tsx — 面板入口：注册侧边栏徽标与归档面板
- * - ArchivePanel.tsx ArchiveBadge.tsx ArchiveToolbar.tsx ArchiveDeleteAck.tsx ArchiveRow.tsx
- *   useArchivePanel.ts — 面板渲染（布局）、侧边栏徽标、工具栏（筛选/排序/批量）、删除确认条、
- *   列表行（勾选/详情）、状态与行为（开关、勾选、批量、筛选）
+ * - ArchivePanel.tsx ArchiveHeader.tsx ArchiveBadge.tsx ArchiveToolbar.tsx ArchiveDeleteAck.tsx
+ *   ArchiveRow.tsx useArchivePanel.ts — 面板渲染（布局）、表头（标题/计数/刷新/关闭）、侧边栏
+ *   徽标、工具栏（筛选/排序/批量）、删除确认条、列表行（勾选/详情）、状态与行为
  * - useArchiveList.ts useArchiveActions.ts useArchiveViewState.ts useArchivePanelChrome.ts
  *   useArchiveBadgeVisibility.ts useArchivePanelOpen.ts — 列表数据源、勾选/批量动作、视图偏好、
  *   对话框外壳行为（焦点/点击外部/Esc/Tab 陷阱）、徽标收起判定、开关状态与关闭动画
