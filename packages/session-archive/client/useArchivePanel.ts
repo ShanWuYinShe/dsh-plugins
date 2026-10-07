@@ -25,6 +25,7 @@ import * as React from 'react'
 import { useArchiveList } from './useArchiveList.js'
 import { useArchiveActions } from './useArchiveActions.js'
 import { useArchiveViewState } from './useArchiveViewState.js'
+import { useArchivePanelChrome } from './useArchivePanelChrome.js'
 
 export function useArchivePanel(props: any) {
   const t = props.t;
@@ -107,59 +108,8 @@ export function useArchivePanel(props: any) {
   React.useEffect(() => {
     if (open) { setNotice(null); load(); }
   }, [open, load]);
-  // 对话框焦点管理：打开时把焦点移入面板（键盘/读屏用户不必 Tab 瞎找），
-  // 关闭时归还给徽标按钮；prevOpen 避免首次挂载（open=false）误触发归还。
-  const panelRef = React.useRef<any>(null);
-  const prevOpenRef = React.useRef(false);
-  React.useEffect(() => {
-    if (open && !prevOpenRef.current) panelRef.current?.focus?.();
-    else if (!open && prevOpenRef.current) badgeRef.current?.focus?.();
-    prevOpenRef.current = open;
-  }, [open]);
+  const { panelRef } = useArchivePanelChrome({ open, notice, setNotice, closePanel, badgeRef, rootRef })
 
-  // 提示（如「已恢复/已删除 N 个会话」）几秒后自动消失，避免残留误导用户，
-  // 也避免删除全部归档后仍挂着上一条提示。
-  React.useEffect(() => {
-    if (notice === null) return;
-    const id = globalThis.setTimeout(() => setNotice(null), 4000);
-    return () => clearTimeout(id);
-  }, [notice]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: any) => {
-      if (rootRef.current !== null && !rootRef.current.contains(event.target)) {
-        closePanel();
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
-
-  // 面板按键（仅 open 时监听）：Esc 关闭是对话框惯例；Tab 环绕是焦点陷阱——
-  // 面板声明了 aria-modal，Tab 不得跑到遮罩后的侧边栏元素上。
-  React.useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: any) => {
-      if (event.key === "Escape") {
-        closePanel();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const panel = panelRef.current;
-      if (panel === undefined || panel === null) return;
-      const focusables = Array.from(panel.querySelectorAll(
-        'button:not([disabled]),input:not([disabled]),[tabindex]:not([tabindex="-1"])'
-      ));
-      const target = trapTarget(focusables, document.activeElement, event.shiftKey === true);
-      if (target !== undefined) {
-        event.preventDefault();
-        target.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open]);
 
   // 筛选:大归档量下逐页翻找效率低,标题/工作区路径/ID 子串前端过滤
   // (列表本就全量在内存,过滤纯展示层,不发请求)。
