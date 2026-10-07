@@ -1,3 +1,14 @@
+## 0.4.14-alpha.5 (2026-10-08)
+
+### 新增
+
+* **Coding Plan 的 5 小时 / 7 天 / 工具调用额度窗口**：pill 此前只报订阅有效性（「有效」），用户看不到用量窗口。反编译 ZCode 客户端定位到它自己的取数端点 `GET bigmodel.cn/api/monitor/usage/quota/limit`（Authorization 用 coding-plan 的 api-key），实测返回 `TOKENS_LIMIT`（unit=3/number=5 → 5 小时）、`TOKENS_LIMIT`（unit=6/number=1 → 7 天）、`TIME_LIMIT`（工具调用次数），其中 `percentage` 是**已用**百分比。现在 pill 展示这三条窗口（剩余百分比 + 进度条 + 重置时间）；端点不可用或响应形状不符时回退订阅有效性窗口，绝不编数字。
+
+### 修复
+
+* **Start Plan 未领取时不再显示「该 provider 不上报额度」**：每日 00:00 后新池子尚未发放/领取时 `billing/balance` 如实返回空 balances，pill 落到通用文案会让用户以为额度功能坏了。现在如实显示「Start Plan: 今日待领取」；有当日池子时照旧显示真实 token 数。
+* **启动时按白名单过滤 saved 名单**：saved 目录可能由旧版本写入（那时还没有产品面白名单），实测升级用户的 saved 里躺着 11 个 Coding Plan 模型（客户端只提供 2 个），启动时会先于 live 拉取被发布出来，用户先看到一整屏越界模型。现在启动即用同一份白名单过滤，白名单不可得时保持原样。
+
 ## 0.4.14-alpha.4 (2026-10-07)
 
 ### 修复
