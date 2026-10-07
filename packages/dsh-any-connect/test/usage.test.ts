@@ -132,7 +132,9 @@ describe('WorkBuddy usage querier', () => {
 
   it('reports a single total window summing live packages', async () => {
     const { registry } = await boot({ signedIn: true })
-    await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })
+    // 等**这个** provider 注册好：只看 length>0 可能被另一个 provider 先满足，
+    // 随后的 find(...)! 就会在未注册时炸（曾出现偶发失败）。
+    await vi.waitFor(() => { expect(registry.registered.some(candidate => candidate.provider === 'workbuddy')).toBe(true) }, { timeout: 5000 })
 
     vi.stubGlobal('fetch', vi.fn(async () => billingBody([
       { PackageName: 'Monthly', CycleCapacitySize: 100, CycleCapacityRemain: 24, CapacityRemain: 24, RemainCycles: 0, Status: 0 },
@@ -153,7 +155,9 @@ describe('WorkBuddy usage querier', () => {
 
   it('reports an empty window list when every package is drained', async () => {
     const { registry } = await boot({ signedIn: true })
-    await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })
+    // 等**这个** provider 注册好：只看 length>0 可能被另一个 provider 先满足，
+    // 随后的 find(...)! 就会在未注册时炸（曾出现偶发失败）。
+    await vi.waitFor(() => { expect(registry.registered.some(candidate => candidate.provider === 'workbuddy')).toBe(true) }, { timeout: 5000 })
     vi.stubGlobal('fetch', vi.fn(async () => billingBody([
       { PackageName: 'Spent', CycleCapacitySize: 10, CycleCapacityRemain: 0, CapacityRemain: 0, RemainCycles: 0, Status: 0 },
     ])))
@@ -164,7 +168,9 @@ describe('WorkBuddy usage querier', () => {
 
   it('propagates a billing failure so the registry records it', async () => {
     const { registry } = await boot({ signedIn: true })
-    await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })
+    // 等**这个** provider 注册好：只看 length>0 可能被另一个 provider 先满足，
+    // 随后的 find(...)! 就会在未注册时炸（曾出现偶发失败）。
+    await vi.waitFor(() => { expect(registry.registered.some(candidate => candidate.provider === 'workbuddy')).toBe(true) }, { timeout: 5000 })
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })))
 
     const entry = registry.registered.find(candidate => candidate.provider === 'workbuddy')!
@@ -177,7 +183,9 @@ describe('WorkBuddy usage querier', () => {
 
   it('omits the limit when no package reports a size', async () => {
     const { registry } = await boot({ signedIn: true })
-    await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })
+    // 等**这个** provider 注册好：只看 length>0 可能被另一个 provider 先满足，
+    // 随后的 find(...)! 就会在未注册时炸（曾出现偶发失败）。
+    await vi.waitFor(() => { expect(registry.registered.some(candidate => candidate.provider === 'workbuddy')).toBe(true) }, { timeout: 5000 })
     vi.stubGlobal('fetch', vi.fn(async () => billingBody([
       { PackageName: 'NoSize', CycleCapacityRemain: 3, CapacityRemain: 3, RemainCycles: 0, Status: 0 },
     ])))
@@ -336,7 +344,9 @@ it('reports the upstream plan name for ZCode instead of a hardcoded label', asyn
 
   it('carries the variant display name through to the snapshot', async () => {
     const { registry } = await boot({ signedIn: true })
-    await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })
+    // 等**这个** provider 注册好：只看 length>0 可能被另一个 provider 先满足，
+    // 随后的 find(...)! 就会在未注册时炸（曾出现偶发失败）。
+    await vi.waitFor(() => { expect(registry.registered.some(candidate => candidate.provider === 'workbuddy-ai')).toBe(true) }, { timeout: 5000 })
     vi.stubGlobal('fetch', vi.fn(async () => billingBody([
       { PackageName: 'AI pack', CapacityRemain: 8, CapacitySize: 30, Status: 0 },
     ])))
