@@ -13,6 +13,7 @@ import { ARCHIVE_SORT_KEYS, ARCHIVE_PAGE_SIZE, needsDeleteAck } from './archive-
 import { useArchivePanel } from './useArchivePanel.js'
 import { ArchiveRow } from './ArchiveRow.js'
 import { ArchiveBadge } from './ArchiveBadge.js'
+import { ArchiveToolbar } from './ArchiveToolbar.js'
 
 export function ArchivePanel(props: any) {
   const {
@@ -89,67 +90,7 @@ export function ArchivePanel(props: any) {
         )
       ),
       // 筛选输入框:子串匹配标题/工作区路径/ID,前端过滤即时生效。
-      React.createElement(
-        "div",
-        { className: "sa_toolbar" },
-        React.createElement("input", {
-          className: "sa_filterInput",
-          type: "search",
-          placeholder: t("filterPlaceholder"),
-          "aria-label": t("filterPlaceholder"),
-          value: filter,
-          onChange: (e: any) => setFilter(e.target.value),
-        }),
-        React.createElement("button", {
-          className: "sa_action",
-          type: "button",
-          title: t("sortByHint"),
-          onClick: () => {
-            // setSortKey 持久化后为值形式(非函数式更新器):从 state 读当前键
-            // 计算下一个;indexOf 未命中(不该发生)时安全回退默认排序 time。
-            const at = ARCHIVE_SORT_KEYS.indexOf(sortKey);
-            setSortKey(ARCHIVE_SORT_KEYS[(at + 1) % ARCHIVE_SORT_KEYS.length] ?? "time");
-          },
-        }, t("sortBy_" + sortKey)),
-      ),
-      React.createElement(
-        "div",
-        { className: "sa_toolbar" },
-        React.createElement("label", { className: "sa_toolLabel" },
-          React.createElement("input", {
-            className: "sa_check",
-            type: "checkbox",
-            checked: allSelected,
-            // 部分选中时半选态：否则半选显示为全不选，误导用户以为没勾上。
-            ref: (el: any) => { if (el !== null && el !== undefined) el.indeterminate = hasSelection && !allSelected; },
-            disabled: busy || selectable.length === 0,
-            onChange: (e) => toggleAll(e.target.checked)
-          }),
-          t("selectAll")
-        ),
-        React.createElement("span", { className: "sa_count" }, t("selected").replace("{n}", String(selected.size))),
-        React.createElement("button", {
-          className: "sa_action",
-          type: "button",
-          disabled: busy || !hasSelection,
-          onClick: restoreSelected
-        }, t("restore")),
-        React.createElement("button", {
-          className: "sa_action " + (confirmingDelete ? "sa_actionDanger sa_confirm" : "sa_actionDanger"),
-          type: "button",
-          disabled: busy || !hasSelection || (needsDeleteAck(selected.size, confirmingDelete) && !deleteAcked),
-          onClick: deleteSelected
-        }, confirmingDelete
-          ? (selected.size > 1 ? t("confirmAll").replace("{n}", String(selected.size)) : t("deleteConfirm"))
-          : t("delete")),
-        React.createElement("button", {
-          className: "sa_action",
-          type: "button",
-          disabled: busy || !hasSelection || detailLoading.size > 0,
-          title: t("exportMd"),
-          onClick: () => void exportSelected(),
-        }, t("exportMd"))
-      ),
+      React.createElement(ArchiveToolbar, { t, selected, detailLoading, busy, confirmingDelete, deleteAcked, filter, setFilter, sortKey, setSortKey, selectable, allSelected, toggleAll, exportSelected, restoreSelected, deleteSelected, hasSelection }),
       React.createElement(
         "div",
         { className: "sa_body" },
