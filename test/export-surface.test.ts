@@ -52,28 +52,53 @@ function resolveSpecifier(specifier: string, fromFile: string): string | undefin
 const SELF = fileURLToPath(import.meta.url);
 const files = collect(ROOT).filter((file) => file !== SELF);
 
-/** 谁从某个模块导入了哪些名字（静态导入与转发导出都算使用）。 */
-function importersOf(target: string): Set<string> {
-  const names = new Set<string>();
+/** 一次读盘：文件 → 文本（两个用例共用，避免同一份文件被反复读取）。 */
+const TEXTS = new Map<string, string>(files.map((file) => [file, readFileSync(file, "utf8")]));
+
+/**
+ * 一次扫描建索引：目标模块 → 从它导入/转发的名字集合（含通配 '*'）。
+ *
+ * 2026-10-08 改为「先建索引再查」：此前每个转发导出都重扫一遍全部文件
+ * （O(候选 × 文件) 次读盘 + 正则），单个用例 3.4s、占全量测试时长 1/5。
+ */
+function buildImporterIndex(): Map<string, Set<string>> {
+  const index = new Map<string, Set<string>>();
   for (const file of files) {
-    const text = readFileSync(file, "utf8");
+    const text = TEXTS.get(file) ?? "";
+    const add = (target: string, name: string): void => {
+      let names = index.get(target);
+      if (names === undefined) {
+        names = new Set<string>();
+        index.set(target, names);
+      }
+      names.add(name);
+    };
     for (const pattern of [
       /import\s+(?:type\s+)?\{([^{}]*?)\}\s+from\s+["'](\.[^"']+)["']/g,
       /export\s+(?:type\s+)?\{([^{}]*?)\}\s+from\s+["'](\.[^"']+)["']/g,
     ]) {
       for (const match of text.matchAll(pattern)) {
-        if (resolveSpecifier(match[2]!, file) !== target) continue;
+        const target = resolveSpecifier(match[2]!, file);
+        if (target === undefined) continue;
         for (const part of match[1]!.split(",")) {
           const name = part.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]!.trim();
-          if (/^[A-Za-z_$][\w$]*$/.test(name)) names.add(name);
+          if (/^[A-Za-z_$][\w$]*$/.test(name)) add(target, name);
         }
       }
     }
     for (const match of text.matchAll(/(?:import|export)\s+\*\s+(?:as\s+[A-Za-z_$][\w$]*\s+)?from\s+["'](\.[^"']+)["']/g)) {
-      if (resolveSpecifier(match[1]!, file) === target) names.add("*");
+      const target = resolveSpecifier(match[1]!, file);
+      if (target !== undefined) add(target, "*");
     }
   }
-  return names;
+  return index;
+}
+
+/** 索引只在首次用到时构建（两个用例共用同一份）。 */
+let importerIndex: Map<string, Set<string>> | undefined;
+function importersOf(target: string): Set<string> {
+  importerIndex ??= buildImporterIndex();
+  return importerIndex.get(target) ?? new Set<string>();
 }
 
 describe("导出面", () => {
@@ -83,7 +108,7 @@ describe("导出面", () => {
       // 包入口（index.ts/index.tsx）的转发就是包的公开 API：由宿主/其它包经 exports map
       // 使用，仓库内没有相对导入者属正常，不在此判据范围内。
       if (/\/index\.tsx?$/.test(file)) continue;
-      const text = readFileSync(file, "utf8");
+      const text = TEXTS.get(file) ?? "";
       const used = importersOf(file);
       if (used.has("*")) continue;
       // 只看**值**转发：\`export type { ... }\` 是门面的公开类型面，没有仓库内使用者也是
@@ -102,7 +127,7 @@ describe("导出面", () => {
 
   it("判据本身有效（扫到足够多的模块与转发导出）", () => {
     const reexports = files.reduce(
-      (sum, file) => sum + [...readFileSync(file, "utf8").matchAll(/export\s+(?:type\s+)?\{[^{}]*?\}\s+from\s+["']\.[^"']+["']/g)].length,
+      (sum, file) => sum + [...(TEXTS.get(file) ?? "").matchAll(/export\s+(?:type\s+)?\{[^{}]*?\}\s+from\s+["']\.[^"']+["']/g)].length,
       0,
     );
     expect(files.length).toBeGreaterThan(150);
