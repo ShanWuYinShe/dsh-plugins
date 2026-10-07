@@ -10,7 +10,8 @@
  * - ArchivePanel.tsx ArchiveBadge.tsx ArchiveToolbar.tsx ArchiveDeleteAck.tsx ArchiveRow.tsx
  *   useArchivePanel.ts — 面板渲染（布局）、侧边栏徽标、工具栏（筛选/排序/批量）、删除确认条、
  *   列表行（勾选/详情）、状态与行为（开关、勾选、批量、筛选）
- * - useArchiveList.ts — 归档列表数据源（items/loading/error、徽标轮询、分页窗口）
+ * - useArchiveList.ts useArchiveActions.ts — 归档列表数据源（items/loading/error、徽标轮询、
+ *   分页窗口）与勾选/批量动作（含两段式删除的二次确认）
  * - archive-entries.ts archive-format.ts — 筛选/排序/导出/Markdown 与展示格式化
  * - styles.ts locales.ts — 样式注入与中英文案
  *
