@@ -7,8 +7,8 @@
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * - index.tsx — 面板入口：注册侧边栏徽标与归档面板
- * - ArchivePanel.tsx ArchiveRow.tsx useArchivePanel.ts — 面板渲染（布局）、列表行（勾选/详情）、
- *   状态与行为（开关、勾选、批量、筛选）
+ * - ArchivePanel.tsx ArchiveBadge.tsx ArchiveRow.tsx useArchivePanel.ts — 面板渲染（布局）、
+ *   侧边栏徽标、列表行（勾选/详情）、状态与行为（开关、勾选、批量、筛选）
  * - useArchiveList.ts — 归档列表数据源（items/loading/error、徽标轮询、分页窗口）
  * - archive-entries.ts archive-format.ts — 筛选/排序/导出/Markdown 与展示格式化
  * - styles.ts locales.ts — 样式注入与中英文案
