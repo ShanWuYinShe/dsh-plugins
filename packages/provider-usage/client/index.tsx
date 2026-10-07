@@ -12,7 +12,10 @@
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * - index.tsx — 浏览器侧入口：注册 composer dock 的用量 pill
- * - ProviderUsagePill.tsx — pill 组件（窗口渲染与轮询）
+ * - ProviderUsagePill.tsx — pill 组件（只剩渲染：早退 + 展开面板）
+ * - useProviderUsage.ts — 状态与取数（订阅目录、60s 轮询、交互状态）
+ * - WindowRow.tsx pill-types.ts — 展开面板的一行窗口、注入面与 props 类型
+ * - pill-styles.ts pill-format.ts — 样式表与注入、纯格式化助手
  * - locales.ts — pill 文案
  *
  * @module provider-usage-client
