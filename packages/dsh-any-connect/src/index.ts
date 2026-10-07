@@ -10,8 +10,9 @@
  *   入口组装、配置 schema、变体类型与共用助手、运行时集合（构造/路由/定时器/适配器
  *   注册）、变体装配（上游客户端与凭据存储，CLI 与运行时共用）、变体清单
  * 目录与额度
- * - catalog-lifecycle.ts catalog.ts catalog-store.ts — 目录拉取/发布/身份核对/定时器、
- *   目录模型与静态兜底、每账号落盘
+ * - catalog-lifecycle.ts catalog-refresh.ts catalog-timers.ts catalog-fingerprint.ts —
+ *   生命周期组合入口、刷新/发布/领取快通道、身份 sweep 与小时定时器、内容指纹
+ * - catalog.ts catalog-store.ts — 目录模型与静态兜底、每账号落盘
  * - usage.ts zcode-quota.ts zcode-builtin-catalog.ts zcode-signer.ts — provider-usage 注册与
  *   dock 窗口助手、Coding Plan 窗口额度、ZCode 内置白名单、请求签名 V4
  * - zcode-plan-claim.ts zcode-plan-models.ts zcode-plan-prompt.ts zcode-plan-store.ts —
@@ -194,7 +195,7 @@ export {
 } from './upstream.js'
 // pill 窗口助手（provider-usage 注册 seam 的同一模块）；CLI 也直接从这里取。
 export { currentPlanWindow, startPlanWindows, totalCreditsWindows } from './usage.js'
-export { catalogFingerprint } from './catalog-lifecycle.js'
+export { catalogFingerprint } from './catalog-fingerprint.js'
 export { Config, WORKBUDDY_SETTINGS_NS, WORKBUDDY_AI_SETTINGS_NS, ZCODE_SETTINGS_NS } from './config.js'
 export type { Options } from './config.js'
 export { applyVariantConfig } from './variant-runtime.js'
