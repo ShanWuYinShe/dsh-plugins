@@ -29,7 +29,8 @@
  *   分发与 Coding Plan）、请求体整形与兜底元数据、Start Plan 通道（余额/名单/领取预览）
  * - upstream-workbuddy.ts upstream-workbuddy-parse.ts upstream-workbuddy-http.ts — WorkBuddy
  *   客户端（探针与类）、纯解析（模型行/促销/计费/推理）、基址/请求头/请求体/响应信封
- * - shim.ts adapter.ts app-version.ts timeout.ts — 回环端点、pi-ai 适配器、版本 UA、deadline 抽象
+ * - shim.ts shim-http.ts adapter.ts app-version.ts timeout.ts — 回环端点、HTTP 管道（读体/写错误体）、
+ *   pi-ai 适配器、版本 UA、deadline 抽象
  * 探针与状态
  * - probe.ts probe-service.ts probe-store.ts probe-route.ts — 档位探测
  * - web-status.ts status-paths.ts loopback.ts host-heartbeat.ts version.ts — 同源 status 路由、

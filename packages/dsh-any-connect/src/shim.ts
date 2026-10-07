@@ -22,6 +22,7 @@ import type { WorkBuddyCredentialStore } from './auth.js'
 import type { WorkBuddyCatalog } from './catalog.js'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { prepareChatBody, WorkBuddyUpstreamClient, type UpstreamErrorKind } from './upstream.js'
+import { isJsonContentType, KIND_STATUS, writeJson, writeOpenAIError, writeAnthropicError, RequestBodyTooLarge, readBody } from './shim-http.js'
 
 /** Minimal logger surface the plugin context already provides. */
 export interface ShimLogger {
@@ -55,63 +56,6 @@ export interface WorkBuddyShimOptions {
   logger?: ShimLogger
 }
 
-const REQUEST_BODY_LIMIT = 64 * 1024 * 1024
-
-// 回环守卫统一走 ./loopback.js（本文件此前的局部拷贝已删除：三处分化后
-// shim 版与标准版在 `[::1]garbage` 上语义不一致，单源是唯一的修法）。
-/** Chat-completion POSTs must carry a JSON body type (simple-request CSRF drops here). */
-function isJsonContentType(req: IncomingMessage): boolean {
-  const type = req.headers['content-type']
-  return typeof type === 'string' && type.trim().toLowerCase().startsWith('application/json')
-}
-
-/** HTTP status each upstream failure class surfaces as. */
-const KIND_STATUS: Readonly<Record<UpstreamErrorKind, number>> = {
-  hard_credit: 402,
-  soft_rate: 429,
-  session_dead: 401,
-  not_found: 502,
-  server: 502,
-  client: 400,
-}
-
-function writeJson(res: ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body)
-  res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) })
-  res.end(payload)
-}
-
-function writeOpenAIError(res: ServerResponse, status: number, kind: string, message: string): void {
-  writeJson(res, status, { error: { message, type: kind, code: kind } })
-}
-
-function writeAnthropicError(res: ServerResponse, status: number, kind: string, message: string): void {
-  writeJson(res, status, { type: 'error', error: { type: kind, message } })
-}
-
-/** 请求体超限的专属标记:兜底 catch 据此映射 413,而非落进 500 internal。 */
-class RequestBodyTooLarge extends Error {
-  constructor() { super('request body too large') }
-}
-
-/** Read a request body with a size cap; over-limit bodies fail the request. */
-function readBody(req: IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let size = 0
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length
-      if (size > REQUEST_BODY_LIMIT) {
-        reject(new RequestBodyTooLarge())
-        req.destroy()
-        return
-      }
-      chunks.push(chunk)
-    })
-    req.on('end', () => resolve(Buffer.concat(chunks)))
-    req.on('error', reject)
-  })
-}
 
 /**
  * Start the loopback endpoint. Requests carry any bearer; the loopback bind
