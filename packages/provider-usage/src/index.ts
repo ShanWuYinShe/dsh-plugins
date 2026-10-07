@@ -15,6 +15,16 @@
  *   the existing turn/usage pills, showing the current session provider's
  *   remaining quota.
  *
+ * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
+ *
+ * - index.ts — 插件入口：注册内置 querier 与宿主路由
+ * - providers.ts — 内置 querier 聚合点（注册表 + re-export）
+ * - provider-shared.ts — querier 共用的取值助手与 JSON 请求
+ * - provider-deepseek.ts provider-openrouter.ts provider-moonshot.ts provider-siliconflow.ts
+ *   provider-bigmodel.ts provider-minimax.ts provider-openai.ts provider-opencode.ts — 各 provider 查询器
+ * - registry.ts resolve.ts route.ts — 查询器注册表与缓存、端点/凭据解析、同源路由
+ * - types.ts typert.host.ts — 宿主与浏览器共享的类型、typert 服务面声明
+ *
  * @module provider-usage
  */
 

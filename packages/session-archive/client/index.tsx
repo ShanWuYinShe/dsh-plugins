@@ -4,6 +4,13 @@
  * 2026-10-08 从 1194 行的 client/index.tsx 拆出：样式、文案、纯逻辑与面板组件
  * 各自成模块，入口只保留注册与 re-export。
  *
+ * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
+ *
+ * - index.tsx — 面板入口：注册侧边栏徽标与归档面板
+ * - ArchivePanel.tsx useArchivePanel.ts — 面板渲染与状态/行为
+ * - archive-entries.ts archive-format.ts — 筛选/排序/导出/Markdown 与展示格式化
+ * - styles.ts locales.ts — 样式注入与中英文案
+ *
  * @module @chaoset/session-archive/client/index
  */
 

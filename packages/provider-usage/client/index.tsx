@@ -9,6 +9,12 @@
  * The guarded boundary itself is covered by the real-entry regression in
  * `test/bundle.test.ts` ("client apply() 的兜底边界对真实入口成立").
  *
+ * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
+ *
+ * - index.tsx — 浏览器侧入口：注册 composer dock 的用量 pill
+ * - ProviderUsagePill.tsx — pill 组件（窗口渲染与轮询）
+ * - locales.ts — pill 文案
+ *
  * @module provider-usage-client
  */
 

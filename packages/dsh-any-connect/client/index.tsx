@@ -1,4 +1,16 @@
-/** Browser half: WorkBuddy account status inside the DSH Plugins page. */
+/**
+ * Browser half: WorkBuddy account status inside the DSH Plugins page.
+ *
+ * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
+ *
+ * - index.tsx — 浏览器侧入口：注册卡片文案与配置页
+ * - WorkBuddyConfigPage.tsx — 配置页入口（解构 + 渲染），对外 API 门面
+ * - VariantsPage.tsx VariantCard.tsx ModelRow.tsx SignedOutRow.tsx — 变体列表、单卡、模型行、未登录行
+ * - config-types.ts config-styles.ts config-format.ts — 共享类型/常量、内联样式与注入 CSS、展示格式化
+ * - locales.ts — 卡片文案
+ *
+ * @module dsh-any-connect-client
+ */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'

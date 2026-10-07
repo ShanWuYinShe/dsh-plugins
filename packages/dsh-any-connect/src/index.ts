@@ -2,6 +2,35 @@
  * WorkBuddy models for DeepSeek Harness. The WorkBuddy providers reuse the
  * desktop apps' sign-in. Streaming, tool calls, compaction, and permissions
  * stay Harness-owned.
+ *
+ * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
+ *
+ * 入口与组装
+ * - index.ts config.ts variant-runtime.ts runtime.ts variants.ts — 入口组装、配置 schema、
+ *   变体类型与共用助手、运行时集合（构造/路由/定时器/适配器注册）、变体清单
+ * 目录与额度
+ * - catalog-lifecycle.ts catalog.ts catalog-store.ts — 目录拉取/发布/身份核对/定时器、
+ *   目录模型与静态兜底、每账号落盘
+ * - usage.ts zcode-quota.ts zcode-builtin-catalog.ts zcode-signer.ts — provider-usage 注册与
+ *   dock 窗口助手、Coding Plan 窗口额度、ZCode 内置白名单、请求签名 V4
+ * - zcode-plan-claim.ts zcode-plan-models.ts zcode-plan-prompt.ts zcode-plan-store.ts —
+ *   Start Plan 领取/名单/请求体指纹/计划语义
+ * 凭据
+ * - auth.ts auth-types.ts auth-paths.ts auth-zcode.ts auth-document.ts auth-store.ts —
+ *   凭据解析门面与类型/路径/ZCode/文档/存储
+ * - desktop-credential-protection.ts desktop-auth-envelope.ts desktop-discovery.ts
+ *   desktop-discovery-windows.ts desktop-at-rest-key.ts — at-rest 凭据门面与信封/发现/密钥解析器
+ * 上游通道
+ * - upstream.ts upstream-shared.ts upstream-workbuddy.ts upstream-zcode.ts — 上游门面与
+ *   共享协议层、两个产品客户端
+ * - shim.ts adapter.ts app-version.ts timeout.ts — 回环端点、pi-ai 适配器、版本 UA、deadline 抽象
+ * 探针与状态
+ * - probe.ts probe-service.ts probe-store.ts probe-route.ts — 档位探测
+ * - web-status.ts status-paths.ts loopback.ts host-heartbeat.ts version.ts — 同源 status 路由、
+ *   路径常量、回环守卫、心跳与版本
+ * 其它
+ * - bin.ts typert.host.ts — status/diagnostics CLI 与 typert 服务面声明
+ *
  * @module dsh-any-connect
  */
 

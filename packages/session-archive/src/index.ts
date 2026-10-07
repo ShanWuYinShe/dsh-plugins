@@ -4,6 +4,16 @@
  * 2026-10-08 从 897 行的 src/index.ts 拆出：扫描助手、配置与 host 工厂各自成
  * 模块，入口只保留网关接线与 apply。
  *
+ * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
+ *
+ * - index.ts — 插件入口：remote 网关接线与 apply
+ * - archive-host.ts — 归档 host 工厂（list/count/detail/delete/unarchive）
+ * - session-scan.ts — 会话文件扫描与读取助手
+ * - plugin-config.ts — 插件身份与配置默认值/校验/归一化
+ * - config-store.ts — 配置持久化（与 sandbox-extra-roots 同字节，根 test 锁一致）
+ * - remote.ts typert-loader.ts typert.host.ts — typert 网关、惰性加载器与服务面声明
+ * - session-id.ts — 网关入参的 session id 断言
+ *
  * @module @chaoset/session-archive/index
  */
 
