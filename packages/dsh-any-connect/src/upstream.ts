@@ -15,6 +15,8 @@ import { deadlineSignal, withTimeout } from './timeout.js'
 import { ZCodeClientSigner } from './zcode-signer.js'
 import { prepareStartPlanBody } from './zcode-plan-prompt.js'
 import { readZcodeCodingPlanWhitelist } from './zcode-builtin-catalog.js'
+import { parseCodingPlanQuota } from './zcode-quota.js'
+import type { ZCodeCodingPlanQuota } from './zcode-quota.js'
 import {
   FALLBACK_ZCODE_START_PLAN_MODELS,
   isStartPlanActivityActive,
@@ -1251,6 +1253,40 @@ export class ZCodeUpstreamClient {
     this.models = options.models ?? []
     this.resolveAppVersion = options.resolveAppVersion ?? (() => resolveAppVersion())
     this.resolveCodingPlanWhitelist = options.resolveCodingPlanWhitelist ?? readZcodeCodingPlanWhitelist
+  }
+
+  /**
+   * 当前客户端内置目录给出的 Coding Plan 白名单（小写 id 集合），不可得时
+   * undefined。公开出来供启动时过滤历史 saved 目录——旧版本写入的 saved 可能
+   * 含产品面之外的模型（见 `filterByCodingPlanWhitelist`）。
+   */
+  codingPlanWhitelist(): ReadonlySet<string> | undefined {
+    return this.resolveCodingPlanWhitelist()
+  }
+
+  /**
+   * Coding Plan 的窗口额度（5 小时 / 7 天 / 工具调用），来自客户端用的同一支
+   * `GET https://bigmodel.cn/api/monitor/usage/quota/limit`（Authorization 用
+   * coding-plan 的 api-key）。拿不到（网络/非 bigmodel 账号/形状变化）返回
+   * undefined，调用方回退到订阅有效性窗口——绝不编数字。
+   */
+  async fetchCodingPlanQuota(credential: WorkBuddyCredential): Promise<ZCodeCodingPlanQuota | undefined> {
+    const quotaTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+    try {
+      const response = await fetch('https://bigmodel.cn/api/monitor/usage/quota/limit', {
+        headers: {
+          'Authorization': `Bearer ${credential.accessToken}`,
+          'Accept': 'application/json',
+        },
+        signal: quotaTimeout.signal,
+      })
+      if (!response.ok) return undefined
+      return parseCodingPlanQuota(await response.json())
+    } catch {
+      return undefined
+    } finally {
+      quotaTimeout.dispose()
+    }
   }
 
   /** POST the BigModel Anthropic messages endpoint; a successful answer is the raw SSE response.

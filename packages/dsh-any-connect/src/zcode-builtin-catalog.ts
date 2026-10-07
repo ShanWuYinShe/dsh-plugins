@@ -105,3 +105,21 @@ export function readZcodeCodingPlanWhitelist(): ReadonlySet<string> | undefined 
   }
   return undefined
 }
+
+/**
+ * 用产品面白名单过滤一份模型名单。
+ *
+ * 用途是启动时的 saved 目录：它是上一次**成功拉取**的名单，可能由旧版本写入
+ * （那时还没有白名单），因此可能含 Coding Plan 产品面之外的模型（实测 2026-10-08：
+ * 升级用户的 saved 里躺着 11 个，而客户端只提供 2 个）。白名单不可得时原样返回
+ * ——宁可按 saved 展示，也不要因为读不到客户端文件就把整组模型抹掉。
+ *
+ * 不过滤 Start Plan：它的名单语义是 entitlements 派生，另有链路（见 zcode-plan-models）。
+ */
+export function filterByCodingPlanWhitelist<T extends { id: string }>(
+  models: readonly T[],
+  whitelist: ReadonlySet<string> | undefined,
+): readonly T[] {
+  if (whitelist === undefined) return models
+  return models.filter(model => whitelist.has(model.id.toLowerCase()))
+}

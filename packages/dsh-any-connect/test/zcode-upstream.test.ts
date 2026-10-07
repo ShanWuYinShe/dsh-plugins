@@ -20,7 +20,7 @@ import {
   type WorkBuddyCredential,
 } from '../src/index.js'
 import type { ZCodeClientSigner } from '../src/zcode-signer.js'
-import { codingPlanWhitelistFromConfig, readZcodeCodingPlanWhitelist } from '../src/zcode-builtin-catalog.js'
+import { codingPlanWhitelistFromConfig, filterByCodingPlanWhitelist, readZcodeCodingPlanWhitelist } from '../src/zcode-builtin-catalog.js'
 
 const CLEANUP: (() => Promise<void>)[] = []
 
@@ -590,6 +590,15 @@ it('attributes the plan to the client selection, not to the fallback key', async
       } finally {
         vi.unstubAllEnvs()
       }
+    })
+
+    it('用白名单过滤历史 saved 名单（旧版本写入的越界模型）', () => {
+      // 实测 2026-10-08：升级用户的 saved 目录里躺着 11 个模型（旧代码写的并集），
+      // 启动时会先于 live 拉取发布——必须用同一份白名单过滤。
+      const saved = [{ id: 'glm-5.3' }, { id: 'GLM-4.5' }, { id: 'glm-5.3-flashx' }]
+      expect(filterByCodingPlanWhitelist(saved, new Set(['glm-5.3', 'glm-5.3-flash']))).toEqual([{ id: 'glm-5.3' }])
+      // 白名单不可得 → 原样返回（不因读不到客户端文件就抹掉整组）。
+      expect(filterByCodingPlanWhitelist(saved, undefined)).toEqual(saved)
     })
 
     it.skipIf(process.platform !== 'darwin')('本机 ZCode 客户端（若安装）解析出官方 GLM 白名单', () => {

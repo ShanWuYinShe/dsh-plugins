@@ -240,6 +240,17 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
       { packageName: 'GLM Coding Pro (有效)', planName: 'GLM Coding Pro', remain: 1, size: 1 },
     ])).toEqual([{ id: 'plan', label: 'GLM Coding Pro', unit: '有效' }])
   })
+
+  it('Start Plan 未领取时报「今日待领取」，而不是「不上报额度」', () => {
+    // 每日 00:00 后新池子还没发放/领取：accounts 为空（billing/balance 如实返回
+    // 空 balances）。pill 若落到通用的「该 provider 不上报额度」，用户会以为额度
+    // 功能坏了——额度接口其实是通的，只是今天还没有池子。
+    expect(WorkBuddy.startPlanWindows([])).toEqual([{ id: 'plan', label: 'Start Plan', unit: '今日待领取' }])
+    // 有当日池子时仍然报真实 token 数（复用 currentPlanWindow 的 sameDay 口径）。
+    expect(WorkBuddy.startPlanWindows([
+      { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, sameDay: true },
+    ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens' }])
+  })
 })
 
 it('reports the upstream plan name for ZCode instead of a hardcoded label', async () => {
@@ -263,6 +274,64 @@ it('reports the upstream plan name for ZCode instead of a hardcoded label', asyn
     expect(snapshot.displayName).toBe('ZCode')
     expect((snapshot as { plan?: string }).plan).toBe('ZCode Trust Build')
     expect(snapshot.windows[0]?.label).toBe('ZCode Trust Build')
+  })
+
+  it('Coding Plan 的 pill 报 5 小时 / 7 天窗口（客户端同款 monitor 端点）', async () => {
+    const { registry } = await boot({ signedIn: false })
+    const credPath = join(root!, 'zcode-credentials.json')
+    await writeFile(credPath, JSON.stringify({
+      'account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:57271768622479063:api-key': 'id.secret',
+    }))
+    vi.stubEnv('ZCODE_AUTH_FILE', credPath)
+    const quotaBody = {
+      code: 200,
+      data: {
+        level: 'pro',
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10, nextResetTime: 1_791_403_544_725 },
+          { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 24, nextResetTime: 1_791_865_446_983 },
+        ],
+      },
+    }
+    const subscriptionBody = {
+      code: 200,
+      data: [{ productName: 'GLM Coding Pro', status: 'VALID', expireTime: 1_790_697_600 }],
+    }
+    // 按 URL 分流：额度端点与订阅端点返回不同形状，避免「谁都能解析」的假绿。
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => new Response(JSON.stringify(
+      String(url).includes('/api/monitor/usage/quota/limit') ? quotaBody : subscriptionBody,
+    ), { status: 200, headers: { 'content-type': 'application/json' } })))
+
+    const entry = registry.registered.find(candidate => candidate.provider === 'zcode')!
+    const snapshot = await entry.query({ provider: 'zcode' })
+    expect(snapshot.windows.map(window => window.label)).toEqual(['5 小时', '7 天'])
+    // percentage 是已用：10% → 剩 90%；24% → 剩 76%。
+    expect(snapshot.windows[0]).toMatchObject({ remain: 90, limit: 100, unit: '%' })
+    expect(snapshot.windows[1]).toMatchObject({ remain: 76, limit: 100, unit: '%' })
+    expect((snapshot as { plan?: string }).plan).toBe('GLM Coding Pro')
+  })
+
+  it('额度端点不可用 / 形状不符时回退订阅有效性窗口', async () => {
+    const { registry } = await boot({ signedIn: false })
+    const credPath = join(root!, 'zcode-credentials.json')
+    await writeFile(credPath, JSON.stringify({
+      'account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:57271768622479063:api-key': 'id.secret',
+    }))
+    vi.stubEnv('ZCODE_AUTH_FILE', credPath)
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+      if (String(url).includes('/api/monitor/usage/quota/limit')) {
+        return new Response('{"code":200,"data":{}}', { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        code: 200,
+        data: [{ productName: 'GLM Coding Pro', status: 'VALID', expireTime: 1_790_697_600 }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }))
+
+    const entry = registry.registered.find(candidate => candidate.provider === 'zcode')!
+    const snapshot = await entry.query({ provider: 'zcode' })
+    expect(snapshot.windows.map(window => window.label)).toEqual(['GLM Coding Pro'])
+    expect(snapshot.windows[0]?.remain).toBeUndefined()
   })
 
   it('carries the variant display name through to the snapshot', async () => {

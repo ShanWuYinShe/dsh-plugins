@@ -31,6 +31,8 @@ import { ANYCONNECT_VERSION } from './version.js'
 import { AI_VARIANT, CN_VARIANT, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { registerWorkBuddyStatusRoute } from './web-status.js'
+import { filterByCodingPlanWhitelist } from './zcode-builtin-catalog.js'
+import { codingPlanQuotaWindows } from './zcode-quota.js'
 import type { StartPlanPreviewResult } from './zcode-plan-claim.js'
 import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
 
@@ -546,6 +548,27 @@ export function currentPlanWindow(accounts: readonly WorkBuddyCreditAccount[]): 
   }]
 }
 
+/**
+ * Start Plan 的 pill 窗口：当日池子存在时报真实 token 数（{@link currentPlanWindow}
+ * 对 sameDay 池已带 remain/limit）；今天还没领取或尚未发放时**如实说「今日待领取」**，
+ * 而不是让 pill 落到通用的「该 provider 不上报额度」——那会让用户以为额度功能坏了，
+ * 而且额度接口本身是通的（billing/balance 返回空 balances 才是事实）。
+ *
+ * Exported for tests: counted directly without booting the plugin.
+ */
+export function startPlanWindows(accounts: readonly WorkBuddyCreditAccount[]): Array<{
+  id: string
+  label: string
+  remain?: number
+  limit?: number
+  unit: string
+  resetsAt?: string
+}> {
+  const windows = currentPlanWindow(accounts)
+  if (windows.length > 0) return windows
+  return [{ id: 'plan', label: 'Start Plan', unit: '今日待领取' }]
+}
+
 export function apply(ctx: Context, config: Config): void {
   const client = new WorkBuddyUpstreamClient()
   let stopped = false
@@ -908,6 +931,14 @@ export function apply(ctx: Context, config: Config): void {
           if (context.signal?.aborted === true) throw context.signal.reason ?? new Error('aborted')
           const credits = await (runtime.client ?? client).fetchCredits(credential)
           const isZCode = runtime.variant.kind === 'zcode'
+          const isStartPlan = variantIsStartPlan(runtime.variant)
+          // Coding Plan 的窗口额度（5 小时 / 7 天 / 工具调用）来自客户端同款
+          // `GET bigmodel.cn/api/monitor/usage/quota/limit`：拿得到就按它展示，
+          // 拿不到（网络 / 非 bigmodel 账号 / 形状变化）回退订阅有效性窗口。
+          const quota = isZCode && !isStartPlan
+            ? await (runtime.client as ZCodeUpstreamClient).fetchCodingPlanQuota(credential)
+            : undefined
+          const quotaWindows = quota === undefined ? [] : codingPlanQuotaWindows(quota)
           return {
             provider: runtime.variant.id,
             displayName: runtime.variant.displayName,
@@ -915,13 +946,21 @@ export function apply(ctx: Context, config: Config): void {
             // 变体报 "Start Plan"（专属通道 + 专属额度），Coding Plan 变体报
             // 上游订阅的真实名称。两条额度口径互不混报。
             plan: isZCode
-              ? (credential.zcodePlan === 'start-plan'
+              ? (isStartPlan
                 ? 'Start Plan'
                 : credits.accounts.find(account => account.planName !== undefined)?.planName ?? 'Coding Plan')
               : undefined,
-            // pill 只要总数：WorkBuddy 同币种分包求和，ZCode 只取当前套餐。
-            // 没人关心每一点的来处，明细在配置页卡片里看。
-            windows: isZCode ? currentPlanWindow(credits.accounts) : totalCreditsWindows(credits.accounts),
+            // 三套口径，各有真源：
+            // - Coding Plan：客户端同款 monitor 端点的窗口额度（5 小时 / 7 天 /
+            //   工具调用）——用户要的就是这三个；拿不到时回退订阅有效性窗口。
+            // - Start Plan：当日 token 池（有池子报真实 token 数，没领取时说
+            //   「今日待领取」）。
+            // - WorkBuddy：同币种分包求和的总积分。
+            windows: isStartPlan
+              ? startPlanWindows(credits.accounts)
+              : quotaWindows.length > 0
+                ? quotaWindows
+                : isZCode ? currentPlanWindow(credits.accounts) : totalCreditsWindows(credits.accounts),
             fetchedAt: Date.now(),
           }
         },
@@ -1007,7 +1046,16 @@ export function apply(ctx: Context, config: Config): void {
           // 覆盖重启场景——重启后 saved 正是阻止分组落回内置名单的东西。
           const saved = catalogStore!.saved(identity)
           if (saved !== undefined) {
-            catalog.set([...saved.models])
+            // saved 可能由**旧版本**写入（那时还没有产品面白名单），启动时会先于
+            // live 拉取发布——实测 2026-10-08：升级用户的 saved 里躺着 11 个
+            // Coding Plan 模型，而客户端只提供 2 个，用户会先看到一整屏越界模型。
+            // 这里用与 live 同一份白名单过滤；白名单不可得则原样发布（宁可按
+            // saved 展示，也不因读不到客户端文件而抹掉整组）。Start Plan 不走
+            // 这条：它的 saved 是 entitlements 派生的名单，语义不同。
+            const savedModels = variant.kind === 'zcode' && !variantIsStartPlan(variant)
+              ? filterByCodingPlanWhitelist(saved.models, (runtime.client as ZCodeUpstreamClient | undefined)?.codingPlanWhitelist?.())
+              : saved.models
+            catalog.set([...savedModels])
             runtime.catalogSource = 'saved'
             runtime.catalogFetchedAtMs = saved.fetchedAtMs
           } else {
