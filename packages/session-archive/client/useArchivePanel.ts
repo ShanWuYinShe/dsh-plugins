@@ -27,41 +27,14 @@ import { useArchiveActions } from './useArchiveActions.js'
 import { useArchiveViewState } from './useArchiveViewState.js'
 import { useArchivePanelChrome } from './useArchivePanelChrome.js'
 import { useArchiveBadgeVisibility } from './useArchiveBadgeVisibility.js'
+import { useArchivePanelOpen } from './useArchivePanelOpen.js'
 
 export function useArchivePanel(props: any) {
   const t = props.t;
   const call = props.call;
   const { collapsed, iconOnly, badgeRef } = useArchiveBadgeVisibility(props.wide)
 
-  const rootRef = React.useRef<any>(null);
-  const [open, setOpen] = React.useState(false);
-  const [closing, setClosing] = React.useState(false);
-
-  // 关闭动画的 timer 存句柄:动画进行中点徽标应是「取消关闭、重新打开」,
-  // 否则 open 仍为 true 期间的那次点击会被当成再次关闭吞掉,用户需要点
-  // 两次才能重开;卸载后也不再触发无意义的回调。
-  const closeTimerRef = React.useRef<any>(0);
-  const closePanel = React.useCallback(() => {
-    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setOpen(false);
-      setClosing(false);
-    } else {
-      setClosing(true);
-      globalThis.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = globalThis.setTimeout(() => {
-        setOpen(false);
-        setClosing(false);
-      }, 150);
-    }
-  }, []);
-  const reopenPanel = React.useCallback(() => {
-    globalThis.clearTimeout(closeTimerRef.current);
-    setClosing(false);
-    setOpen(true);
-  }, []);
-  // 卸载时取消挂着的关闭动画回调(声明与实现一致;React 下 setState 为 no-op,
-  // 但清理让卸载后的行为完全确定)。
-  React.useEffect(() => () => globalThis.clearTimeout(closeTimerRef.current), []);
+  const { rootRef, open, setOpen, closing, closePanel, reopenPanel } = useArchivePanelOpen()
 
   const [selected, setSelected] = React.useState<Set<any>>(new Set());
   const [expanded, setExpanded] = React.useState<any>(null);
