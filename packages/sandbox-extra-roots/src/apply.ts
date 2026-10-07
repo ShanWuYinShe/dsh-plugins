@@ -16,6 +16,8 @@ import { PluginConfigGateway } from './gateway.js'
 import { name, DEFAULT_CONFIG, config } from './plugin-config.js'
 import { STATE, ORIGINAL, canon, expandTilde, classifyRoot, extraGrantRoots } from './roots.js'
 import { getLandlockExec } from './landlock-exec.js'
+import { clearDirExistCache, existingDirectoryRoots } from './roots-filter.js'
+import { normalizeRoots, validateSandboxConfig } from './config-validate.js'
 
 export async function apply(ctx: Context, config?: any): Promise<void> {
   // fail-safe:初始化失败只记录,绝不让本插件拖垮 harness(host 层挂载时
@@ -83,41 +85,8 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
     // （目录存在性缓存声明在 store 之前:onUpdate 回调引用它,不能让
     // 回调看到 TDZ 中的绑定——将来 createConfigStore 若在构造期同步调
     // onUpdate 会直接 ReferenceError。）
-    const dirExistCache = new Map<string, { ok: boolean; until: number }>();
-    const DIR_EXIST_TTL_MS = 5000;
-    function isExistingDirCached(root: string): boolean {
-      const now = Date.now();
-      const hit = dirExistCache.get(root);
-      if (hit !== undefined && hit.until > now) return hit.ok;
-      let ok = false;
-      try {
-        ok = statSync(root, { throwIfNoEntry: false })?.isDirectory() === true;
-      } catch {
-        ok = false;
-      }
-      dirExistCache.set(root, { ok, until: now + DIR_EXIST_TTL_MS });
-      return ok;
-    }
+    const warn = (message: string) => ctx.logger?.warn?.(message);
 
-    // bwrap/Landlock 的 --bind/--rw 与 fs fence 的包含判断都只对"当前真实
-    // 存在的目录"生效:不存在的 root 会让 bwrap/Landlock 启动失败(Landlock
-    // 契约里是 "unopenable grant root"),也会造成 bash 与 fs 两侧判定分叉,
-    // 因此两侧共用这一个目录过滤器;同一侧同一根只告警一次(warned 复用)。
-    function existingDirectoryRoots(roots: string[], warned: Set<string>, side: string) {
-      const existing = [];
-      for (const root of roots) {
-        if (isExistingDirCached(root)) {
-          existing.push(root);
-          continue;
-        }
-        const key = `missing-root:${side}:${root}`;
-        if (!warned.has(key)) {
-          warned.add(key);
-          ctx.logger?.warn?.(`sandbox-extra-roots: extra writable root does not exist or is not a directory; not granting it to ${side}: ${root}`);
-        }
-      }
-      return existing;
-    }
     const store = createConfigStore({
       name: "sandbox-extra-roots",
       defaults: DEFAULT_CONFIG,
@@ -125,63 +94,13 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
       validate: validateSandboxConfig,
       warn: (message) => ctx.logger?.warn?.(`sandbox-extra-roots: ${message}`),
       onUpdate: (merged) => {
-        sandboxState.extraRoots = normalizeRoots({ ...DEFAULT_CONFIG, ...patchConfig, ...merged });
+        sandboxState.extraRoots = normalizeRoots({ ...DEFAULT_CONFIG, ...patchConfig, ...merged }, warn);
         fsState.extraRoots = sandboxState.extraRoots;
-        dirExistCache.clear(); // 新配置按真实文件系统立即判定，不沿用旧 TTL
+        clearDirExistCache(); // 新配置按真实文件系统立即判定，不沿用旧 TTL
       }
     });
     const cfg = store.effective();
 
-    // remote.set 严格校验：非法数组/相对路径直接拒绝，UI 能立即看到原因。
-    function validateSandboxConfig(partial: any) {
-      if (partial === null || typeof partial !== "object" || Array.isArray(partial)) {
-        throw new TypeError("sandbox-extra-roots config must be a plain object");
-      }
-      if (partial.extraWritableRoots !== void 0) {
-        if (!Array.isArray(partial.extraWritableRoots)) {
-          throw new TypeError('sandbox-extra-roots config field "extraWritableRoots" must be an array');
-        }
-        for (const rawRoot of partial.extraWritableRoots) {
-          const root = typeof rawRoot === "string" ? expandTilde(rawRoot) : rawRoot;
-          if (typeof root !== "string" || root.length === 0 || !isAbsolute(root)) {
-            throw new TypeError(`sandbox-extra-roots: extra writable root must be a non-empty absolute path: ${JSON.stringify(root)}`);
-          }
-          // 危险根直接拒绝:canonical 后等于 "/"、Windows 盘根或用户主目录
-          // 本身,授予它等于放弃整个沙盒边界。信息带原始值,UI 能看到原因。
-          const canonical = canon(root);
-          if (classifyRoot(canonical) === "reject") {
-            throw new TypeError(`sandbox-extra-roots: refusing dangerous extra writable root ${JSON.stringify(root)} (resolves to ${canonical}); granting it would effectively disable the sandbox`);
-          }
-        }
-      }
-    }
-
-    // 只接受绝对路径:相对路径/空值会破坏词法包含判断,直接拒绝并告警。
-    // canonical 化后做危险根分类:reject 级("/"等)在此兜底过滤(patch/YAML
-    // 不经过 remote.set 校验),filter 级系统目录 warn 后一并剔除。
-    function normalizeRoots(c: any) {
-      const roots = Array.isArray(c.extraWritableRoots) ? c.extraWritableRoots : [];
-      if (!Array.isArray(c.extraWritableRoots)) {
-        ctx.logger?.warn?.("sandbox-extra-roots: extraWritableRoots must be an array of absolute paths; ignoring current config");
-      }
-      const expanded = roots.map((root: any) => (typeof root === "string" ? expandTilde(root) : root));
-      const normalized = expanded
-        .filter((root: any) => {
-          if (typeof root === "string" && root.length > 0 && isAbsolute(root)) return true;
-          ctx.logger?.warn?.(`sandbox-extra-roots: ignoring non-absolute extra writable root ${JSON.stringify(root)}`);
-          return false;
-        })
-        .map((root: any) => canon(root))
-        .filter((canonical: string) => {
-          const verdict = classifyRoot(canonical);
-          if (verdict === null) return true;
-          ctx.logger?.warn?.(verdict === "reject"
-            ? `sandbox-extra-roots: ignoring dangerous extra writable root ${JSON.stringify(canonical)}; granting it would disable the sandbox boundary`
-            : `sandbox-extra-roots: ignoring system directory ${JSON.stringify(canonical)} as extra writable root`);
-          return false;
-        });
-      return [...new Set(normalized)];
-    }
 
     // 运行期危险根复查:配置期的 classifyRoot 只看配置时刻的文件系统,而
     // confine 与 fs fence 每次调用都会重新 canonical 化并跟随符号链接。
@@ -218,7 +137,7 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
     // 找不到)时降级为"插件不存在":跳过全部包装,只留一条高音量告警;
     // 绝不能让静态导入链的异常逃出 apply——那会拖垮 harness 启动。
     if (sandboxAvailable) {
-      sandboxState.extraRoots = normalizeRoots(cfg);
+      sandboxState.extraRoots = normalizeRoots(cfg, warn);
       fsState.extraRoots = sandboxState.extraRoots;
 
       // ── 1a. 包装 bash 沙盒的 confine:按 runner 追加额外可写目录 ──
@@ -296,7 +215,7 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
               return wrapped;
             }
             const extra = [];
-            for (const root of existingDirectoryRoots(extraGrantRoots(policy, roots), sandboxState.warned, "bwrap/Landlock")) extra.push("--bind", root, root);
+            for (const root of existingDirectoryRoots(extraGrantRoots(policy, roots), sandboxState.warned, "bwrap/Landlock", warn)) extra.push("--bind", root, root);
             wrapped.argv = [...a.slice(0, sep), ...extra, ...a.slice(sep)];
             return wrapped;
           }
@@ -310,7 +229,7 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
               return wrapped;
             }
             const extra = [];
-            for (const root of existingDirectoryRoots(extraGrantRoots(policy, roots), sandboxState.warned, "bwrap/Landlock")) extra.push("--rw", root);
+            for (const root of existingDirectoryRoots(extraGrantRoots(policy, roots), sandboxState.warned, "bwrap/Landlock", warn)) extra.push("--rw", root);
             wrapped.argv = [...a.slice(0, sep), ...extra, ...a.slice(sep)];
             return wrapped;
           }
@@ -375,7 +294,8 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
                   "the fs fence",
                 ),
                 fsState.warned,
-                "the fs fence"
+                "the fs fence",
+                warn,
               );
               for (const root of roots) {
                 if (await isPathUnder(fresh.targetKey, root)) return fresh;

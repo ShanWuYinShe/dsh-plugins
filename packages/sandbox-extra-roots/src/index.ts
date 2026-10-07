@@ -8,6 +8,7 @@
  *
  * - index.ts — 插件入口：name/inject 与 re-export
  * - apply.ts — 插件主体：包装 sandbox/fs 的 confine 与 checkedTarget
+ * - roots-filter.ts config-validate.ts — 真实存在目录过滤（带 TTL 缓存）与配置校验/规范化
  * - roots.ts — 额外根目录规范化、分类与授予集合
  * - plugin-config.ts — 插件身份与配置默认值/生效配置
  * - common.ts — 沙盒能力探测与宿主路径工具
