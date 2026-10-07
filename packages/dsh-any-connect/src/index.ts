@@ -11,8 +11,9 @@
  *   适配器注册）、状态路由响应段（探针/目录）、变体装配（上游客户端与凭据存储，CLI 与运行时
  *   共用）、变体清单
  * 目录与额度
- * - catalog-lifecycle.ts catalog-refresh.ts catalog-timers.ts catalog-fingerprint.ts —
- *   生命周期组合入口、刷新/发布/领取快通道、身份 sweep 与小时定时器、内容指纹
+ * - catalog-lifecycle.ts catalog-refresh.ts catalog-adopt.ts catalog-timers.ts
+ *   catalog-fingerprint.ts — 生命周期组合入口、刷新/发布/领取快通道、账号切换的目录采用、
+ *   身份 sweep 与小时定时器、内容指纹
  * - catalog.ts catalog-store.ts — 目录模型与静态兜底、每账号落盘
  * - usage.ts zcode-quota.ts zcode-builtin-catalog.ts zcode-signer.ts — provider-usage 注册与
  *   dock 窗口助手、Coding Plan 窗口额度、ZCode 内置白名单、请求签名 V4
