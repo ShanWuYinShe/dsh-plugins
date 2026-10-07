@@ -46,6 +46,11 @@ export function hostIsLoopback(host: string | undefined): boolean {
 /**
  * A browser-sent Origin (present header) must be loopback. Non-browser
  * clients (the plugin's own fetch calls) send no Origin at all and pass.
+ *
+ * 空串 Origin 也按「非浏览器客户端」放行（本插件自己的 fetch 不带 Origin，
+ * 浏览器不会发空串）。provider-usage 的同名函数在这**唯一一处**收紧为拒绝
+ * （「分化时偏向拒绝」），两边的其余部分必须逐字一致——见
+ * test/loopback-parity.test.ts。
  */
 export function originIsLoopback(origin: string | undefined): boolean {
   if (origin === undefined || origin.trim() === '') return true
