@@ -18,8 +18,8 @@
  * - zcode-plan-claim.ts zcode-plan-claim-wire.ts — Start Plan 领取（网络 I/O）与线上格式层（纯函数）
  * - zcode-plan-models.ts zcode-plan-prompt.ts zcode-plan-store.ts — 名单、请求体指纹、计划语义
  * 凭据
- * - auth.ts auth-types.ts auth-paths.ts auth-zcode.ts auth-document.ts auth-store.ts —
- *   凭据解析门面与类型/路径/ZCode/文档/存储
+ * - auth.ts auth-types.ts auth-paths.ts auth-zcode.ts auth-zcode-crypto.ts auth-document.ts
+ *   auth-store.ts — 凭据解析门面与类型/路径/ZCode 解析/enc:v1 解密/文档/存储
  * - desktop-credential-protection.ts desktop-auth-envelope.ts desktop-discovery.ts
  *   desktop-discovery-windows.ts desktop-at-rest-key.ts desktop-app-discovery.ts — at-rest 凭据门面与
  *   信封/发现/密钥解析器、按平台找 Electron 二进制

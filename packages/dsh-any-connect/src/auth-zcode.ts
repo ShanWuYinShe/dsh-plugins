@@ -10,107 +10,12 @@
 import crypto from 'node:crypto'
 import os from 'node:os'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { WorkBuddyCredential, ZCodeFamily, ZCodePlanKind } from './auth-types.js'
-import { isWsl, windowsPathForWsl } from './auth-paths.js'
+import { decryptZCodeEncryptedKey } from './auth-zcode-crypto.js'
+import type { DecryptZCodeKeyOptions } from './auth-zcode-crypto.js'
 
-export interface DecryptZCodeKeyOptions {
-  desktopPath?: string
-  platform?: string
-  homedir?: string
-  username?: string
-}
-
-/** Decrypt enc:v1:<iv>.<tag>.<cipher> encrypted values from credentials.json */
-export function decryptZCodeEncryptedKey(
-  encStr: string,
-  options?: DecryptZCodeKeyOptions,
-): string {
-  if (!encStr.startsWith('enc:v1:')) return encStr
-  const parts = encStr.slice('enc:v1:'.length).split('.')
-  if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
-    throw new Error('Invalid ZCode enc:v1 credential format')
-  }
-  const [ivB64, tagB64, cipherB64] = parts
-  const iv = Buffer.from(ivB64, 'base64url')
-  const tag = Buffer.from(tagB64, 'base64url')
-  const cipherBuffer = Buffer.from(cipherB64, 'base64url')
-
-  let currentUsername = 'unknown'
-  try {
-    currentUsername = os.userInfo().username
-  } catch {}
-
-  const currentPlatform = process.platform || os.platform()
-  const currentHomedir = homedir()
-
-  const secrets: string[] = []
-
-  // 1. Explicit env override if set
-  if (process.env.ZCODE_CREDENTIAL_SECRET) {
-    secrets.push(process.env.ZCODE_CREDENTIAL_SECRET)
-  }
-
-  // 2. Explicit options if passed
-  if (options?.platform && options?.homedir && options?.username) {
-    secrets.push(`zcode-credential-fallback:${options.platform}:${options.homedir}:${options.username}`)
-  }
-
-  // 3. Current host runtime fallback
-  secrets.push(`zcode-credential-fallback:${currentPlatform}:${currentHomedir}:${currentUsername}`)
-  if (os.homedir() !== currentHomedir) {
-    secrets.push(`zcode-credential-fallback:${currentPlatform}:${os.homedir()}:${currentUsername}`)
-  }
-
-  // 4. If desktopPath is a Windows path mounted in WSL (/mnt/<drive>/Users/<user>/...):
-  const pathToCheck = options?.desktopPath
-  if (pathToCheck) {
-    const mntMatch = /^\/mnt\/([a-zA-Z])\/Users\/([^/]+)/iu.exec(pathToCheck)
-    if (mntMatch) {
-      const drive = mntMatch[1]!.toUpperCase()
-      const winUser = mntMatch[2]!
-      secrets.push(`zcode-credential-fallback:win32:${drive}:\\Users\\${winUser}:${winUser}`)
-      secrets.push(`zcode-credential-fallback:win32:${drive}:/Users/${winUser}:${winUser}`)
-    }
-  }
-
-  // 5. If running inside WSL, try Windows user profile credentials
-  if (isWsl()) {
-    const winProfile = windowsPathForWsl(process.env['USERPROFILE'])
-    const winUser = winProfile ? basename(winProfile) : basename(currentHomedir)
-    secrets.push(`zcode-credential-fallback:win32:C:\\Users\\${winUser}:${winUser}`)
-    secrets.push(`zcode-credential-fallback:win32:C:/Users/${winUser}:${winUser}`)
-    secrets.push(`zcode-credential-fallback:win32:C:\\Users\\${currentUsername}:${currentUsername}`)
-    secrets.push(`zcode-credential-fallback:win32:C:/Users/${currentUsername}:${currentUsername}`)
-  }
-
-  // 6. If on Windows, check USERPROFILE and USERNAME env vars
-  if (currentPlatform === 'win32') {
-    const winProfile = process.env['USERPROFILE']
-    const winUser = process.env['USERNAME'] ?? currentUsername
-    if (winProfile) {
-      secrets.push(`zcode-credential-fallback:win32:${winProfile}:${winUser}`)
-      secrets.push(`zcode-credential-fallback:win32:${winProfile.replace(/\\/g, '/')}:${winUser}`)
-    }
-  }
-
-  const candidateSecrets = [...new Set(secrets)]
-  let lastError: unknown
-  for (const secret of candidateSecrets) {
-    try {
-      const aesKey = crypto.createHash('sha256').update(secret).digest()
-      const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, iv)
-      decipher.setAuthTag(tag)
-      return Buffer.concat([decipher.update(cipherBuffer), decipher.final()]).toString('utf8')
-    } catch (err) {
-      lastError = err
-    }
-  }
-
-  throw lastError instanceof Error ? lastError : new Error('Invalid ZCode enc:v1 credential format')
-}
 
 /** Every plan kind the desktop client can record for an account provider. */
 export const ZCODE_PLAN_KINDS: readonly ZCodePlanKind[] = [
@@ -341,3 +246,7 @@ export function parseZCodeAuth(text: string, desktopPath?: string): WorkBuddyCre
     zcodeDeviceMid: resolveZCodeDeviceMid(desktopPath),
   }
 }
+
+// enc:v1 解密已搬到 auth-zcode-crypto.ts：在这里再导出，既有导入路径不变。
+export { decryptZCodeEncryptedKey } from './auth-zcode-crypto.js'
+export type { DecryptZCodeKeyOptions } from './auth-zcode-crypto.js'
