@@ -91,8 +91,8 @@ export var css = [
   ".sa_detail{border-top:1px dashed var(--dsw-alias-border-l2);padding-top:10px;margin-top:2px;flex-direction:column;gap:10px;display:flex;max-height:360px;overflow-y:auto}",
   ".sa_msg{flex-direction:column;gap:2px;display:flex}",
   ".sa_msgRole{color:var(--dsw-alias-label-tertiary);font-size:10px;line-height:14px;text-transform:uppercase;letter-spacing:.04em}",
-  ".sa_msgText{color:var(--dsw-alias-label-primary);white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:18px}",
-  ".sa_msgTextUser{color:var(--dsw-alias-label-secondary)}",
+  "",
+  "",
   ".sa_msgBubble{max-width:85%;padding:8px 12px;border-radius:12px;font-size:12px;line-height:18px;overflow-wrap:anywhere;white-space:pre-wrap}",
   // 用户气泡是「品牌色填充面」：文字必须配 label-primary-foreground，
   // 不能写死 #fff——浅色主题下 brand-primary 解析为 near-black（配白字尚可），
