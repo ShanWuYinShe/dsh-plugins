@@ -15,8 +15,8 @@
  * - catalog.ts catalog-store.ts — 目录模型与静态兜底、每账号落盘
  * - usage.ts zcode-quota.ts zcode-builtin-catalog.ts zcode-signer.ts — provider-usage 注册与
  *   dock 窗口助手、Coding Plan 窗口额度、ZCode 内置白名单、请求签名 V4
- * - zcode-plan-claim.ts zcode-plan-models.ts zcode-plan-prompt.ts zcode-plan-store.ts —
- *   Start Plan 领取/名单/请求体指纹/计划语义
+ * - zcode-plan-claim.ts zcode-plan-claim-wire.ts — Start Plan 领取（网络 I/O）与线上格式层（纯函数）
+ * - zcode-plan-models.ts zcode-plan-prompt.ts zcode-plan-store.ts — 名单、请求体指纹、计划语义
  * 凭据
  * - auth.ts auth-types.ts auth-paths.ts auth-zcode.ts auth-document.ts auth-store.ts —
  *   凭据解析门面与类型/路径/ZCode/文档/存储
