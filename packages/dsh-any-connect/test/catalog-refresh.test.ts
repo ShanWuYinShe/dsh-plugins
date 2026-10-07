@@ -95,9 +95,12 @@ async function installPlugin(options: {
   const events = { count: 0 }
   ctx.on('llm/adapters-updated', () => { events.count += 1 })
   await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+// 本文件的等待都覆盖真实 I/O（插件注册 / 目录刷新），显式给 5s 预算：
+// vi.waitFor 的默认超时是 1s，而 testTimeout 是 30s——并行负载下真实 I/O 可能超过 1s，
+// 默认值会造成偶发失败（见 usage.test.ts 那次注册竞态）。
   await vi.waitFor(() => {
     expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
-  })
+  }, { timeout: 5000 })
   return { publishes, events }
 }
 
@@ -118,7 +121,7 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
     const roster: WorkBuddyModelInfo[][] = [[catalogRow('alpha')], [catalogRow('alpha')], [catalogRow('beta')], []]
     const { publishes, events } = await installPlugin({ models: async () => roster.shift() ?? [] })
 
-    await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) })
+    await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) }, { timeout: 5000 })
     // 等第一轮目录发布落定（下面按"本变体的发布次数"记基线，见 publishes）。
     await new Promise(resolve => setTimeout(resolve, 200))
     const settled = publishes()
@@ -131,8 +134,8 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
 
     // 上游换名单：内容变了 → 广播。
     context!.fiber.ctx.emit('loader/volatile-update', [])
-    await vi.waitFor(async () => { expect(await servedIds()).toEqual(['beta']) })
-    await vi.waitFor(() => { expect(publishes()).toBeGreaterThan(settled) })
+    await vi.waitFor(async () => { expect(await servedIds()).toEqual(['beta']) }, { timeout: 5000 })
+    await vi.waitFor(() => { expect(publishes()).toBeGreaterThan(settled) }, { timeout: 5000 })
     // 交叉校验：这次本变体的 replace **确实转化成了宿主的 llm/adapters-updated**
     // ——正是客户端订阅的那个事件。没有这条，本用例只证明了"我们调了自己的
     // 计数函数"，而这正是本任务要交付的因果链。
@@ -141,8 +144,8 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
 
     // 名单被清空：空目录是合法且对用户可见的变化（DSH 隐藏该分组），必须通知。
     context!.fiber.ctx.emit('loader/volatile-update', [])
-    await vi.waitFor(async () => { expect(await servedIds()).toEqual([]) })
-    await vi.waitFor(() => { expect(publishes()).toBeGreaterThan(afterBeta) })
+    await vi.waitFor(async () => { expect(await servedIds()).toEqual([]) }, { timeout: 5000 })
+    await vi.waitFor(() => { expect(publishes()).toBeGreaterThan(afterBeta) }, { timeout: 5000 })
   })
 
   it('费率变化也算内容变化：名称后缀改了就要广播', async () => {
@@ -158,7 +161,7 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
     await vi.waitFor(async () => {
       const listed = await context!.llm.listModels('workbuddy')
       expect(listed.map(model => model.name)).toEqual(['GLM-5.3 · x0.79'])
-    })
+    }, { timeout: 5000 })
     const afterFirst = publishes()
 
     // 上游下调费率：id 没变，但用户看到的名字变了。
@@ -167,8 +170,8 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
     await vi.waitFor(async () => {
       const listed = await context!.llm.listModels('workbuddy')
       expect(listed.map(model => model.name)).toEqual(['GLM-5.3 · x0.31'])
-    })
-    await vi.waitFor(() => { expect(publishes()).toBeGreaterThan(afterFirst) })
+    }, { timeout: 5000 })
+    await vi.waitFor(() => { expect(publishes()).toBeGreaterThan(afterFirst) }, { timeout: 5000 })
   })
 
   it('登录后分组由隐藏变可见，同样广播', async () => {
@@ -202,15 +205,15 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
 
     await vi.waitFor(() => {
       expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
-    })
+    }, { timeout: 5000 })
     // 未登录：分组隐藏（空目录）。
-    await vi.waitFor(async () => { expect(await ctx.llm.listModels('workbuddy')).toEqual([]) })
+    await vi.waitFor(async () => { expect(await ctx.llm.listModels('workbuddy')).toEqual([]) }, { timeout: 5000 })
     const hidden = replaced
 
     await writeFile(desktop, signedInDocument())
     ctx.fiber.ctx.emit('loader/volatile-update', [])
-    await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) })
-    await vi.waitFor(() => { expect(replaced).toBeGreaterThan(hidden) })
+    await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) }, { timeout: 5000 })
+    await vi.waitFor(() => { expect(replaced).toBeGreaterThan(hidden) }, { timeout: 5000 })
     Object.defineProperty(signInProto, 'registerAdapter', signInDescriptor)
   })
 })
@@ -261,7 +264,7 @@ describe('注册已释放（REGISTRATION_DISPOSED）不影响刷新链路', () =
 
     try {
       await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
-      await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) })
+      await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) }, { timeout: 5000 })
       disposeThrows = true
 
       // 换一份**内容不同**的名单，确保这一轮一定走到 publishCatalog → replace。
@@ -277,10 +280,10 @@ describe('注册已释放（REGISTRATION_DISPOSED）不影响刷新链路', () =
       ctx.fiber.ctx.emit('loader/volatile-update', [])
       // 这一轮必然取一次上游（拿到 [beta]）；若通知异常逃逸，refreshCatalog 的
       // 泛捕获会把这次拉取判成失败 → 触发 3 次重试，modelsCall 就会涨到 4。
-      await vi.waitFor(async () => { expect(await servedIds()).toEqual(['beta']) })
+      await vi.waitFor(async () => { expect(await servedIds()).toEqual(['beta']) }, { timeout: 5000 })
       // 这条路径**真的**走到了 replace —— 没有这条，把 notifyCatalogChanged
       // 整个删掉用例也照样"通过"。
-      await vi.waitFor(() => { expect(replaceAttempts).toBeGreaterThan(attemptsBefore) })
+      await vi.waitFor(() => { expect(replaceAttempts).toBeGreaterThan(attemptsBefore) }, { timeout: 5000 })
 
       // 核心断言：replace 抛出的 REGISTRATION_DISPOSED 被就地吞掉。
       //

@@ -72,7 +72,7 @@ describe('ProviderUsageRegistry', () => {
 
     const first = registry.snapshot('acme')
     const second = registry.snapshot('acme')
-    await vi.waitFor(() => { expect(release).toBeDefined() })
+    await vi.waitFor(() => { expect(release).toBeDefined() }, { timeout: 5000 })
     release?.()
     await Promise.all([first, second])
     // Two readers, one billing request: a page polling twice must not double

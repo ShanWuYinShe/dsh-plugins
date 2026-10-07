@@ -245,7 +245,7 @@ describe('WorkBuddyCredentialStore', () => {
       },
     })
     const resolvePromise = store.resolve()
-    await vi.waitFor(() => { expect(refreshStarted).toBe(true) })
+    await vi.waitFor(() => { expect(refreshStarted).toBe(true) }, { timeout: 5000 })
     const logoutPromise = store.logout()
     // logout 必须挂在在途刷新上:刷新未完成前它不该返回。
     let logoutSettled = false

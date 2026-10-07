@@ -125,7 +125,7 @@ describe('WorkBuddy usage querier', () => {
     const { registry } = await boot({ signedIn: false })
     await vi.waitFor(() => {
       expect(registry.registered.map(entry => entry.provider).sort()).toEqual(['workbuddy', 'workbuddy-ai', 'zcode', 'zcode-start-plan'])
-    })
+    }, { timeout: 5000 })
     expect(registry.registered.find(entry => entry.provider === 'workbuddy')?.displayName).toBe('WorkBuddy')
     expect(registry.registered.find(entry => entry.provider === 'zcode')?.displayName).toBe('ZCode')
   })

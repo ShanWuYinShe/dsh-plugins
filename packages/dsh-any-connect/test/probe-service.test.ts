@@ -142,9 +142,9 @@ describe('WorkBuddyProbeService', () => {
     h.service.probeMissingCandidates()
     // isRunning 在队列入队前为 false，不能当完成信号——直接等请求发出、
     // 再等记录落盘（单候选时队列即空）。
-    await vi.waitFor(() => expect(h.calls.length).toBeGreaterThan(0))
+    await vi.waitFor(() => expect(h.calls.length).toBeGreaterThan(0), { timeout: 5000 })
     await vi.waitFor(() =>
-      expect(h.store.get('probe-me', fingerprintModel(undeclaredCatalog().current()[0]!), 'uid-1:')?.validation).toBe('validating'))
+      expect(h.store.get('probe-me', fingerprintModel(undeclaredCatalog().current()[0]!), 'uid-1:')?.validation).toBe('validating'), { timeout: 5000 })
   })
   it('reports sweep probe failures through onSweepError instead of unhandled rejection', async () => {
     // 回归:清扫入口丢弃 promise,而 credentials.current() 会因凭据区域
@@ -166,7 +166,7 @@ describe('WorkBuddyProbeService', () => {
     service.probeMissingCandidates()
     await vi.waitFor(() => {
       expect(sweepErrors.some(e => e.modelId === 'probe-me' && e.message.includes('credential'))).toBe(true)
-    })
+    }, { timeout: 5000 })
   })
 
   it('skips candidates that already have a usable observation', async () => {

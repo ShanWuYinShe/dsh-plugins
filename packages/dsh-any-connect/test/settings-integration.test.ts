@@ -38,9 +38,12 @@ describe('WorkBuddy Host settings integration', () => {
     await ctx.plugin(WorkBuddy, { authFile: join(root, 'no-such-file.info'), authFileAI: join(root, 'no-such-ai-file.info') })
 
     // Registration rides on the loopback shim's listening event.
+// 本文件的等待都覆盖真实 I/O（插件注册 / 目录刷新），显式给 5s 预算：
+// vi.waitFor 的默认超时是 1s，而 testTimeout 是 30s——并行负载下真实 I/O 可能超过 1s，
+// 默认值会造成偶发失败（见 usage.test.ts 那次注册竞态）。
     await vi.waitFor(() => {
       expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
-    })
+    }, { timeout: 5000 })
     expect(ctx.llm.listConfigurableProviders()).toContainEqual({
       provider: 'workbuddy',
       displayName: 'WorkBuddy',
@@ -69,7 +72,7 @@ describe('WorkBuddy Host settings integration', () => {
     // No credential anywhere: the group is hidden (empty), not fallback-filled.
     await vi.waitFor(async () => {
       expect(await ctx.llm.listModels('workbuddy')).toEqual([])
-    })
+    }, { timeout: 5000 })
   })
 
   it('serves the fallback model list once signed in (fetch failing)', async () => {
@@ -90,14 +93,14 @@ describe('WorkBuddy Host settings integration', () => {
         await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(() => {
         expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
-      })
+      }, { timeout: 5000 })
       let models = await ctx.llm.listModels('workbuddy')
       if (models.length === 0) {
         // 启动拉取是异步的：等 fallback 落定（身份已确认、fetch 已失败）。
         await vi.waitFor(async () => {
           models = await ctx.llm.listModels('workbuddy')
           expect(models.length).toBeGreaterThan(0)
-        })
+        }, { timeout: 5000 })
       }
     expect(models.map(model => model.id)).toContain('auto')
     expect(models.map(model => model.id)).toContain('deepseek-v4-pro')
@@ -148,12 +151,12 @@ describe('WorkBuddy Host settings integration', () => {
       await ctx1.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(async () => {
         expect((await ctx1.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
-      })
+      }, { timeout: 5000 })
       // set 先于 save 落盘：等文件出现再"重启"，否则第二程读不到 saved。
       const { existsSync } = await import('node:fs')
       await vi.waitFor(() => {
         expect(existsSync(join(root as string, '.workbuddy-catalog.json'))).toBe(true)
-      })
+      }, { timeout: 5000 })
     } finally {
       okSpy.mockRestore()
       await ctx1.fiber.dispose()
@@ -168,7 +171,7 @@ describe('WorkBuddy Host settings integration', () => {
         await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(async () => {
         expect((await ctx.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
-      })
+      }, { timeout: 5000 })
     } finally {
       failSpy.mockRestore()
     }
@@ -196,11 +199,11 @@ describe('WorkBuddy Host settings integration', () => {
       await ctx1.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(async () => {
         expect((await ctx1.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
-      })
+      }, { timeout: 5000 })
       const { existsSync } = await import('node:fs')
       await vi.waitFor(() => {
         expect(existsSync(join(root as string, '.workbuddy-catalog.json'))).toBe(true)
-      })
+      }, { timeout: 5000 })
     } finally {
       okSpy.mockRestore()
       await ctx1.fiber.dispose()
@@ -216,7 +219,7 @@ describe('WorkBuddy Host settings integration', () => {
       await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(async () => {
         expect(await ctx.llm.listModels('workbuddy')).toEqual([])
-      })
+      }, { timeout: 5000 })
     } finally {
       emptySpy.mockRestore()
     }
@@ -258,7 +261,7 @@ describe('WorkBuddy Host settings integration', () => {
       await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       // waitFor 在假时钟下自动按 50ms 推进(上限 1s,远够不到 60s 重试点),
       // 等首次失败落地。
-      await vi.waitFor(() => { expect(calls).toBe(1) })
+      await vi.waitFor(() => { expect(calls).toBe(1) }, { timeout: 5000 })
       // 假时钟推进只负责触发重试定时器;重试回调里的 fs 读取走真实 I/O,
       // 用真实时钟小步等待其收敛(Date 已被假时钟接管,不读钟)。
       const waitForReal = async (expected: number): Promise<void> => {
@@ -299,11 +302,11 @@ describe('WorkBuddy international variant', () => {
       const ids = ctx.llm.listProviders().map(provider => provider.id)
       expect(ids).toContain('workbuddy')
       expect(ids).toContain('workbuddy-ai')
-    })
+    }, { timeout: 5000 })
     await vi.waitFor(async () => {
       expect(await ctx.llm.listModels('workbuddy')).toEqual([])
       expect(await ctx.llm.listModels('workbuddy-ai')).toEqual([])
-    })
+    }, { timeout: 5000 })
     const entries = ctx.llm.listConfigurableProviders()
     expect(entries.find(entry => entry.provider === 'workbuddy')).toMatchObject({
       settingsNs: WorkBuddy.WORKBUDDY_SETTINGS_NS,
@@ -337,7 +340,7 @@ describe('WorkBuddy international variant', () => {
         const ids = (await ctx.llm.listModels('workbuddy-ai')).map(m => m.id)
         expect(ids).toContain('default-model')
         expect(ids).toContain('gpt-5.6-luna')
-      })
+      }, { timeout: 5000 })
       // CN 侧无凭据：保持隐藏；AI 名单里没有 CN 专属 id。
       expect(await ctx.llm.listModels('workbuddy')).toEqual([])
       const aiIds = (await ctx.llm.listModels('workbuddy-ai')).map(m => m.id)
@@ -378,10 +381,10 @@ describe('volatile configuration', () => {
     })
     await vi.waitFor(() => {
       expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
-    })
+    }, { timeout: 5000 })
     expect(() => fiber.ctx.emit('loader/volatile-update', [])).not.toThrow()
     await vi.waitFor(async () => {
       expect(await ctx.llm.listModels('workbuddy')).toEqual([])
-    })
+    }, { timeout: 5000 })
   })
 })
