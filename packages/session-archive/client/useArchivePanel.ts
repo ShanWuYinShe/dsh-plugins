@@ -26,32 +26,13 @@ import { useArchiveList } from './useArchiveList.js'
 import { useArchiveActions } from './useArchiveActions.js'
 import { useArchiveViewState } from './useArchiveViewState.js'
 import { useArchivePanelChrome } from './useArchivePanelChrome.js'
+import { useArchiveBadgeVisibility } from './useArchiveBadgeVisibility.js'
 
 export function useArchivePanel(props: any) {
   const t = props.t;
   const call = props.call;
-  // 侧边栏收起（icon rail）时，DSH 通过 wide=false 告知（侧边栏 footer 注入点
-  // 下发的是 wide，而非 collapsed）。以 wide 为准；仅当宿主未下发 wide 时，才用
-  // ResizeObserver 观察所在格宽度（<80px 视为收起）兜底，避免窄格把文字标签挤变形。
-  const wideExplicit = typeof props.wide === "boolean" ? props.wide : void 0;
-  const [narrow, setNarrow] = React.useState(false);
-  const collapsed = wideExplicit === void 0 ? narrow : !wideExplicit;
-  const badgeRef = React.useRef<any>(null);
-  React.useEffect(() => {
-    const el = badgeRef.current?.parentElement;
-    if (el === undefined || el === null || typeof (globalThis as any).ResizeObserver === "undefined") return;
-    const ro = new (globalThis as any).ResizeObserver((entries: any[]) => {
-      for (const entry of entries) {
-        const w = entry.contentRect?.width ?? el.clientWidth;
-        setNarrow(w > 0 && w < 80);
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  // 有显式 wide 时完全以宿主状态为准，避免 ResizeObserver 的窄格判断在
-  // 展开后仍残留，导致展开态误用 collapsed 样式（图标不居中、文字丢失）。
-  const iconOnly = collapsed;
+  const { collapsed, iconOnly, badgeRef } = useArchiveBadgeVisibility(props.wide)
+
   const rootRef = React.useRef<any>(null);
   const [open, setOpen] = React.useState(false);
   const [closing, setClosing] = React.useState(false);
