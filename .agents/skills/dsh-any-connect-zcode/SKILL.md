@@ -431,3 +431,51 @@ node -e "const fs=require('fs');const fd=fs.openSync(process.argv[1],'r');const 
 `Contents/Resources/glm/zcode.cjs`（内置 agent）。内置 provider 配置在
 `Contents/Resources/config/provider/zcode-builtin.json`（含每个 provider 的
 `baseUrl` / `access.mode`，是"端点属于哪条通道"的权威来源）。
+
+
+## 八、Coding Plan 窗口额度（pill 的 5 小时 / 7 天来源，2026-10-08 取证）
+
+ZCode 客户端自己显示「5 小时 / 7 天」窗口额度，用的是：
+
+```
+GET https://bigmodel.cn/api/monitor/usage/quota/limit
+    Authorization: Bearer <coding-plan api-key>        # 就是聊天请求用的那把 key
+```
+
+实测（本机 individual-coding-plan key）返回：
+
+```json
+{ "code": 200, "msg": "操作成功", "data": { "level": "pro", "limits": [
+  { "type": "TOKENS_LIMIT", "unit": 3, "number": 5, "percentage": 0,  "nextResetTime": 1791403544725 },
+  { "type": "TOKENS_LIMIT", "unit": 6, "number": 1, "percentage": 24, "nextResetTime": 1791865446983 },
+  { "type": "TIME_LIMIT",   "unit": 5, "number": 1, "usage": 1000, "currentValue": 0,
+    "remaining": 1000, "nextResetTime": 1793026354999 } ] } }
+```
+
+- `unit` 语义（按实测时间差反推）：**3 = 小时、6 = 周、5 = 月**；`number` 是数量。
+- `TOKENS_LIMIT` 只给 `percentage`，且它是**已用**百分比（客户端界面显示的进度就是它）
+  ——窗口要报剩余就 `remain = 100 - percentage`、`limit = 100`、`unit = '%'`。
+- `TIME_LIMIT` 给 `usage/currentValue/remaining`（工具调用次数）。
+- `nextResetTime` 是**毫秒** epoch（与 `billing/balance` 的 `ends_at` 秒级不同，别搞混）。
+- 客户端侧类名是 `BigModelUsageQuotaProvider`；z.ai 系账号走另一支 URL
+  （`ZCODE_BIGMODEL_USAGE_QUOTA_URL` / `BIGMODEL_USAGE_QUOTA_URL` 可覆盖）。
+- 拿 `zcodejwttoken` 当 Bearer 会 `401 令牌已过期或验证不正确`——这条端点只认
+  coding-plan 的 **api-key**（open.bigmodel.cn 同路径也通，两者都返回同样数据）。
+
+实现：`src/zcode-quota.ts`（解析 + 映射）+ `ZCodeUpstreamClient.fetchCodingPlanQuota`；
+端点不可用或形状不符一律 `undefined` → 查询器回退订阅有效性窗口，绝不编数字。
+
+### 8.1 三个 pill / 升级相关的坑（2026-10-08 实测）
+
+1. **saved 目录可能是旧版本写的**：`catalogStore` 存的是「上次成功拉取的名单」，升级前
+   （白名单上线前）写进去的是**上游并集**（实测某升级用户的 saved 里躺着 11 个 Coding Plan
+   模型）。启动时 saved 先于 live 发布 → 用户先看到一整屏越界模型。修法：发布 saved 前用
+   同一份白名单过滤（`filterByCodingPlanWhitelist`，白名单不可得则原样返回）。
+2. **Start Plan 跨天后 accounts 为空**：每日 00:00 后旧池子作废、新池子未发放/未领取时
+   `billing/balance` 的 `balances` 为空。pill 若回落到通用的「该 provider 不上报额度」
+   会让人以为额度功能坏了——`startPlanWindows` 此时如实回「Start Plan: 今日待领取」。
+3. **Plugins 页显示的版本号来自磁盘 package.json，不代表运行中的进程**：`dsh plugin add`
+   只改磁盘与 node_modules；正在跑的 dsh 仍旧用**启动时加载的旧模块**。用户说「已经是新版
+   了」却仍看到旧行为（如 11 个模型、pill 没有新窗口）时，先看 DSH_HOME 下插件写的缓存
+   （`~/.dsh/.zcode-catalog.json`）内容：若是旧行为的特征就说明进程没重启。**重启必须完全
+   退出 dsh 进程**（刷新浏览器页面不算）；`lsof -p <pid>` 可确认进程打开的 DSH_HOME 文件。
