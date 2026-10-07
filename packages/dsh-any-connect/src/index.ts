@@ -21,8 +21,8 @@
  * - zcode-plan-models.ts zcode-plan-prompt.ts zcode-plan-store.ts — 名单、请求体指纹、计划语义
  * 凭据
  * - auth.ts auth-types.ts auth-paths.ts auth-zcode.ts auth-zcode-crypto.ts auth-document.ts
- *   auth-desktop-read.ts auth-store.ts — 凭据解析门面与类型/路径/ZCode 解析/enc:v1 解密/文档/桌面
- *   文件读取/存储（刷新策略与自有副本）
+ *   auth-desktop-read.ts auth-refresh.ts auth-store.ts — 凭据解析门面与类型/路径/ZCode 解析/
+ *   enc:v1 解密/文档/桌面文件读取/刷新策略（何时刷、失败退避、落盘兜底）/存储门面
  * - desktop-credential-protection.ts desktop-auth-envelope.ts desktop-discovery.ts
  *   desktop-discovery-windows.ts desktop-at-rest-key.ts desktop-app-discovery.ts — at-rest 凭据门面与
  *   信封/发现/密钥解析器、按平台找 Electron 二进制

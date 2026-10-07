@@ -9,8 +9,7 @@
 
 import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
-import { regionOf, type WorkBuddyRefreshOutcome } from './upstream.js'
+import { regionOf } from './upstream.js'
 import type { WorkBuddyVariant } from './variants.js'
 import {
   atRestKeyProviderFor,
@@ -22,21 +21,13 @@ import { RegionMismatchError } from './auth-types.js'
 import type { WorkBuddyCredential, WorkBuddyAuthStatus, WorkBuddyStoreOptions } from './auth-types.js'
 import { WORKBUDDY_AUTH_FILE_ENV, workbuddyOwnAuthPath, desktopAuthCandidatesFor } from './auth-paths.js'
 import { parseZCodeAuth } from './auth-zcode.js'
-import { ownDocument, parseOwnDocument } from './auth-document.js'
+import { parseOwnDocument } from './auth-document.js'
+import { needsRefresh, refreshNow, saveOwn, type RefreshContext, type RefreshState } from './auth-refresh.js'
 import { readDesktopCredential } from './auth-desktop-read.js'
-
-/** 刷新响应缺 expiresIn 时新 access token 的保守寿命下限(10 分钟):
- * 沿用旧过期时间会让 needsRefresh 恒真、每条请求都打一次刷新端点。 */
-const DEFAULT_EXPIRES_IN_SEC = 10 * 60
 
 /** 两次刷新之间的最小间隔:极短有效期/缺 expiresIn 的上游响应 otherwise
  * 会把刷新端点打成每请求一次;窗口内 token 未真正过期时直接用现值。 */
 const MIN_REFRESH_INTERVAL_MS = 30_000
-
-/** 「token 剩余寿命长于这个值就容忍一次刷新失败/无 refresh token」的下限。
- *  与 MIN_REFRESH_INTERVAL_MS 同值但语义不同(节流窗口 vs 可容忍寿命),
- *  两者不得互相替代。 */
-const MIN_REUSABLE_LIFETIME_MS = 30_000
 
 /** refreshMarginMs 的默认值(5 分钟):文档承诺 "default five minutes"。 */
 const DEFAULT_REFRESH_MARGIN_MS = 5 * 60 * 1000
@@ -64,18 +55,8 @@ export class WorkBuddyCredentialStore {
   private readonly keyProvider: WorkBuddyStoreOptions['keyProvider']
   private desktopPathOverride: string | undefined
   private inflight: Promise<WorkBuddyCredential> | undefined
-  /** 落盘失败时的内存兜底:承载着可能已被上游轮换的 refresh token,
-   * 比磁盘副本新时 {@link current} 优先返回它,进程退出即失。 */
-  private memoryCredential: WorkBuddyCredential | undefined
-  /** 上一次刷新尝试（无论成败）的时刻；{@link MIN_REFRESH_INTERVAL_MS} 内
-   *  不再发起尝试。失败也计入——否则刷新端点持续故障且 token 还在 margin
-   *  内时，每条请求都会打一次刷新端点（与要防的「极短有效期打爆端点」
-   *  同构，只是发生在失败侧）。 */
-  private lastRefreshAttemptMs = 0
-  /** 上一次刷新**失败**的时刻。token 已过期时 {@link resolve} 无法像未过期
-   *  那样直接复用现值，必须另用本字段保住失败退避：否则刷新端点故障 + 过期
-   *  的最坏组合下，节流被完全绕过，每条请求都串行等一次刷新超时才失败。 */
-  private lastRefreshFailureMs = 0
+  /** 刷新节流与内存兜底状态（由 auth-refresh 读写）。 */
+  private readonly refreshState: RefreshState = { memoryCredential: undefined, lastRefreshAttemptMs: 0, lastRefreshFailureMs: 0 }
 
   constructor(options: WorkBuddyStoreOptions) {
     this.variant = options.variant
@@ -166,7 +147,7 @@ export class WorkBuddyCredentialStore {
     // 落盘失败期间的内存兜底:它承载着可能已轮换的 refresh token,比磁盘
     // 副本新时优先;但同样只在身份一致时——账号已在桌面端切换后,内存里的
     // 旧账号凭据不得盖过新身份。桌面端此后若刷新出更新的凭据则自然回落。
-    const memoryCredential = this.memoryCredential
+    const memoryCredential = this.refreshState.memoryCredential
     const memoryUsable = memoryCredential !== undefined
       && (stored === undefined
         || (memoryCredential.uid === stored.uid
@@ -200,9 +181,9 @@ export class WorkBuddyCredentialStore {
     // needsRefresh 变假,走不到这里,因此窗口内「已过期」基本只剩失败一种
     // 来源;成功刷新出的极短有效期 token 由 lastRefreshFailureMs 已过期
     // (陈旧)放行,下一条请求即重试刷新。
-    if (Date.now() - this.lastRefreshAttemptMs < MIN_REFRESH_INTERVAL_MS) {
+    if (Date.now() - this.refreshState.lastRefreshAttemptMs < MIN_REFRESH_INTERVAL_MS) {
       if (credential.expiresAtMs > Date.now()) return credential
-      if (Date.now() - this.lastRefreshFailureMs < MIN_REFRESH_INTERVAL_MS) {
+      if (Date.now() - this.refreshState.lastRefreshFailureMs < MIN_REFRESH_INTERVAL_MS) {
         throw new Error(
           'workbuddy: token refresh failed recently and the access token is expired;'
           + ' retry in a moment, or open the WorkBuddy desktop app once to sign in again',
@@ -253,78 +234,36 @@ export class WorkBuddyCredentialStore {
     // 的失败路径会把刷新结果兜底进 memoryCredential,先清会被它覆盖。
     const inflight = this.inflight
     if (inflight !== undefined) await inflight.catch(() => {})
-    this.memoryCredential = undefined
-    this.lastRefreshAttemptMs = 0
-    this.lastRefreshFailureMs = 0
+    this.refreshState.memoryCredential = undefined
+    this.refreshState.lastRefreshAttemptMs = 0
+    this.refreshState.lastRefreshFailureMs = 0
     await rm(this.ownPath, { force: true })
     await rm(`${this.ownPath}.lock`, { force: true })
   }
 
   private needsRefresh(credential: WorkBuddyCredential): boolean {
-    if (this.variant.kind === 'zcode') return false
-    if (credential.expiresAtMs <= 0) return true
-    return Date.now() + this.refreshMarginMs >= credential.expiresAtMs
+    return needsRefresh(this.refreshContext(), credential)
   }
 
   private async refreshNow(credential: WorkBuddyCredential): Promise<WorkBuddyCredential> {
-    if (credential.refreshToken === '') {
-      if (credential.expiresAtMs > Date.now() + MIN_REUSABLE_LIFETIME_MS) return credential
-      throw new Error('workbuddy: access token expired and no refresh token is stored; sign in again in the WorkBuddy desktop app')
-    }
-    let outcome: WorkBuddyRefreshOutcome
-    try {
-      outcome = await this.refresh(credential)
-    } catch (error: unknown) {
-      // 失败同样计入节流窗口（见 lastRefreshAttemptMs / lastRefreshFailureMs）。
-      this.lastRefreshAttemptMs = Date.now()
-      this.lastRefreshFailureMs = this.lastRefreshAttemptMs
-      if (credential.expiresAtMs > Date.now() + MIN_REUSABLE_LIFETIME_MS) return credential
-      throw new Error(
-        `workbuddy: token refresh failed and the access token is expired (${String(error)});`
-        + ' open the WorkBuddy desktop app once to sign in again',
-      )
-    }
-    this.lastRefreshAttemptMs = Date.now()
-    const refreshed: WorkBuddyCredential = {
-      ...credential,
-      accessToken: outcome.accessToken,
-      ...outcome.refreshToken === undefined ? {} : { refreshToken: outcome.refreshToken },
-      // 上游省略 expiresIn 时不能沿用旧过期时间:旧值必然已在刷新 margin
-      // 内(否则不会走到这里),沿用会让 needsRefresh 恒真、每条请求都触发
-      // 刷新。按保守下限外推;若真实寿命更短,后续请求的失败路径仍会再次
-      // 尝试刷新。
-      expiresAtMs: outcome.expiresInSec !== undefined
-        ? Date.now() + outcome.expiresInSec * 1000
-        : Date.now() + DEFAULT_EXPIRES_IN_SEC * 1000,
-      ...outcome.domain === undefined || outcome.domain === '' ? {} : { domain: outcome.domain },
-      source: 'dsh',
-    }
-    try {
-      await this.saveOwn(refreshed)
-      this.memoryCredential = undefined
-    } catch (error: unknown) {
-      // 落盘失败绝不丢刷新成果:上游可能已把 refresh token 轮换为一次性
-      // 新值,退回磁盘上的旧副本会让下一次刷新必然 session_dead。内存兜底
-      // 让本进程继续用新凭据,并把真实原因(磁盘写失败,而非上游刷新失败)
-      // 送告警通道。
-      this.memoryCredential = refreshed
-      this.onWarning(
-        'workbuddy: token refreshed but saving the plugin-owned copy failed'
-        + ` (${String(error)}); the refreshed token is kept in memory only and will be lost on exit`,
-      )
-    }
-    return refreshed
+    return await refreshNow(this.refreshContext(), credential)
   }
 
   private async saveOwn(credential: WorkBuddyCredential): Promise<void> {
-    await withFileLock(this.ownPath, async () => {
-      await writeFileAtomic(this.ownPath, `${JSON.stringify(ownDocument(credential), null, 2)}\n`, {
-        mode: 0o600,
-        dirMode: 0o700,
-      })
-    })
+    await saveOwn(this.refreshContext(), credential)
   }
 
+  /** 刷新策略的入参（含调用方持有的节流状态）。 */
+  private refreshContext(): RefreshContext {
+    return {
+      variant: this.variant,
+      refresh: this.refresh,
+      refreshMarginMs: this.refreshMarginMs,
+      ownPath: this.ownPath,
+      onWarning: this.onWarning,
+      state: this.refreshState,
+    }
+  }
   /**
    * Read the first desktop candidate that exists.
    *
