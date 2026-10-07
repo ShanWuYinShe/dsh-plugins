@@ -29,6 +29,8 @@ const EXTERNAL_FACTS: Record<string, string> = {
   TMPDIR: "POSIX 环境变量（沙盒/发布流程里重定向用），不是本仓符号",
 };
 
+// 比其它锁多跳过 `test`：本锁的判据是「文档引用的标识符在**实现**里存在」，而测试文件里
+// 出现的同名局部量（fixture、辅助函数）不构成实现事实——把测试算进来会让判据变松。
 const SKIP_DIRS = new Set(["node_modules", ".git", "lib", "dist", ".worktrees", ".workwork", ".agents", "test", "coverage"]);
 // 只收实现文件（不含 .md）：文档里提到某符号不算「实现里存在」，否则代码改名后
 // 只要 CHANGELOG 还写着旧名就会静默放过。
