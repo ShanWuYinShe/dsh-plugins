@@ -1,0 +1,668 @@
+/**
+ * upstream-zcode.ts — ZCode 上游客户端（bigmodel 订阅通道 + Start Plan）。
+ *
+ * 2026-10-08 从 upstream.ts（1765 行）拆出：原文件同时装着两个产品的 wire 实现
+ * 与共享协议层。现在按「共享协议层 / WorkBuddy / ZCode」三分，upstream.ts 退化为
+ * re-export 门面，对外 API 不变。
+ *
+ * @module dsh-any-connect/upstream-zcode
+ */
+
+import os from 'node:os'
+import { type WorkBuddyCredential } from './auth.js'
+import { FALLBACK_APP_VERSION, resolveAppVersion, type AppVersionInfo } from './app-version.js'
+import { type ProbeAttempt } from './probe.js'
+import { deadlineSignal } from './timeout.js'
+import { ZCodeClientSigner } from './zcode-signer.js'
+import { prepareStartPlanBody } from './zcode-plan-prompt.js'
+import { readZcodeCodingPlanWhitelist } from './zcode-builtin-catalog.js'
+import { parseCodingPlanQuota, type ZCodeCodingPlanQuota } from './zcode-quota.js'
+import { FALLBACK_ZCODE_START_PLAN_MODELS, isStartPlanActivityActive, startPlanModelsFromEntitlements, type StartPlanActivity } from './zcode-plan-models.js'
+import { previewStartPlan, type StartPlanClaimCredential, type StartPlanPlatformInfo, type StartPlanPreviewResult } from './zcode-plan-claim.js'
+import { JSON_TIMEOUT_MS, ERROR_BODY_LIMIT, CHAT_HEADER_TIMEOUT_MS, classifyUpstreamError } from './upstream-shared.js'
+import type { WorkBuddyUpstreamModel, WorkBuddyCreditAccount, WorkBuddyCredits, WorkBuddyRefreshOutcome, WorkBuddyChatResult } from './upstream-shared.js'
+
+/**
+ * Normalize an Anthropic messages body: force `stream: true`, ensure positive
+ * `max_tokens` (required by Anthropic API), and convert OpenAI-shaped messages
+ * if provided.
+ */
+export function prepareAnthropicBody(source: string): string {
+  let body: unknown
+  try {
+    body = JSON.parse(source)
+  } catch {
+    return source
+  }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return source
+  const obj = body as Record<string, unknown>
+  obj['stream'] = true
+
+  // max_tokens is mandatory on Anthropic /v1/messages
+  if (typeof obj['max_tokens'] !== 'number' || obj['max_tokens'] <= 0) {
+    if (typeof obj['max_completion_tokens'] === 'number' && obj['max_completion_tokens'] > 0) {
+      obj['max_tokens'] = obj['max_completion_tokens']
+    } else {
+      obj['max_tokens'] = 8192
+    }
+  }
+  delete obj['max_completion_tokens']
+
+  // If OpenAI messages format with system/developer role, convert to top-level system
+  if (Array.isArray(obj['messages'])) {
+    const systemParts: string[] = []
+    const filteredMessages: unknown[] = []
+    for (const msg of obj['messages']) {
+      if (typeof msg === 'object' && msg !== null && !Array.isArray(msg)) {
+        const wrapped = msg as Record<string, unknown>
+        if (wrapped['role'] === 'system' || wrapped['role'] === 'developer') {
+          if (typeof wrapped['content'] === 'string') {
+            systemParts.push(wrapped['content'])
+          }
+          continue
+        }
+      }
+      filteredMessages.push(msg)
+    }
+    if (systemParts.length > 0) {
+      const existing = obj['system']
+      if (existing === undefined) {
+        obj['system'] = systemParts.join('\n\n')
+        obj['messages'] = filteredMessages
+      } else if (typeof existing === 'string') {
+        // 顶层 system 已有字符串:追加合并,不能整段丢弃——否则 system/
+        // developer 消息留在 messages 里,Anthropic 端点直接拒绝请求。
+        obj['system'] = existing === '' ? systemParts.join('\n\n') : `${existing}\n\n${systemParts.join('\n\n')}`
+        obj['messages'] = filteredMessages
+      } else if (Array.isArray(existing)) {
+        // Anthropic blocks 形态的顶层 system(合法):文本块追加在数组尾,
+        // 整体覆盖会静默丢失原 system 内容。
+        obj['system'] = [...existing, ...systemParts.map(text => ({ type: 'text', text }))]
+        obj['messages'] = filteredMessages
+      }
+      // 其余畸形形态保持原样(连同 system 消息),交给上游校验给出明确错误。
+    }
+  }
+
+  // If OpenAI tools format with type 'function', convert to Anthropic input_schema
+  if (Array.isArray(obj['tools']) && obj['tools'].length > 0) {
+    obj['tools'] = obj['tools'].map(t => {
+      if (typeof t === 'object' && t !== null && !Array.isArray(t)) {
+        const wt = t as Record<string, unknown>
+        if (wt['type'] === 'function' && typeof wt['function'] === 'object' && wt['function'] !== null) {
+          const fn = wt['function'] as Record<string, unknown>
+          return {
+            name: typeof fn['name'] === 'string' ? fn['name'] : '',
+            description: typeof fn['description'] === 'string' ? fn['description'] : '',
+            input_schema: typeof fn['parameters'] === 'object' && fn['parameters'] !== null ? fn['parameters'] : { type: 'object', properties: {} },
+          }
+        }
+      }
+      return t
+    })
+  }
+
+  return JSON.stringify(obj)
+}
+
+/**
+ * 上游新出现、本地目录尚未收录的模型 id 的保守默认行。
+ *
+ * 与 Start Plan 的 `startPlanModelInfo` 同口径：宁可报小不可虚报——200K 窗口、
+ * 32K 输出、不支持图像、思考可关、x1.00 基准费率、不带任何促销徽标。参数报小
+ * 顶多少用一点上下文，报大了会让上游直接拒绝请求；费率同理，凭空打折或加价都
+ * 是错的。真实值等官方目录收录后随发版修正。
+ *
+ * 名字保留上游原样（只做 id 小写归一）——展示名由上游 id 推导比编造一个更好。
+ */
+function defaultZCodeModelInfo(id: string): WorkBuddyUpstreamModel {
+  return {
+    id: id.toLowerCase(),
+    name: id,
+    contextWindow: 200000,
+    maxTokens: 32000,
+    supportsImages: false,
+    reasoning: { supports: true, onlyReasoning: false, canDisableThinking: true },
+    billing: { credits: 'x1.00', free: false },
+  }
+}
+
+/** Options for ZCodeUpstreamClient. */
+export interface ZCodeUpstreamClientOptions {
+  signer?: ZCodeClientSigner
+  models?: readonly WorkBuddyUpstreamModel[]
+  /** Resolves the client app version sent as `app_version`/`X-ZCode-App-Version`
+   * on the account-plan endpoints; injectable so tests never touch the real FS. */
+  resolveAppVersion?: () => Promise<AppVersionInfo>
+  /** Coding Plan 的官方模型白名单（小写 id 集合）；undefined = 客户端产品面不可得。
+   * 默认实现读本机 ZCode 客户端的 zcode-builtin.json（见 zcode-builtin-catalog），
+   * 注入口让测试不依赖测试机的真实安装。 */
+  resolveCodingPlanWhitelist?: () => ReadonlySet<string> | undefined
+}
+
+/**
+ * ZCode upstream client: client request signing V4 handshake and per-request
+ * signing for BigModel Coding Plan, streaming chat completions, model list,
+ * and subscription quota.
+ */
+export class ZCodeUpstreamClient {
+  private readonly signer: ZCodeClientSigner
+  private readonly models: readonly WorkBuddyUpstreamModel[]
+  private readonly resolveAppVersion: () => Promise<AppVersionInfo>
+  private readonly resolveCodingPlanWhitelist: () => ReadonlySet<string> | undefined
+
+  constructor(options: ZCodeUpstreamClientOptions = {}) {
+    this.signer = options.signer ?? new ZCodeClientSigner()
+    this.models = options.models ?? []
+    this.resolveAppVersion = options.resolveAppVersion ?? (() => resolveAppVersion())
+    this.resolveCodingPlanWhitelist = options.resolveCodingPlanWhitelist ?? readZcodeCodingPlanWhitelist
+  }
+
+  /**
+   * 当前客户端内置目录给出的 Coding Plan 白名单（小写 id 集合），不可得时
+   * undefined。公开出来供启动时过滤历史 saved 目录——旧版本写入的 saved 可能
+   * 含产品面之外的模型（见 `filterByCodingPlanWhitelist`）。
+   */
+  codingPlanWhitelist(): ReadonlySet<string> | undefined {
+    return this.resolveCodingPlanWhitelist()
+  }
+
+  /**
+   * Coding Plan 的窗口额度（5 小时 / 7 天 / 工具调用），来自客户端用的同一支
+   * `GET https://bigmodel.cn/api/monitor/usage/quota/limit`（Authorization 用
+   * coding-plan 的 api-key）。拿不到（网络/非 bigmodel 账号/形状变化）返回
+   * undefined，调用方回退到订阅有效性窗口——绝不编数字。
+   */
+  async fetchCodingPlanQuota(credential: WorkBuddyCredential): Promise<ZCodeCodingPlanQuota | undefined> {
+    const quotaTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+    try {
+      const response = await fetch('https://bigmodel.cn/api/monitor/usage/quota/limit', {
+        headers: {
+          'Authorization': `Bearer ${credential.accessToken}`,
+          'Accept': 'application/json',
+        },
+        signal: quotaTimeout.signal,
+      })
+      if (!response.ok) return undefined
+      return parseCodingPlanQuota(await response.json())
+    } catch {
+      return undefined
+    } finally {
+      quotaTimeout.dispose()
+    }
+  }
+
+  /** POST the BigModel Anthropic messages endpoint; a successful answer is the raw SSE response.
+   *
+   * 生效计划为 Start Plan 时走其专属通道（zcode-plan/anthropic + 账号 JWT），
+   * 额度扣 Start Plan 专属余额——普通通道扣的是 Coding Plan 订阅，两者绝不
+   * 混用（2026-09-30 口径）。 */
+  async chatStream(
+    credential: WorkBuddyCredential,
+    bodyJson: string,
+    signal?: AbortSignal,
+  ): Promise<WorkBuddyChatResult> {
+    if (credential.zcodePlan === 'start-plan') {
+      return this.chatStreamStartPlan(credential, bodyJson, signal)
+    }
+    // 头超时与调用方取消经宿主 deadline 融合（同上，与 WorkBuddy 线同口径）。
+    const headersTimeout = await deadlineSignal(signal, CHAT_HEADER_TIMEOUT_MS, 'ANY_CONNECT_HEADERS')
+    let response: Response
+    try {
+      const zcodeHeaders = await this.signer.buildHeaders({ apiKey: credential.accessToken })
+      response = await fetch('https://open.bigmodel.cn/api/anthropic/v1/messages', {
+        method: 'POST',
+        headers: {
+          ...zcodeHeaders,
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+          'anthropic-version': '2023-06-01',
+        },
+        body: prepareAnthropicBody(bodyJson),
+        signal: headersTimeout.signal,
+      })
+    } catch (error: unknown) {
+      headersTimeout.dispose()
+      if (signal?.aborted) {
+        return { ok: false, status: 0, kind: 'client', message: 'client disconnected before upstream response' }
+      }
+      return { ok: false, status: 0, kind: 'server', message: `transport error: ${String(error)}` }
+    }
+    if (response.ok) {
+      headersTimeout.dispose()
+      return { ok: true, response }
+    }
+    let text: string
+    try {
+      text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
+    } catch {
+      return { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)' }
+    } finally {
+      headersTimeout.dispose()
+    }
+    return {
+      ok: false,
+      status: response.status,
+      kind: classifyUpstreamError(response.status, text),
+      message: text,
+    }
+  }
+
+  async fetchModels(credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
+    // Start Plan 的名单以**当前活动的 entitlements** 为准，而不是客户端内置目录：
+    // 内置目录只是候选，服务端按活动放行（实测 Trust Build 只授权 GLM-5.3-Flash，
+    // 另外两个 400 code 3006 model not allowed）。拿不到授权信息时回退已注册名单
+    // ——一次上游抖动不该让整组模型从选择器里消失。
+    if (credential.zcodePlan === 'start-plan') {
+      return this.fetchStartPlanModels(credential)
+    }
+    // Coding Plan 的名单真源是客户端内置 provider 目录（产品面），不是开放平台的
+    // paas 目录：白名单拿不到（客户端未装/结构演进）就回已注册名单，不把未经验证
+    // 的模型带进选择器（端点放行 ≠ 订阅覆盖，2026-10-06 实测见 zcode-builtin-catalog）。
+    const whitelist = this.resolveCodingPlanWhitelist()
+    if (whitelist === undefined) {
+      return this.models
+    }
+    // 超时同样走宿主 deadline：外层 try/catch 的降级语义（失败回退已有模型）不变。
+    const modelsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+    try {
+      const response = await fetch('https://open.bigmodel.cn/api/paas/v4/models', {
+        headers: {
+          'Authorization': `Bearer ${credential.accessToken}`,
+          'Accept': 'application/json',
+        },
+        signal: modelsTimeout.signal,
+      })
+      if (!response.ok) {
+        return this.models
+      }
+      const json = await response.json() as { data?: Array<{ id?: string }> }
+      const upstreamIds = Array.isArray(json.data)
+        ? json.data.map(row => typeof row?.id === 'string' ? row.id.trim() : '').filter(id => id !== '')
+        : []
+      if (upstreamIds.length === 0) {
+        return this.models
+      }
+      // BigModel connection and API credentials verified; Coding Plan subscriber
+      // models are preserved with their verified parameters (128K max tokens, custom rates).
+      //
+      // 三方合流，白名单是总闸：
+      // - 上游 paas 目录给"开放平台有哪些 id"，只作存在性参考；id 必须先过客户端
+      //   产品面白名单，官方未收录的模型不展示——那不是本订阅的名单；
+      // - 白名单内的 id：本地收录过的沿用整行（128K/费率/徽章都不丢），没收录过
+      //   的走保守默认（官方上新时新模型能出现，但不虚报窗口与费率）；
+      // - 本地收录、上游没列的：仍在白名单内才保留（目录接口可能只列一部分；
+      //   官方从产品面下架的模型则随之消失，不再靠本地行续命）。
+      // 失败/空响应仍回退 this.models（上面的 return），语义不变。
+      const known = new Map(this.models.map(model => [model.id.toLowerCase(), model]))
+      const merged: WorkBuddyUpstreamModel[] = []
+      const seen = new Set<string>()
+      for (const rawId of upstreamIds) {
+        const key = rawId.toLowerCase()
+        if (seen.has(key)) continue
+        if (!whitelist.has(key)) continue
+        seen.add(key)
+        const hit = known.get(key)
+        merged.push(hit ?? defaultZCodeModelInfo(rawId))
+      }
+      for (const model of this.models) {
+        const key = model.id.toLowerCase()
+        if (seen.has(key)) continue
+        if (!whitelist.has(key)) continue
+        seen.add(key)
+        merged.push(model)
+      }
+      return merged
+    } catch {
+      return this.models
+    } finally {
+      modelsTimeout.dispose()
+    }
+  }
+
+  /**
+   * Start Plan 专属通道：`zcode-plan/anthropic` + 账号 JWT（`zcodejwttoken`）
+   * + 设备号。额度扣 Start Plan 专属余额（一次性、当日有效），与 Coding Plan
+   * 订阅互不占用。
+   *
+   * 该通道校验**请求体指纹**：`system` 必须以官方客户端的固定提示词开头
+   * （见 `zcode-plan-prompt` 与其中的实测记录），否则一律 405 `code 3012`。
+   * 指纹是请求体内容，与传输层/请求头/签名无关，所以这里把指纹前置、把
+   * Harness 自己的 system 提示词接在其后——实测模型仍按后者回答。仍被拦
+   * （例如上游又加了新条件）时如实报错，绝不回落到普通通道，那会把请求偷偷
+   * 记到 Coding Plan 头上。
+   */
+  private async chatStreamStartPlan(
+    credential: WorkBuddyCredential,
+    bodyJson: string,
+    signal?: AbortSignal,
+  ): Promise<WorkBuddyChatResult> {
+    if (credential.zcodeJwtToken === undefined || credential.zcodeJwtToken === '') {
+      return {
+        ok: false,
+        status: 0,
+        kind: 'client',
+        message: 'Start Plan 专属通道缺少凭据（凭据文档中没有 zcodejwttoken）——请在 ZCode 客户端登录一次后重试',
+      }
+    }
+    const headersTimeout = await deadlineSignal(signal, CHAT_HEADER_TIMEOUT_MS, 'ANY_CONNECT_HEADERS')
+    let response: Response
+    try {
+      response = await fetch('https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${credential.zcodeJwtToken}`,
+          'X-Device-Mid': credential.zcodeDeviceMid ?? '',
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+          'anthropic-version': '2023-06-01',
+        },
+        body: prepareStartPlanBody(prepareAnthropicBody(bodyJson)),
+        signal: headersTimeout.signal,
+      })
+    } catch (error: unknown) {
+      headersTimeout.dispose()
+      if (signal?.aborted) {
+        return { ok: false, status: 0, kind: 'client', message: 'client disconnected before upstream response' }
+      }
+      return { ok: false, status: 0, kind: 'server', message: `transport error: ${String(error)}` }
+    }
+    if (response.ok) {
+      headersTimeout.dispose()
+      return { ok: true, response }
+    }
+    let text: string
+    try {
+      text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
+    } catch {
+      return { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)' }
+    } finally {
+      headersTimeout.dispose()
+    }
+    if (text.includes('"code":3012')) {
+      // 指纹已在请求体里（见 prepareStartPlanBody），走到这里说明上游改了判据
+      // 或加了新条件——如实报告并说明"前置指纹仍不够"，不要谎称通道被封。
+      return {
+        ok: false,
+        status: response.status,
+        kind: classifyUpstreamError(response.status, text),
+        message: 'Start Plan 请求被上游风控拦截（code 3012），本次请求未消耗任何额度。'
+          + '插件已按官方客户端的请求体指纹发送，仍被拦说明上游新增了判据——请报告此情况，不要改扣 Coding Plan。',
+      }
+    }
+    if (response.status === 401) {
+      return {
+        ok: false,
+        status: response.status,
+        kind: 'client',
+        message: 'Start Plan 凭据失效（HTTP 401）——请在 ZCode 客户端重新登录一次',
+      }
+    }
+    return {
+      ok: false,
+      status: response.status,
+      kind: classifyUpstreamError(response.status, text),
+      message: text,
+    }
+  }
+
+  async fetchCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
+    // 额度来源跟生效计划走：Start Plan 查专属余额（billing/balance，当日有效的
+    // 一次性 token 包），其余计划查 coding-plan 订阅（subscription/list）。两个
+    // 口径绝不混报——Start Plan 档显示订阅余额、或 Coding Plan 档显示专属余额，
+    // 都会让用户对着错误的池子做决定。
+    if (credential.zcodePlan === 'start-plan') {
+      return this.fetchStartPlanCredits(credential)
+    }
+    // 额度口径以「账户上的 coding-plan 订阅」为准，与客户端选了哪条账号计划
+    // 无关：模型请求本身就固定走 coding-plan 通道（Start Plan 的专属模型通道
+    // 被上游风控封锁，本包按普通 ZCode 150% 额度使用），额度显示自然也要跟
+    // 模型请求同一口径，否则卡片报的是一份用不上的余额。
+    const creditsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+    try {
+      const response = await fetch('https://bigmodel.cn/api/biz/subscription/list', {
+        headers: {
+          'Authorization': `Bearer ${credential.accessToken}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        signal: creditsTimeout.signal,
+      })
+      if (!response.ok) {
+        return {
+          total: 1,
+          accounts: [{ packageName: 'Coding Plan (有效)', remain: 1, size: 1 }],
+        }
+      }
+      const json = await response.json() as { code?: number; data?: Array<{ productName?: string; status?: string; expireTime?: number | string }> }
+      const accounts: WorkBuddyCreditAccount[] = []
+      if (Array.isArray(json.data) && json.data.length > 0) {
+        for (const item of json.data) {
+          const name = item.productName || 'Coding Plan'
+          const isValid = item.status === 'VALID' || item.status === 'ACTIVE'
+          let expiredAt: string | undefined
+          if (item.expireTime) {
+            const d = new Date(item.expireTime)
+            if (!Number.isNaN(d.getTime())) expiredAt = d.toISOString()
+          }
+          accounts.push({
+            packageName: isValid ? `${name} (有效)` : `${name} (${item.status ?? '未知'})`,
+            // 计划名单独留一份:上游的产品名就是用户看到的活动/套餐名(例如
+            // "ZCode Trust Build"),界面上的 plan 标签必须用它,而不是写死
+            // "Coding Plan"——那会把用户实际没有的套餐名报给用户。
+            planName: name,
+            remain: isValid ? 1 : 0,
+            size: 1,
+            ...expiredAt === undefined ? {} : { expiredAt },
+          })
+        }
+      } else {
+        accounts.push({
+          packageName: 'Coding Plan (有效)',
+          remain: 1,
+          size: 1,
+        })
+      }
+      return {
+        total: accounts.reduce((acc, cur) => acc + cur.remain, 0),
+        accounts,
+      }
+    } catch {
+      return {
+        total: 1,
+        accounts: [{ packageName: 'Coding Plan (有效)', remain: 1, size: 1 }],
+      }
+    } finally {
+      creditsTimeout.dispose()
+    }
+  }
+
+  /**
+   * Start Plan 的模型名单：读当前活动（`billing/balance` 的 `data.plans[]`）
+   * 的 entitlements，按活动实际放行的模型派生。
+   *
+   * 与 {@link fetchStartPlanCredits} 共用同一个端点但**语义不同**：那里问的是
+   * 还剩多少额度、失败必须如实抛错；这里问的是"活动授权了哪些模型"。
+   *
+   * 三种状态必须分开（混在一起就是"过期活动仍列出未授权模型"那个 bug）：
+   * - 查到活动且解析出模型 -> 返回该名单；
+   * - 查询**成功**但没有有效活动（未领取/已过期）-> 返回**空名单**，分组如实隐藏；
+   * - 查询**失败**（HTTP 非 ok / 抛错）-> 回退已注册名单 this.models，一次上游
+   *   抖动不该让用户失去一个本来能用的分组。
+   *
+   * **有有效活动但一个模型都解析不出来同样返回空名单**：走到那一步已经确认活动
+   * 存在且有效，名单的权威来源就是它的 entitlements；此时若回退 this.models（对
+   * start-plan 变体就是兜底那三个模型），等于让授权字段漂移重新长出"看起来能用、
+   * 一用就 400 code 3006"的幻影名单——与"未领取却显示模型"是同一个用户可见症状。
+   * 空名单 = "今天拿不到"（可恢复），幻影名单 = "以为能用"（更糟）。
+   */
+  private async fetchStartPlanModels(credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
+    if (credential.zcodeJwtToken === undefined || credential.zcodeJwtToken === '') {
+      return this.models
+    }
+    const modelsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+    try {
+      const response = await fetch('https://zcode.z.ai/api/v1/zcode-plan/billing/balance', {
+        headers: {
+          'Authorization': `Bearer ${credential.zcodeJwtToken}`,
+          'X-Device-Mid': credential.zcodeDeviceMid ?? '',
+          'Accept': 'application/json',
+        },
+        signal: modelsTimeout.signal,
+      })
+      if (!response.ok) return this.models
+      const json = await response.json() as { data?: { plans?: readonly StartPlanActivity[] } }
+      // 有效期以 ends_at（秒级 epoch）判定：过期活动放行的模型服务端已经不认，
+      // 登记上去只会得到 400 code 3006 model not allowed。ends_at 缺失按有效处理。
+      const now = Date.now()
+      const active = (json.data?.plans ?? []).filter(plan => isStartPlanActivityActive(plan, now))
+      if (active.length === 0) {
+        // B：查询成功、但此刻没有任何有效活动（今天还没领取 / 活动已过期）——
+        // 今日确实没有可用模型，返回空名单让分组隐藏。
+        //
+        // 这里**不再回退 this.models**：兜底名单里的 GLM-5.2 / GLM-5-Turbo 上游
+        // 并不放行，选中只会失败（实测 400 code 3006），等于把"无模型"伪装成
+        // "有三个模型"。分组隐藏后，用户重新领取活动即可恢复。
+        return []
+      }
+      // 走到这里说明**已确认有有效活动**，名单的权威来源就是该活动的
+      // entitlements：解析不出模型时返回空（分组隐藏），绝不回退 this.models。
+      // 对 start-plan 变体而言 this.models 就是那三个幻影模型（index.ts 用
+      // FALLBACK_ZCODE_START_PLAN_MODELS 构造 client），回退等于让"活动有效但
+      // 授权字段漂移"重新长出"看起来能用、一用就 400 code 3006"的假名单。
+      // 空 = "今天拿不到"（可恢复），幻影名单 = "以为能用"（更糟）。
+      return startPlanModelsFromEntitlements(
+        active.flatMap(plan => plan.entitlements ?? []),
+        FALLBACK_ZCODE_START_PLAN_MODELS,
+        true,
+      )
+    } catch {
+      return this.models
+    } finally {
+      modelsTimeout.dispose()
+    }
+  }
+
+  /**
+   * 今日 Start Plan 待领取探测（`billing/preview`）：纯 HTTP、**不需要验证码**，
+   * 因此可以自动跑。返回的清单就是"今天还能领什么"，为空表示今日已领取。
+   *
+   * 这是**提示性**信息，不是额度也不是名单，所以失败语义照 {@link fetchStartPlanModels}：
+   * 绝不抛错（探不到就让调用方按 unknown 处理），也绝不因此影响分组可用性——
+   * 探测失败不该让用户失去一个本来能用的连接。
+   *
+   * 接入点说明（能力边界）：本方法只做 preview。真正的 claim 需要
+   * `X-Aliyun-Captcha-Verify-Param`，该 token 由客户端渲染进程的阿里云 SDK
+   * 签发、与浏览器指纹绑定，纯 Node 侧无法生成（实测无 captcha 一律 400
+   * code 3007），所以**全自动领取做不到**——插件做到的是"自动探测 + 提示用户
+   * 去客户端点一次领取"，见 `zcode-plan-claim` 模块头部。
+   *
+   * `options.signal` 用于把本探测**限制在很短的窗口内**：status 路由是卡片每
+   * 60s 轮询的读路径，一个挂死的上游不能把 status 拖住。超时/取消都会落进
+   * catch，降级成 failed。
+   */
+  async fetchStartPlanClaimPreview(
+    credential: WorkBuddyCredential,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<StartPlanPreviewResult> {
+    const claimCredential: StartPlanClaimCredential = {
+      ...credential.zcodeJwtToken === undefined ? {} : { zcodeJwtToken: credential.zcodeJwtToken },
+      ...credential.zcodeDeviceMid === undefined ? {} : { zcodeDeviceMid: credential.zcodeDeviceMid },
+    }
+    // 平台拼法照抄 zcode-signer 的 'X-Platform'（`<os>-<arch>`），不另造一套；
+    // 账号计划端点按它分流客户端版本，拼错会拿到与真客户端不同的响应。
+    const platform = `${process.platform}-${os.arch()}`
+    if (credential.zcodeJwtToken === undefined || credential.zcodeJwtToken === '') {
+      return { status: 'auth-failed', message: '未登录：凭据文档中没有 zcodejwttoken' }
+    }
+    let appVersion: string
+    try {
+      appVersion = (await this.resolveAppVersion()).version
+    } catch {
+      // 版本解析只影响查询参数与头，拿不到就走编译期兜底；让它把探测打挂
+      // 是轻重倒置（与 WorkBuddyUpstreamClient.fetchModels 的降级同思路）。
+      appVersion = FALLBACK_APP_VERSION
+    }
+    const info: StartPlanPlatformInfo = { appVersion, platform }
+    return previewStartPlan(claimCredential, info, options.signal)
+  }
+
+  /**
+   * Start Plan 专属额度（`billing/balance`）：`data.plans[]` 给活动名与有效期
+   * （一次性包，当日过期），`data.balances[]` 给 token 级的总量/已用/剩余。
+   * 查询失败如实抛错（卡片转 creditsError），绝不拿 Coding Plan 的订阅状态
+   * 冒充 Start Plan 的额度。
+   */
+  private async fetchStartPlanCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
+    if (credential.zcodeJwtToken === undefined || credential.zcodeJwtToken === '') {
+      throw new Error('Start Plan 额度查询缺少凭据（凭据文档中没有 zcodejwttoken）')
+    }
+    const balanceTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+    try {
+      const response = await fetch('https://zcode.z.ai/api/v1/zcode-plan/billing/balance', {
+        headers: {
+          'Authorization': `Bearer ${credential.zcodeJwtToken}`,
+          'X-Device-Mid': credential.zcodeDeviceMid ?? '',
+          'Accept': 'application/json',
+        },
+        signal: balanceTimeout.signal,
+      })
+      if (!response.ok) {
+        throw new Error(`Start Plan 额度查询失败（HTTP ${response.status}）`)
+      }
+      const json = await response.json() as {
+        data?: {
+          plans?: Array<{ name?: string; plan_id?: string; ends_at?: number }>
+          balances?: Array<{
+            show_name?: string
+            plan_id?: string
+            total_units?: number
+            remaining_units?: number
+            expires_at?: number
+          }>
+        }
+      }
+      const plans = json.data?.plans ?? []
+      // 额度是**当日一次性池子**：活动当天发放、当天到期、余额不结转（实测
+      // `period: "one_time"` + `expires_at` 固定当日 16:00Z）。所以卡片与 pill
+      // 报的都是"这个池子此刻还剩多少"，而不是任何可累积的订阅余额。
+      const accounts: WorkBuddyCreditAccount[] = (json.data?.balances ?? []).map(balance => {
+        const plan = plans.find(entry => entry.plan_id !== undefined && entry.plan_id === balance.plan_id)
+        let expiredAt: string | undefined
+        if (typeof balance.expires_at === 'number' && balance.expires_at > 0) {
+          const d = new Date(balance.expires_at * 1000)
+          if (!Number.isNaN(d.getTime())) expiredAt = d.toISOString()
+        }
+        return {
+          packageName: `${balance.show_name ?? 'Start Plan'} (有效)`,
+          // 活动名（如 "ZCode Trust Build"）是用户看到的套餐名。
+          planName: plan?.name ?? balance.show_name ?? 'Start Plan',
+          // 该池子当日有效、不结转：到期时间就是它的"清零时刻"。
+          sameDay: true,
+          remain: typeof balance.remaining_units === 'number' ? balance.remaining_units : 0,
+          size: typeof balance.total_units === 'number' ? balance.total_units : 0,
+          ...expiredAt === undefined ? {} : { expiredAt },
+        }
+      })
+      return {
+        total: accounts.reduce((acc, cur) => acc + cur.remain, 0),
+        accounts,
+      }
+    } finally {
+      balanceTimeout.dispose()
+    }
+  }
+
+  async refreshToken(credential: WorkBuddyCredential): Promise<WorkBuddyRefreshOutcome> {
+    return { accessToken: credential.accessToken }
+  }
+
+  async probeEffort(
+    _credential: WorkBuddyCredential,
+    _model: string,
+    _effort: string | undefined,
+    _signal: AbortSignal,
+  ): Promise<ProbeAttempt> {
+    return { status: 200, streamed: true }
+  }
+}
