@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import * as WorkBuddy from '../src/index.js'
+import { signedInDocument, catalogRow } from './catalog-harness.js'
 import type { WorkBuddyModelInfo } from '../src/index.js'
 
 /**
@@ -33,18 +34,7 @@ afterEach(async () => {
   await Promise.all(CLEANUP.splice(0).map(clean => clean()))
 })
 
-/** 一份已登录的桌面凭据文件，内容只是"看起来登录了"，测试不触真上游。 */
-function signedInDocument(): string {
-  return JSON.stringify({
-    auth: { accessToken: 'at', refreshToken: 'rt', expiresAt: Date.now() + 3600_000, domain: 'www.codebuddy.cn' },
-    account: { uid: 'uid-1', nickname: '昵称' },
-  })
-}
 
-/** 一行目录（展示字段之外的字段测试不关心）。 */
-function row(id: string, name = id): WorkBuddyModelInfo {
-  return { id, name, contextWindow: 1000, maxTokens: 100, supportsImages: false }
-}
 
 /**
  * 装一个真实宿主（LlmRuntime + 插件），并订阅 llm/adapters-updated——
@@ -125,7 +115,7 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
     // 计数基线说明：宿主对每个变体有 2 次固有广播（registerAdapter 与
     // registerConfigurableProviders 各一次，实测），插件自己再加 1 次目录发布。
     // 这里只关心"增量"，所以先记下基线再比差值，不写死绝对数。
-    const roster: WorkBuddyModelInfo[][] = [[row('alpha')], [row('alpha')], [row('beta')], []]
+    const roster: WorkBuddyModelInfo[][] = [[catalogRow('alpha')], [catalogRow('alpha')], [catalogRow('beta')], []]
     const { publishes, events } = await installPlugin({ models: async () => roster.shift() ?? [] })
 
     await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) })
@@ -159,7 +149,7 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
     // 用户看得见的"费率/徽标"直接写在模型展示名后缀上（x0.79 / 免费），只比 id
     // 会漏掉"同一批模型、促销上下线"这种最常见的漂移。
     const priced = (credits: string): WorkBuddyModelInfo => ({
-      ...row('glm-5.3', 'GLM-5.3'),
+      ...catalogRow('glm-5.3', 'GLM-5.3'),
       billing: { credits, free: false },
     })
     let credits = 'x0.79'
@@ -187,7 +177,7 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-refresh-signin-'))
     const desktop = join(root, 'workbuddy-desktop.info')
     vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
-      .mockImplementation(async () => [row('alpha')])
+      .mockImplementation(async () => [catalogRow('alpha')])
     const ctx = new Context()
     context = ctx
     // 同样只数**本变体**的 replace（理由见 installPlugin 的注释）。
@@ -238,7 +228,7 @@ describe('注册已释放（REGISTRATION_DISPOSED）不影响刷新链路', () =
     await writeFile(desktop, signedInDocument())
     let modelsCall = 0
     vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
-      .mockImplementation(async () => { modelsCall += 1; return [row('alpha')] })
+      .mockImplementation(async () => { modelsCall += 1; return [catalogRow('alpha')] })
 
     const ctx = new Context()
     context = ctx
@@ -276,7 +266,7 @@ describe('注册已释放（REGISTRATION_DISPOSED）不影响刷新链路', () =
 
       // 换一份**内容不同**的名单，确保这一轮一定走到 publishCatalog → replace。
       vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
-        .mockImplementation(async () => { modelsCall += 1; return [row('beta')] })
+        .mockImplementation(async () => { modelsCall += 1; return [catalogRow('beta')] })
       const warnings: string[] = []
       const warnSpy = vi.spyOn(ctx.logger, 'warn').mockImplementation((...args: unknown[]) => {
         warnings.push(args.map(String).join(' '))

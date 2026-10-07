@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import * as WorkBuddy from '../src/index.js'
+import { catalogRow } from './catalog-harness.js'
 import type { WorkBuddyModelInfo } from '../src/index.js'
 
 /**
@@ -33,9 +34,6 @@ afterEach(async () => {
   await Promise.all(CLEANUP.splice(0).map(clean => clean()))
 })
 
-function row(id: string): WorkBuddyModelInfo {
-  return { id, name: id, contextWindow: 1000, maxTokens: 100, supportsImages: false }
-}
 
 /** 真实 I/O（凭据文件读取、shim 就绪）在假时钟下不会前进，用真实小睡等它收敛。 */
 async function drain(until: () => boolean, budget = 400): Promise<void> {
@@ -75,7 +73,7 @@ async function install(home: string): Promise<Harness> {
   let previewCalls = 0
   let modelsCalls = 0
   vi.spyOn(WorkBuddy.ZCodeUpstreamClient.prototype, 'fetchModels')
-    .mockImplementation(async () => { modelsCalls += 1; return claimed ? [row('claimed-model')] : [] })
+    .mockImplementation(async () => { modelsCalls += 1; return claimed ? [catalogRow('claimed-model')] : [] })
   vi.spyOn(WorkBuddy.ZCodeUpstreamClient.prototype, 'fetchStartPlanClaimPreview')
     .mockImplementation(async () => {
       previewCalls += 1
