@@ -1,3 +1,15 @@
+## 0.4.14-alpha.4 (2026-10-07)
+
+### 修复
+
+* **Start Plan 额度 pill 显示真实剩余 token 数**：composer dock 的额度 pill 在窗口缺 `remain` 时只渲染「套餐名: 有效」，而 Start Plan 的当日 token 池（`billing/balance` 的 `remain` / `size` 是真实数字）被 `currentPlanWindow` 丢弃——卡片显示 93M tokens 额度、聊天框下方却看不到剩余额度（用户报告）。现在 `sameDay` 池带 `remain` / `limit` / `unit: 'tokens'`：pill 显示「X tokens 剩余」并画进度条，当日用完是红色空条（正确语义）；Coding Plan 订阅的 `remain` / `size` 恒为 1（有效性标志而非用量），维持「有效」展示。
+* **CLI 的 ZCode 额度输出按变体口径**：`dsh-any-connect status` 此前打印裸 `total`——Coding Plan 显示「Remaining credit: 1」（订阅有效性计数被当积分），Start Plan 是无单位 token 数；且 CLI 的凭据 store 缺 `transformCredential`（运行时有），会把 `zcode-start-plan` 的额度查询指到 coding 池子（反之亦然）。现在与运行时同口径固定计划语义，人读行按 pill 语义输出（Start Plan 带 token 数字 / 上限 / 到期时间，Coding Plan 报订阅名与有效性），`--json` 新增 `quotaWindows`（`total` 保留兼容）。
+* **Start Plan 空名单分钟级自愈**：上游偶发对 `billing/balance` 答一个空活动清单（实测 catalog 拉得 `live/empty` 的同一时刻，直调同端点却有 active 活动与模型授权，余额也正常），分组诚实隐藏后唯一的恢复路径是小时刷新——最长消失一小时，且卡片同屏出现「93M tokens 额度」与「今日没有有效的 Start Plan 活动」的自相矛盾。现在 sweep 里对「目录空 + 领取探测无翻转 + 距上次拉取 ≥ 5 分钟」再拉一拍（拉取无论结果都前移 `fetchedAtMs`，不会打环）；空名单文案改为中性表述，不再断言「无活动」。
+
+### 文档
+
+* README 的 ZCode 段重写为双变体现状（`zcode` / `zcode-start-plan` 两个独立连接、专属通道已接入且失败如实报错、两变体各自的模型名单口径），并补 `--provider` 列表漏掉的 `zcode-start-plan`。此前还停留在「Start Plan 按普通 ZCode 通道使用」「专属模型通道未接入（被风控拦截）」的旧口径。
+
 ## 0.4.14-alpha.3 (2026-10-06)
 
 ### 修复
