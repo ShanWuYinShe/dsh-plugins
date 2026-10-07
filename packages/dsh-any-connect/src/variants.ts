@@ -23,6 +23,7 @@ import {
   ZCODE_SP_STATUS_PATH,
   ZCODE_STATUS_PATH,
 } from './status-paths.js'
+import { WORKBUDDY_AI_CATALOG_FILENAME, WORKBUDDY_CATALOG_FILENAME } from './catalog-store.js'
 import type { WorkBuddyRegion } from './upstream.js'
 
 /** Which upstream family a variant talks to; selects the per-kind wiring. */
@@ -143,7 +144,7 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
     desktopFilename: 'workbuddy-desktop.info',
     ownFilename: '.workbuddy-auth.json',
     probeFilename: '.workbuddy-probe.json',
-    catalogFilename: '.workbuddy-catalog.json',
+    catalogFilename: WORKBUDDY_CATALOG_FILENAME,
     settingsNs: 'anyconnect' as SettingsNamespace,
     statusPath: WORKBUDDY_STATUS_PATH,
     probePath: WORKBUDDY_PROBE_PATH,
@@ -173,7 +174,7 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
     desktopFilename: 'workbuddy-desktop-ai.info',
     ownFilename: '.workbuddy-ai-auth.json',
     probeFilename: '.workbuddy-ai-probe.json',
-    catalogFilename: '.workbuddy-ai-catalog.json',
+    catalogFilename: WORKBUDDY_AI_CATALOG_FILENAME,
     settingsNs: 'anyconnect-ai' as SettingsNamespace,
     statusPath: WORKBUDDY_AI_STATUS_PATH,
     probePath: WORKBUDDY_AI_PROBE_PATH,

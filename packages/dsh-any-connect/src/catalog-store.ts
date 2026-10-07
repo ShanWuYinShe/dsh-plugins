@@ -33,7 +33,7 @@ const CATALOG_FORMAT_VERSION = 1
 export const WORKBUDDY_CATALOG_FILENAME = '.workbuddy-catalog.json'
 
 /** Basename of the international saved catalog inside the Harness home. */
-const WORKBUDDY_AI_CATALOG_FILENAME = '.workbuddy-ai-catalog.json'
+export const WORKBUDDY_AI_CATALOG_FILENAME = '.workbuddy-ai-catalog.json'
 
 /** One saved catalog: the account it belonged to, and the models it listed. */
 export interface SavedWorkBuddyCatalog {

@@ -82,16 +82,6 @@ describe('parseWorkBuddyAuth', () => {
   })
 })
 
-function credentialWith(expiresAtMs: number): WorkBuddyCredential {
-  return {
-    accessToken: 'at',
-    refreshToken: 'rt',
-    expiresAtMs,
-    domain: 'www.codebuddy.cn',
-    uid: 'uid-1',
-    source: 'desktop',
-  }
-}
 
 describe('WorkBuddyCredentialStore', () => {
   it('serves a fresh desktop credential without refreshing', async () => {
