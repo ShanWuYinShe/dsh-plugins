@@ -7,7 +7,8 @@
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * - index.ts — 插件入口：remote 网关接线与 apply
- * - archive-host.ts — 归档 host 工厂（list/count/detail/delete/unarchive）
+ * - archive-host.ts archive-host-context.ts archive-host-queries.ts archive-host-mutations.ts —
+ *   归档 host 组合入口、内部上下文（deps 对象）与只读查询 / 写操作两个子工厂
  * - session-scan.ts — 会话文件扫描与读取助手
  * - plugin-config.ts — 插件身份与配置默认值/校验/归一化
  * - config-store.ts — 配置持久化（与 sandbox-extra-roots 同字节，根 test 锁一致）
