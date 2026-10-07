@@ -23,8 +23,9 @@
  * - desktop-credential-protection.ts desktop-auth-envelope.ts desktop-discovery.ts
  *   desktop-discovery-windows.ts desktop-at-rest-key.ts — at-rest 凭据门面与信封/发现/密钥解析器
  * 上游通道
- * - upstream.ts upstream-shared.ts upstream-workbuddy.ts upstream-zcode.ts — 上游门面与
- *   共享协议层、两个产品客户端
+ * - upstream.ts upstream-shared.ts upstream-zcode.ts — 上游门面、协议共享层、ZCode 客户端
+ * - upstream-workbuddy.ts upstream-workbuddy-parse.ts upstream-workbuddy-http.ts — WorkBuddy
+ *   客户端（探针与类）、纯解析（模型行/促销/计费/推理）、基址/请求头/请求体/响应信封
  * - shim.ts adapter.ts app-version.ts timeout.ts — 回环端点、pi-ai 适配器、版本 UA、deadline 抽象
  * 探针与状态
  * - probe.ts probe-service.ts probe-store.ts probe-route.ts — 档位探测
