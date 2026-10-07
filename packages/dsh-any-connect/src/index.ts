@@ -20,7 +20,6 @@ import { createWorkBuddyAdapter, WORKBUDDY_PROVIDER } from './adapter.js'
 import { createWorkBuddyShim } from './shim.js'
 import type { WorkBuddyShim } from './shim.js'
 import { WorkBuddyUpstreamClient, ZCodeUpstreamClient, chatBase, isZCodeOffpeak } from './upstream.js'
-import type { WorkBuddyCreditAccount } from './upstream.js'
 import type { WorkBuddyCredential, ZCodePlanKind } from './auth.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebProbeSection } from './status-paths.js'
 import { applyZCodePlanOverride, isNightFreeEligiblePlan } from './zcode-plan-store.js'
@@ -32,8 +31,10 @@ import { AI_VARIANT, CN_VARIANT, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_ST
 import type { WorkBuddyVariant } from './variants.js'
 import { registerWorkBuddyStatusRoute } from './web-status.js'
 import { filterByCodingPlanWhitelist } from './zcode-builtin-catalog.js'
-import { codingPlanQuotaWindows } from './zcode-quota.js'
 import type { StartPlanPreviewResult } from './zcode-plan-claim.js'
+import { fallbackFor, variantIsStartPlan } from './variant-runtime.js'
+import type { VariantRuntime } from './variant-runtime.js'
+import { registerUsageQueriers } from './usage.js'
 import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
 
 export { WORKBUDDY_PROVIDER, WORKBUDDY_STREAM_IDLE_TIMEOUT_MS, createWorkBuddyAdapter, type WorkBuddyAdapter } from './adapter.js'
@@ -184,6 +185,8 @@ export {
   type WorkBuddyUpstreamModel,
   type ZCodeUpstreamClientOptions,
 } from './upstream.js'
+// pill 窗口助手（provider-usage 注册 seam 的同一模块）；CLI 也直接从这里取。
+export { currentPlanWindow, startPlanWindows, totalCreditsWindows } from './usage.js'
 export {
   parseZCodeApiKey,
   solveClientRequestProofOfWork,
@@ -316,98 +319,6 @@ export function catalogFingerprint(
   return models.map(catalogFingerprintRow).join('\u0002')
 }
 
-/**
- * Structural minimum every variant's credential store satisfies. Credentials
- * travel opaquely (WorkBuddy OAuth fields) — only the WorkBuddy paths ever
- * look inside.
- */
-interface RuntimeStore {
-  current(): Promise<unknown>
-  resolve(): Promise<unknown>
-  status(): Promise<import('./auth.js').WorkBuddyAuthStatus>
-  logout(): Promise<void>
-}
-
-/** One variant's live runtime: credential store, catalog, and source state. */
-interface VariantRuntime {
-  variant: WorkBuddyVariant
-  store: RuntimeStore
-  catalog: WorkBuddyCatalog
-  shim: WorkBuddyShim
-  catalogSource: WorkBuddyWebCatalog['source']
-  catalogFetchedAtMs: number | undefined
-  catalogError: string | undefined
-  /**
-   * 最近一次 live 拉取**成功但零模型**（Start Plan 今日未领取/活动已过期）。
-   *
-   * 空名单本身是有效观测，但它与「插件坏了」在卡片上原本无法区分——两者都是
-   * source=live + 刚拉取 + 0 个模型。这个标记让卡片能如实说明原因（见
-   * {@link WorkBuddyWebCatalog.empty}）。
-   */
-  catalogEmpty: boolean
-  /** 上次发布过目录的账号（`uid:enterpriseId`），或 undefined。 */
-  lastIdentity: string | undefined
-  /**
-   * 该变体上一次通知给宿主的"已发布目录"指纹。
-   *
-   * 只在目录内容**真的变了**时才通知（见 {@link publishCatalog}）：宿主每小时
-   * 会重拉一次目录，多数时候名单一模一样，无条件通知会让每个打开的聊天页白
-   * 重拉一次目录、白重渲染一次模型选择框。
-   *
-   * 初始值无关紧要：第一轮 refresh 一定经过一次 {@link publishCatalog}。
-   */
-  publishedCatalog: string
-  /** WorkBuddy-only parts: live catalog lifecycle, refresh, probe. */
-  client?: WorkBuddyUpstreamClient | ZCodeUpstreamClient
-  credentialStore?: WorkBuddyCredentialStore
-  catalogStore?: WorkBuddyCatalogStore
-  probeStore?: WorkBuddyProbeStore
-  probeService?: WorkBuddyProbeService
-}
-
-/**
- * The slice of @chaoset/provider-usage's registry this plugin calls.
- *
- * Declared structurally instead of imported: the two packages install
- * independently, and only the provider-usage owner should have to change when
- * its registry surface moves. If that surface changes, this is the mirror to
- * update — the host route and the browser pill both come from the other side.
- */
-interface ProviderUsageRegistryLike {
-  register(provider: string, querier: (context: {
-    provider: string
-    baseURL?: string
-    apiKey?: string
-    signal?: AbortSignal
-  }) => Promise<{
-    provider: string
-    displayName?: string
-    plan?: string
-    windows: readonly {
-      id: string
-      label: string
-      remain?: number
-      unit: string
-      limit?: number
-      resetsAt?: string
-    }[]
-    fetchedAt: number
-    error?: string
-  }>, displayName?: string): () => void
-}
-
-/** The static catalog a variant serves before its first successful fetch. */
-const FALLBACK_BY_ID = new Map<string, readonly WorkBuddyModelInfo[]>([
-  [CN_VARIANT.id, FALLBACK_WORKBUDDY_MODELS],
-  [AI_VARIANT.id, FALLBACK_WORKBUDDY_AI_MODELS],
-  [ZCODE_VARIANT.id, FALLBACK_ZCODE_MODELS],
-  [ZCODE_START_PLAN_VARIANT.id, FALLBACK_ZCODE_START_PLAN_MODELS],
-])
-
-function fallbackFor(variant: WorkBuddyVariant): readonly WorkBuddyModelInfo[] {
-  return FALLBACK_BY_ID.get(variant.id) ?? FALLBACK_WORKBUDDY_MODELS
-}
-
 /** The auth-file config field a WorkBuddy variant edits, if it has one. */
 const AUTH_FILE_FIELD_BY_ID = new Map<string, 'authFile' | 'authFileAI' | 'authFileZCode'>([
   [CN_VARIANT.id, 'authFile'],
@@ -420,17 +331,6 @@ const AUTH_FILE_FIELD_BY_ID = new Map<string, 'authFile' | 'authFileAI' | 'authF
 function configuredAuthFile(values: Options, variant: WorkBuddyVariant): string | undefined {
   const field = AUTH_FILE_FIELD_BY_ID.get(variant.id)
   return field === undefined ? undefined : values[field]
-}
-
-/**
- * 是否是 ZCode Start Plan 变体。
- *
- * 判据取 `zcodePlanMode === 'start'`（变体自带的语义），而不是比对 id 字符串：
- * 计划语义在 `variants.ts` 里就是这一个字段，照它判定才不会被将来重命名 id
- * 悄悄改掉行为。Start Plan 是唯一有"每日领取"这回事的变体。
- */
-function variantIsStartPlan(variant: WorkBuddyVariant): boolean {
-  return variant.kind === 'zcode' && variant.zcodePlanMode === 'start'
 }
 
 /**
@@ -475,100 +375,6 @@ export function applyVariantConfig(
  * out groups with no models), which keeps a sign-in that happens after startup
  * working without re-registering the provider.
  */
-/**
- * pill 用总窗口：同币种分包求和为一个窗口（明细在配置页卡片里看）。
- * 全耗尽返回 []（pill 渲染无额度态）——与之前“过滤耗尽包”语义一致，
- * 只是行数永远 ≤1。跨币种/跨周期的窗口绝不在此合并：其它 provider 的
- * 窗口各有其语义，这里的 accounts 永远是同口径 credit 点数。
- *
- * Exported for tests: counted directly without booting the plugin.
- */
-export function totalCreditsWindows(accounts: readonly WorkBuddyCreditAccount[]): Array<{
-  id: string
-  label: string
-  remain: number
-  unit: string
-  limit?: number
-}> {
-  const live = accounts.filter(account => account.remain > 0)
-  if (live.length === 0) return []
-  const remain = live.reduce((sum, account) => sum + account.remain, 0)
-  const limit = live.reduce((sum, account) => sum + (account.size > 0 ? account.size : 0), 0)
-  return [{
-    id: 'total',
-    label: '总计',
-    remain,
-    unit: 'credits',
-    ...limit > 0 ? { limit } : {},
-  }]
-}
-
-/**
- * ZCode 当前套餐窗口：只取首个仍有剩余额度（无则取第一个），与配置页卡片
- * 的 zcodePlan 取法一致——pill 与卡片看到的是同一个“当前套餐”，而不是
- * 一摞计划名。
- *
- * Start Plan 的当日 token 池数字是真实的（billing/balance 的 remain/size），
- * 窗口必须带上它们——composer dock 的 pill 在窗口缺 remain 时只渲染
- * 「套餐名: 有效」，用户在聊天框下方就看不到剩余额度（2026-10-06 用户报告）。
- * Coding Plan 订阅的 remain/size 恒为 1，只是有效性标志而非用量，没有数字
- * 概念，维持「有效」展示；明细看配置页卡片。
- *
- * Exported for tests: counted directly without booting the plugin.
- */
-export function currentPlanWindow(accounts: readonly WorkBuddyCreditAccount[]): Array<{
-  id: string
-  label: string
-  remain?: number
-  limit?: number
-  unit: string
-  resetsAt?: string
-}> {
-  const current = accounts.find(account => account.remain > 0) ?? accounts[0]
-  if (current === undefined) return []
-  const label = current.packageName.replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, '')
-  // sameDay 是 Start Plan 当日池的特有标志（fetchStartPlanCredits 恒置）；
-  // size > 0 才有进度条可画。remain = 0（当日用完）照样带数字——红色空条
-  // 正是「今天用完了」的正确语义。
-  if (current.sameDay === true && current.size > 0) {
-    return [{
-      id: 'plan',
-      label,
-      remain: current.remain,
-      limit: current.size,
-      unit: 'tokens',
-      ...current.expiredAt ? { resetsAt: current.expiredAt } : {},
-    }]
-  }
-  return [{
-    id: 'plan',
-    label,
-    unit: '有效',
-    ...current.expiredAt ? { resetsAt: current.expiredAt } : {},
-  }]
-}
-
-/**
- * Start Plan 的 pill 窗口：当日池子存在时报真实 token 数（{@link currentPlanWindow}
- * 对 sameDay 池已带 remain/limit）；今天还没领取或尚未发放时**如实说「今日待领取」**，
- * 而不是让 pill 落到通用的「该 provider 不上报额度」——那会让用户以为额度功能坏了，
- * 而且额度接口本身是通的（billing/balance 返回空 balances 才是事实）。
- *
- * Exported for tests: counted directly without booting the plugin.
- */
-export function startPlanWindows(accounts: readonly WorkBuddyCreditAccount[]): Array<{
-  id: string
-  label: string
-  remain?: number
-  limit?: number
-  unit: string
-  resetsAt?: string
-}> {
-  const windows = currentPlanWindow(accounts)
-  if (windows.length > 0) return windows
-  return [{ id: 'plan', label: 'Start Plan', unit: '今日待领取' }]
-}
-
 export function apply(ctx: Context, config: Config): void {
   const client = new WorkBuddyUpstreamClient()
   let stopped = false
@@ -908,66 +714,8 @@ export function apply(ctx: Context, config: Config): void {
     }
   })
 
-  // Usage readout: this plugin owns the WorkBuddy routes and already holds the
-  // credential store that reads the desktop app's sign-in, so it is the right
-  // place to answer "how much credit is left" — the provider-usage package
-  // deliberately ships no WorkBuddy querier, because only this package knows
-  // how to reach that app's billing endpoint. Absent provider-usage (the user
-  // removed it), the registration never happens and the model channel is
-  // unaffected.
-  //
-  // The service is read structurally through `ctx.get` rather than by
-  // declaring `providerUsage` on Context: two packages declaring the same
-  // member is a TypeScript error, and this package must not import the other's
-  // types just to reach an optional neighbour (they install independently).
-  ctx.inject(['providerUsage'], (usageCtx: Context) => {
-    const usage = usageCtx.get('providerUsage') as ProviderUsageRegistryLike | undefined
-    if (usage === undefined) return
-    for (const runtime of runtimes) {
-      usageCtx.effect(() => usage.register(
-        runtime.variant.id,
-        async context => {
-          const credential = await runtime.store.resolve() as WorkBuddyCredential
-          if (context.signal?.aborted === true) throw context.signal.reason ?? new Error('aborted')
-          const credits = await (runtime.client ?? client).fetchCredits(credential)
-          const isZCode = runtime.variant.kind === 'zcode'
-          const isStartPlan = variantIsStartPlan(runtime.variant)
-          // Coding Plan 的窗口额度（5 小时 / 7 天 / 工具调用）来自客户端同款
-          // `GET bigmodel.cn/api/monitor/usage/quota/limit`：拿得到就按它展示，
-          // 拿不到（网络 / 非 bigmodel 账号 / 形状变化）回退订阅有效性窗口。
-          const quota = isZCode && !isStartPlan
-            ? await (runtime.client as ZCodeUpstreamClient).fetchCodingPlanQuota(credential)
-            : undefined
-          const quotaWindows = quota === undefined ? [] : codingPlanQuotaWindows(quota)
-          return {
-            provider: runtime.variant.id,
-            displayName: runtime.variant.displayName,
-            // 套餐标签跟变体走（凭据 transform 已固定 zcodePlan）：Start Plan
-            // 变体报 "Start Plan"（专属通道 + 专属额度），Coding Plan 变体报
-            // 上游订阅的真实名称。两条额度口径互不混报。
-            plan: isZCode
-              ? (isStartPlan
-                ? 'Start Plan'
-                : credits.accounts.find(account => account.planName !== undefined)?.planName ?? 'Coding Plan')
-              : undefined,
-            // 三套口径，各有真源：
-            // - Coding Plan：客户端同款 monitor 端点的窗口额度（5 小时 / 7 天 /
-            //   工具调用）——用户要的就是这三个；拿不到时回退订阅有效性窗口。
-            // - Start Plan：当日 token 池（有池子报真实 token 数，没领取时说
-            //   「今日待领取」）。
-            // - WorkBuddy：同币种分包求和的总积分。
-            windows: isStartPlan
-              ? startPlanWindows(credits.accounts)
-              : quotaWindows.length > 0
-                ? quotaWindows
-                : isZCode ? currentPlanWindow(credits.accounts) : totalCreditsWindows(credits.accounts),
-            fetchedAt: Date.now(),
-          }
-        },
-        runtime.variant.displayName,
-      ), 'dsh-any-connect: usage querier')
-    }
-  })
+  // Usage readout：注册 seam 与 pill 窗口助手见 usage.ts（本文件不再持有查询器实现）。
+  registerUsageQueriers(ctx, runtimes, client)
 
   // This plugin ships its own configuration cards: opt out of the host's
   // auto-generated settings page (mirroring upstream `dsh-llm-pi-ai`). The

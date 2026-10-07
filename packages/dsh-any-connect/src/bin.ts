@@ -12,7 +12,7 @@ import { CN_VARIANT, variantFor, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_ST
 import type { WorkBuddyVariant } from './variants.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { applyZCodePlanOverride } from './zcode-plan-store.js'
-import { currentPlanWindow } from './index.js'
+import { currentPlanWindow } from './usage.js'
 import { isHeartbeatProcessAlive, readHostHeartbeat, workbuddyHostHeartbeatPath } from './host-heartbeat.js'
 import { WORKBUDDY_ELECTRON_BIN_ENV } from './desktop-credential-protection.js'
 
