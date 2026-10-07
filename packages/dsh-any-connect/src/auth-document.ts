@@ -7,7 +7,7 @@
  * @module dsh-any-connect/auth-document
  */
 
-import { type WorkBuddyCredential } from './auth-types.js'
+import type { WorkBuddyCredential } from './auth-types.js'
 
 /** Current on-disk format of the plugin-owned copy; readers reject others. */
 const OWN_FORMAT_VERSION = 1

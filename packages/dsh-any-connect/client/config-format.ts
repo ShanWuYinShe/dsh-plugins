@@ -8,7 +8,7 @@
  */
 
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
-import { type WorkBuddyConfigPageInjected } from './config-types.js'
+import type { WorkBuddyConfigPageInjected } from './config-types.js'
 
 export function formatExpiry(iso?: string): string {
   if (iso === undefined || iso === '') return ''

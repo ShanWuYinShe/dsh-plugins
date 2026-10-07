@@ -9,7 +9,7 @@
 
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import { useState } from 'react'
-import { type WorkBuddyConfigPageInjected, type WorkBuddyCardVariant, type CardStatus } from './config-types.js'
+import type { WorkBuddyConfigPageInjected, WorkBuddyCardVariant, CardStatus } from './config-types.js'
 import {
   nameStyle,
   chevronStyle,

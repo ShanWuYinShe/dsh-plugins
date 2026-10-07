@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { type WorkBuddyCredential, type ZCodeFamily, type ZCodePlanKind } from './auth-types.js'
+import type { WorkBuddyCredential, ZCodeFamily, ZCodePlanKind } from './auth-types.js'
 import { isWsl, windowsPathForWsl } from './auth-paths.js'
 
 export interface DecryptZCodeKeyOptions {

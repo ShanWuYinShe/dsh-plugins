@@ -8,9 +8,9 @@
  * @module dsh-any-connect/upstream-workbuddy
  */
 
-import { type WorkBuddyCredential } from './auth.js'
+import type { WorkBuddyCredential } from './auth.js'
 import { appUserAgent, resolveAppVersion, type AppVersionInfo } from './app-version.js'
-import { type ProbeAttempt } from './probe.js'
+import type { ProbeAttempt } from './probe.js'
 import { deadlineSignal, withTimeout } from './timeout.js'
 import { JSON_TIMEOUT_MS, ERROR_BODY_LIMIT, CHAT_HEADER_TIMEOUT_MS, normalizeCredits, classifyUpstreamError, normalizeDeveloperRole, normalizeToolChoice } from './upstream-shared.js'
 import type { WorkBuddyUpstreamModel, WorkBuddyModelReasoning, WorkBuddyEffort, WorkBuddyModelBilling, WorkBuddyPromotion, WorkBuddyCreditAccount, WorkBuddyCredits, WorkBuddyRefreshOutcome, WorkBuddyChatResult } from './upstream-shared.js'

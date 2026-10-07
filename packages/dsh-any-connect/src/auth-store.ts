@@ -11,7 +11,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { regionOf, type WorkBuddyRefreshOutcome } from './upstream.js'
-import { type WorkBuddyVariant } from './variants.js'
+import type { WorkBuddyVariant } from './variants.js'
 import {
   atRestKeyProviderFor,
   classifyDesktopAuthDocument,
@@ -24,7 +24,7 @@ import {
   type DesktopAuthFormat,
 } from './desktop-credential-protection.js'
 import { RegionMismatchError } from './auth-types.js'
-import { type WorkBuddyCredential, type WorkBuddyAuthStatus, type WorkBuddyStoreOptions } from './auth-types.js'
+import type { WorkBuddyCredential, WorkBuddyAuthStatus, WorkBuddyStoreOptions } from './auth-types.js'
 import { WORKBUDDY_AUTH_FILE_ENV, workbuddyOwnAuthPath, desktopAuthCandidatesFor } from './auth-paths.js'
 import { parseZCodeAuth } from './auth-zcode.js'
 import { parseWorkBuddyAuth, ownDocument, parseOwnDocument, isENOENT } from './auth-document.js'

@@ -9,15 +9,9 @@
 
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  type WorkBuddyWebCatalog,
-  type WorkBuddyWebModelRow,
-  type WorkBuddyWebProbeSection,
-  type WorkBuddyWebStartPlanClaim,
-  type WorkBuddyWebStatus,
-} from '../src/status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStartPlanClaim, WorkBuddyWebStatus } from '../src/status-paths.js'
 import { REFRESH_POLL_MS, REFRESH_TIMEOUT_MS, isCatalogLive, catalogSourceKey } from './config-types.js'
-import { type WorkBuddyConfigPageInjected, type WorkBuddyCardVariant, type CardStatus } from './config-types.js'
+import type { WorkBuddyConfigPageInjected, WorkBuddyCardVariant, CardStatus } from './config-types.js'
 import {
   cardStyle,
   headerStyle,

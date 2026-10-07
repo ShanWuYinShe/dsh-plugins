@@ -21,7 +21,7 @@ import {
   ARCHIVE_PAGE_SIZE,
   needsDeleteAck,
 } from './archive-entries.js'
-import { type ArchiveSortKey } from './archive-entries.js'
+import type { ArchiveSortKey } from './archive-entries.js'
 
 /**
  * 面板的全部状态、副作用与批量操作。返回对象正好覆盖渲染需要的名字：

@@ -7,7 +7,7 @@
  * @module dsh-any-connect/client/WorkBuddyConfigPage
  */
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
-import { type WorkBuddyConfigPageProps } from './config-types.js'
+import type { WorkBuddyConfigPageProps } from './config-types.js'
 import { VariantsPage } from './VariantsPage.js'
 
 export { isCatalogLive } from './config-types.js'

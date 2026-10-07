@@ -8,8 +8,8 @@
  */
 
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
-import { type CSSProperties } from 'react'
-import { type CardStatus } from './config-types.js'
+import type { CSSProperties } from 'react'
+import type { CardStatus } from './config-types.js'
 
 const WB_STYLE_ID = '@chaoset/dsh-any-connect/config.css'
 if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css="${WB_STYLE_ID}"]`) === null) {

@@ -7,7 +7,7 @@
  * @module @chaoset/session-archive/client/index
  */
 
-import { type TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
+import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 import { NS, zh, en } from './locales.js'
 import { ArchivePanel } from './ArchivePanel.js'
 

@@ -8,8 +8,8 @@
  */
 
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
-import { type WorkBuddyWebModelRow } from '../src/status-paths.js'
-import { type WorkBuddyConfigPageInjected } from './config-types.js'
+import type { WorkBuddyWebModelRow } from '../src/status-paths.js'
+import type { WorkBuddyConfigPageInjected } from './config-types.js'
 import {
   chipStyle,
   modelBadgesStyle,

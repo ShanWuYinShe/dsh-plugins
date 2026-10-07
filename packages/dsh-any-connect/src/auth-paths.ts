@@ -10,7 +10,7 @@
 import { homedir, release } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { type WorkBuddyVariant } from './variants.js'
+import type { WorkBuddyVariant } from './variants.js'
 
 /** Basename of the plugin-owned credential copy inside the Harness home. */
 export const WORKBUDDY_AUTH_FILENAME = '.workbuddy-auth.json'

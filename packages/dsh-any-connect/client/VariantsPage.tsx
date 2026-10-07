@@ -9,9 +9,9 @@
 
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { type WorkBuddyWebStatus } from '../src/status-paths.js'
+import type { WorkBuddyWebStatus } from '../src/status-paths.js'
 import { CARD_VARIANTS, POLL_INTERVAL_MS } from './config-types.js'
-import { type WorkBuddyConfigPageInjected, type WorkBuddyCardVariant, type CardStatus } from './config-types.js'
+import type { WorkBuddyConfigPageInjected, WorkBuddyCardVariant, CardStatus } from './config-types.js'
 import { hintStyle } from './config-styles.js'
 import { VariantCard } from './VariantCard.js'
 import { SignedOutRow } from './SignedOutRow.js'

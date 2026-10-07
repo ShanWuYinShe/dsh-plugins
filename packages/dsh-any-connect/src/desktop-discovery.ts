@@ -12,7 +12,7 @@
 import { execFile } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
 import { join } from 'node:path'
-import { type WorkBuddyElectronProduct } from './variants.js'
+import type { WorkBuddyElectronProduct } from './variants.js'
 import type { WorkBuddySignedOutReasonCode } from './desktop-auth-envelope.js'
 
 /**

@@ -7,9 +7,9 @@
  * @module dsh-any-connect/auth-types
  */
 
-import { type WorkBuddyRefreshOutcome } from './upstream.js'
-import { type WorkBuddyVariant } from './variants.js'
-import { type WorkBuddyAtRestKeyProvider, type WorkBuddySignedOutReasonCode } from './desktop-credential-protection.js'
+import type { WorkBuddyRefreshOutcome } from './upstream.js'
+import type { WorkBuddyVariant } from './variants.js'
+import type { WorkBuddyAtRestKeyProvider, WorkBuddySignedOutReasonCode } from './desktop-credential-protection.js'
 
 /** Normalized WorkBuddy credential, timestamps in epoch milliseconds. */
 export interface WorkBuddyCredential {

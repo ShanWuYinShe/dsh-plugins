@@ -9,9 +9,9 @@
  */
 
 import os from 'node:os'
-import { type WorkBuddyCredential } from './auth.js'
+import type { WorkBuddyCredential } from './auth.js'
 import { FALLBACK_APP_VERSION, resolveAppVersion, type AppVersionInfo } from './app-version.js'
-import { type ProbeAttempt } from './probe.js'
+import type { ProbeAttempt } from './probe.js'
 import { deadlineSignal } from './timeout.js'
 import { ZCodeClientSigner } from './zcode-signer.js'
 import { prepareStartPlanBody } from './zcode-plan-prompt.js'

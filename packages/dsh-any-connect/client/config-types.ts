@@ -8,7 +8,7 @@
  */
 
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
-import { type PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   WORKBUDDY_AI_PROBE_PATH,
   WORKBUDDY_AI_STATUS_PATH,
@@ -21,7 +21,7 @@ import {
   type WorkBuddyWebCatalog,
   type WorkBuddyWebStatus,
 } from '../src/status-paths.js'
-import { type WorkBuddySettingsKey } from './locales.js'
+import type { WorkBuddySettingsKey } from './locales.js'
 
 /** Localized copy injected by the browser-plugin registration. */
 export interface WorkBuddyConfigPageInjected {
