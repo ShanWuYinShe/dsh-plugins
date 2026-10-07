@@ -89,7 +89,7 @@ function windowsRegistryKeyMissing(stderr: string): boolean {
     || /^错误[:：]\s*系统找不到指定的注册表项或值[。.]?$/u.test(detail)
 }
 
-export /**
+/**
  * Parse the value columns emitted by `reg query ... /s`.
  *
  * Entries are filtered by the product's DisplayName pattern *before* the
@@ -97,7 +97,7 @@ export /**
  * excluded as decisively not ours and can never mark this product's search
  * incomplete.
  */
-function parseWindowsRegistryOutput(output: string, displayNamePattern: RegExp): { candidates: string[], incomplete: boolean } {
+export function parseWindowsRegistryOutput(output: string, displayNamePattern: RegExp): { candidates: string[], incomplete: boolean } {
   const entries = new Map<string, { displayName?: string, displayIcon?: string }>()
   let currentKey: string | undefined
   for (const line of output.split(/\r?\n/u)) {
@@ -152,12 +152,12 @@ interface WindowsCandidateInspection {
   identity: string
 }
 
-export /**
+/**
  * Validate the known Windows layout for the product's exe. `undefined` is a
  * decidable exclusion; `unresolved` is reserved for errors that prevent
  * checking.
  */
-function inspectWindowsElectronCandidate(
+export function inspectWindowsElectronCandidate(
   electronPath: string,
   platform: NodeJS.Platform,
   exeBasename: string,

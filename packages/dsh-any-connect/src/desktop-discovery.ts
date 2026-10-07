@@ -41,8 +41,8 @@ export function defaultWorkBuddyElectronPath(
     : join(localAppData, ...product.windows.defaultPathSegments)
 }
 
-export /** A resolved protector key and the id envelopes name for it. */
-interface ResolvedKey {
+/** A resolved protector key and the id envelopes name for it. */
+export interface ResolvedKey {
   key: Buffer
   keyId: string
 }
@@ -87,16 +87,16 @@ const MDFIND_MAX_OUTPUT_BYTES = 1024 * 1024
 
 const PLUTIL_MAX_OUTPUT_BYTES = 64 * 1024
 
-export /**
+/**
  * Why a discovery step could not produce an answer. Every one of these means
  * "we do not know", explicitly *not* "the candidate does not exist" — the
  * distinction is what keeps a half-finished check from being mistaken for a
  * unique candidate.
  */
-class DiscoveryIncompleteError extends Error {}
+export class DiscoveryIncompleteError extends Error {}
 
-export /** A discovered app: its `.app` bundle and the Electron binary inside it. */
-interface DiscoveredApp {
+/** A discovered app: its `.app` bundle and the Electron binary inside it. */
+export interface DiscoveredApp {
   bundlePath: string
   electronPath: string
   /** Display version, best effort; absent when unreadable. */
@@ -198,8 +198,8 @@ export function workBuddyDiscoveryTools(bundleId: string): WorkBuddyDiscoveryToo
   }
 }
 
-export /** Whether a path exists and is executable; never throws. */
-function isExecutable(path: string): boolean {
+/** Whether a path exists and is executable; never throws. */
+export function isExecutable(path: string): boolean {
   try {
     accessSync(path, constants.X_OK)
     return true
@@ -228,8 +228,8 @@ export function reasonCodeOf(error: unknown): WorkBuddySignedOutReasonCode | und
   return error instanceof WorkBuddyElectronPathError ? error.reasonCode : undefined
 }
 
-export /** Whether a filesystem error reports an absent path (`existsSync` cannot tell). */
-function isENOENT(error: unknown): boolean {
+/** Whether a filesystem error reports an absent path (`existsSync` cannot tell). */
+export function isENOENT(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT'
 }
 
@@ -241,11 +241,11 @@ export function discoveryIncomplete(productName: string, detail: string): WorkBu
   )
 }
 
-export /**
+/**
  * The helper: run inside WorkBuddy's Electron as plain Node, where the
  * private `workbuddyStorage` binding exists, and print only the payload. It
  * writes nothing else, so whatever reaches stdout is the payload.
  */
-const HELPER_SCRIPT = 'process.stdout.write(String(process._linkedBinding("electron_browser_workbuddy_storage").loggerGet()))'
+export const HELPER_SCRIPT = 'process.stdout.write(String(process._linkedBinding("electron_browser_workbuddy_storage").loggerGet()))'
 
 export const HELPER_SCRIPT_ARGUMENT_FLAG = '-e'

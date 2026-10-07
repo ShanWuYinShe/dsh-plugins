@@ -95,7 +95,8 @@ export interface WorkBuddyAtRestKeyProviderOptions {
  * In-memory protector-key resolver: one spawn per key id, single-flight, never
  * persisted. The cache is keyed by the id envelopes ask for, so an envelope
  * sealed under a rotated key triggers exactly one fresh resolution.
- */export class WorkBuddyAtRestKeyProvider {
+ */
+export class WorkBuddyAtRestKeyProvider {
   /**
    * The explicit binary, when one was configured. `undefined` here means "the
    * caller did not name one", which is what lets discovery run — an explicit
