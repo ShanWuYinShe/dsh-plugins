@@ -297,6 +297,26 @@ rules 绑定的模型 id，一行改动。
 今日未领取 → 空名单 → 分组隐藏；用户领取后要等**最长 60 分钟**（小时刷新）才恢复，
 因为 60s sweep 只比对凭据身份，领取不改变身份。
 
+**⚠️ 空名单的第二个来源：上游间歇性答空活动清单（2026-10-07 实测）。** 隔离实例
+的 catalog 拉得 `live/empty` 的同一时刻，直调同端点却有 active 活动 +
+entitlements 模型授权，余额也正常（93M/100M）——即插件逻辑无错，是上游偶发
+给出空 plans。后果：分组诚实隐藏，但唯一恢复路径是小时刷新，且卡片同时显示
+「93M tokens 额度」与「今日没有有效的 Start Plan 活动」自相矛盾。修法（commit
+`103097a`）：sweep 里对「目录空 + 领取探测无翻转 + 距上次拉取 ≥ 5 分钟」再拉一拍
+（拉取无论结果都前移 `catalogFetchedAtMs`，不会打环），自愈压到分钟级；文案改
+中性表述不再断言「无活动」。
+
+**排查这类「空名单」的决定性手法：进程内探针。** status 只给聚合结果
+（live/empty/fetchedAt），分不清「上游真的没活动」还是「那次拉取抽风」——在
+`lib/upstream.js`（编译产物）的 `fetchStartPlanModels` 里临时插
+`console.error('[probe] plans=' + JSON.stringify(...))` 后重启实例，stderr 直出
+运行时收到的原始 plans。三个坑：①产物缩进是 8 空格 + 分号，按 TS 源码形状
+replace 会静默不匹配；②kill 旧实例后 `sleep 2` 可能不够，多次「重启后行为没变」
+其实是 curl 一直打在没死的旧进程上，kill 后要轮询端口释放再起；③**变体 id 与
+路由前缀不同**——注册/查询键是 `zcode-start-plan`，status 路由前缀是
+`zcode-sp`，对 provider-usage 的 usage 路由用错键会得到 `queried: false`，
+看似注册失败实为查错名字。
+
 ### 5.2 推送链：选择框实时刷新（宿主侧被动通知）
 
 **这是"实时"的真正瓶颈，且极容易被忽略。**
