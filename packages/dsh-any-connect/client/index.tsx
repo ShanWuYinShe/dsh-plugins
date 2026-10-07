@@ -5,7 +5,8 @@
  *
  * - index.tsx — 浏览器侧入口：注册卡片文案与配置页
  * - WorkBuddyConfigPage.tsx — 配置页入口（解构 + 渲染），对外 API 门面
- * - VariantsPage.tsx VariantCard.tsx ModelRow.tsx SignedOutRow.tsx — 变体列表、单卡、模型行、未登录行
+ * - VariantsPage.tsx VariantCard.tsx useVariantCard.ts — 变体列表、单卡（渲染）、卡片状态与动作
+ * - StartPlanClaimBox.tsx ModelRow.tsx SignedOutRow.tsx — 今日待领取提示框、模型行、未登录行
  * - config-types.ts config-styles.ts config-format.ts — 共享类型/常量、内联样式与注入 CSS、展示格式化
  * - locales.ts — 卡片文案
  *
