@@ -77,7 +77,8 @@ const CATALOG_REFRESH_INTERVAL_MS = 60 * 60_000
             refreshCatalog(runtime, offpeakChanged ? 'offpeak boundary crossed' : 'identity sweep')
             return
           }
-          // Start Plan「领取后恢复」快通道。见 claimFlipRefreshes。
+          // Start Plan「领取后恢复」快通道。回归见
+          // test/catalog-start-plan-fastpath.test.ts（领取后 ≤60s 恢复）。
           if (!isStopped() && await claimFlipChanged(runtime)) {
             refreshCatalog(runtime, 'start-plan claim flipped')
           } else if (!isStopped() && variantIsStartPlan(runtime.variant)
