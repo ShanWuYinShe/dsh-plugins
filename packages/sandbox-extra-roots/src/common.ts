@@ -91,7 +91,7 @@ export async function loadLandlock(): Promise<any> {
 }
 
 /** 转义一个路径为 SBPL 字符串字面量(与官方实现一致)。 */
-export function sbplString(path: string): string {
+function sbplString(path: string): string {
   return `"${path.replaceAll("\\", String.raw`\\`).replaceAll("\"", String.raw`\"`)}"`;
 }
 

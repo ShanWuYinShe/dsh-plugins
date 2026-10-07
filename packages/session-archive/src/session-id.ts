@@ -7,7 +7,7 @@
  */
 
 /** 批量上限：面板勾选集现实中不足千级，超限直接拒绝（防网关层失控展开）。 */
-export const SESSION_ID_ARRAY_LIMIT = 5000;
+const SESSION_ID_ARRAY_LIMIT = 5000;
 
 /** 单个会话 id：非空字符串。 */
 export function assertSessionId(value: unknown): string {

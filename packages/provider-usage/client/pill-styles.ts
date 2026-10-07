@@ -8,7 +8,7 @@
 
 import type { CSSProperties } from 'react'
 
-export const PU_STYLE_ID = '@chaoset/provider-usage/pill.css'
+const PU_STYLE_ID = '@chaoset/provider-usage/pill.css'
 if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css="${PU_STYLE_ID}"]`) === null) {
   const styleEl = document.createElement('style')
   styleEl.dataset.pluginCss = PU_STYLE_ID

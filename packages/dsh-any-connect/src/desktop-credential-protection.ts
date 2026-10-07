@@ -13,7 +13,7 @@
  */
 export { keyIdsOf, classifyDesktopAuthDocument, unwrapDesktopAuthDocument, buildAuthenticatedContextAad, openAuthField, sealAuthFieldForTest, parseAtRestPayload, deriveProtectorKey } from './desktop-auth-envelope.js'
 export type { WorkBuddySignedOutReasonCode, DesktopAuthFormat, WorkBuddyEnvelope, WrappedAuthField, DesktopAuthClassification, WorkBuddyAtRestPayload } from './desktop-auth-envelope.js'
-export { WORKBUDDY_ELECTRON_BIN_ENV, defaultWorkBuddyElectronPath, electronDiscoveryFor, WORKBUDDY_DISCOVERY_STEP_TIMEOUT_MS, WORKBUDDY_DISCOVERY_BUDGET_MS, workBuddyDiscoveryTools, WorkBuddyElectronPathError, reasonCodeOf } from './desktop-discovery.js'
+export { WORKBUDDY_ELECTRON_BIN_ENV, defaultWorkBuddyElectronPath, electronDiscoveryFor, WorkBuddyElectronPathError, reasonCodeOf } from './desktop-discovery.js'
 export type { WorkBuddyElectronDiscovery, WorkBuddyDiscoveryTools } from './desktop-discovery.js'
 export { workBuddyWindowsDiscoveryTools } from './desktop-discovery-windows.js'
 export type { WorkBuddyWindowsDiscoveryTools } from './desktop-discovery-windows.js'

@@ -21,7 +21,6 @@ import type { StartPlanPreviewResult } from './zcode-plan-claim.js'
 // `WorkBuddyWebStartPlanClaim` 的形状定义在 status-paths.ts（客户端与宿主共用同一
 // 份契约，避免两处各写一遍后漂移）。这里只转出，不再重复声明。
 
-export { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_AI_STATUS_PATH, WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from './status-paths.js'
 export type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStartPlanClaim, WorkBuddyWebStatus } from './status-paths.js'
 
 /** Constructor dependencies. */
@@ -73,7 +72,6 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) })
   res.end(payload)
 }
-
 
 /**
  * Assemble the card's status document. Sign-in state is read-only; credit is

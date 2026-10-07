@@ -15,7 +15,7 @@
 export { RegionMismatchError } from './auth-types.js'
 export type { WorkBuddyCredential, WorkBuddyAuthStatus, WorkBuddyStoreOptions, ZCodeFamily, ZCodePlanKind } from './auth-types.js'
 export { WORKBUDDY_AUTH_FILENAME, WORKBUDDY_AUTH_FILE_ENV, workbuddyOwnAuthPath, defaultDesktopAuthCandidates, defaultZCodeDesktopCandidates, desktopAuthCandidatesFor } from './auth-paths.js'
-export { decryptZCodeEncryptedKey, ZCODE_PLAN_KINDS, parseZCodePlanSelection, selectZCodeAccountKey, ZCODE_DEVICE_MID_FILENAME, resolveZCodeDeviceMid, parseZCodeAuth } from './auth-zcode.js'
+export { decryptZCodeEncryptedKey, parseZCodePlanSelection, selectZCodeAccountKey, parseZCodeAuth } from './auth-zcode.js'
 export type { DecryptZCodeKeyOptions, ZCodeAccountSelection } from './auth-zcode.js'
 export { parseWorkBuddyAuth } from './auth-document.js'
 export { WorkBuddyCredentialStore } from './auth-store.js'
