@@ -709,6 +709,14 @@ export function apply(ctx: Context, config: Config): void {
   const claimWasAvailable = new Map<string, boolean>()
 
   /**
+   * 空名单自愈阈值：Start Plan 目录为空且领取探测无翻转时，距上次拉取超过
+   * 该时长就在 sweep 里再拉一拍。上游偶发地答一个空活动清单(间歇抖动)时,
+   * 小时刷新要等一整小时,5 分钟自愈把分组消失的时间压到分钟级;拉取本身
+   * 无论结果都会前移 fetchedAtMs,不会形成每拍重拉的循环。
+   */
+  const EMPTY_ROSTER_SELF_HEAL_MS = 5 * 60_000
+
+  /**
    * Start Plan 的廉价状态翻转快通道：目录为空时探一次「今天还能不能领」
    * （{@link claimPreviewFor}，纯 HTTP、无 captcha、3s 超时），返回「是否刚刚
    * 从可领翻到不可领」——那正是**用户刚领完**的唯一信号。
@@ -1123,6 +1131,16 @@ export function apply(ctx: Context, config: Config): void {
           // Start Plan「领取后恢复」快通道。见 claimFlipRefreshes。
           if (!stopped && await claimFlipChanged(runtime)) {
             refreshCatalog(runtime, 'start-plan claim flipped')
+          } else if (!stopped && variantIsStartPlan(runtime.variant)
+            && runtime.catalog.current().length === 0
+            && runtime.catalogFetchedAtMs !== undefined
+            && Date.now() - runtime.catalogFetchedAtMs >= EMPTY_ROSTER_SELF_HEAL_MS) {
+            // 空名单自愈：领取探测一直 none（不是刚领取），但距上次拉取已超过
+            // 5 分钟——上游偶尔会间歇性地答一个空活动清单（2026-10-07 实测：
+            // catalog 拉得 live/empty 的同一时刻，直调同端点却有 active 活动
+            // 与模型授权；余额也正常）。空名单按小时刷新兜底太久，超过阈值
+            // 就再试一拍；拉完（无论结果）fetchedAtMs 都会前移，不会打环。
+            refreshCatalog(runtime, 'start-plan empty roster self-heal')
           }
         } catch (error: unknown) {
           if (error instanceof RegionMismatchError) {

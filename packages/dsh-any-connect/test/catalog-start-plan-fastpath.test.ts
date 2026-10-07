@@ -136,6 +136,42 @@ describe('Start Plan 空名单快通道（领取后 ≤60s 恢复）', () => {
     }
   }, 30000)
 
+  it('空名单 + 探测一直 none（非领取）→ 超过 5 分钟自愈重拉', async () => {
+    // 间歇空响应自愈（2026-10-07 实测）：上游偶尔对 billing/balance 答一个空
+    // 活动清单（同刻直调却有 active 活动 + 模型授权），目录被诚实地置空后，
+    // 唯一的恢复路径是小时刷新——分组最长消失一小时。现在 sweep 里对「目录
+    // 空 + 无翻转 + 距上次拉取 ≥ 5 分钟」再试一拍，把自愈压到分钟级。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-selfheal-'))
+    const h = await install(root)
+    try {
+      // 从头就是「探测不到可领项」：preview 恒 none，上游一直答空名单。
+      h.setPreview('none')
+      await vi.waitFor(async () => { expect(await h.ctx.llm.listModels('zcode-start-plan')).toEqual([]) }, { timeout: 5000 })
+
+      // 第一拍：探测一次（none，无翻转）。距启动拉取 1 分钟，不到阈值，不重拉。
+      await vi.advanceTimersByTimeAsync(60_000)
+      await drain(() => h.previewCalls() >= 1)
+      const pullsBefore = h.modelsCalls()
+      await vi.advanceTimersByTimeAsync(60_000)
+      await drain(() => false, 300)
+      expect(h.modelsCalls()).toBe(pullsBefore)
+
+      // 跨过 5 分钟阈值：自愈分支重拉一次（上游仍空，fetchedAtMs 前移）。
+      await vi.advanceTimersByTimeAsync(3 * 60_000)
+      await drain(() => h.modelsCalls() > pullsBefore, 400)
+      expect(h.modelsCalls()).toBeGreaterThan(pullsBefore)
+
+      // 上游恢复正常：下一拍自愈把名单带回来。
+      h.serveClaimed()
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+      await vi.waitFor(async () => {
+        expect((await h.ctx.llm.listModels('zcode-start-plan')).map(m => m.id)).toEqual(['claimed-model'])
+      }, { timeout: 5000 })
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 30000)
+
   it('目录非空 → 完全不探测（稳态零额外请求）', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-claimflip-idle-'))
     const h = await install(root)
