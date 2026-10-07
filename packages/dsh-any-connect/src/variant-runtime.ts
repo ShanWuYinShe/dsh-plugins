@@ -25,6 +25,7 @@ import type { WorkBuddyProbeStore } from './probe-store.js'
 import type { WorkBuddyShim } from './shim.js'
 import type { WorkBuddyWebCatalog } from './status-paths.js'
 import type { WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
+import type { Options } from './config.js'
 
 /**
  * Structural minimum every variant's credential store satisfies. Credentials
@@ -97,4 +98,44 @@ export function fallbackFor(variant: WorkBuddyVariant): readonly WorkBuddyModelI
  */
 export function variantIsStartPlan(variant: WorkBuddyVariant): boolean {
   return variant.kind === 'zcode' && variant.zcodePlanMode === 'start'
+}
+
+/** The auth-file config field a WorkBuddy variant edits, if it has one. */
+const AUTH_FILE_FIELD_BY_ID = new Map<string, 'authFile' | 'authFileAI' | 'authFileZCode'>([
+  [CN_VARIANT.id, 'authFile'],
+  [AI_VARIANT.id, 'authFileAI'],
+  // 两个 ZCode 变体读同一份桌面凭据文档（各自取用专属材料）。
+  [ZCODE_VARIANT.id, 'authFileZCode'],
+  [ZCODE_START_PLAN_VARIANT.id, 'authFileZCode'],
+])
+
+/** 该变体在 Options 里对应的 authFile 字段值（没有则该变体不编辑路径）。 */
+export function configuredAuthFile(values: Options, variant: WorkBuddyVariant): string | undefined {
+  const field = AUTH_FILE_FIELD_BY_ID.get(variant.id)
+  return field === undefined ? undefined : values[field]
+}
+
+/**
+ * Push configuration values into one variant's credential stores (no catalog
+ * I/O — the caller refreshes afterwards): WorkBuddy variants repoint their
+ * desktop auth-file path.
+ *
+ * Exported for tests: the `loader/volatile-update` path has no Loader in unit
+ * tests, so the store-branching is driven directly here.
+ *
+ * @returns which credential source was pushed, for diagnostics.
+ */
+export function applyVariantConfig(
+  variant: WorkBuddyVariant,
+  stores: {
+    credentialStore?: Pick<WorkBuddyCredentialStore, 'setDesktopPath'>
+  },
+  values: Options,
+): 'authFile' | undefined {
+  const field = AUTH_FILE_FIELD_BY_ID.get(variant.id)
+  if (field !== undefined) {
+    stores.credentialStore?.setDesktopPath(values[field])
+    return 'authFile'
+  }
+  return undefined
 }
