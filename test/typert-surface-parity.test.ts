@@ -45,6 +45,29 @@ function declaredSurface(host: string): Map<string, string[]> {
   return surface;
 }
 
+/**
+ * 按 id 切片的服务面解析（id → 方法 + 参数名）。
+ *
+ * 用于比对**浏览器侧**的远程贡献描述符：它与宿主服务面各自写了一遍 id/service/
+ * namespace/method/parameters，漂移了只会在运行时表现为「命名空间里没这个方法」。
+ */
+function parseInvocations(text: string): Map<string, { method: string; params: string[] }> {
+  const parsed = new Map<string, { method: string; params: string[] }>();
+  const marks = [...text.matchAll(/id:\s*["']([^"']+)["']/g)];
+  for (let index = 0; index < marks.length; index++) {
+    const mark = marks[index]!;
+    const end = index + 1 < marks.length ? marks[index + 1]!.index! : text.length;
+    const block = text.slice(mark.index!, end);
+    const method = block.match(/method:\s*["']([A-Za-z_$][\w$]*)["']/)?.[1];
+    if (method === undefined) continue;
+    const parameters =
+      block.match(/parameters:\s*\[([\s\S]*?)\n\s*\]/)?.[1] ?? block.match(/parameters:\s*\[([^\]]*)\]/)?.[1] ?? "";
+    const params = [...parameters.matchAll(/name:\s*["']([A-Za-z_$][\w$]*)["']/g)].map((match) => match[1]!);
+    parsed.set(mark[1]!, { method, params });
+  }
+  return parsed;
+}
+
 /** 网关方法签名里的参数名。 */
 function gatewayParams(remote: string): Map<string, string[]> {
   const params = new Map<string, string[]>();
@@ -83,6 +106,27 @@ describe("网关层与 typert 服务面一致", () => {
       for (const [method, names] of surface) {
         expect(gateway.get(method), `网关缺少方法 ${method}`).toBeDefined();
         expect(gateway.get(method), `${method} 的参数名两侧必须一致`).toEqual(names);
+      }
+    });
+
+    const clientPath = join(ROOT, "packages", pkg, "client", "index.tsx");
+    if (!existsSync(clientPath)) continue;
+    const clientText = readFileSync(clientPath, "utf8");
+    if (!clientText.includes("REMOTE_CONTRIBUTION") && !clientText.includes("descriptors")) continue;
+
+    it(`${pkg}: 浏览器侧远程贡献与宿主服务面一一对应`, () => {
+      const host = parseInvocations(readFileSync(hostPath, "utf8"));
+      const client = parseInvocations(clientText);
+      expect(host.size, "宿主服务面应声明至少一个 invocation").toBeGreaterThan(0);
+      expect(client.size, "客户端贡献应声明至少一个 descriptor").toBeGreaterThan(0);
+
+      // id 必须逐字相同：它是路由键，错一个字符就是「命名空间里没这个方法」。
+      expect([...client.keys()].sort(), "客户端 descriptor 的 id 必须与宿主一致").toEqual([...host.keys()].sort());
+      for (const [id, declared] of client) {
+        const reference = host.get(id);
+        expect(reference, `宿主没有 ${id}`).toBeDefined();
+        expect(declared.method, `${id} 的 method`).toBe(reference!.method);
+        expect(declared.params, `${id} 的参数名`).toEqual(reference!.params);
       }
     });
   }
