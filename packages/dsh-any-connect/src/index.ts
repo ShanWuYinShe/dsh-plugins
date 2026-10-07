@@ -23,7 +23,8 @@
  * - desktop-credential-protection.ts desktop-auth-envelope.ts desktop-discovery.ts
  *   desktop-discovery-windows.ts desktop-at-rest-key.ts — at-rest 凭据门面与信封/发现/密钥解析器
  * 上游通道
- * - upstream.ts upstream-shared.ts — 上游门面与协议共享层
+ * - upstream.ts upstream-shared.ts upstream-types.ts — 上游门面、协议共享层（常量与助手）、
+ *   协议类型（纯声明，零运行时）
  * - upstream-zcode.ts upstream-zcode-body.ts upstream-zcode-start-plan.ts — ZCode 客户端（通道
  *   分发与 Coding Plan）、请求体整形与兜底元数据、Start Plan 通道（余额/名单/领取预览）
  * - upstream-workbuddy.ts upstream-workbuddy-parse.ts upstream-workbuddy-http.ts — WorkBuddy
