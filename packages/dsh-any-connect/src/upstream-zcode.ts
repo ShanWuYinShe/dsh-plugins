@@ -20,6 +20,7 @@ import {
 import type { ZCodeStartPlanContext } from './upstream-zcode-start-plan.js'
 import { chatStreamStartPlan, fetchStartPlanModels, fetchStartPlanClaimPreview, fetchStartPlanCredits } from './upstream-zcode-start-plan.js'
 import { defaultZCodeModelInfo, prepareAnthropicBody } from './upstream-zcode-body.js'
+import { CODING_PLAN_FALLBACK_CREDITS, codingPlanCreditsFrom, mergeZCodeCatalogue } from './upstream-zcode-normalize.js'
 
 /**
  * upstream-zcode.ts — ZCode 上游客户端（bigmodel 订阅通道 + Start Plan）。
@@ -202,25 +203,7 @@ export class ZCodeUpstreamClient {
       // - 本地收录、上游没列的：仍在白名单内才保留（目录接口可能只列一部分；
       //   官方从产品面下架的模型则随之消失，不再靠本地行续命）。
       // 失败/空响应仍回退 this.models（上面的 return），语义不变。
-      const known = new Map(this.models.map(model => [model.id.toLowerCase(), model]))
-      const merged: WorkBuddyUpstreamModel[] = []
-      const seen = new Set<string>()
-      for (const rawId of upstreamIds) {
-        const key = rawId.toLowerCase()
-        if (seen.has(key)) continue
-        if (!whitelist.has(key)) continue
-        seen.add(key)
-        const hit = known.get(key)
-        merged.push(hit ?? defaultZCodeModelInfo(rawId))
-      }
-      for (const model of this.models) {
-        const key = model.id.toLowerCase()
-        if (seen.has(key)) continue
-        if (!whitelist.has(key)) continue
-        seen.add(key)
-        merged.push(model)
-      }
-      return merged
+      return mergeZCodeCatalogue(this.models, upstreamIds, whitelist)
     } catch {
       return this.models
     } finally {
@@ -271,49 +254,12 @@ export class ZCodeUpstreamClient {
         signal: creditsTimeout.signal,
       })
       if (!response.ok) {
-        return {
-          total: 1,
-          accounts: [{ packageName: 'Coding Plan (有效)', remain: 1, size: 1 }],
-        }
+        return CODING_PLAN_FALLBACK_CREDITS
       }
       const json = await response.json() as { code?: number; data?: Array<{ productName?: string; status?: string; expireTime?: number | string }> }
-      const accounts: WorkBuddyCreditAccount[] = []
-      if (Array.isArray(json.data) && json.data.length > 0) {
-        for (const item of json.data) {
-          const name = item.productName || 'Coding Plan'
-          const isValid = item.status === 'VALID' || item.status === 'ACTIVE'
-          let expiredAt: string | undefined
-          if (item.expireTime) {
-            const d = new Date(item.expireTime)
-            if (!Number.isNaN(d.getTime())) expiredAt = d.toISOString()
-          }
-          accounts.push({
-            packageName: isValid ? `${name} (有效)` : `${name} (${item.status ?? '未知'})`,
-            // 计划名单独留一份:上游的产品名就是用户看到的活动/套餐名(例如
-            // "ZCode Trust Build"),界面上的 plan 标签必须用它,而不是写死
-            // "Coding Plan"——那会把用户实际没有的套餐名报给用户。
-            planName: name,
-            remain: isValid ? 1 : 0,
-            size: 1,
-            ...expiredAt === undefined ? {} : { expiredAt },
-          })
-        }
-      } else {
-        accounts.push({
-          packageName: 'Coding Plan (有效)',
-          remain: 1,
-          size: 1,
-        })
-      }
-      return {
-        total: accounts.reduce((acc, cur) => acc + cur.remain, 0),
-        accounts,
-      }
+      return codingPlanCreditsFrom(json)
     } catch {
-      return {
-        total: 1,
-        accounts: [{ packageName: 'Coding Plan (有效)', remain: 1, size: 1 }],
-      }
+      return CODING_PLAN_FALLBACK_CREDITS
     } finally {
       creditsTimeout.dispose()
     }

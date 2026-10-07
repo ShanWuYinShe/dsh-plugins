@@ -26,8 +26,9 @@
  * 上游通道
  * - upstream.ts upstream-shared.ts upstream-types.ts — 上游门面、协议共享层（常量与助手）、
  *   协议类型（纯声明，零运行时）
- * - upstream-zcode.ts upstream-zcode-body.ts upstream-zcode-start-plan.ts — ZCode 客户端（通道
- *   分发与 Coding Plan）、请求体整形与兜底元数据、Start Plan 通道（余额/名单/领取预览）
+ * - upstream-zcode.ts upstream-zcode-body.ts upstream-zcode-normalize.ts
+ *   upstream-zcode-start-plan.ts — ZCode 客户端（通道分发与 Coding Plan）、请求体整形与兜底
+ *   元数据、响应归一化（目录合流/订阅额度）、Start Plan 通道（余额/名单/领取预览）
  * - upstream-workbuddy.ts upstream-workbuddy-parse.ts upstream-workbuddy-http.ts — WorkBuddy
  *   客户端（探针与类）、纯解析（模型行/促销/计费/推理）、基址/请求头/请求体/响应信封
  * - shim.ts shim-http.ts adapter.ts app-version.ts timeout.ts — 回环端点、HTTP 管道（读体/写错误体）、
