@@ -33,11 +33,14 @@ function collect(dir: string, out: string[] = []): string[] {
 
 const files = collect(ROOT);
 
+/** 一次读盘：文件 → 文本（三个用例共用，避免同一份文件被反复读取）。 */
+const TEXTS = new Map<string, string>(files.map((file) => [file, readFileSync(file, "utf8")]));
+
 describe("源码结构卫生", () => {
   it("export 关键字不与注释粘连", () => {
     const offenders: string[] = [];
     for (const file of files) {
-      const text = readFileSync(file, "utf8");
+      const text = TEXTS.get(file) ?? "";
       const lines = text.split("\n");
       lines.forEach((line, index) => {
         if (/^export\s+\/\*/.test(line) || /\*\/export\s/.test(line)) {
@@ -50,7 +53,7 @@ describe("源码结构卫生", () => {
 
   it("每个文件以换行结尾", () => {
     const offenders = files.filter((file) => {
-      const text = readFileSync(file, "utf8");
+      const text = TEXTS.get(file) ?? "";
       return text.length > 0 && !text.endsWith("\n");
     });
     expect(offenders.map((file) => file.slice(ROOT.length + 1)), "文件缺少结尾换行").toEqual([]);
@@ -60,7 +63,7 @@ describe("源码结构卫生", () => {
     const crlf: string[] = [];
     const tabs: string[] = [];
     for (const file of files) {
-      const text = readFileSync(file, "utf8");
+      const text = TEXTS.get(file) ?? "";
       if (text.includes("\r\n")) crlf.push(file.slice(ROOT.length + 1));
       if (text.includes("\t")) tabs.push(file.slice(ROOT.length + 1));
     }

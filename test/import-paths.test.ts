@@ -54,8 +54,11 @@ function caseExact(file: string): boolean {
 const SELF = fileURLToPath(import.meta.url);
 const files = collect(ROOT).filter((file) => file !== SELF);
 
+/** 一次读盘：文件 → 文本（两个用例共用）。 */
+const TEXTS = new Map<string, string>(files.map((file) => [file, readFileSync(file, "utf8")]));
+
 function relativeImports(file: string): string[] {
-  return [...readFileSync(file, "utf8").matchAll(/from\s+["'](\.[^"']+)["']/g)].map((match) => match[1]!);
+  return [...(TEXTS.get(file) ?? "").matchAll(/from\s+["'](\.[^"']+)["']/g)].map((match) => match[1]!);
 }
 
 describe("相对导入的路径与大小写", () => {
