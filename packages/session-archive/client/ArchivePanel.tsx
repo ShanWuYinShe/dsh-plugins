@@ -14,6 +14,7 @@ import { useArchivePanel } from './useArchivePanel.js'
 import { ArchiveRow } from './ArchiveRow.js'
 import { ArchiveBadge } from './ArchiveBadge.js'
 import { ArchiveToolbar } from './ArchiveToolbar.js'
+import { ArchiveDeleteAck } from './ArchiveDeleteAck.js'
 
 export function ArchivePanel(props: any) {
   const {
@@ -96,32 +97,7 @@ export function ArchivePanel(props: any) {
         { className: "sa_body" },
         notice !== null ? React.createElement("p", { className: notice.kind === "ok" ? "sa_ok" : notice.kind === "warn" ? "sa_warn" : "sa_error", role: "status" }, notice.text) : null,
         error !== null ? React.createElement("p", { className: "sa_error", role: "alert" }, error) : null,
-        // 大批量删除的勾选确认条（数量达阈值才出现）：文案说清不可恢复，
-        // 主按钮在勾选前禁用——抄宿主 RiskConfirmation 的行为。
-        needsDeleteAck(selected.size, confirmingDelete) ? React.createElement(
-          "div",
-          { className: "sa_ack", role: "alert" },
-          React.createElement("p", { className: "sa_ackText" },
-            t("deleteConfirmBody").replace("{n}", String(selected.size))),
-          React.createElement("label", { className: "sa_ackLabel" },
-            React.createElement("input", {
-              className: "sa_check",
-              type: "checkbox",
-              checked: deleteAcked,
-              onChange: (e: any) => setDeleteAcked(e.target.checked)
-            }),
-            t("deleteAcknowledge").replace("{n}", String(selected.size))
-          ),
-          React.createElement(
-            "div",
-            { className: "sa_ackActions" },
-            React.createElement("button", {
-              className: "sa_action",
-              type: "button",
-              onClick: () => disarmDelete()
-            }, t("cancel"))
-          )
-        ) : null,
+        React.createElement(ArchiveDeleteAck, { t, selected, confirmingDelete, deleteAcked, setDeleteAcked, disarmDelete }),
         // 加载中明确提示（loading 只由打开面板/手动刷新置位，静默刷新不打扰）：
         // 此前列表已有内容时手动刷新零反馈，首次加载只有一个孤零零的 "…"。
         loading ? React.createElement("p", { className: "sa_loading", role: "status" },
