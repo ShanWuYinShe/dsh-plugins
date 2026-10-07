@@ -11,6 +11,7 @@ import * as React from 'react'
 import { formatBytes, formatTime, shortId } from './archive-format.js'
 import { ARCHIVE_SORT_KEYS, ARCHIVE_PAGE_SIZE, needsDeleteAck } from './archive-entries.js'
 import { useArchivePanel } from './useArchivePanel.js'
+import { ArchiveRow } from './ArchiveRow.js'
 
 export function ArchivePanel(props: any) {
   const {
@@ -224,78 +225,7 @@ export function ArchivePanel(props: any) {
         items.length > 0 ? React.createElement(
           "ul",
           { className: "sa_rows" },
-          visibleItems.map((item) => {
-            const isExpanded = expanded === item.sessionId;
-            const detail = details.get(item.sessionId);
-            const detailPending = detailLoading.has(item.sessionId);
-            return React.createElement(
-              "li",
-              { className: "sa_row" + (busy ? " sa_busy" : "") + (selected.has(item.sessionId) ? " sa_row--selected" : ""), key: item.sessionId },
-              React.createElement(
-                "div",
-                { className: "sa_rowHead" },
-                React.createElement("input", {
-                  className: "sa_check",
-                  type: "checkbox",
-                  checked: selected.has(item.sessionId),
-                  disabled: busy || item.live,
-                  title: item.live ? t("runningHint") : void 0,
-                  "aria-label": item.title !== null && item.title !== void 0 && item.title !== "" ? item.title : t("noneTitle"),
-                  onChange: (e: any) => toggleOne(item.sessionId, e.target.checked)
-                }),
-                React.createElement(
-                  "button",
-                  { className: "sa_rowTitle", type: "button", onClick: () => toggleDetail(item), title: t("view") },
-                  item.title !== null && item.title !== void 0 && item.title !== "" ? item.title : t("noneTitle")
-                ),
-                item.live ? React.createElement("span", { className: "sa_live" }, t("live")) : null
-              ),
-              React.createElement("div", { className: "sa_rowMeta" },
-                React.createElement("span", null, formatTime(item.updatedAt)),
-                item.cwd !== null && item.cwd !== void 0 ? React.createElement("span", null, " · ", React.createElement("code", null, item.cwd)) : null,
-                React.createElement("span", null, " · ", formatBytes(item.size, t))
-              ),
-              React.createElement(
-                "div",
-                { className: "sa_rowFoot" },
-                React.createElement("span", { className: "sa_rowMeta" },
-                  React.createElement("code", null, shortId(item.sessionId)),
-                  detail !== void 0 && !detail.error && detail.messageCount !== void 0
-                    ? " · " + (detail.truncated === true
-                      ? t("messagesTruncated").replace("{n}", String(detail.totalMessageCount !== void 0 ? detail.totalMessageCount : detail.messageCount))
-                      : t("messages").replace("{n}", String(detail.messageCount)))
-                    : null
-                ),
-                React.createElement(
-                  "div",
-                  { className: "sa_rowActions" },
-                  React.createElement("button", {
-                    className: "sa_action",
-                    type: "button",
-                    disabled: busy || detailPending,
-                    onClick: () => toggleDetail(item)
-                  }, isExpanded ? t("collapse") : t("view"))
-                )
-              ),
-              isExpanded ? React.createElement(
-                "div",
-                { className: "sa_detail" },
-                detailPending ? React.createElement("p", { className: "sa_loading" },
-                  React.createElement("span", { className: "sa_spin", "aria-hidden": true }),
-                  t("loading")) : null,
-                detail === void 0 ? null :
-                  detail.error !== void 0 ? React.createElement("p", { className: "sa_error" }, detail.error) :
-                  !Array.isArray(detail.messages) ? React.createElement("p", { className: "sa_error" }, t("detailLoadFailed")) :
-                  detail.messages.length === 0 ? React.createElement("p", { className: "sa_empty" }, t("noMessages")) :
-                  detail.messages.map((message: any, index: any) => React.createElement(
-                    "div",
-                    { className: "sa_msg", key: index },
-                    React.createElement("span", { className: "sa_msgRoleChip " + (message.role === "user" ? "sa_msgRoleUser" : "sa_msgRoleAssistant") }, message.role === "user" ? t("user") : t("assistant") + " · " + formatTime(message.time)),
-                    React.createElement("span", { className: "sa_msgBubble " + (message.role === "user" ? "sa_msgUser" : "sa_msgAssistant") }, message.text)
-                  ))
-              ) : null
-            );
-          }),
+          visibleItems.map((item) => React.createElement(ArchiveRow, { key: item.sessionId, item, t, loading, error, selected, expanded, details, detailLoading, busy, toggleOne, toggleDetail })),
           // 分页：还有未渲的行就给“加载更多”，点一次追加一页。
           visibleCount < sortedItems.length ? React.createElement("button", {
             className: "sa_action",
