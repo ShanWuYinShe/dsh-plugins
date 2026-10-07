@@ -13,7 +13,6 @@ import { regionOf } from './upstream.js'
 import type { WorkBuddyVariant } from './variants.js'
 import {
   atRestKeyProviderFor,
-  classifyDesktopAuthDocument,
   reasonCodeOf,
   type DesktopAuthFormat,
 } from './desktop-credential-protection.js'
@@ -23,6 +22,7 @@ import { WORKBUDDY_AUTH_FILE_ENV, workbuddyOwnAuthPath, desktopAuthCandidatesFor
 import { parseZCodeAuth } from './auth-zcode.js'
 import { parseOwnDocument } from './auth-document.js'
 import { needsRefresh, refreshNow, saveOwn, type RefreshContext, type RefreshState } from './auth-refresh.js'
+import { atRestHelperPath, desktopAuthFormat, desktopFilePresent, resolvedDesktopAuthPath, type DesktopInspectContext } from './auth-desktop-inspect.js'
 import { readDesktopCredential } from './auth-desktop-read.js'
 
 /** 两次刷新之间的最小间隔:极短有效期/缺 expiresIn 的上游响应 otherwise
@@ -303,53 +303,23 @@ export class WorkBuddyCredentialStore {
    * placeholder beside it.
    */
   async resolvedDesktopAuthPath(): Promise<string | undefined> {
-    for (const desktopPath of this.resolveDesktopCandidates()) {
-      let text: string
-      try {
-        text = await readFile(desktopPath, 'utf8')
-      } catch {
-        // absent, unreadable, or not a regular file — try the next candidate
-        continue
-      }
-      if (text.trim() === '') continue
-      return desktopPath
-    }
-    return undefined
+    return await resolvedDesktopAuthPath(this.desktopInspectContext())
   }
 
-  /**
-   * How the first desktop candidate that carries content is stored:
-   * `plaintext`, the 5.6 `encrypted` envelope form, `unrecognized`, or
-   * `absent`. Diagnostics only — it never spawns the key helper and never
-   * decrypts, so `doctor` can describe the file without opening it.
-   */
   async desktopAuthFormat(): Promise<DesktopAuthFormat> {
-    for (const desktopPath of this.resolveDesktopCandidates()) {
-      let text: string
-      try {
-        text = await readFile(desktopPath, 'utf8')
-      } catch {
-        // absent, unreadable, or not a regular file — try the next candidate
-        continue
-      }
-      const format = classifyDesktopAuthDocument(text).format
-      if (format !== 'absent') return format
-    }
-    return 'absent'
+    return await desktopAuthFormat(this.desktopInspectContext())
   }
 
-  /**
-   * The Electron binary the at-rest key helper would run, for diagnostics;
-   * `undefined` when this variant has no helper. Never triggers a discovery
-   * search — it reports the path an explicit setting or the platform default
-   * already names.
-   */
   atRestHelperPath(): string | undefined {
-    return this.keyProvider?.helperPath()
+    return atRestHelperPath(this.desktopInspectContext())
   }
 
-  /** Whether a desktop-file candidate with content exists; diagnostics only. */
   async desktopFilePresent(): Promise<boolean> {
-    return await this.resolvedDesktopAuthPath() !== undefined
+    return await desktopFilePresent(this.desktopInspectContext())
+  }
+
+  /** 诊断检查的入参。 */
+  private desktopInspectContext(): DesktopInspectContext {
+    return { candidates: () => this.resolveDesktopCandidates(), keyProvider: this.keyProvider }
   }
 }
