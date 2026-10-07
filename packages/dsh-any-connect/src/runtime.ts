@@ -14,18 +14,16 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { AdapterRegistrationHandle } from '@deepseek-ai/dsh-llm'
-import { WorkBuddyCredentialStore } from './auth.js'
 import { WorkBuddyCatalog } from './catalog.js'
 import { FALLBACK_ZCODE_MODELS } from './catalog.js'
 import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
 import { WorkBuddyCatalogStore, workbuddyCatalogPath } from './catalog-store.js'
 import { createWorkBuddyAdapter } from './adapter.js'
 import { createWorkBuddyShim } from './shim.js'
-import { WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
+import { WorkBuddyUpstreamClient } from './upstream.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { PROVIDER_VARIANTS } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
-import { applyZCodePlanOverride } from './zcode-plan-store.js'
 import { WorkBuddyProbeService } from './probe-service.js'
 import { newestFirst, workbuddyProbePath, WorkBuddyProbeStore } from './probe-store.js'
 import { createProbeKey, registerWorkBuddyProbeRoute } from './probe-route.js'
@@ -36,6 +34,7 @@ import { createCatalogLifecycle } from './catalog-lifecycle.js'
 import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebProbeSection } from './status-paths.js'
 import type { Options } from './config.js'
+import { createVariantCredentialStore, upstreamClientFor } from './variant-wiring.js'
 
 /** apply() 拿到的运行时集合句柄。 */
 export interface VariantRuntimeSet {
@@ -72,16 +71,14 @@ export function createVariantRuntimeSet(deps: {
       // 自己的计划语义固定进读出的凭据（credential.zcodePlan 恒为该变体的
       // 计划）——模型路由（专属 vs 普通通道）、额度来源、夜免资格都只看这
       // 一个字段。共享同一份桌面凭据文档，互不掺用对方的材料。
-      const zcodeClient = new ZCodeUpstreamClient({
+      const zcodeClient = upstreamClientFor(variant, {
         models: variant.zcodePlanMode === 'start' ? FALLBACK_ZCODE_START_PLAN_MODELS : FALLBACK_ZCODE_MODELS,
       })
-      const credentialStore = new WorkBuddyCredentialStore({
+      const credentialStore = createVariantCredentialStore({
         variant,
-        ...configured === undefined ? {} : { desktopPath: configured },
-        refresh: credential => zcodeClient.refreshToken(credential),
+        client: zcodeClient,
+        desktopPath: configured,
         onWarning: message => ctx.logger?.warn?.(message),
-        transformCredential: credential =>
-          applyZCodePlanOverride(credential, variant.zcodePlanMode === 'start' ? 'start-plan' : 'coding-plan'),
       })
       const catalogStore = new WorkBuddyCatalogStore({ path: workbuddyCatalogPath(variant.catalogFilename) })
       const shim = createWorkBuddyShim({ kind: 'zcode', store: credentialStore, client: zcodeClient, catalog, logger: ctx.logger })
@@ -103,10 +100,10 @@ export function createVariantRuntimeSet(deps: {
       return runtime
     }
 
-    const credentialStore = new WorkBuddyCredentialStore({
+    const credentialStore = createVariantCredentialStore({
       variant,
-      ...configured === undefined ? {} : { desktopPath: configured },
-      refresh: credential => client.refreshToken(credential),
+      client,
+      desktopPath: configured,
       onWarning: message => ctx.logger?.warn?.(message),
     })
     const catalogStore = new WorkBuddyCatalogStore({ path: workbuddyCatalogPath(variant.catalogFilename) })

@@ -4,17 +4,16 @@
 import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { WorkBuddyCredentialStore, workbuddyOwnAuthPath, WORKBUDDY_AUTH_FILE_ENV } from './auth.js'
-import { WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
 import type { WorkBuddyCreditAccount } from './upstream.js'
 import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS } from './catalog.js'
 import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
 import { CN_VARIANT, variantFor, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { ANYCONNECT_VERSION } from './version.js'
-import { applyZCodePlanOverride } from './zcode-plan-store.js'
 import { currentPlanWindow } from './usage.js'
 import { isHeartbeatProcessAlive, readHostHeartbeat, workbuddyHostHeartbeatPath } from './host-heartbeat.js'
 import { WORKBUDDY_ELECTRON_BIN_ENV } from './desktop-credential-protection.js'
+import { createVariantCredentialStore, upstreamClientFor } from './variant-wiring.js'
 
 type Action = 'doctor' | 'logout' | 'status'
 
@@ -49,18 +48,10 @@ function printJson(value: unknown): void {
 
 /** Credential store wired for CLI diagnostics. */
 function makeWorkBuddyStore(variant: WorkBuddyVariant): WorkBuddyCredentialStore {
-  const client = variant.kind === 'zcode' ? new ZCodeUpstreamClient() : new WorkBuddyUpstreamClient()
-  return new WorkBuddyCredentialStore({
-    variant,
-    refresh: credential => client.refreshToken(credential),
-    // 与插件运行时同口径（runtime.ts 的 createRuntime）：变体的计划语义固定进
-    // 读出的凭据——否则 CLI 会凭 setting.json 的选择推断计划，把
-    // zcode-start-plan 的额度查询指到 coding 池子（反之亦然）。
-    ...variant.kind === 'zcode'
-      ? { transformCredential: credential =>
-          applyZCodePlanOverride(credential, variant.zcodePlanMode === 'start' ? 'start-plan' : 'coding-plan') }
-      : {},
-  })
+  // 与插件运行时同一份装配（见 variant-wiring.ts）：计划语义 / 刷新通道都由它
+  // 决定，CLI 不再自己拼一遍——历史上正是这里漏掉 transformCredential，把
+  // zcode-start-plan 的额度查询指到了 coding 池子。
+  return createVariantCredentialStore({ variant, client: upstreamClientFor(variant) })
 }
 
 /** Compiled-in roster size per provider id. */
@@ -186,7 +177,7 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
   try {
     const credential = await workbuddyStore.current()
     if (credential !== undefined) {
-      const client = variant.kind === 'zcode' ? new ZCodeUpstreamClient() : new WorkBuddyUpstreamClient()
+      const client = upstreamClientFor(variant)
       const answer = await client.fetchCredits(credential)
       credits = { total: answer.total }
       creditAccounts = [...answer.accounts]
