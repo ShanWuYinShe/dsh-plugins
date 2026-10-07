@@ -53,7 +53,7 @@ function makeWorkBuddyStore(variant: WorkBuddyVariant): WorkBuddyCredentialStore
   return new WorkBuddyCredentialStore({
     variant,
     refresh: credential => client.refreshToken(credential),
-    // 与插件运行时同口径（index.ts 的 createRuntime）：变体的计划语义固定进
+    // 与插件运行时同口径（runtime.ts 的 createRuntime）：变体的计划语义固定进
     // 读出的凭据——否则 CLI 会凭 setting.json 的选择推断计划，把
     // zcode-start-plan 的额度查询指到 coding 池子（反之亦然）。
     ...variant.kind === 'zcode'

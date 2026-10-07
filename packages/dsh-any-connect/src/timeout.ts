@@ -74,7 +74,7 @@ export function localDeadlineSignal(upstream: AbortSignal | undefined, timeoutMs
 }
 
 /** 融合上游取消与超时的信号（宿主优先，缺席回退本地）。用完必须 dispose，
- * 否则 timer 挂住事件循环（此前手写三件套同类泄漏的注释见 upstream.ts）。 */
+ * 否则 timer 挂住事件循环（此前手写三件套同类泄漏的注释见 upstream-workbuddy.ts）。 */
 export async function deadlineSignal(upstream: AbortSignal | undefined, timeoutMs: number, code: string): Promise<DeadlineHandle> {
   const make = await loadFactory();
   if (make === null) return localDeadlineSignal(upstream, timeoutMs, code);
