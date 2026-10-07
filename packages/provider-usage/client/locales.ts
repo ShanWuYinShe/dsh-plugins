@@ -12,10 +12,7 @@ export type ProviderUsageLocaleKey =
   | 'plan'
   | 'resetsAt'
   | 'windowRemaining'
-  | 'expand'
-  | 'collapse'
   | 'providerUsageTitle'
-  | 'emptyProvider'
   | 'refresh'
   | 'staleData'
 
@@ -30,10 +27,7 @@ export const en: Record<ProviderUsageLocaleKey, string> = {
   plan: 'Plan',
   resetsAt: 'Resets {time}',
   windowRemaining: '{remain} / {limit}',
-  expand: 'Expand',
-  collapse: 'Collapse',
   providerUsageTitle: 'Provider usage',
-  emptyProvider: 'No provider',
   refresh: 'Refresh',
   staleData: 'may be stale',
 }
@@ -49,10 +43,7 @@ export const zh: Record<ProviderUsageLocaleKey, string> = {
   plan: '套餐',
   resetsAt: '{time} 重置',
   windowRemaining: '{remain} / {limit}',
-  expand: '展开',
-  collapse: '收起',
   providerUsageTitle: 'Provider 额度',
-  emptyProvider: '无 provider',
   refresh: '刷新',
   staleData: '数据可能过期',
 }

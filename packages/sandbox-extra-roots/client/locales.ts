@@ -26,11 +26,6 @@ export const zh = {
   rootsCount: "共 {n} 个目录",
   presetsTitle: "常用工具缓存（一键添加）", 
   placeholder: "~/data\n/tmp/cache",
-  rootInvalid: "第 {n} 行「{v}」不是绝对路径，保存将被拒绝",
-  rootDuplicate: "第 {n} 行「{v}」与前面的行重复（host 会去重）",
-  rootDanger: "第 {n} 行「{v}」会被拒绝：授予它等于解除沙盒边界",
-  rootHomeAncestor: "第 {n} 行「{v}」会被拒绝：它是主目录的父目录",
-  rootSystem: "第 {n} 行「{v}」会被忽略：系统目录"
 };
 export const en = {
   title: "Extra sandbox roots (sandbox-extra-roots)",
@@ -48,9 +43,4 @@ export const en = {
   rootsCount: "{n} roots",
   presetsTitle: "Common tool caches (one-tap add)",
   placeholder: "~/data\n/tmp/cache",
-  rootInvalid: "Line {n} \"{v}\" is not an absolute path; saving will be rejected",
-  rootDuplicate: "Line {n} \"{v}\" duplicates an earlier line (deduped by host)",
-  rootDanger: "Line {n} \"{v}\" will be rejected: granting it disables the sandbox boundary",
-  rootHomeAncestor: "Line {n} \"{v}\" will be rejected: it is a parent of the home directory",
-  rootSystem: "Line {n} \"{v}\" will be ignored: system directory"
 };
