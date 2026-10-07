@@ -25,14 +25,14 @@ import { ANYCONNECT_VERSION } from './version.js'
 import { PROVIDER_VARIANTS } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { WorkBuddyProbeService } from './probe-service.js'
-import { newestFirst, workbuddyProbePath, WorkBuddyProbeStore } from './probe-store.js'
+import { workbuddyProbePath, WorkBuddyProbeStore } from './probe-store.js'
 import { createProbeKey, registerWorkBuddyProbeRoute } from './probe-route.js'
 import { registerWorkBuddyStatusRoute } from './web-status.js'
 import { applyVariantConfig, configuredAuthFile, fallbackFor, variantIsStartPlan } from './variant-runtime.js'
 import type { VariantRuntime } from './variant-runtime.js'
+import { catalogSection, probeSection } from './runtime-sections.js'
 import { createCatalogLifecycle } from './catalog-lifecycle.js'
 import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
-import type { WorkBuddyWebCatalog, WorkBuddyWebProbeSection } from './status-paths.js'
 import type { Options } from './config.js'
 import { createVariantCredentialStore, upstreamClientFor } from './variant-wiring.js'
 
@@ -166,37 +166,6 @@ export function createVariantRuntimeSet(deps: {
     isStopped: () => stopped,
   })
 
-  function probeSection(runtime: VariantRuntime): WorkBuddyWebProbeSection {
-    // 仅 WorkBuddy 变体携带探针服务；status 路由也只对它们启用 probe 字段。
-    if (runtime.probeService === undefined) {
-      return { running: false, results: [] }
-    }
-    const results = runtime.catalog.current().flatMap(info => {
-      const record = runtime.probeService!.recordFor(info.id)
-      if (record === undefined) return []
-      return [{
-        id: info.id,
-        name: info.name,
-        validation: record.validation,
-        efforts: record.efforts,
-        probedAt: record.probedAtMs,
-      }]
-    })
-    return {
-      running: runtime.probeService.isRunning(),
-      results: newestFirst(results),
-    }
-  }
-
-  function catalogSection(runtime: VariantRuntime): WorkBuddyWebCatalog {
-    return {
-      source: runtime.catalogSource,
-      ...runtime.catalogFetchedAtMs === undefined ? {} : { fetchedAt: runtime.catalogFetchedAtMs },
-      // 与 error 互斥：error 表示「没拉到、保留旧名单」，empty 表示「拉到了、就是空的」。
-      ...runtime.catalogEmpty && runtime.catalogError === undefined ? { empty: true as const } : {},
-      ...runtime.catalogError === undefined ? {} : { error: runtime.catalogError },
-    }
-  }
 
   // Same-origin status routes backing each Plugin-configuration card; the
   // webServer service is optional (a headless profile serves no browser).

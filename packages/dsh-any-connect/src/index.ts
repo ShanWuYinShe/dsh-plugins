@@ -6,9 +6,10 @@
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * 入口与组装
- * - index.ts config.ts variant-runtime.ts runtime.ts variant-wiring.ts variants.ts —
- *   入口组装、配置 schema、变体类型与共用助手、运行时集合（构造/路由/定时器/适配器
- *   注册）、变体装配（上游客户端与凭据存储，CLI 与运行时共用）、变体清单
+ * - index.ts config.ts variant-runtime.ts runtime.ts runtime-sections.ts variant-wiring.ts
+ *   variants.ts — 入口组装、配置 schema、变体类型与共用助手、运行时集合（构造/路由/定时器/
+ *   适配器注册）、状态路由响应段（探针/目录）、变体装配（上游客户端与凭据存储，CLI 与运行时
+ *   共用）、变体清单
  * 目录与额度
  * - catalog-lifecycle.ts catalog-refresh.ts catalog-timers.ts catalog-fingerprint.ts —
  *   生命周期组合入口、刷新/发布/领取快通道、身份 sweep 与小时定时器、内容指纹
