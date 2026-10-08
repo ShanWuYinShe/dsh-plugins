@@ -35,8 +35,16 @@ afterEach(async () => {
 })
 
 
-/** 真实 I/O（凭据文件读取、shim 就绪）在假时钟下不会前进，用真实小睡等它收敛。 */
-async function drain(until: () => boolean, budget = 400): Promise<void> {
+/**
+ * 真实 I/O（凭据文件读取、shim 就绪）在假时钟下不会前进，用真实小睡等它收敛。
+ *
+ * 预算默认 1500ms：**等条件成立**的调用在条件满足时立刻返回，所以调大不增加正常耗时；
+ * 它只在条件迟迟不成立时多等（那本来就意味着用例要失败）。原先的 400ms 在并行 / 机器繁忙时
+ * 偏紧——2026-10-08 实测到过一次 drain 后 previewCalls() 仍为 0 的失败（随后连续复跑与
+ * 4 路并发加压都无法复现，属环境性的时间脆弱点）。
+ * **故意沉降**（等一段固定时间后断言「什么都没发生」）的调用仍显式传小预算，语义不变。
+ */
+async function drain(until: () => boolean, budget = 1500): Promise<void> {
   for (let waited = 0; waited < budget && !until(); waited += 10) await realSleep(10)
 }
 
@@ -156,7 +164,7 @@ describe('Start Plan 空名单快通道（领取后 ≤60s 恢复）', () => {
 
       // 跨过 5 分钟阈值：自愈分支重拉一次（上游仍空，fetchedAtMs 前移）。
       await vi.advanceTimersByTimeAsync(3 * 60_000)
-      await drain(() => h.modelsCalls() > pullsBefore, 400)
+      await drain(() => h.modelsCalls() > pullsBefore, 1500)
       expect(h.modelsCalls()).toBeGreaterThan(pullsBefore)
 
       // 上游恢复正常：下一拍自愈把名单带回来。
