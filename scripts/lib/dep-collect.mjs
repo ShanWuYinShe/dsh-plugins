@@ -2,6 +2,8 @@
 // 本模块只做收集与解析，不做网络与 exit/log 决策（策略留给调用方）。
 // 收集键为 name@version：同版本多路径只查一次，不同版本分别查。
 
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { DEP_SECTIONS } from "./dsh-deps.mjs";
 
 /** 收集键：同版本多路径只查一次，不同版本分别查。 */
@@ -68,5 +70,35 @@ export function collectDirectDeps(manifests, workspaceNames, readVersion) {
       }
     }
   }
+  return deps;
+}
+
+/**
+ * 非 bun 布局（npm/yarn 安装的树）：递归 walk node_modules 收集每个 name@version。
+ * 点开头目录跳过；@scope 先下钻一层；每个目录读 package.json（坏文件跳过不炸）；
+ * 嵌套 node_modules 继续下钻。statSync 语义跟随符号链接。
+ * 直接读真实 fs：调用方给根目录，测试用临时目录树驱动（见 dep-collect.test.ts）。
+ */
+export function collectWalkTree(nodeModulesDir, workspaceNames) {
+  const { deps, collect } = createCollector(workspaceNames);
+  const walk = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.name.startsWith(".")) continue;
+      if (entry.name.startsWith("@")) { walk(full); continue; }
+      const pkgJson = join(full, "package.json");
+      if (existsSync(pkgJson)) {
+        try {
+          const { name, version } = JSON.parse(readFileSync(pkgJson, "utf8"));
+          if (typeof name === "string") collect(name, version);
+        } catch {}
+      }
+      const nested = join(full, "node_modules");
+      if (existsSync(nested)) walk(nested);
+    }
+  };
+  walk(nodeModulesDir);
   return deps;
 }

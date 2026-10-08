@@ -1,10 +1,12 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   collectBunStoreEntries,
   collectDirectDeps,
+  collectWalkTree,
   createCollector,
   depKey,
   parseBunStoreEntry,
@@ -141,5 +143,41 @@ describe("collectDirectDeps", () => {
   it("dsh.host 等非依赖字段不参与", () => {
     const deps = collectDirectDeps([{ dsh: { host: "0.2.1-alpha.1" } }], new Set(), () => "9.9.9");
     expect(deps.size).toBe(0);
+  });
+});
+
+describe("collectWalkTree", () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function pkg(root: string, dirRel: string, manifest: Record<string, unknown>): void {
+    const dir = join(root, dirRel);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify(manifest));
+  }
+
+  it("收集普通包、scoped 包与嵌套 node_modules，跳过点目录与坏文件", () => {
+    const root = mkdtempSync(join(tmpdir(), "dep-collect-walk-"));
+    dirs.push(root);
+    pkg(root, "foo", { name: "foo", version: "1.0.0" });
+    pkg(root, "@scope/bar", { name: "@scope/bar", version: "2.0.0" });
+    // 读的是 package.json 里声明的名字，不是目录名（npm 语义）。
+    pkg(root, "foo/node_modules/nested", { name: "nested", version: "0.0.1" });
+    pkg(root, "@chaoset/dsh-any-connect", { name: "@chaoset/dsh-any-connect", version: "0.4.0" });
+    mkdirSync(join(root, ".hidden"));
+    writeFileSync(join(root, ".hidden", "package.json"), JSON.stringify({ name: "hidden", version: "9.9.9" }));
+    mkdirSync(join(root, "broken"), { recursive: true });
+    writeFileSync(join(root, "broken", "package.json"), "{not json");
+    mkdirSync(join(root, "noname"), { recursive: true });
+    writeFileSync(join(root, "noname", "package.json"), JSON.stringify({ version: "1.0.0" }));
+    const deps = collectWalkTree(root, WS);
+    expect([...deps.keys()].sort()).toEqual(["@scope/bar@2.0.0", "foo@1.0.0", "nested@0.0.1"]);
+  });
+
+  it("不存在的根目录返回空表而不抛错", () => {
+    expect(collectWalkTree(join(tmpdir(), "dep-collect-no-such-dir"), new Set()).size).toBe(0);
   });
 });

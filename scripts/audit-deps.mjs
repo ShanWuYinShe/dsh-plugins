@@ -11,7 +11,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { manifestPaths, ROOT } from "./lib/dsh-deps.mjs";
-import { collectBunStoreEntries, collectDirectDeps, createCollector } from "./lib/dep-collect.mjs";
+import { collectBunStoreEntries, collectDirectDeps, collectWalkTree } from "./lib/dep-collect.mjs";
 
 const manifests = manifestPaths(ROOT).map((rel) =>
   JSON.parse(readFileSync(join(ROOT, rel), "utf8")),
@@ -40,28 +40,8 @@ if (deep) {
       .map((entry) => entry.name);
     deps = collectBunStoreEntries(entryNames, workspaceNames);
   } else {
-    // 非 bun 布局（npm/yarn 安装的树）：递归 walk，statSync 跟随符号链接。
-    const { deps: walked, collect } = createCollector(workspaceNames);
-    const walk = (dir) => {
-      let entries;
-      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-      for (const entry of entries) {
-        const full = join(dir, entry.name);
-        if (entry.name.startsWith(".")) continue;
-        if (entry.name.startsWith("@")) { walk(full); continue; }
-        const pkgJson = join(full, "package.json");
-        if (existsSync(pkgJson)) {
-          try {
-            const { name, version } = JSON.parse(readFileSync(pkgJson, "utf8"));
-            if (typeof name === "string") collect(name, version);
-          } catch {}
-        }
-        const nested = join(full, "node_modules");
-        if (existsSync(nested)) walk(nested);
-      }
-    };
-    walk(join(ROOT, "node_modules"));
-    deps = walked;
+    // 非 bun 布局（npm/yarn 安装的树）：递归 walk，逻辑在 collectWalkTree（有单测）。
+    deps = collectWalkTree(join(ROOT, "node_modules"), workspaceNames);
   }
 } else {
   // 默认：直接依赖（manifest 声明 + hoisted 主版本）。

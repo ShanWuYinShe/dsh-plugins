@@ -35,3 +35,12 @@ export declare function collectDirectDeps(
   workspaceNames: ReadonlySet<string>,
   readVersion: (name: string) => string | undefined,
 ): Map<string, { name: string; version: string }>;
+
+/**
+ * 非 bun 布局（npm/yarn 安装的树）：递归 walk node_modules 收集每个 name@version。
+ * 直接读真实 fs，测试用临时目录树驱动。
+ */
+export declare function collectWalkTree(
+  nodeModulesDir: string,
+  workspaceNames: ReadonlySet<string>,
+): Map<string, { name: string; version: string }>;
