@@ -580,6 +580,47 @@ function isAuthRequiredLikeError(L,ei,ea,es){
 
 处置：找服务方确认套餐是否含 chat 权益 / 是否需要绑卡或升级；插件侧无可修之处。
 
+### 9.6.1 排除"请求被拒是因为我们发得不对"（2026-10-08 对照组实验）
+
+关键对照：**同一端点、同一请求体形态**，只换凭据：
+
+| 场景 | 响应 |
+|---|---|
+| 不带 Authorization | **401**（网关直接拒绝，HTML） |
+| `Bearer not-a-real-token` | **401**（同上） |
+| **真实凭据**（哪怕 body 只有一个 `system: "s"`） | **403 / code 11140** |
+
+⇒ 网关**认这份 token**（否则会与伪造 token 一样 401），是**业务层按权益拒绝**。
+再用"完全无害内容"（只有 system、空 user content）复测，仍一律 403/11140 ⇒ 与消息内容无关，
+上游那句"内容未通过安全审核"确系泛化兜底文案。
+
+服务端 `/v3/config` 也**没有任何禁用 chat 的开关**：`productFeatures` 只有两个无关项，
+`agents[cli]` 正常挂着 21 个模型，`isDefault` 模型可用——"配置层面被禁"同样不成立。
+
+### 9.6.2 官方客户端的分类口径（同一结论）
+
+`app.asar.unpacked/cli/dist/codebuddy-headless.js` 里：
+```js
+[11140, {category:"auth", subcategory:"auth_forbidden"}]
+[11142, {category:"auth", subcategory:"auth_forbidden"}]
+// 且 classifyAfterBizCode: 403===ei ? {category:"auth", subcategory:"auth_forbidden"} : ...
+// isAuthRequiredLikeError: 403 + 该码集合 → authRequired
+```
+即**官方自己**也把 403/11140 当鉴权/权益问题（非内容问题）。用户的官方客户端同样报错，
+进一步印证服务端按账号权益拒绝。
+
+### 9.6.3 能做的事 / 不能做的事
+
+- **不能由插件解决**：权益判定在服务端，客户端无从绕过（也不该绕——绕过权益等于盗用）。
+- **用户侧可做**：
+  1. 在官方 WorkBuddy AI 里确认当前是 **Free Plan**，查看是否有"对话/模型调用"权益，
+     以及是否需要**升级套餐 / 绑卡 / 开通试用**；
+  2. 若官方客户端在付费后可用，插件应**立即**随之可用（鉴权、目录、账单均已被证明正常）；
+  3. 向服务方反馈：Free Plan 下 `/v3/config` 会列出 21 个模型、`credits` 报 100 点赠送额度，
+     但任何 chat 都被 403 拒绝——**展示与权限不一致**，容易误导用户；
+  4. 提交反馈用错误体自带的 `actions: ["SUBMIT_FEEDBACK","COPY_ERROR","EDIT_INPUT"]` 里的
+     requestId（如 `f331ae4a-3b51-4424-8ea0-e087b60e72b3`），这是服务方定位的唯一凭据。
+
 ### 9.7 插件侧已做的改进（commit 0589841）
 
 原实现把上游状态码**裸写**进失败文案（`(http 403)`），而宿主 `dsh-llm-pi-ai` 的
