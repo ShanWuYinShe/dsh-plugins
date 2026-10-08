@@ -29,6 +29,7 @@
 import { randomBytes } from 'node:crypto'
 import { withTimeout } from './timeout.js'
 import type { WorkBuddyEffort } from './upstream.js'
+import { httpStatusLabel } from './upstream-shared.js'
 
 /**
  * The canonical values a probe tests, in a fixed order.
@@ -101,7 +102,7 @@ function isAcceptance(attempt: ProbeAttempt): boolean {
 function unknownReason(stage: string, attempt: ProbeAttempt): string {
   const code = attempt.errorCode === undefined ? '' : ` (${attempt.errorCode})`
   const detail = attempt.detail === undefined ? '' : `: ${attempt.detail}`
-  return `${stage} status ${attempt.status}${code}${detail}`
+  return `${stage} status ${httpStatusLabel(attempt.status)}${code}${detail}`
 }
 
 /**

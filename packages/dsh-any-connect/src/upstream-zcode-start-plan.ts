@@ -27,6 +27,7 @@ import {
 import {
   JSON_TIMEOUT_MS,
   settleChatFetch,
+  httpStatusLabel,
   classifyUpstreamError,
   type WorkBuddyUpstreamModel,
   type WorkBuddyCreditAccount,
@@ -198,7 +199,7 @@ export async function fetchStartPlanCredits(
       signal: balanceTimeout.signal,
     })
     if (!response.ok) {
-      throw new Error(`Start Plan 额度查询失败（HTTP ${response.status}）`)
+      throw new Error(`Start Plan 额度查询失败（${httpStatusLabel(response.status)}）`)
     }
     const json = await response.json() as {
       data?: {

@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { KIND_STATUS, upstreamFailureMessage } from '../src/shim-http.js'
 import { httpStatusLabel } from '../src/upstream-shared.js'
@@ -87,5 +90,50 @@ describe('upstreamFailureMessage', () => {
       if (status < 500) expect(HOST_AUTH_RE.test(message), `kind=${kind} 触发了 AUTH`).toBe(false)
       expect(message.length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('源码里不再裸写状态码（防回归到文案层）', () => {
+  // 宿主按文本正则分类：\b(?:401|403)\b 命中即判 AUTH，随后我们的 message 被丢弃。
+  // 所以「状态码进错误文案」必须统一走 httpStatusLabel（渲染成 HTTP_403）。
+  const SRC = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'src')
+
+  /** 会被宿主当文本读取的渲染点：模板串里直接插 status / response.status / res.status。 */
+  const BARE_STATUS = new RegExp(String.raw`\$\{[^}]*\b(?:status|response\.status|res\.status)\b[^}]*\}`, 'g')
+
+  /** 例外：这些不是 HTTP 状态码，或已由专用渲染器处理。 */
+  const ALLOWED: ReadonlyArray<{ file: string; reason: string }> = [
+    { file: 'upstream-shared.ts', reason: 'httpStatusLabel 自身实现' },
+    { file: 'bin.ts', reason: 'status.reason 是登录态原因字符串，不是 HTTP 状态码' },
+  ]
+
+  it('src 下没有绕过 httpStatusLabel 的裸状态码插值', () => {
+    const offenders: string[] = []
+    for (const name of readdirSync(SRC)) {
+      if (!name.endsWith('.ts')) continue
+      if (ALLOWED.some((a) => a.file === name)) continue
+      const text = readFileSync(join(SRC, name), 'utf8')
+      text.split('\n').forEach((line: string, index: number) => {
+        if (line.includes('httpStatusLabel')) return
+        for (const match of line.matchAll(BARE_STATUS)) {
+          offenders.push(name + ':' + (index + 1) + '  ' + match[0])
+        }
+      })
+    }
+    expect(offenders, '这些状态码插值会被宿主按文本重新分类（403 -> AUTH），请改用 httpStatusLabel').toEqual([])
+  })
+
+  it('扫描面非空（防止规则空转）', () => {
+    const files = readdirSync(SRC).filter((n: string) => n.endsWith('.ts'))
+    expect(files.length).toBeGreaterThanOrEqual(40)
+    expect(files).toContain('shim-http.ts')
+    expect(files).toContain('upstream-shared.ts')
+  })
+
+  it('判据本身有效：能识别裸状态码', () => {
+    const bare = 'throw new Error(String.raw`failed (http ' + '\${response.status})`)'
+    expect([...bare.matchAll(BARE_STATUS)].length).toBe(1)
+    const safe = 'throw new Error(String.raw`failed (' + '\${httpStatusLabel(response.status)})`)'
+    expect(safe.includes('httpStatusLabel')).toBe(true)
   })
 })

@@ -36,6 +36,7 @@
  */
 
 import { deadlineSignal } from './timeout.js'
+import { httpStatusLabel } from './upstream-shared.js'
 import type { StartPlanEntitlement } from './zcode-plan-models.js'
 import {
   ZCODE_ACCOUNT_BASE,
@@ -85,7 +86,7 @@ export async function previewStartPlan(
       signal: handle.signal,
     })
     if (response.status === 401 || response.status === 403) {
-      return { status: 'auth-failed', message: `登录态已失效（HTTP ${response.status}）` }
+      return { status: 'auth-failed', message: `登录态已失效（${httpStatusLabel(response.status)}）` }
     }
     if (!response.ok) {
       const text = await readErrorBody(response)
@@ -93,7 +94,7 @@ export async function previewStartPlan(
       if (code !== undefined && AUTH_FAILURE_CODES.has(code)) {
         return { status: 'auth-failed', message: `登录态已失效（code ${code}）` }
       }
-      return { status: 'failed', message: `preview 失败（HTTP ${response.status}）` }
+      return { status: 'failed', message: `preview 失败（${httpStatusLabel(response.status)}）` }
     }
     const body: unknown = await response.json()
     const code = upstreamCode(body)
@@ -160,7 +161,7 @@ export async function claimStartPlan(
       try {
         body = await response.json()
       } catch {
-        return { status: 'failed', message: `claim 响应不是 JSON（HTTP ${response.status}）` }
+        return { status: 'failed', message: `claim 响应不是 JSON（${httpStatusLabel(response.status)}）` }
       }
     } else {
       const text = await readErrorBody(response)
