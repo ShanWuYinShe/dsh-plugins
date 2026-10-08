@@ -10,7 +10,8 @@
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { DEP_SECTIONS, manifestPaths, ROOT } from "./lib/dsh-deps.mjs";
+import { manifestPaths, ROOT } from "./lib/dsh-deps.mjs";
+import { collectBunStoreEntries, collectDirectDeps, createCollector } from "./lib/dep-collect.mjs";
 
 const manifests = manifestPaths(ROOT).map((rel) =>
   JSON.parse(readFileSync(join(ROOT, rel), "utf8")),
@@ -22,13 +23,8 @@ const workspaceNames = new Set(manifests.map((m) => m.name).filter(Boolean));
 
 const deep = process.argv.includes("--deep");
 
-// name@version → 唯一收集键（同版本多路径只查一次；不同版本分别查）。
-const deps = new Map();
-const collect = (name, version) => {
-  if (workspaceNames.has(name)) return;
-  if (typeof version !== "string" || version === "") return;
-  deps.set(`${name}@${version}`, { name, version });
-};
+// 收集逻辑见 ./lib/dep-collect.mjs（纯逻辑 + 单测）；这里只做分支选择与 I/O 供给。
+let deps;
 
 if (deep) {
   // --deep：审计传递依赖。
@@ -38,17 +34,14 @@ if (deep) {
   // 更快更准。scoped 包的 / 存为 +（如 @deepseek-ai+dsh-sandbox@0.1.7-rc.2）。
   const bunStore = join(ROOT, "node_modules", ".bun");
   if (existsSync(bunStore)) {
-    for (const entry of readdirSync(bunStore, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const at = entry.name.lastIndexOf("@");
-      if (at <= 0) continue; // 形如 name@version；@ 只出现在名内（scoped 存为 +）
-      const rawName = entry.name.slice(0, at);
-      const version = entry.name.slice(at + 1);
-      const name = rawName.startsWith("@") ? rawName.replace("+", "/") : rawName;
-      collect(name, version);
-    }
+    // 目录是符号链接故只取目录项名；解析逻辑在 parseBunStoreEntry（有单测）。
+    const entryNames = readdirSync(bunStore, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+    deps = collectBunStoreEntries(entryNames, workspaceNames);
   } else {
     // 非 bun 布局（npm/yarn 安装的树）：递归 walk，statSync 跟随符号链接。
+    const { deps: walked, collect } = createCollector(workspaceNames);
     const walk = (dir) => {
       let entries;
       try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
@@ -68,22 +61,15 @@ if (deep) {
       }
     };
     walk(join(ROOT, "node_modules"));
+    deps = walked;
   }
 } else {
   // 默认：直接依赖（manifest 声明 + hoisted 主版本）。
-  const seenDirect = new Set();
-  for (const manifest of manifests) {
-    for (const section of DEP_SECTIONS) {
-      for (const name of Object.keys(manifest[section] ?? {})) {
-        if (workspaceNames.has(name) || seenDirect.has(name)) continue;
-        seenDirect.add(name);
-        const pkgJson = join(ROOT, "node_modules", name, "package.json");
-        if (!existsSync(pkgJson)) continue; // optionalDependencies 未安装的平台专属包
-        const { version } = JSON.parse(readFileSync(pkgJson, "utf8"));
-        collect(name, version);
-      }
-    }
-  }
+  deps = collectDirectDeps(manifests, workspaceNames, (name) => {
+    const pkgJson = join(ROOT, "node_modules", name, "package.json");
+    if (!existsSync(pkgJson)) return undefined; // optionalDependencies 未安装的平台专属包
+    return JSON.parse(readFileSync(pkgJson, "utf8")).version;
+  });
 }
 
 if (deps.size === 0) {
