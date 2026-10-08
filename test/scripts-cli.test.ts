@@ -35,7 +35,7 @@ describe("dsh-baseline", () => {
 });
 
 describe("release-notes", () => {
-  it("缺参数：退出 2 并给出用法", () => {
+  it("release-notes 缺参数：退出 2 并给出用法", () => {
     const { code, stderr } = run("release-notes.mjs");
     expect(code).toBe(2);
     expect(stderr).toContain("用法");
@@ -55,7 +55,7 @@ describe("release-notes", () => {
 });
 
 describe("adapt-dsh", () => {
-  it("缺参数：退出 2 并给出用法", () => {
+  it("adapt-dsh 缺参数：退出 2 并给出用法", () => {
     const { code, stderr } = run("adapt-dsh.mjs");
     expect(code).toBe(2);
     expect(stderr).toContain("用法");
