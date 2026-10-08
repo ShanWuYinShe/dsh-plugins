@@ -44,6 +44,14 @@ describe("npm bundle metadata", () => {
     it(`${name}: files 包含 cordis.patch.yml`, () => {
       expect(Array.isArray(pkg.files) && pkg.files.includes("cordis.patch.yml")).toBe(true);
     });
+    it(`${name}: files 清单固定且条条在磁盘上有货`, () => {
+      // tarball 缺文件（LICENSE 合规缺失、lib 缺入口）是安装时才炸：只钉“包含谁”
+      // 不够，还要钉清单本身不变 + 每条真实存在。改清单是合法需求，改这里即显式承认。
+      expect(pkg.files).toEqual(["lib", "client", "cordis.patch.yml", "README.md", "CHANGELOG.md", "LICENSE"]);
+      for (const entry of pkg.files as string[]) {
+        expect(existsSync(join(ROOT, "packages", name, entry)), `${name}: files 里的 ${entry} 在磁盘上存在`).toBe(true);
+      }
+    });
     it(`${name}: exports 暴露 cordis.patch.yml`, () => {
       expect(pkg.exports?.["./cordis.patch.yml"]).toBe("./cordis.patch.yml");
     });
