@@ -1,4 +1,12 @@
 #!/usr/bin/env node
+/**
+ * bin.ts — dsh-any-connect 的独立诊断 CLI（doctor / status / logout）。
+ *
+ * 与插件本体共用同一份凭据存储与上游客户端，因此 doctor 看到的就是插件运行时
+ * 会看到的状态；密钥类输出经 safeMessage 脱敏。
+ *
+ * @module dsh-any-connect/bin
+ */
 /** Standalone status/diagnostics CLI for the dsh-any-connect bundle. */
 
 import { realpathSync } from 'node:fs'

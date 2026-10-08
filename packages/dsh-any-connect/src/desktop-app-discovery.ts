@@ -1,3 +1,13 @@
+/**
+ * desktop-app-discovery.ts — 两个 WorkBuddy 桌面应用的默认安装路径枚举。
+ *
+ * 只做「平台默认布局」这一层：注册表/Bundle id 的身份判定在
+ * desktop-discovery.ts 与 desktop-discovery-windows.ts。海外版的 Windows
+ * 默认路径刻意缺失——未实测过的默认值不猜（见 variants.ts 的注释）。
+ *
+ * @module dsh-any-connect/desktop-app-discovery
+ */
+
 import { realpathSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {

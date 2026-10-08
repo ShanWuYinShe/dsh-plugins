@@ -1,3 +1,14 @@
+/**
+ * upstream-zcode.ts — ZCode 上游客户端（bigmodel 订阅通道 + Start Plan）。
+ *
+ * 2026-10-08 从 upstream.ts（1765 行）拆出：共享协议层在 upstream-shared.ts，
+ * WorkBuddy 线在 upstream-workbuddy.ts，Start Plan 专属方法在
+ * upstream-zcode-start-plan.ts（类里保留薄委托）。请求体整形在
+ * upstream-zcode-body.ts，白名单与费率归一各自成模块。对外 API 不变。
+ *
+ * @module dsh-any-connect/upstream-zcode
+ */
+
 import type { WorkBuddyCredential } from './auth.js'
 import { resolveAppVersion, type AppVersionInfo } from './app-version.js'
 import type { ProbeAttempt } from './probe.js'
