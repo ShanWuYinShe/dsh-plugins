@@ -346,6 +346,9 @@ export type {
  * 必须紧邻词字符（`_` 或字母），本实现取 `HTTP_403`。
  *
  * 真·鉴权失败（401）同样走这里——鉴权与否由**插件**分类，不该交给宿主用正则猜。
+ *
+ * status=0（传输失败、无 HTTP 响应）渲染成 HTTP_0：不触发宿主正则（0 不在 401/403 集合里），
+ * 且调用方（probe）在 detail 里已写 transport error，读者结合两处即可理解。
  */
 export function httpStatusLabel(status: number): string {
   return `HTTP_${status}`
