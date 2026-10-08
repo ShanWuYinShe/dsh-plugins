@@ -332,3 +332,21 @@ export type {
   WorkBuddyRefreshOutcome,
   WorkBuddyChatResult,
 } from './upstream-types.js'
+
+/**
+ * 错误文案里的状态码渲染。**这一点看着吹毛求疵，但它是用户能不能看到真实原因的分水岭。**
+ *
+ * 宿主 `dsh-llm-pi-ai` 的 `classifyPiAiError` 用**文本正则**给错误分类：
+ * `/\b(?:401|403)\b/.test(message)` 命中即判 `AUTH`，随后 `dsh-client-ui-chat` 在
+ * `code === 'AUTH'` 时会**丢弃我们写的 message**，换成固定的本地化文案「API 密钥无效」。
+ * 于是上游真实的 403（code 11140 = auth_forbidden，与密钥无关）被显示成「API 密钥无效」，
+ * 用户被误导去重新登录/换密钥——本仓为此实测排查了一整轮。
+ *
+ * 注意 `HTTP-403` **无效**：`-` 是非词字符，`403` 两侧仍构成 `\b`，照样命中（已实测）。
+ * 必须紧邻词字符（`_` 或字母），本实现取 `HTTP_403`。
+ *
+ * 真·鉴权失败（401）同样走这里——鉴权与否由**插件**分类，不该交给宿主用正则猜。
+ */
+export function httpStatusLabel(status: number): string {
+  return `HTTP_${status}`
+}

@@ -22,7 +22,7 @@ import type { WorkBuddyCredentialStore } from './auth.js'
 import type { WorkBuddyCatalog } from './catalog.js'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { prepareChatBody, WorkBuddyUpstreamClient, type UpstreamErrorKind } from './upstream.js'
-import { isJsonContentType, KIND_STATUS, writeJson, writeOpenAIError, writeAnthropicError, RequestBodyTooLarge, readBody } from './shim-http.js'
+import { isJsonContentType, KIND_STATUS, writeJson, writeOpenAIError, writeAnthropicError, RequestBodyTooLarge, readBody, upstreamFailureMessage } from './shim-http.js'
 
 /** Minimal logger surface the plugin context already provides. */
 export interface ShimLogger {
@@ -235,7 +235,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         res,
         KIND_STATUS[result.kind],
         result.kind,
-        `${options.kind} upstream ${result.kind} (http ${result.status}): ${result.message.slice(0, 400)}`,
+        upstreamFailureMessage(options.kind, result.kind, result.status, result.message),
       )
       return
     }
@@ -301,7 +301,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         res,
         KIND_STATUS[result.kind],
         result.kind === 'hard_credit' ? 'billing_error' : 'api_error',
-        `${options.kind} upstream ${result.kind} (http ${result.status}): ${result.message.slice(0, 400)}`,
+        upstreamFailureMessage(options.kind, result.kind, result.status, result.message),
       )
       return
     }

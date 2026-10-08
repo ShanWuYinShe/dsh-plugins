@@ -8,7 +8,7 @@
  */
 
 import type { WorkBuddyCredential } from './auth.js'
-import { classifyUpstreamError, normalizeDeveloperRole, normalizeToolChoice } from './upstream-shared.js'
+import { classifyUpstreamError, httpStatusLabel, normalizeDeveloperRole, normalizeToolChoice } from './upstream-shared.js'
 import { isObject } from './upstream-workbuddy-parse.js'
 
 export type WorkBuddyRegion = 'cn' | 'global'
@@ -177,10 +177,10 @@ export async function readEnvelope(response: Response): Promise<Envelope> {
   try {
     parsed = JSON.parse(text)
   } catch {
-    throw new Error(`workbuddy upstream returned non-JSON (http ${response.status}): ${text.slice(0, 160)}`)
+    throw new Error(`workbuddy upstream returned non-JSON (${httpStatusLabel(response.status)}): ${text.slice(0, 160)}`)
   }
   if (typeof parsed !== 'object' || parsed === null) {
-    throw new Error(`workbuddy upstream returned an unexpected document (http ${response.status})`)
+    throw new Error(`workbuddy upstream returned an unexpected document (${httpStatusLabel(response.status)})`)
   }
   const document = parsed as Record<string, unknown>
   const envelope: Envelope = {
@@ -238,7 +238,7 @@ export async function readFirstEvent(response: Response): Promise<boolean> {
 /** Fail an envelope whose business code is non-zero, classified like HTTP errors. */
 export function envelopeError(status: number, envelope: Envelope): Error {
   const kind = classifyUpstreamError(status, envelope.msg)
-  return new Error(`workbuddy upstream ${kind} (http ${status}): ${envelope.msg.slice(0, 160)}`)
+  return new Error(`workbuddy upstream ${kind} (${httpStatusLabel(status)}): ${envelope.msg.slice(0, 160)}`)
 }
 
 /**

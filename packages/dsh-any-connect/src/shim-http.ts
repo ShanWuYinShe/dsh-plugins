@@ -9,6 +9,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { UpstreamErrorKind } from './upstream.js'
+import { httpStatusLabel } from './upstream-shared.js'
 
 const REQUEST_BODY_LIMIT = 64 * 1024 * 1024
 
@@ -34,6 +35,33 @@ export function writeJson(res: ServerResponse, status: number, body: unknown): v
   const payload = JSON.stringify(body)
   res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) })
   res.end(payload)
+}
+
+/**
+ * 失败文案的单一构造点。
+ *
+ * 两件事必须同时做到，缺一个用户就看不懂：
+ * 1. **状态码不能裸写**（见 upstream-shared.httpStatusLabel）：宿主用正则
+ *    `/\b(?:401|403)\b/` 分类，命中即判 AUTH 并丢弃我们的文案。
+ * 2. **要覆盖上游的误导性文案**：海外网关对 403 回的 `displayMsg` 写的是
+ *    "内容未通过安全审核"，但官方客户端的错误码表里 11140 =
+ *    auth/subcategory=auth_forbidden（与内容无关、与密钥也无关）。原样透传会让用户
+ *    去改 prompt，或者像本次一样被告知"API 密钥无效"。
+ *
+ * 因此 403 一律前置一句如实说明，再把上游原文附在后面（保留可诊断性）。
+ */
+export function upstreamFailureMessage(
+  variantId: string,
+  kind: string,
+  status: number,
+  message: string,
+): string {
+  const suffix = `${variantId} upstream ${kind} (${httpStatusLabel(status)}): ${message.slice(0, 400)}`
+  if (status === 403) {
+    return `上游拒绝了本次请求（授权未通过 / auth_forbidden，非密钥失效、非内容审核）。`
+      + `若同账号在官方客户端也无法对话，属账号权益问题。原文：${suffix}`
+  }
+  return suffix
 }
 
 export function writeOpenAIError(res: ServerResponse, status: number, kind: string, message: string): void {
