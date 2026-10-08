@@ -25,7 +25,7 @@
 | `module-map.test.ts` | 每个包入口的「模块一览」与实际磁盘模块一一对应（新增模块必须登记） |
 | `module-graph.test.ts` | 没有孤儿模块：每个模块都要被别的模块引用（副作用模块如 styles 必须被导入） |
 | `import-paths.test.ts` | 每条相对导入都能解析到真实文件，且大小写与磁盘一致（macOS 上写错大小写、Linux 才炸） |
-| `source-structure.test.ts` | 源码结构卫生：`export` 不与注释粘连、文件以换行结尾、无 CRLF 与制表符缩进 |
+| `source-structure.test.ts` | 源码结构卫生：`export` 不与注释粘连、文件以换行结尾、无 CRLF 与制表符缩进、shipped 代码无 console.log/debug/info |
 | `comment-references.test.ts` | 注释里的「见 <文件>」「见 <符号>」都真实存在 |
 | `export-surface.test.ts` | 非入口模块的值转发导出必须真的有人从这个模块导入（包外消费者登记白名单） |
 | `internal-dead-code.test.ts` | 未导出的顶层声明必须在同文件里被用到 |
