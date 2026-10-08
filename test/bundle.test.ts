@@ -65,6 +65,13 @@ describe("npm bundle metadata", () => {
     it(`${name}: exports 指向 lib/typert.host.js`, () => {
       expect(pkg.exports?.["./typert"]).toBe("./lib/typert.host.js");
     });
+    it(`${name}: 构建产物 lib/index.js 与 lib/typert.host.js 存在`, () => {
+      // 只钉映射字符串不够：构建若静默少产出文件，字符串检查照样绿，
+      // 而 tarball 会缺入口（宿主加载时才炸）。client.cjs 已有冒烟覆盖存在性。
+      for (const file of ["lib/index.js", "lib/typert.host.js"]) {
+        expect(existsSync(join(ROOT, "packages", name, file)), `${name}: ${file} 已构建`).toBe(true);
+      }
+    });
   }
 });
 
