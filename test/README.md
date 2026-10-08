@@ -39,6 +39,7 @@
 | `skill-facts.test.ts` | 技能文档里引用的标识符在实现里真实存在（外部事实走 `EXTERNAL_FACTS` 白名单） |
 | `wait-for-budget.test.ts` | 每个 `vi.waitFor` 都显式声明 timeout（默认 1s 而 testTimeout 是 30s） |
 | `docs-links.test.ts` | 每个 Markdown 相对链接都指向真实存在的文件（改文件名后别留死链） |
+| `docs-commands.test.ts` | 文档里的每条 bun run 命令与 node scripts 调用都真实存在（改脚本名后别留错文档） |
 
 ## 写一把新锁时的约定
 
