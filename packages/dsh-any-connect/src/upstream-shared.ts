@@ -8,7 +8,8 @@
  * @module dsh-any-connect/upstream-shared
  */
 
-import type { UpstreamErrorKind, WorkBuddyUpstreamModel } from './upstream-types.js'
+import { deadlineSignal } from './timeout.js'
+import type { UpstreamErrorKind, WorkBuddyChatResult, WorkBuddyUpstreamModel } from './upstream-types.js'
 
 export const JSON_TIMEOUT_MS = 30_000
 
@@ -208,6 +209,63 @@ export function classifyUpstreamError(status: number, body: string): UpstreamErr
   if (status >= 500) return 'server'
   if (status >= 400) return 'client'
   return 'client'
+}
+
+/**
+ * chat 请求落定形态：传输失败 / 可读流 / 非 ok 文本三者之一。settled 为 true
+ * 时 result 就是最终结果（超时句柄已释放），调用方直接返回；为 false 时调用方
+ * 拿 response/text 续写端点专属判定（通用 classify、Start Plan 的 3012/401 分支）。
+ */
+export type SettledChatFetch =
+  | { settled: true; result: WorkBuddyChatResult }
+  | { settled: false; response: Response; text: string }
+
+/**
+ * chat 类端点的统一传输骨架：头超时 + 调用方取消融合 + 错误体读取 + 超时句柄全路径释放。
+ *
+ * WorkBuddy / Coding Plan / Start Plan 的 chat 方法曾各持一份一字不差的拷贝（21 行）：
+ * 超时/释放/取消分类的口径一旦修了一处而漏了另两处，就是只在某一产品线出现的挂起或
+ * 误分类——与 semver 那次“四份手抄漂移”同一病根。抽成单源后改一处即三处。
+ *
+ * deliver 只管发请求（把给到的 signal 拼进 fetch，header 组装等前置工作在闭包里做）；
+ * 非 ok 文本的后续判定是各端点的事——通用 classify 与 Start Plan 的风控分支语义不同，
+ * 不宜塞进共享函数。
+ */
+export async function settleChatFetch(
+  signal: AbortSignal | undefined,
+  deliver: (fetchSignal: AbortSignal) => Promise<Response>,
+): Promise<SettledChatFetch> {
+  // 头超时与调用方取消经宿主 deadline 融合：任一触发都中止请求。
+  const headersTimeout = await deadlineSignal(signal, CHAT_HEADER_TIMEOUT_MS, 'ANY_CONNECT_HEADERS')
+  let response: Response
+  try {
+    response = await deliver(headersTimeout.signal)
+  } catch (error: unknown) {
+    // fetch 本身抛错（取消/传输错误/头超时）同样要拆掉定时器：超时回调对已 settled 的
+    // controller 是无害 no-op，但定时器会继续挂住事件循环 30s，连续失败的请求会积攒
+    // 一堆待触发回调。
+    headersTimeout.dispose()
+    // 客户端主动断开不是上游故障，按 client 分类回报。
+    if (signal?.aborted) {
+      return { settled: true, result: { ok: false, status: 0, kind: 'client', message: 'client disconnected before upstream response' } }
+    }
+    return { settled: true, result: { ok: false, status: 0, kind: 'server', message: `transport error: ${String(error)}` } }
+  }
+  if (response.ok) {
+    headersTimeout.dispose() // 头已到：流式阶段不受头超时约束
+    return { settled: true, result: { ok: true, response } }
+  }
+  let text: string
+  try {
+    // 错误体读取仍在头超时的保护窗口内：上游发了头却卡住错误体时，定时器中止请求，
+    // 这里按 server 分类兜底而非无限挂起。
+    text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
+  } catch {
+    return { settled: true, result: { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)' } }
+  } finally {
+    headersTimeout.dispose()
+  }
+  return { settled: false, response, text }
 }
 
 /** Rewrite `role: "developer"` messages to `role: "system"` (upstream rejects developer). */

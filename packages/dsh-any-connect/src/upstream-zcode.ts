@@ -8,8 +8,7 @@ import { parseCodingPlanQuota, type ZCodeCodingPlanQuota } from './zcode-quota.j
 import { type StartPlanPreviewResult } from './zcode-plan-claim.js'
 import {
   JSON_TIMEOUT_MS,
-  ERROR_BODY_LIMIT,
-  CHAT_HEADER_TIMEOUT_MS,
+  settleChatFetch,
   classifyUpstreamError,
   type WorkBuddyUpstreamModel,
   type WorkBuddyCreditAccount,
@@ -114,12 +113,10 @@ export class ZCodeUpstreamClient {
     if (credential.zcodePlan === 'start-plan') {
       return this.chatStreamStartPlan(credential, bodyJson, signal)
     }
-    // 头超时与调用方取消经宿主 deadline 融合（同上，与 WorkBuddy 线同口径）。
-    const headersTimeout = await deadlineSignal(signal, CHAT_HEADER_TIMEOUT_MS, 'ANY_CONNECT_HEADERS')
-    let response: Response
-    try {
+    // 传输骨架（超时/释放/取消分类）见 settleChatFetch：三处 chat 共用一份，改一处即三处。
+    const settled = await settleChatFetch(signal, async (fetchSignal) => {
       const zcodeHeaders = await this.signer.buildHeaders({ apiKey: credential.accessToken })
-      response = await fetch('https://open.bigmodel.cn/api/anthropic/v1/messages', {
+      return fetch('https://open.bigmodel.cn/api/anthropic/v1/messages', {
         method: 'POST',
         headers: {
           ...zcodeHeaders,
@@ -128,27 +125,11 @@ export class ZCodeUpstreamClient {
           'anthropic-version': '2023-06-01',
         },
         body: prepareAnthropicBody(bodyJson),
-        signal: headersTimeout.signal,
+        signal: fetchSignal,
       })
-    } catch (error: unknown) {
-      headersTimeout.dispose()
-      if (signal?.aborted) {
-        return { ok: false, status: 0, kind: 'client', message: 'client disconnected before upstream response' }
-      }
-      return { ok: false, status: 0, kind: 'server', message: `transport error: ${String(error)}` }
-    }
-    if (response.ok) {
-      headersTimeout.dispose()
-      return { ok: true, response }
-    }
-    let text: string
-    try {
-      text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
-    } catch {
-      return { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)' }
-    } finally {
-      headersTimeout.dispose()
-    }
+    })
+    if (settled.settled) return settled.result
+    const { response, text } = settled
     return {
       ok: false,
       status: response.status,

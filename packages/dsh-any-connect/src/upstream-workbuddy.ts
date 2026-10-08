@@ -10,11 +10,11 @@
 import type { WorkBuddyCredential } from './auth.js'
 import { appUserAgent, resolveAppVersion, type AppVersionInfo } from './app-version.js'
 import type { ProbeAttempt } from './probe.js'
-import { deadlineSignal, withTimeout } from './timeout.js'
+import { withTimeout } from './timeout.js'
 import {
   JSON_TIMEOUT_MS,
   ERROR_BODY_LIMIT,
-  CHAT_HEADER_TIMEOUT_MS,
+  settleChatFetch,
   classifyUpstreamError,
   type WorkBuddyUpstreamModel,
   type WorkBuddyCreditAccount,
@@ -58,46 +58,19 @@ export class WorkBuddyUpstreamClient {
     bodyJson: string,
     signal?: AbortSignal,
   ): Promise<WorkBuddyChatResult> {
-    // 头超时与调用方取消经宿主 deadline 融合（此前手写 AbortController +
-    // setTimeout + AbortSignal.any 三件套）：任一触发都中止请求，超时原因
-    // 可分类（此前是裸 Error 字符串）。
-    const headersTimeout = await deadlineSignal(signal, CHAT_HEADER_TIMEOUT_MS, 'ANY_CONNECT_HEADERS')
     const international = regionOf(credential.domain) === 'global'
-    let response: Response
-    try {
-      response = await fetch(`${chatBase(credential)}/v2/chat/completions`, {
+    // 传输骨架（超时/释放/取消分类）见 settleChatFetch：三处 chat 共用一份，改一处即三处。
+    const settled = await settleChatFetch(signal, (fetchSignal) =>
+      fetch(`${chatBase(credential)}/v2/chat/completions`, {
         method: 'POST',
         headers: { ...chatHeaders(credential), 'Authorization': `Bearer ${credential.accessToken}` },
         // 国际网关硬性要求首条 system 消息（缺失即 400/11128），国内线不加。
         body: international ? prepareInternationalChatBody(bodyJson) : bodyJson,
-        signal: headersTimeout.signal,
-      })
-    } catch (error: unknown) {
-      // fetch 本身抛错（取消/传输错误/头超时）同样要拆掉定时器：超时回调对
-      // 已 settled 的 controller 是无害 no-op，但定时器会继续挂住事件循环
-      // 30s，连续失败的请求会积攒一堆待触发回调。
-      headersTimeout.dispose()
-      // 客户端主动断开（pi-ai 取消生成）不是上游故障，按 client 分类回报；
-      // shim 对这类结果不向已销毁的 socket 回写错误。
-      if (signal?.aborted) {
-        return { ok: false, status: 0, kind: 'client', message: 'client disconnected before upstream response' }
-      }
-      return { ok: false, status: 0, kind: 'server', message: `transport error: ${String(error)}` }
-    }
-    if (response.ok) {
-      headersTimeout.dispose() // 头已到：流式阶段不受头超时约束
-      return { ok: true, response }
-    }
-    let text: string
-    try {
-      // 错误体读取仍在头超时的保护窗口内：上游发了头却卡住错误体时，
-      // 定时器中止请求，这里按 server 分类兜底而非无限挂起。
-      text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
-    } catch {
-      return { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)' }
-    } finally {
-      headersTimeout.dispose()
-    }
+        signal: fetchSignal,
+      }),
+    )
+    if (settled.settled) return settled.result
+    const { response, text } = settled
     return {
       ok: false,
       status: response.status,

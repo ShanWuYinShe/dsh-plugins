@@ -26,8 +26,7 @@ import {
 } from './zcode-plan-claim.js'
 import {
   JSON_TIMEOUT_MS,
-  ERROR_BODY_LIMIT,
-  CHAT_HEADER_TIMEOUT_MS,
+  settleChatFetch,
   classifyUpstreamError,
   type WorkBuddyUpstreamModel,
   type WorkBuddyCreditAccount,
@@ -60,10 +59,9 @@ export async function chatStreamStartPlan(
       message: 'Start Plan 专属通道缺少凭据（凭据文档中没有 zcodejwttoken）——请在 ZCode 客户端登录一次后重试',
     }
   }
-  const headersTimeout = await deadlineSignal(signal, CHAT_HEADER_TIMEOUT_MS, 'ANY_CONNECT_HEADERS')
-  let response: Response
-  try {
-    response = await fetch('https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages', {
+  // 传输骨架（超时/释放/取消分类）见 settleChatFetch：三处 chat 共用一份，改一处即三处。
+  const settled = await settleChatFetch(signal, (fetchSignal) =>
+    fetch('https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${credential.zcodeJwtToken}`,
@@ -73,27 +71,11 @@ export async function chatStreamStartPlan(
         'anthropic-version': '2023-06-01',
       },
       body: prepareStartPlanBody(prepareAnthropicBody(bodyJson)),
-      signal: headersTimeout.signal,
-    })
-  } catch (error: unknown) {
-    headersTimeout.dispose()
-    if (signal?.aborted) {
-      return { ok: false, status: 0, kind: 'client', message: 'client disconnected before upstream response' }
-    }
-    return { ok: false, status: 0, kind: 'server', message: `transport error: ${String(error)}` }
-  }
-  if (response.ok) {
-    headersTimeout.dispose()
-    return { ok: true, response }
-  }
-  let text: string
-  try {
-    text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
-  } catch {
-    return { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)' }
-  } finally {
-    headersTimeout.dispose()
-  }
+      signal: fetchSignal,
+    }),
+  )
+  if (settled.settled) return settled.result
+  const { response, text } = settled
   if (text.includes('"code":3012')) {
     // 指纹已在请求体里（见 prepareStartPlanBody），走到这里说明上游改了判据
     // 或加了新条件——如实报告并说明"前置指纹仍不够"，不要谎称通道被封。
