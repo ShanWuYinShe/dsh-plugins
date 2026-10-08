@@ -559,67 +559,91 @@ function isAuthRequiredLikeError(L,ei,ea,es){
   `HOME=$PWD/.workwork/cb-home` 重定向（**但重定向后它读不到真实登录态**，会报
   "Authentication required"，所以它无法直接充当 chat 对照）。
 
-### 9.6 结论：**账号侧限制**（2026-10-08 已定论）
+### 9.6 结论：服务端按会话/权益拦截，**与客户端实现无关**（2026-10-08 定论）
 
-**用户用官方 WorkBuddy AI 客户端（同账号）发消息，得到完全相同的报错** ⇒ 与本插件无关，
-是账号在该服务上的权益问题，不是插件请求构造错误。
+**判定依据（最重要的一条）**：**官方 WorkBuddy AI 客户端在同一账号、同一网络上得到完全相同的
+报错**。官方自己的客户端都被拒 ⇒ 不可能是本插件的请求构造问题。
 
-决定性证据：`fetchCredits` 返回
+服务端响应头给出了直接证据：
 
-```json
-{ "packageName": "Free Plan Subscription", "remain": 100, "size": 100 }
+```
+403 响应头： server: APISIX/3.12.0
+             x-user-id: 4e388551-…                     ← 服务端**正确识别**了账号
+             set-cookie: session=; Max-Age=0; Path=/v2 ← 并**主动清除会话**
 ```
 
-即账号是 **Free Plan（免费套餐）**。交叉验证：把 `/v3/config` 里列出的模型逐个发 chat
-（gpt-5.5 / deepseek-v4.1-flash / glm-5.3-flash / kimi-k2.6 / hy3 / default-model-lite），
-**全部 403 / code 11140**；而同一凭据的目录（`/v3/config`）、账单（credits）、doctor 全部正常。
-"目录能列、额度能查、chat 一律被拒" 是账号级限制的典型形态。
+同一凭据访问 `/v3/config` 却是 200（同样带正确的 `x-user-id`）⇒ 不是 token 无效，
+而是服务端按业务规则拒绝 chat。
 
-> 注意：`credits displayMsg` 与目录里列出的模型**不代表**有 chat 权限——免费套餐同样会
-> 返回完整模型清单与 100 点赠送额度。别把"目录里有这个模型"当成"我可以用它"。
+### 9.6.1 ⚠️ 本条曾写错，已更正（留作反面教材）
 
-处置：找服务方确认套餐是否含 chat 权益 / 是否需要绑卡或升级；插件侧无可修之处。
+本节最初写成"**账号是 Free Plan，所以没有 chat 权益**"——**这是错的**，两个反证：
 
-### 9.6.1 排除"请求被拒是因为我们发得不对"（2026-10-08 对照组实验）
+1. 服务端 `/v3/config` 里该模型明写 `credits: "x0.00"`（费率为 0）；
+2. 官方 UI 截图里 **Deepseek-V4.1-Flash 标着 "Free now"，并注明
+   "Sep 11 – Oct 9: Free daily use with unlimited credits"**，还给了 "Use now" 按钮。
+   另有 `deepseek-v4.1-flash-sg` 是 `x0.03`（收费）。
 
-关键对照：**同一端点、同一请求体形态**，只换凭据：
+**教训**：不要从 `packageName`（如 "Free Plan Subscription"）这类**间接字段**推断权限结论——
+要去看**权威字段**（模型自身的 `credits` 费率、官方 UI 的明确标识）。我当时的推断越过了证据，
+属于把"额度账户名"当成了"权限判定"。写进 skill 的结论必须是**被直接证据支撑**的。
+
+### 9.6.2 已排除的全部假设（都做过实测，别再重复）
+
+| 假设 | 验证结果 |
+|---|---|
+| 凭据读不到 | ✗ doctor signed-in；token 1374 字符；有效期剩 365 天；官方 app 今天刚刷新 |
+| 密钥无效 | ✗ 伪造 token → **401**，真实 token → **403**（网关认这份 token） |
+| 模型没权限 | ✗ `deepseek-v4.1-flash` 服务端 `credits: "x0.00"`，官方 UI 标 "Free now" |
+| 请求体缺字段 | ✗ 试过 `reasoning_summary` / `reasoning:{effort,summary}` / `max_tokens` / `temperature` |
+| 请求头缺字段 | ✗ 十余个逐个与组合：`X-Product` / `X-Product-Version` / `X-IDE-*` / `X-Agent-*` / `X-Conversation-ID` / `X-Session-ID` / `X-Request-ID` / `X-Model-ID` |
+| UA 不对 | ✗ 四种（CLI/CodeBuddy 组合、`WorkBuddy/…`、浏览器 UA） |
+| 路径不对 | ✗ 只有 `/v2/chat/completions` 存在；`/v3`、`/v1`、`/v2/messages`、`/v2/plugin/…` 全 404 |
+| 是我们的代码坏了 | ✗ CN 变体同机/同网络/同代码 → **200 正常** |
+| 网络或地域被封 | ✗ 同上，CN 通；且 `/v3/config`、credits 都通 |
+| 是插件问题 | ✗ **官方 app 同样失败**（用户实测确认） |
+
+对照实验（同一端点、同一 body，只换凭据）：
 
 | 场景 | 响应 |
 |---|---|
-| 不带 Authorization | **401**（网关直接拒绝，HTML） |
-| `Bearer not-a-real-token` | **401**（同上） |
-| **真实凭据**（哪怕 body 只有一个 `system: "s"`） | **403 / code 11140** |
+| 不带 Authorization | **401**（网关拒绝，HTML） |
+| `Bearer not-a-real-token` | **401** |
+| 真实凭据（甚至 body 只有一个 `system: "s"`） | **403 / code 11140** |
 
-⇒ 网关**认这份 token**（否则会与伪造 token 一样 401），是**业务层按权益拒绝**。
-再用"完全无害内容"（只有 system、空 user content）复测，仍一律 403/11140 ⇒ 与消息内容无关，
-上游那句"内容未通过安全审核"确系泛化兜底文案。
+再用"完全无害内容"（只有 system、空 user content）复测仍全部 403/11140 ⇒ 与消息内容无关，
+上游那句"内容未通过安全审核"是泛化兜底文案。
 
-服务端 `/v3/config` 也**没有任何禁用 chat 的开关**：`productFeatures` 只有两个无关项，
-`agents[cli]` 正常挂着 21 个模型，`isDefault` 模型可用——"配置层面被禁"同样不成立。
+### 9.6.3 一处可疑的结构差异（未能从客户端侧证实）
 
-### 9.6.2 官方客户端的分类口径（同一结论）
-
-`app.asar.unpacked/cli/dist/codebuddy-headless.js` 里：
-```js
-[11140, {category:"auth", subcategory:"auth_forbidden"}]
-[11142, {category:"auth", subcategory:"auth_forbidden"}]
-// 且 classifyAfterBizCode: 403===ei ? {category:"auth", subcategory:"auth_forbidden"} : ...
-// isAuthRequiredLikeError: 403 + 该码集合 → authRequired
 ```
-即**官方自己**也把 403/11140 当鉴权/权益问题（非内容问题）。用户的官方客户端同样报错，
-进一步印证服务端按账号权益拒绝。
+CN 凭据：  scope 字段**不存在**
+AI 凭据：  scope: "openid profile offline_access email"   ← 纯 OIDC scope，无 API 权限声明
+```
 
-### 9.6.3 能做的事 / 不能做的事
+海外版可能要求**先激活免费试用/绑定支付方式**才开通 chat。官方前端 bundle 里确实有这套状态机：
 
-- **不能由插件解决**：权益判定在服务端，客户端无从绕过（也不该绕——绕过权益等于盗用）。
-- **用户侧可做**：
-  1. 在官方 WorkBuddy AI 里确认当前是 **Free Plan**，查看是否有"对话/模型调用"权益，
-     以及是否需要**升级套餐 / 绑卡 / 开通试用**；
-  2. 若官方客户端在付费后可用，插件应**立即**随之可用（鉴权、目录、账单均已被证明正常）；
-  3. 向服务方反馈：Free Plan 下 `/v3/config` 会列出 21 个模型、`credits` 报 100 点赠送额度，
-     但任何 chat 都被 403 拒绝——**展示与权限不一致**，容易误导用户；
-  4. 提交反馈用错误体自带的 `actions: ["SUBMIT_FEEDBACK","COPY_ERROR","EDIT_INPUT"]` 里的
-     requestId（如 `f331ae4a-3b51-4424-8ea0-e087b60e72b3`），这是服务方定位的唯一凭据。
+```js
+// pricing-*.js
+Kr = { currentPlan: "free", paidActive: false, trialActive: false, trialEligible: true }
+POST /billing/meter/apply-free-trial   // 申请免费试用
+POST /billing/meter/get-user-resource  // 返回 accounts 与 proTrialStatus
+```
+
+`trialEligible: true` + `trialActive: false` = **有资格但未激活**，与截图里的 "Use now" 吻合。
+（这两个接口在 `www.workbuddy.ai` 上试过，均 404——应在官方 usercenter 域下，客户端侧无法代调。）
+
+### 9.6.4 能做什么 / 不能做什么
+
+- **插件侧无解**：判定在服务端；绕过权益等于盗用，不做。
+- **用户侧可做**（按有效性排序）：
+  1. 在官方 app 里点截图那个 **"Use now"**，若弹出绑卡/开通流程就走完它；
+  2. 去官方账号/订阅设置里查"免费试用待激活"；
+  3. 拿错误体的 `requestId` 找官方客服，例如 `d1234151-a05e-4d65-8334-705074d6ec81`、
+     `f331ae4a-3b51-4424-8ea0-e087b60e72b3`，说明"免费期内的 deepseek-v4.1-flash，
+     chat 一律 403/11140，官方客户端同样失败"。
+- **插件的替代路径**：换用别的 provider（`provider-usage` 支持 DeepSeek / OpenAI / Moonshot /
+  MiniMax 等，自备 API key）。
 
 ### 9.7 插件侧已做的改进（commit 0589841）
 
