@@ -479,3 +479,92 @@ GET https://bigmodel.cn/api/monitor/usage/quota/limit
    了」却仍看到旧行为（如 11 个模型、pill 没有新窗口）时，先看 DSH_HOME 下插件写的缓存
    （`~/.dsh/.zcode-catalog.json`）内容：若是旧行为的特征就说明进程没重启。**重启必须完全
    退出 dsh 进程**（刷新浏览器页面不算）；`lsof -p <pid>` 可确认进程打开的 DSH_HOME 文件。
+
+## 九、workbuddy-ai（海外版）凭据"能用但 chat 被拒"（2026-10-08 取证）
+
+**症状**：用户报「dsh-any-connect 无法使用 workbuddy.ai 的凭据」。典型误判是「凭据没读到」，
+但实测凭据链路**完全正常**——必须分清「凭据问题」与「chat 授权问题」。
+
+### 9.1 实测：凭据、目录、账单三条全通，只有 chat 被拒
+
+在本机（两个 app 都装了）逐项验证，命令与结果：
+
+| 检查 | 命令 | 结果 |
+|---|---|---|
+| doctor | `node packages/dsh-any-connect/lib/bin.js doctor --provider workbuddy-ai --json` | `present:true, format:"encrypted", signIn:"signed-in"` |
+| status（金额） | `... status --provider workbuddy-ai` | `signed in`，Remaining credit **100** |
+| 凭据解析 | `new WorkBuddyCredentialStore({variant}).current()` | `domain=www.workbuddy.ai`，accessToken 1374 字符 |
+| 模型目录 | `WorkBuddyUpstreamClient.fetchModels(cred)` | **200**，25 个模型（`/v3/config`） |
+| 账单 | `client.fetchCredits(cred)` | **200**，total 100 |
+| **chat** | `client.chatStream(cred, body)` | **403 `{"code":11140,"msg":"request illegal"}`** |
+| 探测 | `client.probeEffort(...)` | 同样 **403/11140** |
+
+对照组：**同 body 走国内变体返回 200**（`copilot.tencent.com/v2/chat/completions`）。
+所以不是代码构造错误，是**区域/账号侧对 chat 的授权判定**。
+
+### 9.2 权威依据：11140 = `auth_forbidden`，不是"内容审核"
+
+提示文案 `displayMsg: "内容未通过安全审核，请调整后重试"` **是误导性兜底**——别照着它去改
+prompt。官方客户端自己的错误码表（反编译取证，见 9.4）写得明确：
+
+```js
+// app.asar.unpacked/cli/dist/codebuddy-headless.js
+new Map([[10105,{category:"quota",subcategory:"quota_active_session"}], ...
+         [11140,{category:"auth",subcategory:"auth_forbidden"}],
+         [11141,{category:"model_service",subcategory:"model_behavior_error"}],
+         [11142,{category:"auth",subcategory:"auth_forbidden"}]])
+
+let t9 = new Set([11140,11141,11142,17271,17272,17273,17274,17275,17276]);
+function isAuthRequiredLikeError(L,ei,ea,es){
+  return !(...) && (... || 401===ea || 403===ea)   // 403 + t9 命中 → authRequired
+}
+```
+
+### 9.3 已穷尽的排除项（别再重复试）
+
+- **请求体**：只带 user → `400 / 11128 "first message is not system prompt"`（证明海外网关
+  **确实**要求首条 system，插件注入 `INTERNATIONAL_SYSTEM_PROMPT` 的处理是对的）；
+  带 system → 403/11140。故与 system 注入无关。
+- **非流式**：`stream:false` → `400 / 11101 "Non-stream chat request is currently not
+  supported"`（走到更后面的校验），说明流式请求正是被前面的授权关卡拦下。
+- **路径**：只有 `/v2/chat/completions` 存在；`/v3/chat/completions`、`/v1/...`、
+  `/v2/messages`、`/v2/plugin/chat/completions` 全 404。
+- **请求头**：逐个/组合试过 `X-Product`、`X-Product-Version`、`X-IDE-Type/Name/Version`、
+  `X-Agent-Type/Intent/Purpose`、`X-Conversation-ID`、`X-Session-ID`、`X-Request-ID`、
+  `X-Trace-ID`、`X-Model-ID`、有无 CLI `User-Agent`、有无 `X-Requested-With` ——**全部 403/11140**。
+  故不是缺某个头。
+- **模型名**：官方静态清单里 `agents[cli].models` 是 `fast-model/balanced-model/primary-model/
+  deep-model`（**不含** `default-model`）；但换模型名同样 403。
+
+### 9.4 官方客户端配置里的权威事实（product.json）
+
+`app.asar.unpacked/cli/product.json`（海外版）：
+
+- `isOversea: true`，`endpoint: "https://www.workbuddy.ai"`
+- `authentication.id: "workbuddy-desktop-ai"`（与插件 variant 的 desktopFilename 同源）、
+  `tokenHeader: "Authorization"`、`tokenType: "bearerToken"`、`usernameHeader: "X-User-Id"`
+- `attributes.prefixPath: "/plugin"`（官方部分端点形如 `/v2/plugin/auth/state`）
+- `externalDomain` 含 `www.workbuddy.ai` / `www.codebuddy.ai` / `staging.workbuddy.ai`
+- 会话相关头常量：`X-Trace-ID` / `X-Request-ID` / `X-Conversation-ID` / `X-Session-ID` /
+  `X-Agent-Type` / `X-Agent-Intent` / `X-IDE-*` / `X-Api-Key` / `X-Product-Version`
+
+### 9.5 反编译取证手法（asar 内嵌 + unpacked）
+
+`app.asar` 头部是 `[8B pickle][4B headerSize][header JSON]`；**文件表里带
+`unpacked:true` 的条目内容不在 asar 里**，要去 `app.asar.unpacked/` 同名路径读
+（本机 `cli/dist/codebuddy-headless.js` 就是 unpacked）。踩坑记录：
+- 顺序累加 offset 定位内嵌文件时，unpacked 条目的 size 会被计入导致偏移全错——
+  先看 `meta.unpacked`，是就去 unpacked 目录按原路径读。
+- macOS 上跑官方 CLI 会因沙盒写 `~/.codebuddy/local_storage` 报 EPERM；用
+  `HOME=$PWD/.workwork/cb-home` 重定向（**但重定向后它读不到真实登录态**，会报
+  "Authentication required"，所以它无法直接充当 chat 对照）。
+
+### 9.6 结论与下一步
+
+`403 / 11140 (auth_forbidden)` + 账单与目录正常 = **账号在该区域对 chat 的授权未通过**
+（订阅/权益/风控层面），不是插件请求构造错误。排查顺序：
+1. 用**官方客户端本身**（同账号）发一次 chat：若也失败 → 账号/权益问题，找官方；
+   若成功 → 我们的请求构造仍缺东西，再对比官方实际请求（抓包或 debug 日志）。
+2. 不要因为 `displayMsg` 写"内容未通过安全审核"就去改 prompt / 加 system 提示词。
+3. 插件侧可做的改进：把 403/11140 的错误文案**照实**报为「账号在该区域无 chat 授权
+   （auth_forbidden）」，而不是透传上游那句误导性的安全审核文案——待确认后实施。
