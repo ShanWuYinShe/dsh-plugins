@@ -43,6 +43,7 @@
 | `no-runtime-cycles.test.ts` | packages 各 src 里没有值级导入环（类型环不算，行首匹配防注释误报） |
 | `no-uncollected-tests.test.ts` | 每个 *.test.* 文件都在 vitest 收集范围内（放错目录/扩展名会静默不跑） |
 | `lock-index.test.ts` | 锁文件与索引表双向一致（单测在 UNIT_TESTS 登记，防索引腐烂） |
+| `no-focused-tests.test.ts` | 测试文件里没有 .only / 裸 .skip / .todo（条件跳过 skipIf 不在此限） |
 
 ## 写一把新锁时的约定
 
