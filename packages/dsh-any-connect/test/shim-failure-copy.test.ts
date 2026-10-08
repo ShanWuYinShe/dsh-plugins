@@ -136,4 +136,36 @@ describe('源码里不再裸写状态码（防回归到文案层）', () => {
     const safe = 'throw new Error(String.raw`failed (' + '\${httpStatusLabel(response.status)})`)'
     expect(safe.includes('httpStatusLabel')).toBe(true)
   })
+
+  it('字符串字面量里也没有裸 401/403（防硬编码漏网）', () => {
+    // 上一版扫描只查 `${...}` 插值，漏掉了**硬编码字面量**——实际就在
+    // upstream-zcode-start-plan.ts 里抓到一处 'Start Plan 凭据失效（HTTP 401）'。
+    // 宿主正则不看来源，字面量一样会被判 AUTH、文案照样被替换。
+    const LITERAL = /(['"\u0060])((?:(?!\1)[^\\]|\\.)*?)\1/g
+    const offenders: string[] = []
+    for (const name of readdirSync(SRC)) {
+      if (!name.endsWith('.ts')) continue
+      readFileSync(join(SRC, name), 'utf8').split('\n').forEach((line: string, index: number) => {
+        const trimmed = line.trim()
+        if (trimmed.startsWith('*') || trimmed.startsWith('//')) return // 注释不是文案
+        for (const match of line.matchAll(LITERAL)) {
+          if (/\b(?:401|403)\b/.test(match[2] ?? '')) {
+            offenders.push(name + ':' + (index + 1) + '  ' + trimmed.slice(0, 80))
+          }
+        }
+      })
+    }
+    expect(offenders, '文案里硬编码的 401/403 会被宿主判成 AUTH；请写 HTTP_401/HTTP_403').toEqual([])
+  })
+
+  it('判据有效：三种引号都命中，HTTP_403 与数字比较放过', () => {
+    const LITERAL = /(['"\u0060])((?:(?!\1)[^\\]|\\.)*?)\1/g
+    const hits = (line: string): boolean =>
+      [...line.matchAll(LITERAL)].some((m) => /\b(?:401|403)\b/.test(m[2] ?? ''))
+    expect(hits("message: 'failed (HTTP 403)'")).toBe(true)
+    expect(hits('message: "failed (HTTP 401)"')).toBe(true)
+    expect(hits('message: `failed (HTTP 403)`')).toBe(true)
+    expect(hits("message: 'failed (HTTP_403)'")).toBe(false)
+    expect(hits('if (response.status === 401) {')).toBe(false)
+  })
 })

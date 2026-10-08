@@ -93,7 +93,7 @@ export async function chatStreamStartPlan(
       ok: false,
       status: response.status,
       kind: 'client',
-      message: 'Start Plan 凭据失效（HTTP 401）——请在 ZCode 客户端重新登录一次',
+      message: 'Start Plan 凭据失效（HTTP_401）——请在 ZCode 客户端重新登录一次',
     }
   }
   return {
