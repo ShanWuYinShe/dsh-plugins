@@ -32,7 +32,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { aggregateBaseline, manifestPaths, ROOT } from "./lib/dsh-deps.mjs";
 // 与 publish-gate / adapt-dsh 同一口径的 semver 校验（共享单一来源，见 issue #6）。
-import { VERSION_RE } from "./lib/version-checks.mjs";
+import { VERSION_RE, compareVersions, parseVersion } from "./lib/version-checks.mjs";
 
 const ci = process.argv.includes("--ci");
 // 与 publish-gate 钉定同一 registry：本地 .npmrc 指向镜像时，两个脚本对
@@ -40,39 +40,6 @@ const ci = process.argv.includes("--ci");
 const REGISTRY = "https://registry.npmjs.org";
 
 /** 解析 dsh 版本号为可比较结构（0.1.2-alpha.5 → {n:[0,1,2], pre:["alpha",5]}）。 */
-function parseVersion(v) {
-  const [core, pre = ""] = v.split("-");
-  const [major, minor, patch] = core.split(".").map(Number);
-  const preParts = pre === "" ? [] : pre.split(".").map((p) => (/^\d+$/.test(p) ? Number(p) : p));
-  return { n: [major, minor, patch], pre: preParts };
-}
-
-function cmpVersion(a, b) {
-  const A = parseVersion(a);
-  const B = parseVersion(b);
-  for (let i = 0; i < 3; i++) {
-    if (A.n[i] !== B.n[i]) return A.n[i] - B.n[i];
-  }
-  if (A.pre.length === 0 && B.pre.length === 0) return 0;
-  // 无 prerelease 的一版更大
-  if (A.pre.length === 0) return 1;
-  if (B.pre.length === 0) return -1;
-  for (let i = 0; i < Math.max(A.pre.length, B.pre.length); i++) {
-    const x = A.pre[i];
-    const y = B.pre[i];
-    if (x === undefined) return -1;
-    if (y === undefined) return 1;
-    if (x === y) continue;
-    const bothNumeric = typeof x === "number" && typeof y === "number";
-    if (bothNumeric) return x - y;
-    // semver：数字 identifier 小于字符串 identifier
-    if (typeof x === "number") return -1;
-    if (typeof y === "number") return 1;
-    return x < y ? -1 : 1;
-  }
-  return 0;
-}
-
 /** 解析分支名到可 git show 的引用：CI 的 checkout 只有 origin/<branch>
  *  远端引用而没有本地分支，本地恰好相反的场景也存在——两者按序回退。 */
 function branchRef(branch) {
@@ -173,20 +140,21 @@ const head = currentBranch();
 // 进行中预发布线 = 高于该正式版的最高 -alpha/-beta 版本。
 const stableVersions = versions.filter((v) => {
   const p = parseVersion(v);
-  return p.pre.length === 0 || p.pre[0] === "rc";
+  return p.pre === null || p.pre[0] === "rc";
 });
 // 兜底：理论上 dsh 总有 rc，但绝不让空数组把诊断脚本打成崩溃（本脚本承诺
 // 永远 exit 0）；无 rc/正式版时退回 dist-tag 的 latest。
 const stable = stableVersions.length > 0
-  ? stableVersions.reduce((a, b) => (cmpVersion(a, b) > 0 ? a : b))
+  ? stableVersions.reduce((a, b) => (compareVersions(a, b) > 0 ? a : b))
   : distTags.latest;
-const stableBase = parseVersion(stable).n.join(".");
+const stableCore = parseVersion(stable);
+const stableBase = [stableCore.maj, stableCore.min, stableCore.pat].join(".");
 const devVersions = versions.filter((v) => {
   const p = parseVersion(v);
-  return p.pre.length > 0 && p.pre[0] !== "rc" && cmpVersion(v, stable) > 0;
+  return p.pre !== null && p.pre[0] !== "rc" && compareVersions(v, stable) > 0;
 });
 const devLine = devVersions.length > 0
-  ? devVersions.reduce((a, b) => (cmpVersion(a, b) > 0 ? a : b))
+  ? devVersions.reduce((a, b) => (compareVersions(a, b) > 0 ? a : b))
   : null;
 
 const rows = [];
@@ -220,7 +188,7 @@ for (const branch of ["main", "alpha"]) {
 
   const { baseline, host, mixed, unreadable, packageDirs } = branchBaseline(branch === head ? null : branch);
   // 基线不是合法版本号（无 dsh 依赖 / 包间不一致 / 分支不可读）时比较
-  // 无意义——NaN 会让 cmpVersion 的结果静默落进「超前」分支，报出荒谬
+  // 无意义——NaN 会让 compareVersions 的结果静默落进「超前」分支，报出荒谬
   // 状态；这里显式归入漂移并说明原因。
   const comparable = !mixed && !unreadable && VERSION_RE.test(baseline);
   let target;
@@ -236,16 +204,16 @@ for (const branch of ["main", "alpha"]) {
     state = "漂移(基线非版本号)";
   } else if (branch === "main") {
     target = stable;
-    const cmp = cmpVersion(baseline, stable);
+    const cmp = compareVersions(baseline, stable);
     state = cmp === 0 ? "就位" : cmp < 0 ? "落后" : "超前";
   } else if (devLine !== null) {
     target = devLine;
-    const cmp = cmpVersion(baseline, devLine);
+    const cmp = compareVersions(baseline, devLine);
     state = cmp === 0 ? "就位" : cmp < 0 ? "落后" : "超前";
   } else {
     // 待命：没有进行中的预发布线，alpha 分支仍存在。
     target = `(待命：无新线，建议删除)`;
-    const cmp = cmpVersion(baseline, stable);
+    const cmp = compareVersions(baseline, stable);
     state = cmp === 0 ? "就位(待命)" : cmp < 0 ? "落后" : "超前";
   }
   rows.push({ branch, baseline, host, target, state, packageDirs });

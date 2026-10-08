@@ -12,6 +12,9 @@
 /** 合法 semver（含 prerelease / build metadata）。 */
 export declare const VERSION_RE: RegExp;
 
+/** 解析版本号：{ maj, min, pat, pre }（pre 为 null 表示正式版；build metadata 先剥掉）。 */
+export declare function parseVersion(v: string): { maj: number; min: number; pat: number; pre: string[] | null };
+
 /** semver 比较：主/次/补丁按数值，prerelease 段按 semver §11，build metadata 不参与。 */
 export declare function compareVersions(a: string, b: string): number;
 

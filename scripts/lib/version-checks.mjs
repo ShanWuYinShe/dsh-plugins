@@ -13,17 +13,18 @@ export const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+
 // semver 比较（不含 prerelease 与 build metadata 以外的差异）：主/次/补丁按
 // 数值比；带 prerelease 的版本小于同号正式版；prerelease 标识符逐段比，数字
 // 段小于字母段，段数少的是前缀、更小。语义与 npm 一致。
+export function parseVersion(v) {
+  const plus = v.indexOf("+");
+  const noBuild = plus === -1 ? v : v.slice(0, plus); // build metadata 不参与比较
+  const dash = noBuild.indexOf("-");
+  const core = dash === -1 ? noBuild : noBuild.slice(0, dash);
+  const [maj, min, pat] = core.split(".").map(Number);
+  return { maj, min, pat, pre: dash === -1 ? null : noBuild.slice(dash + 1).split(".") };
+}
+
 export function compareVersions(a, b) {
-  function parse(v) {
-    const plus = v.indexOf("+");
-    const noBuild = plus === -1 ? v : v.slice(0, plus); // build metadata 不参与比较
-    const dash = noBuild.indexOf("-");
-    const core = dash === -1 ? noBuild : noBuild.slice(0, dash);
-    const [maj, min, pat] = core.split(".").map(Number);
-    return { maj, min, pat, pre: dash === -1 ? null : noBuild.slice(dash + 1).split(".") };
-  }
-  const x = parse(a);
-  const y = parse(b);
+  const x = parseVersion(a);
+  const y = parseVersion(b);
   for (const k of ["maj", "min", "pat"]) {
     if (x[k] !== y[k]) return x[k] - y[k];
   }

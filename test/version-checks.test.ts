@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   VERSION_RE,
   compareVersions,
+  parseVersion,
   findChangelogSection,
   isPrerelease,
   isStable,
@@ -28,6 +29,26 @@ describe("类型声明与实现一致", () => {
     const declared = [...readFileSync(join(ROOT, "scripts/lib/version-checks.d.mts"), "utf8")
       .matchAll(/export declare (?:const|function) (\w+)/g)].map((match) => match[1] as string).sort();
     expect(actual).toEqual(declared);
+  });
+});
+
+describe("parseVersion", () => {
+  it("拆出主/次/补丁与 prerelease 段（正式版 pre 为 null）", () => {
+    expect(parseVersion("1.2.3")).toEqual({ maj: 1, min: 2, pat: 3, pre: null });
+    expect(parseVersion("0.2.1-alpha.1")).toEqual({ maj: 0, min: 2, pat: 1, pre: ["alpha", "1"] });
+  });
+
+  it("build metadata 先剥掉，不参与比较", () => {
+    expect(parseVersion("1.2.3-rc.1+build.7")).toEqual({ maj: 1, min: 2, pat: 3, pre: ["rc", "1"] });
+    expect(parseVersion("1.2.3+build.7")).toEqual({ maj: 1, min: 2, pat: 3, pre: null });
+  });
+
+  it("非版本号输入产出 NaN 核心——调用方必须先用 VERSION_RE 把关", () => {
+    // dsh-follow-status 正是靠这个前置校验把「基线不是版本号」归入漂移，而不是让 NaN
+    // 静默落进「超前」分支。
+    const parsed = parseVersion("(无 dsh 依赖)");
+    expect(Number.isNaN(parsed.maj)).toBe(true);
+    expect(VERSION_RE.test("(无 dsh 依赖)")).toBe(false);
   });
 });
 
