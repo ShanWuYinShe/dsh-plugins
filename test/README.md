@@ -38,6 +38,7 @@
 | `loopback-parity.test.ts` | 两个包各自持有的回环守卫不许静默分叉（差异只允许已登记的那一处收紧） |
 | `skill-facts.test.ts` | 技能文档里引用的标识符在实现里真实存在（外部事实走 `EXTERNAL_FACTS` 白名单） |
 | `wait-for-budget.test.ts` | 每个 `vi.waitFor` 都显式声明 timeout（默认 1s 而 testTimeout 是 30s） |
+| `docs-links.test.ts` | 每个 Markdown 相对链接都指向真实存在的文件（改文件名后别留死链） |
 
 ## 写一把新锁时的约定
 
