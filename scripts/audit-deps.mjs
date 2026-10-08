@@ -5,7 +5,7 @@
 // 用法：node scripts/audit-deps.mjs [--deep]   或   bun run audit [--deep]
 //   默认审计直接依赖（manifest 声明 + hoisted 版本，快）；
 //   --deep 递归收集 node_modules 全树的每个 name@version（传递依赖也审，
-//   供应链攻击常藏在传递树里；880+ 包按 100/批分批查询）。
+//   供应链攻击常藏在传递树里；数百包按 100/批分批查询，实测约 280 个）。
 // 需要网络（api.osv.dev 公共接口，无需认证）。
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
