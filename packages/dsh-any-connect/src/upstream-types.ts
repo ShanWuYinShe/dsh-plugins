@@ -11,6 +11,7 @@ export type UpstreamErrorKind =
   | 'hard_credit'
   | 'soft_rate'
   | 'session_dead'
+  | 'auth_forbidden'
   | 'not_found'
   | 'server'
   | 'client'

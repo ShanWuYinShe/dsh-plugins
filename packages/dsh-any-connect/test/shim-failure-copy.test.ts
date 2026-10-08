@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { KIND_STATUS, upstreamFailureMessage } from '../src/shim-http.js'
-import { httpStatusLabel } from '../src/upstream-shared.js'
+import { classifyUpstreamError, httpStatusLabel } from '../src/upstream-shared.js'
 
 /**
  * 失败文案的回归锁：它必须同时躲开宿主的两道文本判定，并如实说明 403 的真实语义。
@@ -173,5 +173,30 @@ describe('源码里不再裸写状态码（防回归到文案层）', () => {
     expect(hits('message: `failed (HTTP 403)`')).toBe(true)
     expect(hits("message: 'failed (HTTP_403)'")).toBe(false)
     expect(hits('if (response.status === 401) {')).toBe(false)
+  })
+})
+
+describe('auth_forbidden 分类', () => {
+  it('403 归类为 auth_forbidden（授权拒绝，与泛化 client 不同）', () => {
+    // 实测：海外版 workbuddy-ai 对未开通 chat 权益的账号，所有模型一律
+    // 403 + code 11140；官方错误码表同口径（auth/auth_forbidden）。单列出来，
+    // kind 才与「参数错误的 400」区分开，上层指引才准确。
+    expect(classifyUpstreamError(403, '{"code":11140}')).toBe('auth_forbidden')
+    expect(classifyUpstreamError(403, '')).toBe('auth_forbidden')
+  })
+
+  it('会话标记仍优先于 403（body 含 session 标记时归 session_dead）', () => {
+    expect(classifyUpstreamError(403, 'Offline user session not found')).toBe('session_dead')
+  })
+
+  it('KIND_STATUS：auth_forbidden 刻意映射 400（而非 403，避免宿主误判 AUTH）', () => {
+    expect(KIND_STATUS['auth_forbidden']).toBe(400)
+  })
+
+  it('auth_forbidden 的失败文案安全且如实', () => {
+    const message = upstreamFailureMessage('workbuddy-ai', 'auth_forbidden', 400,
+      '{"code":11140,"msg":"request illegal"}')
+    expect(/\b(?:401|403)\b/.test(message)).toBe(false) // 不触发宿主 AUTH
+    expect(message).toContain('workbuddy-ai upstream auth_forbidden (HTTP_400)')
   })
 })

@@ -204,6 +204,10 @@ export function classifyUpstreamError(status: number, body: string): UpstreamErr
   for (const marker of SESSION_DEAD_MARKERS) {
     if (body.includes(marker)) return 'session_dead'
   }
+  // 403 是授权拒绝（与 400 的参数错误、与 401 的会话失效都不同）：海外版把
+  // 未开通 chat 权益的账号也归到这里（code 11140 auth_forbidden，官方错误码表
+  // 同口径），单列出来让上层能给出「检查账号权益」而非「检查密钥」的指引。
+  if (status === 403) return 'auth_forbidden'
   if (status === 429) return 'soft_rate'
   if (status === 404) return 'not_found'
   if (status >= 500) return 'server'

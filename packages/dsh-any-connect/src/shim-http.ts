@@ -26,6 +26,10 @@ export const KIND_STATUS: Readonly<Record<UpstreamErrorKind, number>> = {
   hard_credit: 402,
   soft_rate: 429,
   session_dead: 401,
+  // auth_forbidden 刻意映射 400 而非 403：返回 401/403 会让宿主（pi-ai / deepseek
+  // 两处都按状态码判 AUTH）把它重新显示成「API 密钥无效」，覆盖掉我们写好的
+  // 如实文案——这正是 2026-10-08 排障修掉的那个误报。语义区分靠 kind 本身。
+  auth_forbidden: 400,
   not_found: 502,
   server: 502,
   client: 400,
