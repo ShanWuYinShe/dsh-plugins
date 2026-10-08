@@ -559,12 +559,40 @@ function isAuthRequiredLikeError(L,ei,ea,es){
   `HOME=$PWD/.workwork/cb-home` 重定向（**但重定向后它读不到真实登录态**，会报
   "Authentication required"，所以它无法直接充当 chat 对照）。
 
-### 9.6 结论与下一步
+### 9.6 结论：**账号侧限制**（2026-10-08 已定论）
 
-`403 / 11140 (auth_forbidden)` + 账单与目录正常 = **账号在该区域对 chat 的授权未通过**
-（订阅/权益/风控层面），不是插件请求构造错误。排查顺序：
-1. 用**官方客户端本身**（同账号）发一次 chat：若也失败 → 账号/权益问题，找官方；
-   若成功 → 我们的请求构造仍缺东西，再对比官方实际请求（抓包或 debug 日志）。
-2. 不要因为 `displayMsg` 写"内容未通过安全审核"就去改 prompt / 加 system 提示词。
-3. 插件侧可做的改进：把 403/11140 的错误文案**照实**报为「账号在该区域无 chat 授权
-   （auth_forbidden）」，而不是透传上游那句误导性的安全审核文案——待确认后实施。
+**用户用官方 WorkBuddy AI 客户端（同账号）发消息，得到完全相同的报错** ⇒ 与本插件无关，
+是账号在该服务上的权益问题，不是插件请求构造错误。
+
+决定性证据：`fetchCredits` 返回
+
+```json
+{ "packageName": "Free Plan Subscription", "remain": 100, "size": 100 }
+```
+
+即账号是 **Free Plan（免费套餐）**。交叉验证：把 `/v3/config` 里列出的模型逐个发 chat
+（gpt-5.5 / deepseek-v4.1-flash / glm-5.3-flash / kimi-k2.6 / hy3 / default-model-lite），
+**全部 403 / code 11140**；而同一凭据的目录（`/v3/config`）、账单（credits）、doctor 全部正常。
+"目录能列、额度能查、chat 一律被拒" 是账号级限制的典型形态。
+
+> 注意：`credits displayMsg` 与目录里列出的模型**不代表**有 chat 权限——免费套餐同样会
+> 返回完整模型清单与 100 点赠送额度。别把"目录里有这个模型"当成"我可以用它"。
+
+处置：找服务方确认套餐是否含 chat 权益 / 是否需要绑卡或升级；插件侧无可修之处。
+
+### 9.7 插件侧已做的改进（commit 0589841）
+
+原实现把上游状态码**裸写**进失败文案（`(http 403)`），而宿主 `dsh-llm-pi-ai` 的
+`classifyPiAiError` 用**文本正则**分类：`/\b(?:401|403)\b/` 命中即判 `AUTH`，
+`dsh-client-ui-chat` 随后**丢弃我们的 message** 换成固定文案「API 密钥无效」——
+于是与密钥无关的 11140 被显示成密钥失效，用户被误导去重新登录。修法：
+
+- `upstream-shared.httpStatusLabel()`：状态码渲染为 `HTTP_403`。
+  **`HTTP-403` 无效**（`-` 是非词字符，403 两侧仍是 `\b`，实测照样命中）；
+- `shim-http.upstreamFailureMessage()`：失败文案单一构造点，403 前置如实说明
+  （auth_forbidden、非密钥失效、非内容审核）再附原文，覆盖上游那句误导性的"安全审核"；
+- 回归锁 `test/shim-failure-copy.test.ts`：断言任何状态下文案都不触发宿主全部 7 条分类
+  正则，并含反例证明非空转。
+
+**通用教训**：给宿主写错误文案时，**不要裸写 401/403/429/400/5xx 等状态码数字**——
+宿主会按文本重新分类，轻则分类错误、重则整条文案被替换掉。
