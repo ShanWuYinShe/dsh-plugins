@@ -94,6 +94,12 @@ describe('upstreamFailureMessage', () => {
 })
 
 describe('源码里不再裸写状态码（防回归到文案层）', () => {
+  // **扫描范围为什么只有 dsh-any-connect**：判据是「文案会流到宿主 dsh-llm-pi-ai
+  // 的文本分类器 classifyPiAiError（/\b(?:401|403)\b/ 命中→AUTH→我们的 message 被丢弃）」。
+  // 只有 LLM 流错误的 message 会走那条路；provider-usage 的用量错误走 /usage JSON 路由
+  // 到浏览器 pill，不经过 pi-ai 分类器——所以**刻意不扫**其它包（判据贴意图，不用近似代理）。
+  // 曾按「任何包都查」的近似代理扫到 provider-shared 一处，核实后发现它到不了分类器，
+  // 是假阳性，已还原——这条边界说明就是为防后人再犯同样的过度泛化。
   // 宿主按文本正则分类：\b(?:401|403)\b 命中即判 AUTH，随后我们的 message 被丢弃。
   // 所以「状态码进错误文案」必须统一走 httpStatusLabel（渲染成 HTTP_403）。
   const SRC = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'src')
