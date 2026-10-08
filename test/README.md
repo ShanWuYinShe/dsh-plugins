@@ -40,6 +40,7 @@
 | `wait-for-budget.test.ts` | 每个 `vi.waitFor` 都显式声明 timeout（默认 1s 而 testTimeout 是 30s） |
 | `docs-links.test.ts` | 每个 Markdown 相对链接都指向真实存在的文件（改文件名后别留死链） |
 | `docs-commands.test.ts` | 文档里的每条 bun run 命令与 node scripts 调用都真实存在（改脚本名后别留错文档） |
+| `no-runtime-cycles.test.ts` | packages 各 src 里没有值级导入环（类型环不算，行首匹配防注释误报） |
 
 ## 写一把新锁时的约定
 
