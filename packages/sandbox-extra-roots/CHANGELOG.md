@@ -1,3 +1,15 @@
+## 0.4.22-alpha.4 (2026-10-10)
+
+### 修复
+
+* **设置页保存的目录列表整体失效**：client 打包脚本（`scripts/build.mjs`）对 bundle 按行加缩进时，会把 esbuild minify 产出的跨行模板字面量（`split("\n")` 被 minify 成含真换行的模板字面量）内部注入缩进空格，分隔符变成 `split("\n    ")`——多行文本不再被拆分成数组，整段文本作为单元素落库后被 `normalizeRoots` 拒绝，保存静默失效。打包改为 body 直接嵌入不做按行缩进（该缺陷影响所有 client 源码含 `\n` 字面量的包，单测直跑源码不经 minify+缩进故未覆盖，端到端核查发现）。
+
+### 变更
+
+* **配置持久化切换官方 configEditor**：设置页保存经 `ctx.configEditor.edit()` 写入当前 profile 的 `cordis.patch.yml` 本行 config（与 Web 设置编辑器同一途径，dsh-base 内置），由 Loader 对账后 reload 生效。退役自建的 `~/.dsh/plugins/<name>/config.json` 目录（harness 官方目录布局中不存在该目录，清理时会连带丢配置；且 `$DSH_HOME` 只读环境变量、未走宿主完整解析链）。
+* **配置作用域从全局一份变为 per-profile**（官方 patch 模型即如此）：desktop 与 web profile 各自保存各自的插件配置。
+* **旧配置自动迁移**：0.4.x 的 `~/.dsh/plugins/sandbox-extra-roots/config.json` 在启动时一次性并入 profile patch，旧文件改名 `*.imported` 保留（官方 settings.yaml.imported 同款模式）。
+
 ## 0.4.22-alpha.3 (2026-10-09)
 
 ### 修复

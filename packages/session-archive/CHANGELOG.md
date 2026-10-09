@@ -1,3 +1,14 @@
+## 0.3.26-alpha.5 (2026-10-10)
+
+### 修复
+
+* **client 打包按行缩进污染模板字面量**：`scripts/build.mjs` 的按行缩进会把 esbuild minify 产出的跨行模板字面量（`join("\n")` 被 minify 成含真换行的模板字面量）内部注入缩进空格，归档条目文本的分隔符被改写。打包改为 body 直接嵌入不做按行缩进（单测直跑源码不经 minify+缩进故未覆盖，端到端核查发现）。
+
+### 变更
+
+* **配置持久化切换官方 configEditor**：与 sandbox-extra-roots 同批改造（config-store.ts 两包逐字一致）——退役自建的 `~/.dsh/plugins/session-archive/config.json`，0.3.x 的旧配置在启动时一次性并入 profile patch，旧文件改名 `*.imported` 保留。
+* **配置作用域从全局一份变为 per-profile**（官方 patch 模型即如此）。该包远程服务本无配置写入端点，此变化主要影响启动时旧配置文件的读取位置。
+
 ## 0.3.26-alpha.4 (2026-10-09)
 
 ### 修复
