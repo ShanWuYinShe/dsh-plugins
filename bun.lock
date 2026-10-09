@@ -6,7 +6,7 @@
       "name": "dsh-plugins",
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.0.5-alpha.1",
-        "@deepseek-ai/dsh-typert-protocol": "^0.2.1-alpha.1",
+        "@deepseek-ai/dsh-typert-protocol": "^0.2.1-alpha.2",
         "@deepseek-ai/schemastery": "~3.18.5-alpha.1",
         "@types/node": "^26.6.4",
         "@types/react": "^19.3.0",
@@ -28,22 +28,22 @@
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.0.5-alpha.1",
         "@deepseek-ai/cordis-plugin-loader": "~1.0.6-alpha.1",
-        "@deepseek-ai/dsh-client-locale": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-client-ui-plugin-manager": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-client-ui-slots": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-timeout": "^0.2.1-alpha.1",
+        "@deepseek-ai/dsh-client-locale": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-client-ui-plugin-manager": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-client-ui-slots": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-timeout": "^0.2.1-alpha.2",
         "vitest": "^4.1.11",
       },
       "optionalDependencies": {
-        "@deepseek-ai/dsh-atomic-write": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-attachment": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-home-paths": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-host-webserver": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-llm": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-llm-pi-ai": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-settings": "^0.2.1-alpha.1",
-        "@earendil-works/pi-ai": "^0.87.1",
+        "@deepseek-ai/dsh-atomic-write": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-attachment": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-home-paths": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-host-webserver": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-llm": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-llm-pi-ai": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-settings": "^0.2.1-alpha.2",
+        "@earendil-works/pi-ai": "^1.1.0",
       },
     },
     "packages/provider-usage": {
@@ -51,28 +51,28 @@
       "version": "0.1.7-alpha.2",
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.0.5-alpha.1",
-        "@deepseek-ai/dsh-client-locale": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-client-ui-conversation": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-client-ui-model-selection": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-client-ui-slots": "^0.2.1-alpha.1",
+        "@deepseek-ai/dsh-client-locale": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-client-ui-conversation": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-client-ui-model-selection": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-client-ui-slots": "^0.2.1-alpha.2",
         "vitest": "^4.1.11",
       },
       "optionalDependencies": {
-        "@deepseek-ai/dsh-credentials": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-host-webserver": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-llm": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-settings": "^0.2.1-alpha.1",
+        "@deepseek-ai/dsh-credentials": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-host-webserver": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-llm": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-settings": "^0.2.1-alpha.2",
       },
     },
     "packages/sandbox-extra-roots": {
       "name": "@chaoset/sandbox-extra-roots",
       "version": "0.4.22-alpha.2",
       "dependencies": {
-        "@deepseek-ai/dsh-sandbox": "^0.2.1-alpha.1",
+        "@deepseek-ai/dsh-sandbox": "^0.2.1-alpha.2",
       },
       "optionalDependencies": {
-        "@deepseek-ai/dsh-typert-protocol": "^0.2.1-alpha.1",
+        "@deepseek-ai/dsh-typert-protocol": "^0.2.1-alpha.2",
         "@deepseek-ai/node-addon-landlock-run": "^0.1.1",
       },
     },
@@ -80,18 +80,18 @@
       "name": "@chaoset/session-archive",
       "version": "0.3.26-alpha.2",
       "devDependencies": {
-        "@deepseek-ai/dsh-session": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-session-persistence": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-session-title": "^0.2.1-alpha.1",
-        "@deepseek-ai/dsh-workspace": "^0.2.1-alpha.1",
+        "@deepseek-ai/dsh-session": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-session-persistence": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-session-title": "^0.2.1-alpha.2",
+        "@deepseek-ai/dsh-workspace": "^0.2.1-alpha.2",
       },
       "optionalDependencies": {
-        "@deepseek-ai/dsh-typert-protocol": "^0.2.1-alpha.1",
+        "@deepseek-ai/dsh-typert-protocol": "^0.2.1-alpha.2",
       },
     },
   },
   "packages": {
-    "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.124.0", "https://registry.npmmirror.com/@anthropic-ai/sdk/-/sdk-0.124.0.tgz", { "dependencies": { "json-schema-to-ts": "^3.1.1", "standardwebhooks": "^1.0.0" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-cN5O8i9UVxHeOQAzj/XjshWXG8KiibJDw9OGpH2Z/eR3n/RBxdoLxDJOcfqAJWvjaMDFfHTBADU04hWRJVkDyA=="],
+    "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.129.0", "https://registry.npmmirror.com/@anthropic-ai/sdk/-/sdk-0.129.0.tgz", { "dependencies": { "json-schema-to-ts": "^3.1.1", "standardwebhooks": "^1.0.0" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-MH7LB20kNpGLUpPTe2OG5XvL/KhX8HUO9XyBaFjgFk6TLS4Xjt0VPIuMKywe7POKKPslX+QxSlVok9e+8kG5Nw=="],
 
     "@asamuzakjp/css-color": ["@asamuzakjp/css-color@7.1.3", "https://registry.npmmirror.com/@asamuzakjp/css-color/-/css-color-7.1.3.tgz", { "dependencies": { "@csstools/css-calc": "^3.4.2", "@csstools/css-color-parser": "^4.2.5", "@csstools/css-parser-algorithms": "^4.0.2", "@csstools/css-tokenizer": "^4.0.2", "lru-cache": "^11.5.3" } }, "sha512-1t1U8Cm3RBl9vh3RAZhjkPaduzLSvQJRToRrxpGR/eDRW99mOREleuu+mWfiFa795bUzjwht7NgphCKTs2ianQ=="],
 
@@ -173,57 +173,57 @@
 
     "@deepseek-ai/dsh-app-boot": ["@deepseek-ai/dsh-app-boot@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-app-boot/-/dsh-app-boot-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-atomic-write": "0.2.1-alpha.1", "@deepseek-ai/dsh-package-manifest": "0.2.1-alpha.1", "@eslint-community/regexpp": "^4.12.2", "ajv": "^8.20.0", "js-yaml": "^4.2.0", "node-addon-require-builtin": "^0.1.6", "resolve.exports": "^2.0.3", "semver": "^7.8.5" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/cordis-plugin-group": "~1.0.5-alpha.1", "@deepseek-ai/cordis-plugin-include": "~1.0.10-alpha.1", "@deepseek-ai/cordis-plugin-loader": "~1.0.6-alpha.1", "@deepseek-ai/dsh-home-paths": "0.2.1-alpha.1", "@deepseek-ai/dsh-launch-environment": "0.2.1-alpha.1", "@deepseek-ai/dsh-system-prompt": "0.2.1-alpha.1" } }, "sha512-UZ1DiyT8qBcMCoCt8jm1tcBlunByNWAGF7/rJ6/aCba+i/TCKnY37vlSlk5lslLuv4SomGLtBOQ+H7JSYjxSdg=="],
 
-    "@deepseek-ai/dsh-atomic-write": ["@deepseek-ai/dsh-atomic-write@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-atomic-write/-/dsh-atomic-write-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-4ADMLg8g0HVK2Tor/qPoT7RKdSeyRiK3MSj+PBIaxR0ZtQvxxoWbFJGwj4WwUyePhtMDfxYNhdwXDvYovlyTkg=="],
+    "@deepseek-ai/dsh-atomic-write": ["@deepseek-ai/dsh-atomic-write@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-atomic-write/-/dsh-atomic-write-0.2.1-alpha.2.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-ZBbUSKxUUgXGnTbQLRSl2qjibLUEMxp0Y0nv5pZOwmXKOpxbK8w6M1GwfHt9BqpWU223H7hzgJyATQIfNhqxOw=="],
 
-    "@deepseek-ai/dsh-attachment": ["@deepseek-ai/dsh-attachment@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-attachment/-/dsh-attachment-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-brand": "0.2.1-alpha.1" } }, "sha512-Fqwym3k1JbypM6vocxRc4pUVCVBdUdKxbC1V5zYyK6EwEO+5dN0QVEtdRUd1LNo7pcUQruhPtI4CWVSULDSNgg=="],
+    "@deepseek-ai/dsh-attachment": ["@deepseek-ai/dsh-attachment@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-attachment/-/dsh-attachment-0.2.1-alpha.2.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-brand": "0.2.1-alpha.2" } }, "sha512-O4nn/+YIQ2X0ylrOOx5LKKWtGsezl9zTY/qIec9ugX380yTrzexMWHuRbEG/3jbIxUgXQdjqOwDLmkTVFkY38A=="],
 
     "@deepseek-ai/dsh-authorization": ["@deepseek-ai/dsh-authorization@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-authorization/-/dsh-authorization-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-credentials": "0.2.1-alpha.1", "@deepseek-ai/dsh-llm": "0.2.1-alpha.1" } }, "sha512-juI6wkGAaUG+7qWVRYFS6EyU+RTikHx29C0JeM4AYidMflvkOeTAJMJfv+LmVDrgz6jRWWNO/IQZm9NThFBA2Q=="],
 
-    "@deepseek-ai/dsh-brand": ["@deepseek-ai/dsh-brand@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-brand/-/dsh-brand-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-DNzncR3F5uO21E/dQGHvIFpYu1I11Ti3okkqUsE4BWqMyCsgLUaSGX/Vg6dtYeoFmPNbcWuhmk26L1/uaz1/Gw=="],
+    "@deepseek-ai/dsh-brand": ["@deepseek-ai/dsh-brand@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-brand/-/dsh-brand-0.2.1-alpha.2.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-2cpJzyu0IbyRXwZMBSEy+tWxj1OvhgiQwSTY1GlhEcPi+VF0nvT2pJIa/i43kH+0hs48r4tFX/v/tczK6d//Hg=="],
 
-    "@deepseek-ai/dsh-client-locale": ["@deepseek-ai/dsh-client-locale@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-client-locale/-/dsh-client-locale-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/schemastery": "~3.18.5-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-+ncAy0uByylbj5lH5jSs01m5u9I8gUiIjdjwl4N2AGyPgqm0iNOXLmTyIhPHtBbnepkpOnRhcMKQM42HDO90QQ=="],
+    "@deepseek-ai/dsh-client-locale": ["@deepseek-ai/dsh-client-locale@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-client-locale/-/dsh-client-locale-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/schemastery": "~3.18.5-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-DqAlZVpGjydjpkIwW0GPIr5uTEIKDs1uXngeaoNnJneF944iXdBOzp3ZQffJ8jxdg0YMud0GZtQp2ZjWpBuHrg=="],
 
-    "@deepseek-ai/dsh-client-ui-conversation": ["@deepseek-ai/dsh-client-ui-conversation@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-client-ui-conversation/-/dsh-client-ui-conversation-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/schemastery": "~3.18.5-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-sDXRgRqD3H/dI+20WjVJLUl6i1q8WAAR3VSLtne7onBfBtNmLble6EaYcP11gpvgLUf6KWtmyk0i/y+gXoQhlQ=="],
+    "@deepseek-ai/dsh-client-ui-conversation": ["@deepseek-ai/dsh-client-ui-conversation@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-client-ui-conversation/-/dsh-client-ui-conversation-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/schemastery": "~3.18.5-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-qadzPWzAOHndKgNvR89rOY03wz4lkoaYo1N8f1pxACMv29aEPAzoF0kNHrNDBoiacml1OS/KeC6kZGWYphYscA=="],
 
-    "@deepseek-ai/dsh-client-ui-model-selection": ["@deepseek-ai/dsh-client-ui-model-selection@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-client-ui-model-selection/-/dsh-client-ui-model-selection-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-qEfkhZyuV75cugRZOh4e0WUyxKZrpyXgWCztmdJ0kXyVhIFCnlCJ5odJwxMCY+151Sg66+hWEUYGUQHuOBtEdg=="],
+    "@deepseek-ai/dsh-client-ui-model-selection": ["@deepseek-ai/dsh-client-ui-model-selection@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-client-ui-model-selection/-/dsh-client-ui-model-selection-0.2.1-alpha.2.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-LM7zcBIEUaMb2AEZU0mJSsZaNvCVK7135HdAeypTq/NHV7L59EZXFrhiN7Nf21NIMwq3+QPpe9SCrH1CJ9ee6g=="],
 
-    "@deepseek-ai/dsh-client-ui-plugin-manager": ["@deepseek-ai/dsh-client-ui-plugin-manager@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-client-ui-plugin-manager/-/dsh-client-ui-plugin-manager-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-timeout": "0.2.1-alpha.1", "@deepseek-ai/dsh-typert-protocol": "0.2.1-alpha.1", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-tO54Wi/oN4REXQdBla5GNsZ1ajSMKHdpjNJWBZP2xCoFzFmUQnmjugg+ZLiRlOqAAHaBtprwDiGl3eCkpaiDvg=="],
+    "@deepseek-ai/dsh-client-ui-plugin-manager": ["@deepseek-ai/dsh-client-ui-plugin-manager@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-client-ui-plugin-manager/-/dsh-client-ui-plugin-manager-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/dsh-timeout": "0.2.1-alpha.2", "@deepseek-ai/dsh-typert-protocol": "0.2.1-alpha.2", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-/1CHlClzaUXFiZSw34JFVgf+0D7Mwqtxxmz05XFkqyq53OUnm4juMRb0JggjhxlYGMPCCq8WUdIIua6VmVAybA=="],
 
-    "@deepseek-ai/dsh-client-ui-renderer": ["@deepseek-ai/dsh-client-ui-renderer@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-client-ui-renderer/-/dsh-client-ui-renderer-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-xGX3ogNqFGTf+blD249IVz+mwHcFbf71yDtcIikL2rVUrLHaKanTkdQNT5sRK0YTG5iz3Vzl60JxJoVTjsO27Q=="],
+    "@deepseek-ai/dsh-client-ui-renderer": ["@deepseek-ai/dsh-client-ui-renderer@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-client-ui-renderer/-/dsh-client-ui-renderer-0.2.1-alpha.2.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-vG4+tOTkGDkpW9TfEGFgXtPZwZOAZV/nO3KyQpmBStCeewzTdOFF7lIwiYj49R4iP1f2mo3wQugIGejpf85//A=="],
 
-    "@deepseek-ai/dsh-client-ui-slots": ["@deepseek-ai/dsh-client-ui-slots@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-client-ui-slots/-/dsh-client-ui-slots-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-DlblKPBopAUvAuSNqpsqxlJa9H1HKt8jMrWjGqqerguTAFPEKA++HA503WVX/ObmxCQ1ZLOrJ/s04LQu/MwqEQ=="],
+    "@deepseek-ai/dsh-client-ui-slots": ["@deepseek-ai/dsh-client-ui-slots@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-client-ui-slots/-/dsh-client-ui-slots-0.2.1-alpha.2.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-OchP2oVNa+yHWygUrws/eEM0wgwUfxgzzPB0YwYjTu6Rj+cIM+wUEAM0kaFZ1gGuwtltfh710SLYev/HkKoiGA=="],
 
-    "@deepseek-ai/dsh-config-editor": ["@deepseek-ai/dsh-config-editor@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-config-editor/-/dsh-config-editor-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-atomic-write": "0.2.1-alpha.1", "js-yaml": "^4.1.0", "yaml": "^2.8.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/cordis-plugin-include": "~1.0.10-alpha.1", "@deepseek-ai/cordis-plugin-loader": "~1.0.6-alpha.1", "@deepseek-ai/dsh-app-boot": "0.2.1-alpha.1", "@deepseek-ai/dsh-hmr": "0.2.1-alpha.1" }, "optionalPeers": ["@deepseek-ai/dsh-hmr"] }, "sha512-lMTEh5R214VpBchwZ0g4sMt13oJH2R//nor17n1qdSx40X0M3SG8somw67cJMsw/qphI2NRftF8rG7rnUHg8oA=="],
+    "@deepseek-ai/dsh-config-editor": ["@deepseek-ai/dsh-config-editor@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-config-editor/-/dsh-config-editor-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/dsh-atomic-write": "0.2.1-alpha.2", "js-yaml": "^4.3.2", "yaml": "^2.8.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/cordis-plugin-include": "~1.0.10-alpha.1", "@deepseek-ai/cordis-plugin-loader": "~1.0.6-alpha.1", "@deepseek-ai/dsh-app-boot": "0.2.1-alpha.2", "@deepseek-ai/dsh-hmr": "0.2.1-alpha.2" }, "optionalPeers": ["@deepseek-ai/dsh-hmr"] }, "sha512-Vvsg9/fqCrB29y2qa+Zj6VH7rm1CINErFWi0n0sGLH0qTxUQCIj3FYZZKjW+8S5hzMqMpXFnwNd8nigimTyekQ=="],
 
-    "@deepseek-ai/dsh-credentials": ["@deepseek-ai/dsh-credentials@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-credentials/-/dsh-credentials-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-+v6vCJoglb3zClmaFqenPBK/QWux/EOi403dCttH3kt7hUfjDwKoKGbDxInjvLxhqoKvjNnEN3JttjMXj+PEcA=="],
+    "@deepseek-ai/dsh-credentials": ["@deepseek-ai/dsh-credentials@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-credentials/-/dsh-credentials-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.2" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-3K30MkY+8Ms+bMb2KeQtrFvjlwoqhCXVg8uzGnDJWMmnmRiqomWK/Gnx9Njv86QC/Gj4+PWHZeZEwd65z2AO7Q=="],
 
     "@deepseek-ai/dsh-fs": ["@deepseek-ai/dsh-fs@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-fs/-/dsh-fs-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-llm": "0.2.1-alpha.1", "@deepseek-ai/dsh-sandbox": "0.2.1-alpha.1" } }, "sha512-5tkrZL0NF/O49twckURiF6Pj9UGgBQxKewuhcbDgZLRS3eg45S7XvIcEIjXWkY96zYxViIqjjMtXUjDpHwdrtg=="],
 
-    "@deepseek-ai/dsh-home-paths": ["@deepseek-ai/dsh-home-paths@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-home-paths/-/dsh-home-paths-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-qf3DDHCb4xEqoCETt3xfoOb42SXFRtC2kZEo8trzCY+Ksdfyw1bq2p6Mt1S3BQbaJGrDt5xuV5ituqBJViVoHA=="],
+    "@deepseek-ai/dsh-home-paths": ["@deepseek-ai/dsh-home-paths@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-home-paths/-/dsh-home-paths-0.2.1-alpha.2.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-ESeto9Jn8Ya24pm7grggkpedsqUjDjk8Atl1fUzvAJnfSTZNLVbiO37HrGmZQmf3DQKktErq7XKi58uNwHNEoQ=="],
 
-    "@deepseek-ai/dsh-host-webserver": ["@deepseek-ai/dsh-host-webserver@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-host-webserver/-/dsh-host-webserver-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "compression": "^1.8.1", "negotiator": "^1.0.0" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-/lHO20DyIBxNl8heV3Q5xb5wX6q4rLTsr7XCXh2ocgWfjCHthcvbHUo3J5t0VqpxBTvyy1pea8iDGLk8VMBtDQ=="],
+    "@deepseek-ai/dsh-host-webserver": ["@deepseek-ai/dsh-host-webserver@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-host-webserver/-/dsh-host-webserver-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "compression": "^1.8.1", "ipaddr.js": "^2.5.0", "negotiator": "^1.1.0" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-wu5rAUaPhrzoTNvE6kxX3zQF+ufHuB6GqkTlVSY7aETrJ3XnUF9CG4oxI6WlLwrLuUeiN1t6xY5CW9RzPsVfag=="],
 
     "@deepseek-ai/dsh-launch-environment": ["@deepseek-ai/dsh-launch-environment@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-launch-environment/-/dsh-launch-environment-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-wro2ThQwnjyX/8MPUPkffiV7R7h1CQuUi+hucusnXj3tuzHJHjvFinkavtZwJVrhGOH/GTdZAFxn/ij6X0HMNg=="],
 
-    "@deepseek-ai/dsh-llm": ["@deepseek-ai/dsh-llm@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-llm/-/dsh-llm-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-timeout": "0.2.1-alpha.1", "@deepseek-ai/dsh-typert-protocol": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-crypto": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-BKvO+mcV+L8y8df39BmbpB3OntmpBHUAeVcvJhI8RyUoGjxJ3I0RfNTgYwmde57C/UpVKVOsnNo7SV9lDsI+BQ=="],
+    "@deepseek-ai/dsh-llm": ["@deepseek-ai/dsh-llm@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-llm/-/dsh-llm-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.2", "@deepseek-ai/dsh-timeout": "0.2.1-alpha.2", "@deepseek-ai/dsh-typert-protocol": "0.2.1-alpha.2", "@deepseek-ai/dsh-util-crypto": "0.2.1-alpha.2", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.2", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-+pUKWsWBZorW3nQLGAC2qEQudFOscKINR0njoPhhFhJsVPuAqLUYF3bf6G4evbMKUF1+Uw901CFHOfwLluljNQ=="],
 
-    "@deepseek-ai/dsh-llm-pi-ai": ["@deepseek-ai/dsh-llm-pi-ai@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-llm-pi-ai/-/dsh-llm-pi-ai-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "@earendil-works/pi-ai": "^0.87.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/cordis-plugin-loader": "~1.0.6-alpha.1", "@deepseek-ai/dsh-attachment": "0.2.1-alpha.1", "@deepseek-ai/dsh-authorization": "0.2.1-alpha.1", "@deepseek-ai/dsh-credentials": "0.2.1-alpha.1", "@deepseek-ai/dsh-fs": "0.2.1-alpha.1", "@deepseek-ai/dsh-launch-environment": "0.2.1-alpha.1", "@deepseek-ai/dsh-llm": "0.2.1-alpha.1", "@deepseek-ai/dsh-timeout": "0.2.1-alpha.1" }, "optionalPeers": ["@deepseek-ai/cordis-plugin-loader"] }, "sha512-aho5yKkkZW9nL4yjnJDRhe1MrW8CvYYoMWAfqYTILvVxKDwvPfkXSvMvVcSdkkRJ+4jFALla+qFzIDkpAPt/rQ=="],
+    "@deepseek-ai/dsh-llm-pi-ai": ["@deepseek-ai/dsh-llm-pi-ai@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-llm-pi-ai/-/dsh-llm-pi-ai-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.2", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.2", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "@earendil-works/pi-ai": "^1.0.2" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/cordis-plugin-loader": "~1.0.6-alpha.1", "@deepseek-ai/dsh-attachment": "0.2.1-alpha.2", "@deepseek-ai/dsh-authorization": "0.2.1-alpha.2", "@deepseek-ai/dsh-credentials": "0.2.1-alpha.2", "@deepseek-ai/dsh-fs": "0.2.1-alpha.2", "@deepseek-ai/dsh-launch-environment": "0.2.1-alpha.2", "@deepseek-ai/dsh-llm": "0.2.1-alpha.2", "@deepseek-ai/dsh-timeout": "0.2.1-alpha.2" }, "optionalPeers": ["@deepseek-ai/cordis-plugin-loader"] }, "sha512-Zl4nI1VxELu8hLQKARj3jKjXO4kz1EQPlAh9NvwKMYDwUF0v9ULhiXPGgqfATqKn9mV9GUx352Me2lt6wDWpnA=="],
 
     "@deepseek-ai/dsh-package-manifest": ["@deepseek-ai/dsh-package-manifest@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-package-manifest/-/dsh-package-manifest-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-xYAiMIzpXriIN01LtHZ1fNgsN4T8hYyesDqO2215sWvvVrquWKuVcvVp6sqwlkSBAkqwvrXFOgXTiFdaNFjlKw=="],
 
-    "@deepseek-ai/dsh-sandbox": ["@deepseek-ai/dsh-sandbox@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-sandbox/-/dsh-sandbox-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-llm": "0.2.1-alpha.1", "@deepseek-ai/dsh-session": "0.2.1-alpha.1" } }, "sha512-37Q3biu4oCKDObXsO4MNk1nQNk/ZWuqdGmgHoO1ZLj/Uwr0oMVtKSpasjtf/0Tu5DcakYnbG7a5eKn4Lm851BQ=="],
+    "@deepseek-ai/dsh-sandbox": ["@deepseek-ai/dsh-sandbox@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-sandbox/-/dsh-sandbox-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/dsh-util-values": "0.2.1-alpha.2" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-llm": "0.2.1-alpha.2", "@deepseek-ai/dsh-session": "0.2.1-alpha.2" } }, "sha512-kCzOlDplb6S19sPQ68OOZfVP7lmeA2mpHN8ihWbI/OG2YODRE4cqLd18rI2FYtQjTlcCEFA4G5HtSNTpJlAWCg=="],
 
     "@deepseek-ai/dsh-scope": ["@deepseek-ai/dsh-scope@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-scope/-/dsh-scope-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-2t2lf9sT5eE5T7b8KkS4LJJWLH+JI4JG/4eMmFe9bnUwUiJAknU65SHa5duCRck29JWypN2CU05sDFb7ubnuSA=="],
 
-    "@deepseek-ai/dsh-session": ["@deepseek-ai/dsh-session@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-session/-/dsh-session-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-llm": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-scope": "0.2.1-alpha.1" } }, "sha512-33GdDCYXlp0u4ptJgKwM1DkNDvbabDQ2zZFtj278o1XL9cBf2f2Q11fVj8FW9IV88YhrXjRBT/Ju978i/M7mDA=="],
+    "@deepseek-ai/dsh-session": ["@deepseek-ai/dsh-session@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-session/-/dsh-session-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.2", "@deepseek-ai/dsh-llm": "0.2.1-alpha.2", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.2" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-scope": "0.2.1-alpha.2" } }, "sha512-xINgQ8XFC40aLxPLBMxAMl3ZkY8NlkasVVrnIio94hZYX+dqw7N63y53vqLU69WKTPEFJ11GdCJq4Yx5Tr2HFA=="],
 
-    "@deepseek-ai/dsh-session-persistence": ["@deepseek-ai/dsh-session-persistence@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-session-persistence/-/dsh-session-persistence-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-session": "0.2.1-alpha.1", "@deepseek-ai/dsh-timeout": "0.2.1-alpha.1" } }, "sha512-h9mObhRfy4zHz8sVFOhMkht15s/DCROkdnEdGhXx5tLRaHh2DuLNoemYeJg7ItGrIOStrKcVg1aInU+jt61yOw=="],
+    "@deepseek-ai/dsh-session-persistence": ["@deepseek-ai/dsh-session-persistence@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-session-persistence/-/dsh-session-persistence-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/dsh-util-values": "0.2.1-alpha.2" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-brand": "0.2.1-alpha.2", "@deepseek-ai/dsh-session": "0.2.1-alpha.2", "@deepseek-ai/dsh-timeout": "0.2.1-alpha.2" } }, "sha512-dVi0eW+U9ug6XGz/b15h5fVJBVJhEWsLFtLm8hplEKct8Yb4TdPKKhFyJ+M9NrvAPxT3Di+LelIBpaqoTxJd6w=="],
 
     "@deepseek-ai/dsh-session-projection": ["@deepseek-ai/dsh-session-projection@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-session-projection/-/dsh-session-projection-0.2.1-alpha.1.tgz", { "dependencies": { "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-session": "0.2.1-alpha.1" } }, "sha512-uWDiHRRwXMXwtkX7FMkPVEjFY8pKo2h0NOkwTQuO3y5FjN/G9LMKWFKhRsPQysXmO12rqeGkxBnjI0AbUtpgCQ=="],
 
-    "@deepseek-ai/dsh-session-title": ["@deepseek-ai/dsh-session-title@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-session-title/-/dsh-session-title-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-agent": "0.2.1-alpha.1", "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-llm": "0.2.1-alpha.1", "@deepseek-ai/dsh-session": "0.2.1-alpha.1", "@deepseek-ai/dsh-session-projection": "0.2.1-alpha.1" } }, "sha512-81iPEXW5f0c/T2gK3wfmiDVS0tNoVKKLPrcstpDJtFM9Cez8h1dmfVZMHFNhynnvHdwOsAELuuwN4DlgmJQhvA=="],
+    "@deepseek-ai/dsh-session-title": ["@deepseek-ai/dsh-session-title@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-session-title/-/dsh-session-title-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/dsh-util-values": "0.2.1-alpha.2", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-agent": "0.2.1-alpha.2", "@deepseek-ai/dsh-brand": "0.2.1-alpha.2", "@deepseek-ai/dsh-llm": "0.2.1-alpha.2", "@deepseek-ai/dsh-session": "0.2.1-alpha.2", "@deepseek-ai/dsh-session-projection": "0.2.1-alpha.2" } }, "sha512-PhlO9KKk+TwK6IfEgeV3n0rA44DKbTZqN6gG+YSUNnhngmBpBBB43X934wWimYZEdAtCjxS1RRy+i8fu/CkGvg=="],
 
-    "@deepseek-ai/dsh-settings": ["@deepseek-ai/dsh-settings@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-settings/-/dsh-settings-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/cordis-plugin-loader": "~1.0.6-alpha.1", "@deepseek-ai/cosmokit": "~1.8.6-alpha.1", "@deepseek-ai/dsh-config-editor": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1", "yaml": "^2.8.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-session": "0.2.1-alpha.1", "@deepseek-ai/schemastery": "~3.18.5-alpha.1" } }, "sha512-KjiH3Cnr3hxsuVOX+j3r8cPWbhQOcxq2sIg8icRWdOMKN9vdhsKLpId56lezXF1tKIlAHVcLkQyO4ac9Bjp6WA=="],
+    "@deepseek-ai/dsh-settings": ["@deepseek-ai/dsh-settings@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-settings/-/dsh-settings-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/cordis-plugin-loader": "~1.0.6-alpha.1", "@deepseek-ai/cosmokit": "~1.8.6-alpha.1", "@deepseek-ai/dsh-config-editor": "0.2.1-alpha.2", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.2", "yaml": "^2.8.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-brand": "0.2.1-alpha.2", "@deepseek-ai/dsh-session": "0.2.1-alpha.2", "@deepseek-ai/schemastery": "~3.18.5-alpha.1" } }, "sha512-c7xPzg3rQKixTum8MMLc/yw8Gp08+K6gPuQr0e1sq8s0RTlLUdUszYR9jVzu+qUdzuFJEEPUnFSeiJmT9YvlkA=="],
 
     "@deepseek-ai/dsh-storage": ["@deepseek-ai/dsh-storage@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-storage/-/dsh-storage-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-qTwmphDRxExShYB34NN1D3f471tbqTJOkk5+9kQib6JoKflSFAx64DOrPBeeFXbS9hF1ungRr+Q9L/PkmCfPNg=="],
 
@@ -231,15 +231,15 @@
 
     "@deepseek-ai/dsh-system-prompt": ["@deepseek-ai/dsh-system-prompt@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-system-prompt/-/dsh-system-prompt-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/schemastery": "~3.18.5-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-llm": "0.2.1-alpha.1", "@deepseek-ai/dsh-scope": "0.2.1-alpha.1" } }, "sha512-BvqCc2gLD314H/Sgl3epP5zpsIK7N3TR3JWyqi5LKmBZuxDeX41WI36ErjByQUwCoOZ79LCF9XG+AJGU9UUCzA=="],
 
-    "@deepseek-ai/dsh-timeout": ["@deepseek-ai/dsh-timeout@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-timeout/-/dsh-timeout-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-lsdyhMVixctXVGIdo2cXZHyjwBdLisgC3T5zmWFHs/Azv48v+gZExuc85VYpJ4JlztRgbtRS7FFoAALrCWr+FQ=="],
+    "@deepseek-ai/dsh-timeout": ["@deepseek-ai/dsh-timeout@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-timeout/-/dsh-timeout-0.2.1-alpha.2.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-hgII55C+B2MWnMwP8Nv1BTCh+RbNP14EhzwMfOiwBWK08PdVHi2gdB7ZtbRprps5s2fO2gVXaclgXpnLX05hgw=="],
 
-    "@deepseek-ai/dsh-typert-protocol": ["@deepseek-ai/dsh-typert-protocol@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-typert-protocol/-/dsh-typert-protocol-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-nzNwKdiMv3nxrE6y99WtKOwbLZB5v1KzAIciMcCuZQ38rv/PKNLxE4P1QlbzyLdmKKeb68IUYvf9a1TNkv9V3g=="],
+    "@deepseek-ai/dsh-typert-protocol": ["@deepseek-ai/dsh-typert-protocol@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-typert-protocol/-/dsh-typert-protocol-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.2" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-L/f22tnjV9LXFOf8CaX5XmEyKXR18oRKP2X3qb/I7NrAxk5uwKZcLHCFU/LXECVXrkm/Q0MPp5iNiREG1rLfzQ=="],
 
-    "@deepseek-ai/dsh-util-crypto": ["@deepseek-ai/dsh-util-crypto@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-crypto/-/dsh-util-crypto-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-uZhfu30VShru7GxknldvvKdPfiXIJJewm0KwJgrtwZbOMoWTH8lzTvDFgK8YvhG8rCRmFySNqQdgdzsMRLiZVQ=="],
+    "@deepseek-ai/dsh-util-crypto": ["@deepseek-ai/dsh-util-crypto@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-crypto/-/dsh-util-crypto-0.2.1-alpha.2.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-Hrm2c1H5ZOGBfviHPSEfPOg+FqagqH7PwGLoB/PVWZztQ2otw31NarPgrzSXO4cVY5fUmuoK8lsMRmgnQzs0FA=="],
 
-    "@deepseek-ai/dsh-util-values": ["@deepseek-ai/dsh-util-values@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-values/-/dsh-util-values-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-RlA49PBUEiahDt11WQ6gFUGlLWG8jfC+Y/D5MNDysg5A2VbixSsbS/ZTuDp8/SrJrZKoYMxa1g7T9T61zuvP7Q=="],
+    "@deepseek-ai/dsh-util-values": ["@deepseek-ai/dsh-util-values@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-values/-/dsh-util-values-0.2.1-alpha.2.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-0MoZ0C8rXC+2PyxJER6ZSRfkU21/HbX4Z5oCcdC3b151epcBYQVlP/o8vjqePQAJCZwTrWAEknnJHRMWbVlh0A=="],
 
-    "@deepseek-ai/dsh-workspace": ["@deepseek-ai/dsh-workspace@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-workspace/-/dsh-workspace-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-session": "0.2.1-alpha.1", "@deepseek-ai/dsh-session-persistence": "0.2.1-alpha.1", "@deepseek-ai/dsh-storage": "0.2.1-alpha.1", "@deepseek-ai/dsh-storage-domain": "0.2.1-alpha.1", "@deepseek-ai/dsh-typert-protocol": "0.2.1-alpha.1" } }, "sha512-drH82m/CaSI/o3OtRQ0NOtUJroYsYhCpUjO756c3ix7tQtN+lSdbkfFp7aqS183fNgZK96Vr7cOFHhvSArEy8Q=="],
+    "@deepseek-ai/dsh-workspace": ["@deepseek-ai/dsh-workspace@0.2.1-alpha.2", "https://registry.npmmirror.com/@deepseek-ai/dsh-workspace/-/dsh-workspace-0.2.1-alpha.2.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.2", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-session": "0.2.1-alpha.2", "@deepseek-ai/dsh-session-persistence": "0.2.1-alpha.2", "@deepseek-ai/dsh-storage": "0.2.1-alpha.2", "@deepseek-ai/dsh-storage-domain": "0.2.1-alpha.2", "@deepseek-ai/dsh-typert-protocol": "0.2.1-alpha.2" } }, "sha512-QjReTPKcmtpZXi0woYPoWkiCEqj7Scm0arb8H/NFpU/IDes2Qt5R4DPwChir4z56z6Chp6gHmeizj6j7uCe2ew=="],
 
     "@deepseek-ai/node-addon-landlock-run": ["@deepseek-ai/node-addon-landlock-run@0.1.1", "https://registry.npmmirror.com/@deepseek-ai/node-addon-landlock-run/-/node-addon-landlock-run-0.1.1.tgz", { "optionalDependencies": { "@deepseek-ai/node-addon-landlock-run-linux-arm64": "0.1.1", "@deepseek-ai/node-addon-landlock-run-linux-x64": "0.1.1" } }, "sha512-aHGhlQJEutfobKM/4K59SERbT7RmQdD2oMKzD8Bne/Ps7TeT8AweCN+dpdfuxQhMNbFcJMymrgPnID0WYQ30Tw=="],
 
@@ -249,9 +249,9 @@
 
     "@deepseek-ai/schemastery": ["@deepseek-ai/schemastery@3.18.5-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/schemastery/-/schemastery-3.18.5-alpha.1.tgz", { "dependencies": { "@deepseek-ai/cosmokit": "~1.8.6-alpha.1", "@standard-schema/spec": "^1.1.0" } }, "sha512-HojoBv1wMQn6N8nDgTgWbc/f4EFAlg/ZsIYN2AChnEDoFOmcWd3+MDzhozNffmywywzV7pcouHRR4x37YZfcjA=="],
 
-    "@earendil-works/pi-ai": ["@earendil-works/pi-ai@0.87.1", "https://registry.npmmirror.com/@earendil-works/pi-ai/-/pi-ai-0.87.1.tgz", { "dependencies": { "@anthropic-ai/sdk": "0.124.0", "@aws-sdk/client-bedrock-runtime": "3.1127.0", "@earendil-works/pi-telemetry": "^0.87.1", "@google/genai": "2.21.0", "@smithy/node-http-handler": "4.12.1", "http-proxy-agent": "9.1.0", "https-proxy-agent": "9.1.0", "openai": "6.40.0", "partial-json": "0.1.7", "typebox": "1.3.27" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-X/3PfQBnnoeVdO9Cv8zHghUMglzlgNZYGNzoPnbRoGnHl3Rw3TlA2UKSUB7BRHUOxMryHXYa8dnjWZlbRheDZA=="],
+    "@earendil-works/pi-ai": ["@earendil-works/pi-ai@1.1.0", "https://registry.npmmirror.com/@earendil-works/pi-ai/-/pi-ai-1.1.0.tgz", { "dependencies": { "@anthropic-ai/sdk": "0.129.0", "@aws-sdk/client-bedrock-runtime": "3.1127.0", "@earendil-works/pi-telemetry": "^1.1.0", "@google/genai": "2.21.0", "@smithy/node-http-handler": "4.12.1", "http-proxy-agent": "9.1.0", "https-proxy-agent": "9.1.0", "openai": "7.19.0", "partial-json": "0.1.7", "typebox": "1.3.27" }, "bin": { "pi-ai": "dist/cli.js" } }, "sha512-1T7LAkc/5Bvc0v6w4vAGVdCrli0o/E0pEmYKTnixu95vSFArBjvbhS/G4ZwI0RUePgf0Imcu0VyqlM4EcXxqfw=="],
 
-    "@earendil-works/pi-telemetry": ["@earendil-works/pi-telemetry@0.87.1", "https://registry.npmmirror.com/@earendil-works/pi-telemetry/-/pi-telemetry-0.87.1.tgz", {}, "sha512-MC6TRQH5lgMXpcN+Vku2WMI2T8BsiUPzMQHGo81uqFZD3/9O79WWJAysEDGuzduP6R4tvtgwMLwmqIxynM10JQ=="],
+    "@earendil-works/pi-telemetry": ["@earendil-works/pi-telemetry@1.1.0", "https://registry.npmmirror.com/@earendil-works/pi-telemetry/-/pi-telemetry-1.1.0.tgz", {}, "sha512-8gAK05/2pPozZZz6hCLOi8x2vsqzvsmO9gG92kbvuvTPm0qMHaFlaXX98ndXsrOi5pmzha7vNLguuG4+0Rgxjw=="],
 
     "@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.28.2", "https://registry.npmmirror.com/@esbuild/aix-ppc64/-/aix-ppc64-0.28.2.tgz", { "os": "aix", "cpu": "ppc64" }, "sha512-XExcO+dvLKvVtNTibSTBej1NCAbaGhWn9Ww1ZPx80qsahhPFe/8jgWP0IchNe0F3HwkU7n8ejhH8bjonqht8mQ=="],
 
@@ -537,6 +537,8 @@
 
     "https-proxy-agent": ["https-proxy-agent@9.1.0", "https://registry.npmmirror.com/https-proxy-agent/-/https-proxy-agent-9.1.0.tgz", { "dependencies": { "agent-base": "9.0.0", "debug": "^4.3.4", "proxy-agent-negotiate": "1.1.0" } }, "sha512-ag87y7cJJ9/3+GxFr8Oy4O5faDsGRGnBGsJj/YjOSsSx/5eadKLYTMPlzuR6obgoCDDm0abAAZitXXQkMOPSpA=="],
 
+    "ipaddr.js": ["ipaddr.js@2.5.0", "https://registry.npmmirror.com/ipaddr.js/-/ipaddr.js-2.5.0.tgz", {}, "sha512-aq+t5NAc+cS6rZQQVWC2x98CPqGtKKTMDd4Gaodv0wShnItdKg/51djkGJ1hqH+Oy0ivDftCbSLCQob8zso01w=="],
+
     "is-potential-custom-element-name": ["is-potential-custom-element-name@1.0.1", "https://registry.npmmirror.com/is-potential-custom-element-name/-/is-potential-custom-element-name-1.0.1.tgz", {}, "sha512-bCYeRA2rVibKZd+s2625gGnGF/t7DSqDs4dP7CrLA1m7jKWz6pps0LpYLJN8Q64HtmPKJ1hrN3nzPNKFEKOUiQ=="],
 
     "js-yaml": ["js-yaml@4.3.2", "https://registry.npmmirror.com/js-yaml/-/js-yaml-4.3.2.tgz", { "dependencies": { "argparse": "^2.0.1" }, "bin": { "js-yaml": "bin/js-yaml.js" } }, "sha512-SFNOvSJ+Dgf/9An904Yx+CgSlIPCkIpao4qo51lpee25TIRejdH3rhR4EZMGoNx3/TP3O+wzWuiTFl4sqbltzA=="],
@@ -623,7 +625,7 @@
 
     "on-headers": ["on-headers@1.1.0", "https://registry.npmmirror.com/on-headers/-/on-headers-1.1.0.tgz", {}, "sha512-737ZY3yNnXy37FHkQxPzt4UZ2UWPWiCZWLvFZ4fu5cueciegX0zGPnrlY6bwRg4FdQOe9YU8MkmJwGhoMybl8A=="],
 
-    "openai": ["openai@6.40.0", "https://registry.npmmirror.com/openai/-/openai-6.40.0.tgz", { "peerDependencies": { "ws": "^8.18.0", "zod": "^3.25 || ^4.0" }, "optionalPeers": ["ws", "zod"] }, "sha512-MWtTjd/gQt4jpbji61NTgFWJLoY/PdRJ6wG9/ZDRMYNMlBKrCrSlkLI+KgHP1vR1qT6LKSAyAqIxno6lcK9JiA=="],
+    "openai": ["openai@7.19.0", "https://registry.npmmirror.com/openai/-/openai-7.19.0.tgz", { "peerDependencies": { "@aws-sdk/credential-provider-node": ">=3.972.0 <4", "@smithy/hash-node": ">=4.3.0 <5", "@smithy/signature-v4": ">=5.4.0 <6", "undici": ">=5 <9", "ws": "^8.21.0", "zod": "^3.25 || ^4.0" }, "optionalPeers": ["@aws-sdk/credential-provider-node", "@smithy/hash-node", "@smithy/signature-v4", "undici", "ws", "zod"] }, "sha512-MX2s3u2L5racTO0CC/SWpCOasJQBCJrqLKXK+l82cAhdeF8mPMBEe/gxMm0ZFa2xpKpOFLRjxv5afYEZbBXmbQ=="],
 
     "p-retry": ["p-retry@4.6.2", "https://registry.npmmirror.com/p-retry/-/p-retry-4.6.2.tgz", { "dependencies": { "@types/retry": "0.12.0", "retry": "^0.13.1" } }, "sha512-312Id396EbJdvRONlngUx0NydfrIQ5lsYu0znKVUzVvArzEIt08V1qhtyESbGVd1FGX7UKtiFp5uwKZdM8wIuQ=="],
 
@@ -733,6 +735,30 @@
 
     "@aws-sdk/credential-provider-sso/@aws-sdk/token-providers": ["@aws-sdk/token-providers@3.1138.0", "https://registry.npmmirror.com/@aws-sdk/token-providers/-/token-providers-3.1138.0.tgz", { "dependencies": { "@aws-sdk/core": "^3.978.1", "@aws-sdk/nested-clients": "^3.997.46", "@aws-sdk/types": "^3.974.6", "@smithy/core": "^3.35.0", "@smithy/types": "^4.19.0", "tslib": "^2.6.2" } }, "sha512-GpyAr0DD63YOEmYFM6Df+gJuIgC92MMTiBK4FTKfxii5MJ9ge20epR7LyroulscYlG89J+ZB2ivFDPjvfQhzdw=="],
 
+    "@deepseek-ai/dsh-agent/@deepseek-ai/dsh-llm": ["@deepseek-ai/dsh-llm@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-llm/-/dsh-llm-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-timeout": "0.2.1-alpha.1", "@deepseek-ai/dsh-typert-protocol": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-crypto": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-BKvO+mcV+L8y8df39BmbpB3OntmpBHUAeVcvJhI8RyUoGjxJ3I0RfNTgYwmde57C/UpVKVOsnNo7SV9lDsI+BQ=="],
+
+    "@deepseek-ai/dsh-agent/@deepseek-ai/dsh-session": ["@deepseek-ai/dsh-session@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-session/-/dsh-session-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-llm": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-scope": "0.2.1-alpha.1" } }, "sha512-33GdDCYXlp0u4ptJgKwM1DkNDvbabDQ2zZFtj278o1XL9cBf2f2Q11fVj8FW9IV88YhrXjRBT/Ju978i/M7mDA=="],
+
+    "@deepseek-ai/dsh-agent/@deepseek-ai/dsh-util-values": ["@deepseek-ai/dsh-util-values@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-values/-/dsh-util-values-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-RlA49PBUEiahDt11WQ6gFUGlLWG8jfC+Y/D5MNDysg5A2VbixSsbS/ZTuDp8/SrJrZKoYMxa1g7T9T61zuvP7Q=="],
+
+    "@deepseek-ai/dsh-app-boot/@deepseek-ai/dsh-atomic-write": ["@deepseek-ai/dsh-atomic-write@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-atomic-write/-/dsh-atomic-write-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-4ADMLg8g0HVK2Tor/qPoT7RKdSeyRiK3MSj+PBIaxR0ZtQvxxoWbFJGwj4WwUyePhtMDfxYNhdwXDvYovlyTkg=="],
+
+    "@deepseek-ai/dsh-app-boot/@deepseek-ai/dsh-home-paths": ["@deepseek-ai/dsh-home-paths@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-home-paths/-/dsh-home-paths-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-qf3DDHCb4xEqoCETt3xfoOb42SXFRtC2kZEo8trzCY+Ksdfyw1bq2p6Mt1S3BQbaJGrDt5xuV5ituqBJViVoHA=="],
+
+    "@deepseek-ai/dsh-authorization/@deepseek-ai/dsh-credentials": ["@deepseek-ai/dsh-credentials@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-credentials/-/dsh-credentials-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-+v6vCJoglb3zClmaFqenPBK/QWux/EOi403dCttH3kt7hUfjDwKoKGbDxInjvLxhqoKvjNnEN3JttjMXj+PEcA=="],
+
+    "@deepseek-ai/dsh-authorization/@deepseek-ai/dsh-llm": ["@deepseek-ai/dsh-llm@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-llm/-/dsh-llm-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-timeout": "0.2.1-alpha.1", "@deepseek-ai/dsh-typert-protocol": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-crypto": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-BKvO+mcV+L8y8df39BmbpB3OntmpBHUAeVcvJhI8RyUoGjxJ3I0RfNTgYwmde57C/UpVKVOsnNo7SV9lDsI+BQ=="],
+
+    "@deepseek-ai/dsh-fs/@deepseek-ai/dsh-brand": ["@deepseek-ai/dsh-brand@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-brand/-/dsh-brand-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-DNzncR3F5uO21E/dQGHvIFpYu1I11Ti3okkqUsE4BWqMyCsgLUaSGX/Vg6dtYeoFmPNbcWuhmk26L1/uaz1/Gw=="],
+
+    "@deepseek-ai/dsh-fs/@deepseek-ai/dsh-llm": ["@deepseek-ai/dsh-llm@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-llm/-/dsh-llm-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-timeout": "0.2.1-alpha.1", "@deepseek-ai/dsh-typert-protocol": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-crypto": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-BKvO+mcV+L8y8df39BmbpB3OntmpBHUAeVcvJhI8RyUoGjxJ3I0RfNTgYwmde57C/UpVKVOsnNo7SV9lDsI+BQ=="],
+
+    "@deepseek-ai/dsh-fs/@deepseek-ai/dsh-sandbox": ["@deepseek-ai/dsh-sandbox@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-sandbox/-/dsh-sandbox-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-llm": "0.2.1-alpha.1", "@deepseek-ai/dsh-session": "0.2.1-alpha.1" } }, "sha512-37Q3biu4oCKDObXsO4MNk1nQNk/ZWuqdGmgHoO1ZLj/Uwr0oMVtKSpasjtf/0Tu5DcakYnbG7a5eKn4Lm851BQ=="],
+
+    "@deepseek-ai/dsh-session-projection/@deepseek-ai/dsh-session": ["@deepseek-ai/dsh-session@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-session/-/dsh-session-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-llm": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-scope": "0.2.1-alpha.1" } }, "sha512-33GdDCYXlp0u4ptJgKwM1DkNDvbabDQ2zZFtj278o1XL9cBf2f2Q11fVj8FW9IV88YhrXjRBT/Ju978i/M7mDA=="],
+
+    "@deepseek-ai/dsh-system-prompt/@deepseek-ai/dsh-llm": ["@deepseek-ai/dsh-llm@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-llm/-/dsh-llm-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-timeout": "0.2.1-alpha.1", "@deepseek-ai/dsh-typert-protocol": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-crypto": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-BKvO+mcV+L8y8df39BmbpB3OntmpBHUAeVcvJhI8RyUoGjxJ3I0RfNTgYwmde57C/UpVKVOsnNo7SV9lDsI+BQ=="],
+
     "compression/negotiator": ["negotiator@0.6.4", "https://registry.npmmirror.com/negotiator/-/negotiator-0.6.4.tgz", {}, "sha512-myRT3DiWPHqho5PrJaIRyaMv2kgYf0mUVgBNOYMuCH5Ki1yEiQaf/ZJuQ62nvpc44wL5WDbTX7yGJi1Neevw8w=="],
 
     "gaxios/https-proxy-agent": ["https-proxy-agent@7.0.6", "https://registry.npmmirror.com/https-proxy-agent/-/https-proxy-agent-7.0.6.tgz", { "dependencies": { "agent-base": "^7.1.2", "debug": "4" } }, "sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw=="],
@@ -741,6 +767,56 @@
 
     "https-proxy-agent/debug": ["debug@4.4.3", "https://registry.npmmirror.com/debug/-/debug-4.4.3.tgz", { "dependencies": { "ms": "^2.1.3" }, "peerDependencies": { "supports-color": "*" }, "optionalPeers": ["supports-color"] }, "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA=="],
 
+    "@deepseek-ai/dsh-agent/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-brand": ["@deepseek-ai/dsh-brand@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-brand/-/dsh-brand-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-DNzncR3F5uO21E/dQGHvIFpYu1I11Ti3okkqUsE4BWqMyCsgLUaSGX/Vg6dtYeoFmPNbcWuhmk26L1/uaz1/Gw=="],
+
+    "@deepseek-ai/dsh-agent/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-timeout": ["@deepseek-ai/dsh-timeout@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-timeout/-/dsh-timeout-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-lsdyhMVixctXVGIdo2cXZHyjwBdLisgC3T5zmWFHs/Azv48v+gZExuc85VYpJ4JlztRgbtRS7FFoAALrCWr+FQ=="],
+
+    "@deepseek-ai/dsh-agent/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-typert-protocol": ["@deepseek-ai/dsh-typert-protocol@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-typert-protocol/-/dsh-typert-protocol-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-nzNwKdiMv3nxrE6y99WtKOwbLZB5v1KzAIciMcCuZQ38rv/PKNLxE4P1QlbzyLdmKKeb68IUYvf9a1TNkv9V3g=="],
+
+    "@deepseek-ai/dsh-agent/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-util-crypto": ["@deepseek-ai/dsh-util-crypto@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-crypto/-/dsh-util-crypto-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-uZhfu30VShru7GxknldvvKdPfiXIJJewm0KwJgrtwZbOMoWTH8lzTvDFgK8YvhG8rCRmFySNqQdgdzsMRLiZVQ=="],
+
+    "@deepseek-ai/dsh-agent/@deepseek-ai/dsh-session/@deepseek-ai/dsh-brand": ["@deepseek-ai/dsh-brand@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-brand/-/dsh-brand-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-DNzncR3F5uO21E/dQGHvIFpYu1I11Ti3okkqUsE4BWqMyCsgLUaSGX/Vg6dtYeoFmPNbcWuhmk26L1/uaz1/Gw=="],
+
+    "@deepseek-ai/dsh-authorization/@deepseek-ai/dsh-credentials/@deepseek-ai/dsh-brand": ["@deepseek-ai/dsh-brand@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-brand/-/dsh-brand-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-DNzncR3F5uO21E/dQGHvIFpYu1I11Ti3okkqUsE4BWqMyCsgLUaSGX/Vg6dtYeoFmPNbcWuhmk26L1/uaz1/Gw=="],
+
+    "@deepseek-ai/dsh-authorization/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-brand": ["@deepseek-ai/dsh-brand@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-brand/-/dsh-brand-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-DNzncR3F5uO21E/dQGHvIFpYu1I11Ti3okkqUsE4BWqMyCsgLUaSGX/Vg6dtYeoFmPNbcWuhmk26L1/uaz1/Gw=="],
+
+    "@deepseek-ai/dsh-authorization/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-timeout": ["@deepseek-ai/dsh-timeout@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-timeout/-/dsh-timeout-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-lsdyhMVixctXVGIdo2cXZHyjwBdLisgC3T5zmWFHs/Azv48v+gZExuc85VYpJ4JlztRgbtRS7FFoAALrCWr+FQ=="],
+
+    "@deepseek-ai/dsh-authorization/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-typert-protocol": ["@deepseek-ai/dsh-typert-protocol@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-typert-protocol/-/dsh-typert-protocol-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-nzNwKdiMv3nxrE6y99WtKOwbLZB5v1KzAIciMcCuZQ38rv/PKNLxE4P1QlbzyLdmKKeb68IUYvf9a1TNkv9V3g=="],
+
+    "@deepseek-ai/dsh-authorization/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-util-crypto": ["@deepseek-ai/dsh-util-crypto@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-crypto/-/dsh-util-crypto-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-uZhfu30VShru7GxknldvvKdPfiXIJJewm0KwJgrtwZbOMoWTH8lzTvDFgK8YvhG8rCRmFySNqQdgdzsMRLiZVQ=="],
+
+    "@deepseek-ai/dsh-authorization/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-util-values": ["@deepseek-ai/dsh-util-values@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-values/-/dsh-util-values-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-RlA49PBUEiahDt11WQ6gFUGlLWG8jfC+Y/D5MNDysg5A2VbixSsbS/ZTuDp8/SrJrZKoYMxa1g7T9T61zuvP7Q=="],
+
+    "@deepseek-ai/dsh-fs/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-timeout": ["@deepseek-ai/dsh-timeout@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-timeout/-/dsh-timeout-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-lsdyhMVixctXVGIdo2cXZHyjwBdLisgC3T5zmWFHs/Azv48v+gZExuc85VYpJ4JlztRgbtRS7FFoAALrCWr+FQ=="],
+
+    "@deepseek-ai/dsh-fs/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-typert-protocol": ["@deepseek-ai/dsh-typert-protocol@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-typert-protocol/-/dsh-typert-protocol-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-nzNwKdiMv3nxrE6y99WtKOwbLZB5v1KzAIciMcCuZQ38rv/PKNLxE4P1QlbzyLdmKKeb68IUYvf9a1TNkv9V3g=="],
+
+    "@deepseek-ai/dsh-fs/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-util-crypto": ["@deepseek-ai/dsh-util-crypto@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-crypto/-/dsh-util-crypto-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-uZhfu30VShru7GxknldvvKdPfiXIJJewm0KwJgrtwZbOMoWTH8lzTvDFgK8YvhG8rCRmFySNqQdgdzsMRLiZVQ=="],
+
+    "@deepseek-ai/dsh-fs/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-util-values": ["@deepseek-ai/dsh-util-values@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-values/-/dsh-util-values-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-RlA49PBUEiahDt11WQ6gFUGlLWG8jfC+Y/D5MNDysg5A2VbixSsbS/ZTuDp8/SrJrZKoYMxa1g7T9T61zuvP7Q=="],
+
+    "@deepseek-ai/dsh-fs/@deepseek-ai/dsh-sandbox/@deepseek-ai/dsh-session": ["@deepseek-ai/dsh-session@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-session/-/dsh-session-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-llm": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1", "@deepseek-ai/dsh-scope": "0.2.1-alpha.1" } }, "sha512-33GdDCYXlp0u4ptJgKwM1DkNDvbabDQ2zZFtj278o1XL9cBf2f2Q11fVj8FW9IV88YhrXjRBT/Ju978i/M7mDA=="],
+
+    "@deepseek-ai/dsh-fs/@deepseek-ai/dsh-sandbox/@deepseek-ai/dsh-util-values": ["@deepseek-ai/dsh-util-values@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-values/-/dsh-util-values-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-RlA49PBUEiahDt11WQ6gFUGlLWG8jfC+Y/D5MNDysg5A2VbixSsbS/ZTuDp8/SrJrZKoYMxa1g7T9T61zuvP7Q=="],
+
+    "@deepseek-ai/dsh-session-projection/@deepseek-ai/dsh-session/@deepseek-ai/dsh-brand": ["@deepseek-ai/dsh-brand@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-brand/-/dsh-brand-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-DNzncR3F5uO21E/dQGHvIFpYu1I11Ti3okkqUsE4BWqMyCsgLUaSGX/Vg6dtYeoFmPNbcWuhmk26L1/uaz1/Gw=="],
+
+    "@deepseek-ai/dsh-session-projection/@deepseek-ai/dsh-session/@deepseek-ai/dsh-llm": ["@deepseek-ai/dsh-llm@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-llm/-/dsh-llm-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1", "@deepseek-ai/dsh-timeout": "0.2.1-alpha.1", "@deepseek-ai/dsh-typert-protocol": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-crypto": "0.2.1-alpha.1", "@deepseek-ai/dsh-util-values": "0.2.1-alpha.1", "@deepseek-ai/schemastery": "~3.18.5-alpha.1", "zod": "^4.4.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-BKvO+mcV+L8y8df39BmbpB3OntmpBHUAeVcvJhI8RyUoGjxJ3I0RfNTgYwmde57C/UpVKVOsnNo7SV9lDsI+BQ=="],
+
+    "@deepseek-ai/dsh-session-projection/@deepseek-ai/dsh-session/@deepseek-ai/dsh-util-values": ["@deepseek-ai/dsh-util-values@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-values/-/dsh-util-values-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-RlA49PBUEiahDt11WQ6gFUGlLWG8jfC+Y/D5MNDysg5A2VbixSsbS/ZTuDp8/SrJrZKoYMxa1g7T9T61zuvP7Q=="],
+
+    "@deepseek-ai/dsh-system-prompt/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-brand": ["@deepseek-ai/dsh-brand@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-brand/-/dsh-brand-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-DNzncR3F5uO21E/dQGHvIFpYu1I11Ti3okkqUsE4BWqMyCsgLUaSGX/Vg6dtYeoFmPNbcWuhmk26L1/uaz1/Gw=="],
+
+    "@deepseek-ai/dsh-system-prompt/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-timeout": ["@deepseek-ai/dsh-timeout@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-timeout/-/dsh-timeout-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-lsdyhMVixctXVGIdo2cXZHyjwBdLisgC3T5zmWFHs/Azv48v+gZExuc85VYpJ4JlztRgbtRS7FFoAALrCWr+FQ=="],
+
+    "@deepseek-ai/dsh-system-prompt/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-typert-protocol": ["@deepseek-ai/dsh-typert-protocol@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-typert-protocol/-/dsh-typert-protocol-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-nzNwKdiMv3nxrE6y99WtKOwbLZB5v1KzAIciMcCuZQ38rv/PKNLxE4P1QlbzyLdmKKeb68IUYvf9a1TNkv9V3g=="],
+
+    "@deepseek-ai/dsh-system-prompt/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-util-crypto": ["@deepseek-ai/dsh-util-crypto@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-crypto/-/dsh-util-crypto-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-uZhfu30VShru7GxknldvvKdPfiXIJJewm0KwJgrtwZbOMoWTH8lzTvDFgK8YvhG8rCRmFySNqQdgdzsMRLiZVQ=="],
+
+    "@deepseek-ai/dsh-system-prompt/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-util-values": ["@deepseek-ai/dsh-util-values@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-values/-/dsh-util-values-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-RlA49PBUEiahDt11WQ6gFUGlLWG8jfC+Y/D5MNDysg5A2VbixSsbS/ZTuDp8/SrJrZKoYMxa1g7T9T61zuvP7Q=="],
+
     "gaxios/https-proxy-agent/agent-base": ["agent-base@7.1.4", "https://registry.npmmirror.com/agent-base/-/agent-base-7.1.4.tgz", {}, "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ=="],
 
     "gaxios/https-proxy-agent/debug": ["debug@4.4.3", "https://registry.npmmirror.com/debug/-/debug-4.4.3.tgz", { "dependencies": { "ms": "^2.1.3" }, "peerDependencies": { "supports-color": "*" }, "optionalPeers": ["supports-color"] }, "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA=="],
@@ -748,6 +824,12 @@
     "http-proxy-agent/debug/ms": ["ms@2.1.3", "https://registry.npmmirror.com/ms/-/ms-2.1.3.tgz", {}, "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="],
 
     "https-proxy-agent/debug/ms": ["ms@2.1.3", "https://registry.npmmirror.com/ms/-/ms-2.1.3.tgz", {}, "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="],
+
+    "@deepseek-ai/dsh-session-projection/@deepseek-ai/dsh-session/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-timeout": ["@deepseek-ai/dsh-timeout@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-timeout/-/dsh-timeout-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-lsdyhMVixctXVGIdo2cXZHyjwBdLisgC3T5zmWFHs/Azv48v+gZExuc85VYpJ4JlztRgbtRS7FFoAALrCWr+FQ=="],
+
+    "@deepseek-ai/dsh-session-projection/@deepseek-ai/dsh-session/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-typert-protocol": ["@deepseek-ai/dsh-typert-protocol@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-typert-protocol/-/dsh-typert-protocol-0.2.1-alpha.1.tgz", { "dependencies": { "@deepseek-ai/dsh-brand": "0.2.1-alpha.1" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-nzNwKdiMv3nxrE6y99WtKOwbLZB5v1KzAIciMcCuZQ38rv/PKNLxE4P1QlbzyLdmKKeb68IUYvf9a1TNkv9V3g=="],
+
+    "@deepseek-ai/dsh-session-projection/@deepseek-ai/dsh-session/@deepseek-ai/dsh-llm/@deepseek-ai/dsh-util-crypto": ["@deepseek-ai/dsh-util-crypto@0.2.1-alpha.1", "https://registry.npmmirror.com/@deepseek-ai/dsh-util-crypto/-/dsh-util-crypto-0.2.1-alpha.1.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.1" } }, "sha512-uZhfu30VShru7GxknldvvKdPfiXIJJewm0KwJgrtwZbOMoWTH8lzTvDFgK8YvhG8rCRmFySNqQdgdzsMRLiZVQ=="],
 
     "gaxios/https-proxy-agent/debug/ms": ["ms@2.1.3", "https://registry.npmmirror.com/ms/-/ms-2.1.3.tgz", {}, "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="],
   }

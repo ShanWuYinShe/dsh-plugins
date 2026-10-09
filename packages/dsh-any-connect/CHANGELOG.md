@@ -1,3 +1,8 @@
+## 0.4.14-alpha.6 (2026-10-09)
+
+### 修复
+
+* **依赖对齐宿主 `0.2.1-alpha.2`**：全部 `@deepseek-ai/dsh-*` 依赖 range 升到 `^0.2.1-alpha.2`；宿主该版把 `@earendil-works/pi-ai` 升到 1.1.0（`TranscriptContext` 增加 brand 字段），插件依赖同步提到 `^1.1.0`，消除双版本类型互斥。
 ## 0.4.14-alpha.5 (2026-10-08)
 
 ### 新增

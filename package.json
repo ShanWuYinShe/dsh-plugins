@@ -28,7 +28,7 @@
   ],
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.5-alpha.1",
-    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-alpha.1",
+    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-alpha.2",
     "@deepseek-ai/schemastery": "~3.18.5-alpha.1",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",

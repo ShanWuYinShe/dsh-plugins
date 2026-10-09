@@ -1,3 +1,8 @@
+## 0.4.22-alpha.3 (2026-10-09)
+
+### 修复
+
+* **依赖对齐宿主 `0.2.1-alpha.2`**：`@deepseek-ai/dsh-sandbox`、`dsh-typert-protocol` range 升到 `^0.2.1-alpha.2`。
 ## 0.4.22-alpha.2 (2026-10-05)
 
 ### 修复
