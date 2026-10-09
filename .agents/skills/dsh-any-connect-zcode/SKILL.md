@@ -145,7 +145,7 @@ provider runtime headers（captcha-diagnostics `headersApplied:true`）。
 不带 → **HTTP 405 `{"code":3012,"msg":"request has been blocked due to unusual activity."}`**。
 
 同页多路 relay 也都不通：`/api/v1/ultra/anthropic`、`/api/v1/ultra-zai/anthropic`
-（自造 header 会返回 `401 code 1002`，说明这些端点主要在验收特殊的鉴权形状）；
+（自造 header 会返回 `401 code 1002`，说明这些端点主要在验收特殊的鉴权形状；`zcode-plan/anthropic` 换 coding-plan api-key 同样 401）；
 off-peak 通道**取票可用**（`POST /api/v1/off-peak/ticket` 需
 `X-Coding-Plan-Api-Key`，轮询 `/ticket/status` 能到 `ready`），但
 `POST /api/v1/off-peak/anthropic/v1/messages` 一律 `400 code 3001 parameter error`
@@ -162,12 +162,6 @@ curl 与 undici、stream 与否、阿里云验证码头、阿里云 cookie（`ac
 对照（同刻同域）：不带 JWT → 401；`x-api-key: <jwt>` → 401（本通道只认 Bearer）；
 不存在的路径 → 404；`billing/balance` → 200。
 
-同页多路 relay 都不通：`/api/v1/ultra/anthropic`、`/api/v1/ultra-zai/anthropic`
-返回 `401 code 1002`；`zcode-plan/anthropic` 换 coding-plan api-key → 401。
-off-peak 通道**取票可用**（`POST /api/v1/off-peak/ticket` 需
-`X-Coding-Plan-Api-Key`，轮询 `/ticket/status` 能到 `ready`），但
-`POST /api/v1/off-peak/anthropic/v1/messages` 一律 `400 code 3001 parameter error`
-——参数形状与服务端校验不一致，尚未逆出。
 
 ### 3.1 判定"能用了"的最小探针
 

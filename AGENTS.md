@@ -1,6 +1,6 @@
 # AGENTS.md — AI 协作指引
 
-DSH host 插件 monorepo，双分支跟随 DSH 宿主线。通用约束以全局 `~/AGENTS.md` 为准
+DSH host 插件 monorepo，跟随 DSH 宿主线（`alpha` 分支仅在活跃期存在，见下文三期纪律）。通用约束以全局 `~/AGENTS.md` 为准
 （本项目例外：`alpha` 分支允许推送，见全局「Git 红线」），本文件只做项目特有补充。
 动手前先读
 [RELEASING.md](RELEASING.md)（分支 / 版本号 / 发布流程的唯一权威约定）；
