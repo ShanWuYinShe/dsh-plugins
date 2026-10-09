@@ -106,9 +106,7 @@ export async function workBuddyWebStatus(
       id: model.id,
       name: model.name,
       contextWindow: model.contextWindow,
-      largerWindows: [...(model.supportedContextWindows ?? [])]
-        .filter(windows => windows > model.contextWindow)
-        .sort((a, b) => a - b),
+      contextWindows: [...(model.supportedContextWindows ?? [])].sort((a, b) => a - b),
       ...model.billing?.free === true ? { free: true as const } : {},
       ...model.billing?.badges !== undefined && model.billing.badges.length > 0 ? { badges: model.billing.badges } : {},
       ...rate === undefined ? {} : { credits: rate },

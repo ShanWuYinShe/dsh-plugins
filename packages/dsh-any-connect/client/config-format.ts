@@ -33,11 +33,19 @@ export function formatTokens(value: number): string {
   return new Intl.NumberFormat(undefined).format(value)
 }
 
-/** Localize an upstream promotional badge label, with an unknown-badge fallback. */
+/**
+ * Localize an upstream promotional badge label, with an unknown-badge fallback.
+ *
+ * Matching is substring-based on the three known Chinese labels, not exact:
+ * upstream appends decorations (time ranges, 生效 markers) to the same base
+ * label, and an exact table would leak the Chinese raw string to English
+ * users on every such variant. A genuinely unknown badge still passes through
+ * unchanged — showing the upstream's own label beats inventing a translation.
+ */
 export function modelBadgeLabel(badge: string, t: WorkBuddyConfigPageInjected['t']): string {
-  if (badge === '限时免费') return t('badgeLimitedFree')
-  if (badge === '夜间折扣') return t('badgeNightDiscount')
-  if (badge === '夜间免费') return t('badgeNightFree')
   if (badge.includes('夜间免费') && badge.includes('生效')) return t('badgeNightFreeActive')
+  if (badge.includes('限时免费')) return t('badgeLimitedFree')
+  if (badge.includes('夜间折扣')) return t('badgeNightDiscount')
+  if (badge.includes('夜间免费')) return t('badgeNightFree')
   return badge
 }

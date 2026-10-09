@@ -27,13 +27,15 @@ import { formatTokens, modelBadgeLabel } from './config-format.js'
  * `<table>`, so tabular figures line up perfectly. Even-indexed rows get a
  * subtle background for visual grouping.
  */
-export function ModelRow({ row, efforts, t, even }: {
+export function ModelRow({ row, efforts, t, even, onRefresh }: {
   row: WorkBuddyWebModelRow
   /** The effort levels the model accepts: declared, or automatically detected. */
   efforts: readonly string[] | undefined
   t: WorkBuddyConfigPageInjected['t']
   /** Whether this is an even-indexed row (for zebra striping). */
   even: boolean
+  /** 卡片级刷新动作：「价格未知」行就地给一个刷新入口，提示与动作不脱节。 */
+  onRefresh?: () => void
 }): React.ReactNode {
   return (
     <tr style={even ? modelRowEvenStyle : modelRowBaseStyle}>
@@ -46,9 +48,22 @@ export function ModelRow({ row, efforts, t, even }: {
           ))}
         </span>
       </td>
-      {/* 无 credits 也无 rateUnknown 标记的行(内置 fallback 目录即有此形态)显示「价格未知」而非无声空白——同一语义不应两种呈现。 */}
-      <td style={metaCellStyle}>{row.free === true ? null : row.rateUnknown === true || row.credits === undefined ? t('rateUnknown') : row.credits}</td>
-      <td style={metaCellStyle}>{formatTokens(row.contextWindow)}</td>
+      {/* 无 credits 也无 rateUnknown 标记的行(内置 fallback 目录即有此形态)显示「价格未知」而非无声空白——同一语义不应两种呈现。
+          rateUnknown 行就地给刷新入口：提示说"刷新后更新"，动作却在表格上方摘要行，距离太远等于没说。 */}
+      <td style={metaCellStyle}>
+        {row.free === true ? null : row.rateUnknown === true || row.credits === undefined
+          ? <>{t('rateUnknown')}{onRefresh !== undefined
+              ? <button type="button" className="wb-btn" style={{ ...chipStyle, marginLeft: 6, cursor: 'pointer' }} onClick={onRefresh}>{t('refresh')}</button>
+              : null}</>
+          : row.credits}
+      </td>
+      {/* 多档模型标注其余可选窗口：改取最大档后，裸数字分不清"最大的那个"
+          还是"只有一档"；单档维持原样，不制造阅读噪音。 */}
+      <td style={metaCellStyle} title={row.contextWindows.length > 1 ? t('contextSmaller', { window: formatTokens(row.contextWindow), others: row.contextWindows.filter(w => w < row.contextWindow).map(formatTokens).join('/') }) : undefined}>
+        {row.contextWindows.length > 1
+          ? t('contextSmaller', { window: formatTokens(row.contextWindow), others: row.contextWindows.filter(w => w < row.contextWindow).map(formatTokens).join('/') })
+          : formatTokens(row.contextWindow)}
+      </td>
       <td style={{ ...metaCellStyle, color: 'var(--dsw-alias-label-secondary)' }}>
         {efforts !== undefined && efforts.length > 0 ? efforts.join('/') : null}
       </td>

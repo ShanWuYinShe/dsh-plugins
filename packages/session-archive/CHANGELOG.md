@@ -1,3 +1,9 @@
+## 0.3.26-alpha.4 (2026-10-09)
+
+### 修复
+
+* ** locales 导出 `TFunc` 类型并收紧 ArchiveDeleteAck 的 props**：`t` 此前标为 `any`，键名拼错只能等运行时空白上屏；收紧后拼错直接 typecheck 报红。行为不变（插值仍按面板既有口径手动 replace）。
+
 ## 0.3.26-alpha.3 (2026-10-09)
 
 ### 修复

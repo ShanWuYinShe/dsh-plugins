@@ -16,6 +16,7 @@
  * @module provider-usage/pill
  */
 
+import { useEffect } from 'react'
 import { rootStyle, pillStyle, labelStyle, dotStyle, panelStyle, panelTitleStyle, noteStyle, errorStyle } from './pill-styles.js'
 import { getDotColor } from './pill-format.js'
 import { WindowRow } from './WindowRow.js'
@@ -39,6 +40,18 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
   const usage = useProviderUsage(props)
   if (usage === null) return null
   const { t, provider, answer, open, setOpen, busy, stale, alignRight, setAlignRight, rootRef, buttonRef, panelRef, refresh, queried, snapshot, headlineText } = usage
+
+  // 面板打开期间窗口尺寸变化（resize、侧栏收展）也要重判翻转：对齐只在
+  // 打开瞬间决定的话，打开后收窄视口会让 320px 面板溢出屏幕右缘。
+  useEffect(() => {
+    if (!open) return
+    const realign = () => {
+      if (!buttonRef.current) return
+      setAlignRight(buttonRef.current.getBoundingClientRect().left + 320 > window.innerWidth - 8)
+    }
+    window.addEventListener('resize', realign)
+    return () => window.removeEventListener('resize', realign)
+  }, [open, setAlignRight, buttonRef])
 
   return (
     <span ref={rootRef} style={{ ...rootStyle, position: 'relative' }}>

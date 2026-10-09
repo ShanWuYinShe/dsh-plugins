@@ -103,12 +103,12 @@ export interface WorkBuddyWebModelRow {
    */
   efforts?: readonly string[]
   /**
-   * Selectable larger windows the upstream declares, excluding the working
-   * budget itself. Reported, never chosen: offering the ceiling as though it
-   * were the working window would overstate the budget (the desktop app's
-   * window picker is client-side policy that appears nowhere in the catalog).
+   * Every selectable window the upstream declares, ascending. The working
+   * budget is the largest entry (users asked for maximum context), so the
+   * model table renders the smaller entries as "also available" context.
+   * Empty when the row declares no `supportedLengths`.
    */
-  largerWindows: readonly number[]
+  contextWindows: readonly number[]
 }
 
 /** One billing package and its remaining credit. */

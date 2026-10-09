@@ -33,8 +33,8 @@ const STATUS_DOC = {
     ],
   },
   models: [
-    { id: 'auto', name: 'Auto', contextWindow: 256000, largerWindows: [] },
-    { id: 'glm-5.3', name: 'GLM-5.3', contextWindow: 1000000, largerWindows: [], credits: 'x0.79' },
+    { id: 'auto', name: 'Auto', contextWindow: 256000, contextWindows: [] },
+    { id: 'glm-5.3', name: 'GLM-5.3', contextWindow: 1000000, contextWindows: [], credits: 'x0.79' },
   ],
 }
 

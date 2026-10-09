@@ -34,9 +34,7 @@ export function StartPlanClaimBox({ t, claim, copied, onCopy }: {
     <div style={claim.state === 'available' ? claimBoxStyle : claimUnknownBoxStyle}>
       {claim.state === 'available' ? (
         <>
-          <span style={claimTitleStyle}>
-            <span aria-hidden="true">🎁</span> {t('claimAvailable')}
-          </span>
+          <span style={claimTitleStyle}>{t('claimAvailable')}</span>
           <span style={planMetaStyle}>
             {t('claimAvailableHint', { name: claim.planName ?? t('startPlanLabel') })}
           </span>

@@ -60,7 +60,7 @@ export function VariantCard(props: {
     t, variant, status, open, onToggle,
     busy, notice, modelsOpen, setModelsOpen, copiedPlanId,
     probe, startPlanClaim, copyPlanId, refresh,
-    refreshWithCatalog, title, label, isZCode, isStartPlanCard, zcodePlan, isPlanActive, displayPlanName, headerSummary, effortsOf,
+    refreshWithCatalog, title, label, isZCode, isStartPlanCard, zcodePlan, isPlanActive, displayPlanName, headerSummary, catalogOffline, effortsOf,
   } = useVariantCard(props)
 
   return (
@@ -78,7 +78,7 @@ export function VariantCard(props: {
             <span aria-hidden="true" className="wb-dot-pulse" style={dotStyle('signed-in')} />
             <span style={nameStyle}>{title}</span>
           </span>
-          <span style={summaryStyle} title={t(variant.introKey)}>{headerSummary}</span>
+          <span style={{ ...summaryStyle, ...(catalogOffline ? { color: 'var(--dsw-alias-state-error-primary, #ff4d4f)' } : {}) }} title={t(variant.introKey)}>{headerSummary}</span>
         </span>
         <span aria-hidden="true" style={{ ...chevronStyle, transform: open ? 'rotate(180deg)' : 'none' }}>⌄</span>
       </button>
@@ -106,14 +106,16 @@ export function VariantCard(props: {
                   </button>
                 </div>
                 <div style={planBadgeRowStyle}>
+                  {/* 不用 emoji 当图标：渲染随系统字体漂移，宿主卡片也以纯文字
+                      chip 为主；语义已由文案完整承载。 */}
                   {isStartPlanCard ? (
-                    <span style={privilegeChipStyle}><span aria-hidden="true">🎯</span> {t('planDedicatedQuota')}</span>
+                    <span style={privilegeChipStyle}>{t('planDedicatedQuota')}</span>
                   ) : (
-                    <span style={privilegeChipStyle}><span aria-hidden="true">⚡</span> {t('codingPlanExtraQuota')}</span>
+                    <span style={privilegeChipStyle}>{t('codingPlanExtraQuota')}</span>
                   )}
                   {isStartPlanCard
-                    ? <span style={planChipOffStyle}><span aria-hidden="true">🌙</span> {t('planNightFreeOff')}</span>
-                    : <span style={privilegeChipStyle}><span aria-hidden="true">🌙</span> {t('codingPlanNightFree')}</span>}
+                    ? <span style={planChipOffStyle}>{t('planNightFreeOff')}</span>
+                    : <span style={privilegeChipStyle}>{t('codingPlanNightFree')}</span>}
                 </div>
                 {isStartPlanCard && zcodePlan !== undefined && zcodePlan.size > 0 ? (
                   <span style={planMetaStyle}>
@@ -147,7 +149,9 @@ export function VariantCard(props: {
                 <span style={summaryLabelStyle}>{t('creditsLabel')}</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={summaryValueStyle} title={status.domain}>
-                    {status.credits !== undefined ? formatNumber(status.credits.total) : '—'}
+                    {status.credits !== undefined
+                      ? formatNumber(status.credits.total)
+                      : (status.creditsError !== undefined ? '—' : t('creditsUnavailable'))}
                   </span>
                   <button
                     type="button"
@@ -217,6 +221,7 @@ export function VariantCard(props: {
                           t={t}
                           efforts={effortsOf(row)}
                           even={i % 2 === 1}
+                          onRefresh={() => { void refreshWithCatalog() }}
                         />
                       ))}
                     </tbody>

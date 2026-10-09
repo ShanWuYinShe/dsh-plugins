@@ -40,6 +40,13 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
 }) {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | undefined>(undefined)
+  // 刷新失败提示 8s 自动消退：一次瞬时网络抖动的红字不该挂到下次手动刷新，
+  // 也不该让用户找关闭按钮——下一轮刷新会重新给反馈。
+  useEffect(() => {
+    if (notice === undefined) return
+    const timer = window.setTimeout(() => { if (mounted.current) setNotice(undefined) }, 8000)
+    return () => window.clearTimeout(timer)
+  }, [notice])
   // 模型清单默认收起：它是最长的一段，而卡片的常看信息只有积分本身。
   const [modelsOpen, setModelsOpen] = useState(false)
   // 「已复制」是短暂反馈：复制成功给一次确认，2s 后自行复原，不留陈旧状态。
@@ -155,6 +162,10 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
   }, [probeKey, status.catalog, refreshWithCatalog])
 
   const title = t(variant.titleKey)
+  // 收起态也想知道目录是否健康：目录不 live（拉取失败/回落 saved/内置列表）
+  // 时在卡头摘要追加短标记——细节展开后才看得到，异常必须收着也能看见。
+  // 自动重拉进行中会自愈，标记随之消失。
+  const catalogOffline = !isCatalogLive(status.catalog)
   const label = status.nickname === undefined
     ? t('signedInAs', { nickname: '' }).replace(/[:：]\s*$/, '')
     : t('signedInAs', { nickname: status.nickname })
@@ -176,17 +187,20 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
   const displayPlanName = isStartPlanCard ? (zcodePlanName ?? t('startPlanLabel')) : zcodePlanName
 
   // 卡头摘要：已登录身份 + 当前积分/套餐状态，收起态下也要一眼看到。
-  const headerSummary = isZCode
-    ? [
-        label,
-        displayPlanName !== undefined
-          ? `${displayPlanName} · ${t(isPlanActive ? 'codingPlanActive' : 'codingPlanExpired')}`
-          : (status.credits !== undefined ? t('codingPlanActive') : undefined),
-      ].filter(part => part !== undefined).join(' · ')
-    : [
-        label,
-        status.credits !== undefined ? t('creditsTotal', { total: formatNumber(status.credits.total) }) : undefined,
-      ].filter(part => part !== undefined).join(' · ')
+  const headerSummary = [
+    isZCode
+      ? [
+          label,
+          displayPlanName !== undefined
+            ? `${displayPlanName} · ${t(isPlanActive ? 'codingPlanActive' : 'codingPlanExpired')}`
+            : (status.credits !== undefined ? t('codingPlanActive') : undefined),
+        ].filter(part => part !== undefined).join(' · ')
+      : [
+          label,
+          status.credits !== undefined ? t('creditsTotal', { total: formatNumber(status.credits.total) }) : undefined,
+        ].filter(part => part !== undefined).join(' · '),
+    ...(catalogOffline ? [t('catalogOfflineShort')] : []),
+  ].filter(part => part !== '').join(' · ')
 
   /** Efforts shown on one model row: a declared set wins, then a validating
    * observation (mirrors the adapter's own precedence). Models whose probe
@@ -222,6 +236,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     isPlanActive,
     displayPlanName,
     headerSummary,
+    catalogOffline,
     effortsOf,
   }
 }

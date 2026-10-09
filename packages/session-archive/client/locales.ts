@@ -124,3 +124,10 @@ export const en = {
 };
 
 // ── 工具函数 ─────────────────────────────────────────────────────────
+
+/**
+ * 面板组件共用的翻译函数类型：键取自 zh 字典（en 与其同构，取其一即可）。
+ * 此前各组件把 t 标成 any，locales 键名拼错只能等运行时空白上屏——
+ * 收紧到字典键后拼错直接 typecheck 红。
+ */
+export type TFunc = (key: keyof typeof zh, params?: Record<string, string | number>) => string
