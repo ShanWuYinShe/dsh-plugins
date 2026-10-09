@@ -427,12 +427,33 @@ describe('international catalog and promotions', () => {
     expect(seen[0]!.headers['User-Agent']).toBe('WorkBuddyAI/5.5.6')
     expect(seen[0]!.headers['X-Product']).toBe('SaaS')
     const byId = new Map(models.map(model => [model.id, model]))
-    expect(byId.get('ctx-model')?.contextWindow).toBe(200_000)
+    // 工作预算取最大可选档位（用户偏好大上下文），以输入上限封顶。
+    expect(byId.get('ctx-model')?.contextWindow).toBe(1_000_000)
     expect(byId.get('ctx-model')?.maxInputTokens).toBe(1_000_000)
     expect(byId.get('ctx-model')?.supportedContextWindows).toEqual([200_000, 1_000_000])
     // No promotions in the document: rows pass through untouched.
     expect(byId.get('hy3')?.promotions).toEqual([])
     expect(byId.get('hy3')?.billing).toEqual({ free: false })
+  })
+
+  it('clamps the working window to the input ceiling when a declared length exceeds it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(JSON.stringify({
+      code: 0,
+      msg: 'ok',
+      data: {
+        models: [{
+          id: 'over', name: 'Over', maxInputTokens: 262_144, maxOutputTokens: 32_000,
+          supportsImages: false,
+          contextWindow: { defaultLength: 131_072, supportedLengths: [131_072, 512_000] },
+        }],
+        agents: [{ name: 'cli', models: ['over'] }],
+      },
+    }))))
+    const client = new WorkBuddyUpstreamClient({
+      resolveAppVersion: async () => ({ version: '5.5.6', source: 'installed' }),
+    })
+    const models = await client.fetchModels(AI_CREDENTIAL)
+    expect(models[0]?.contextWindow).toBe(262_144)
   })
 
   it('degrades to the CLI UA when version resolution fails', async () => {

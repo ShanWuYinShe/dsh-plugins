@@ -72,8 +72,9 @@ export interface WorkBuddyWebModelRow {
   name: string
   /**
    * Working budget in tokens: the window the plugin actually requests under
-   * (the international document's `contextWindow.defaultLength` where
-   * declared, else the row's input ceiling).
+   * (the international document's largest selectable `supportedLengths`
+   * entry, clamped to the input ceiling; `defaultLength` / input ceiling as
+   * fallbacks).
    */
   contextWindow: number
   /** Whether the model is currently free (`x0.00` credits). */

@@ -99,9 +99,10 @@ function positive(value: unknown): value is number {
 
 /**
  * Parse one catalog row. The international App document carries three extras
- * the CN document lacks: `contextWindow` as an object (`defaultLength` is the
- * working budget the plugin requests under), the input ceiling plus the
- * selectable lengths, and per-model promotions (parsed from the document-level
+ * the CN document lacks: `contextWindow` as an object (the plugin works under
+ * the largest declared selectable length — users asked for maximum context —
+ * clamped to the input ceiling), the input ceiling plus the selectable
+ * lengths, and per-model promotions (parsed from the document-level
  * `modelPromotions` array passed in).
  */
 export function parseModelRow(
@@ -121,10 +122,15 @@ export function parseModelRow(
   const supportedLengths = isObject(context) && Array.isArray(context['supportedLengths'])
     ? (context['supportedLengths'] as unknown[]).filter(positive)
     : []
+  // Working budget: prefer the largest selectable window (some models expose
+  // several), falling back to `defaultLength`, then the input ceiling — the
+  // budget never exceeds what the upstream actually accepts. The wire request
+  // carries no length parameter, so this only sets how much the plugin packs.
+  const preferred = Math.max(...supportedLengths, defaultLength ?? 0)
   return {
     id,
     name: typeof wrapped['name'] === 'string' && wrapped['name'] !== '' ? wrapped['name'] : id,
-    contextWindow: international && defaultLength !== undefined ? defaultLength : input,
+    contextWindow: international ? Math.min(preferred, input) || input : input,
     maxTokens: output,
     ...international ? {
       maxInputTokens: input,
