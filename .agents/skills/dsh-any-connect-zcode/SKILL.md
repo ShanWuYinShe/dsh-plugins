@@ -229,7 +229,7 @@ curl -sS "http://127.0.0.1:8932/plugins/dsh-any-connect/zcode-sp/status" -H "Hos
 - 想验证"客户端选了 start-plan"的分支：把真实 `credentials.json` 复制到临时目录，旁边放一份
   `setting.json`（`providerFamilyConnectionSelections.bigmodel.kind = start-plan`），用
   `ZCODE_AUTH_FILE` 指过去。**不要改用户真实的 `~/.zcode/v2/setting.json`。**
-- 浏览器侧用 `/Users/liyou/.local/bin/agent-browser`（全路径，PATH 顺序不保证）；若报
+- 浏览器侧用 `~/.local/bin/agent-browser`（全路径，PATH 顺序不保证）；若报
   `SingletonLock: File exists` 先删 `$TMPDIR/agent-browser-sandbox/chrome-profile/Singleton*`
   再开。**`--no-sandbox` 由包装器按环境自动注入，不要手写。**
 - 真客户端的行为可用 `node /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs --help` 观察；
