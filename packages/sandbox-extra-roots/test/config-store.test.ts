@@ -1,19 +1,21 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createConfigStore } from '../src/config-store.js'
+import { legacyConfigPath, markLegacyImported, readLegacyConfig, resolveConfigPersist } from '../src/config-store.js'
 
 /**
- * 配置持久化的直接测试。
+ * 配置持久化适配的直接测试。
  *
  * 本文件与 session-archive/src/config-store.ts **逐字一致**（由 bundle 锁钉住），
  * 所以这里钉住的行为对两份都生效——两侧不可能漂移。
  *
- * 覆盖：生效顺序（defaults < patch < json）、原子写入（0600 + 无 tmp 残留）、
- * 损坏 JSON 只告警一次并兜底、onUpdate 热更新与失败告警、validate 在写盘前拦截。
+ * 覆盖：官方 configEditor 通道解析（resolveConfigPersist 的可用与降级）、
+ * 旧版 config.json 的读取与改名迁移（readLegacyConfig / markLegacyImported）。
+ * 持久化本体（profile patch 的原子写与对账）由官方 dsh-config-editor 负责，
+ * 不在本文件测试面内。
  *
- * 隔离：createConfigStore 在**调用时**读 process.env.DSH_HOME，
+ * 隔离：legacyConfigPath 在**调用时**读 process.env.DSH_HOME，
  * 每个用例用 vi.stubEnv 指向独立临时目录，互不影响、也不碰真实 ~/.dsh。
  */
 
@@ -29,112 +31,109 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true })
 })
 
-function makeStore(overrides: Partial<Parameters<typeof createConfigStore>[0]> = {}) {
-  return createConfigStore({
-    name: 'test-plugin',
-    defaults: { theme: 'light', retries: 3 },
-    patchConfig: { theme: 'dark' },
-    ...overrides,
-  })
+function writeLegacyConfig(body: string) {
+  const file = legacyConfigPath('test-plugin')
+  mkdirSync(join(file, '..'), { recursive: true })
+  writeFileSync(file, body)
+  return file
 }
 
-describe('生效顺序', () => {
-  it('defaults < patchConfig < config.json（后者覆盖前者）', () => {
-    const store = makeStore()
-    expect(store.effective()).toEqual({ theme: 'dark', retries: 3 })
-    const file = store.file
-    mkdirSync(join(file, '..'), { recursive: true })
-    writeFileSync(file, JSON.stringify({ theme: 'auto', extra: true }))
-    expect(store.effective()).toEqual({ theme: 'auto', retries: 3, extra: true })
+describe('legacyConfigPath', () => {
+  it('落在 $DSH_HOME/plugins/<name>/config.json', () => {
+    expect(legacyConfigPath('test-plugin')).toBe(join(home, 'plugins', 'test-plugin', 'config.json'))
   })
 
-  it('config.json 不存在时 effective 只有 defaults+patch', () => {
-    const store = makeStore()
-    expect(store.effective()).toEqual({ theme: 'dark', retries: 3 })
-    expect(existsSync(store.file)).toBe(false)
+  it('DSH_HOME 为空白时回退 ~/.dsh（不 stub，仅断言形状）', () => {
+    vi.stubEnv('DSH_HOME', '   ')
+    const p = legacyConfigPath('x')
+    expect(p).toContain('plugins')
+    expect(p.endsWith(join('x', 'config.json'))).toBe(true)
   })
 })
 
-describe('set', () => {
-  it('合并写入并返回新的生效配置，文件真实落盘', () => {
-    const store = makeStore()
-    const next = store.set({ theme: 'auto' })
-    expect(next).toEqual({ theme: 'auto', retries: 3 })
-    const onDisk = JSON.parse(readFileSync(store.file, 'utf8'))
-    expect(onDisk).toEqual({ theme: 'auto' })
+describe('readLegacyConfig', () => {
+  it('文件不存在返回 undefined', () => {
+    expect(readLegacyConfig('test-plugin')).toBeUndefined()
   })
 
-  it('跨多次 set 保留此前写入的键', () => {
-    const store = makeStore()
-    store.set({ a: 1 })
-    store.set({ b: 2 })
-    expect(JSON.parse(readFileSync(store.file, 'utf8'))).toEqual({ a: 1, b: 2 })
+  it('JSON 对象正常读出', () => {
+    writeLegacyConfig(JSON.stringify({ theme: 'auto', extra: true }))
+    expect(readLegacyConfig('test-plugin')).toEqual({ theme: 'auto', extra: true })
   })
 
-  it('非对象（数组/null/字符串）抛 TypeError', () => {
-    const store = makeStore()
-    for (const bad of [[], null, 'x', 42]) {
-      expect(() => store.set(bad as never), JSON.stringify(bad)).toThrow(TypeError)
+  it('坏 JSON 返回 undefined（迁移跳过，文件保留原样）', () => {
+    const file = writeLegacyConfig('{not json')
+    expect(readLegacyConfig('test-plugin')).toBeUndefined()
+    expect(existsSync(file)).toBe(true)
+  })
+
+  it('JSON 数组（非对象）同样返回 undefined', () => {
+    writeLegacyConfig('[1,2,3]')
+    expect(readLegacyConfig('test-plugin')).toBeUndefined()
+  })
+})
+
+describe('markLegacyImported', () => {
+  it('把旧文件改名 *.imported，内容原样保留', () => {
+    const file = writeLegacyConfig(JSON.stringify({ theme: 'auto' }))
+    markLegacyImported('test-plugin')
+    expect(existsSync(file)).toBe(false)
+    expect(readFileSync(`${file}.imported`, 'utf8')).toBe(JSON.stringify({ theme: 'auto' }))
+  })
+
+  it('文件已不存在时静默无操作', () => {
+    expect(() => markLegacyImported('test-plugin')).not.toThrow()
+  })
+
+  it('已存在 *.imported 时再次迁移覆盖之（rename 语义），不抛错', () => {
+    const file = writeLegacyConfig('{"v":1}')
+    renameSync(file, `${file}.imported`)
+    writeLegacyConfig('{"v":2}')
+    expect(() => markLegacyImported('test-plugin')).not.toThrow()
+    expect(readFileSync(`${file}.imported`, 'utf8')).toBe('{"v":2}')
+  })
+})
+
+describe('resolveConfigPersist', () => {
+  function makeCtx({ entry, editor, getThrows }: { entry?: unknown; editor?: unknown; getThrows?: boolean }) {
+    return {
+      fiber: entry === undefined ? undefined : { entry },
+      get: (name: string) => {
+        if (getThrows) throw new Error('service missing')
+        if (name === 'configEditor') return editor
+        return undefined
+      },
     }
-    expect(existsSync(store.file)).toBe(false)
+  }
+
+  it('entry 与 config-editor 都在时，edit 透传给 editor.edit(entry, change)', async () => {
+    const entry = { options: { id: 'test' } }
+    const edit = vi.fn(async (_e: unknown, _change: unknown) => {})
+    const persist = resolveConfigPersist(makeCtx({ entry, editor: { edit } }))
+    expect(persist).toBeDefined()
+    const change = () => ({ a: 1 })
+    await persist!.edit(change)
+    expect(edit).toHaveBeenCalledWith(entry, change)
   })
 
-  it('validate 在写盘前调用；抛错则什么都不写', () => {
-    const validate = vi.fn(() => { throw new Error('bad key') })
-    const store = makeStore({ validate })
-    expect(() => store.set({ theme: 'nope' })).toThrow('bad key')
-    expect(validate).toHaveBeenCalledTimes(1)
-    expect(existsSync(store.file)).toBe(false)
+  it('无 fiber entry（非 profile 部署）返回 undefined', () => {
+    expect(resolveConfigPersist(makeCtx({}))).toBeUndefined()
   })
 
-  it('onUpdate 收到 (merged, next)；抛错只告警、配置仍已保存', () => {
-    const onUpdate = vi.fn(() => { throw new Error('callback exploded') })
-    const warn = vi.fn()
-    const store = makeStore({ onUpdate, warn })
-    const next = store.set({ theme: 'auto' })
-    expect(onUpdate).toHaveBeenCalledWith({ theme: 'auto' }, next)
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/onUpdate failed.*callback exploded/))
-    expect(JSON.parse(readFileSync(store.file, 'utf8'))).toEqual({ theme: 'auto' })
+  it('config-editor 服务缺失返回 undefined', () => {
+    const entry = { options: { id: 'test' } }
+    expect(resolveConfigPersist(makeCtx({ entry, editor: undefined }))).toBeUndefined()
   })
 
-  it('写入后无 .tmp 残留（原子 rename）', () => {
-    const store = makeStore()
-    store.set({ theme: 'auto' })
-    const dir = join(store.file, '..')
-    const leftovers = readdirSync(dir).filter((n: string) => n.includes('.tmp'))
-    expect(leftovers).toEqual([])
+  it('ctx.get 抛错（宿主服务解析失败）返回 undefined 而非外泄异常', () => {
+    const entry = { options: { id: 'test' } }
+    expect(resolveConfigPersist(makeCtx({ entry, getThrows: true }))).toBeUndefined()
   })
 
-  it.skipIf(process.platform === 'win32')('文件权限 0600', () => {
-    const store = makeStore()
-    store.set({ theme: 'auto' })
-    const mode = statSync(store.file).mode & 0o777
-    expect(mode).toBe(0o600)
-  })
-})
-
-describe('损坏配置兜底', () => {
-  it('坏 JSON 只告警一次并按空配置处理', () => {
-    const store = makeStore()
-    mkdirSync(join(store.file, '..'), { recursive: true })
-    writeFileSync(store.file, '{not json')
-    const warn = vi.fn()
-    const warnedStore = makeStore({ warn })
-    expect(warnedStore.effective()).toEqual({ theme: 'dark', retries: 3 })
-    expect(warn).toHaveBeenCalledTimes(1)
-    // 第二次读不再重复告警（readWarningShown 闸门）。
-    warnedStore.effective()
-    expect(warn).toHaveBeenCalledTimes(1)
-    void store
-  })
-
-  it('JSON 是数组（非对象）同样告警兜底', () => {
-    const store = makeStore()
-    mkdirSync(join(store.file, '..'), { recursive: true })
-    writeFileSync(store.file, '[1,2,3]')
-    const warn = vi.fn()
-    const warnedStore = makeStore({ warn })
-    expect(warnedStore.effective()).toEqual({ theme: 'dark', retries: 3 })
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/must contain a JSON object/))
+  it('editor.edit 的拒绝原样向上传播（由调用方决定失败姿态）', async () => {
+    const entry = { options: { id: 'test' } }
+    const edit = vi.fn(async () => { throw new Error('reconciliation failed') })
+    const persist = resolveConfigPersist(makeCtx({ entry, editor: { edit } }))!
+    await expect(persist.edit(() => ({}))).rejects.toThrow('reconciliation failed')
   })
 })

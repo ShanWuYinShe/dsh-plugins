@@ -71,7 +71,7 @@ function parseInvocations(text: string): Map<string, { method: string; params: s
 /** 网关方法签名里的参数名。 */
 function gatewayParams(remote: string): Map<string, string[]> {
   const params = new Map<string, string[]>();
-  for (const match of remote.matchAll(/^\s{2}([A-Za-z_$][\w$]*)\(([^)]*)\)\s*(?::\s*[^{]+)?\{/gm)) {
+  for (const match of remote.matchAll(/^\s{2}(?:async\s+)?([A-Za-z_$][\w$]*)\(([^)]*)\)\s*(?::\s*[^{]+)?\{/gm)) {
     // 先剥泛型：Record<string, any> 里的逗号不是参数分隔符。
     let signature = match[2]!;
     for (let previous = ""; previous !== signature; ) {

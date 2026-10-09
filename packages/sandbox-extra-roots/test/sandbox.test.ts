@@ -68,6 +68,21 @@ function makeCtx(sandbox: any, fs: any): any {
     },
     sandboxPolicy: { resolve: () => ({ mode: "workspace-write", workspaceRoot: WS }) },
     logger: { warn: () => {} },
+    // 官方 configEditor fake:记录 edit 写入的候选 config(即"持久化到
+    // profile patch"的内容)。配置生效(reload 本行)由 Loader 对账完成,
+    // mock 环境没有 Loader,不会重跑 apply。
+    fiber: { entry: { options: { id: "sandbox-extra-roots" } } },
+    configEditorEdits: [] as Array<Record<string, any>>,
+    get(name: string) {
+      if (name === "configEditor") {
+        return {
+          edit: async (_entry: unknown, change: (current: any) => any) => {
+            this.configEditorEdits.push(change({}));
+          },
+        };
+      }
+      return undefined;
+    },
     effect(fn: () => any) {
       const dispose = fn();
       if (typeof dispose === "function") disposers.push(dispose);
@@ -115,10 +130,13 @@ describe("sandbox-extra-roots host (Seatbelt)", () => {
     await expect(fsMock.checkedTarget({ displayPath: "/tmp/other/bar" })).rejects.toThrow("FS_SANDBOX_DENIED");
   });
 
-  it("remote set 热更新", async () => {
-    ctx.gateway.set({ extraWritableRoots: ["/tmp/hot"] });
-    const out2 = await sandboxMock.confine(["x"], { mode: "workspace-write", workspaceRoot: WS });
-    expect(out2.argv[2].includes('(subpath "/tmp/hot")')).toBe(true);
+  it("remote set 经官方 configEditor 写入 profile patch", async () => {
+    // 热生效由 Loader 对账(reload 本行)完成;mock 环境没有 Loader,这里
+    // 断言保存确实写进了官方通道(edit 收到合并后的完整候选 config)。
+    await ctx.gateway.set({ extraWritableRoots: ["/tmp/hot"] });
+    expect(ctx.configEditorEdits.at(-1)).toEqual(
+      expect.objectContaining({ extraWritableRoots: ["/tmp/hot"] }),
+    );
   });
 
   it("confine 异步化：包装返回 Promise 并把 signal 透传给原实现", async () => {
@@ -128,8 +146,8 @@ describe("sandbox-extra-roots host (Seatbelt)", () => {
     expect(sandboxMock.lastSignal).toBe(signal);
   });
 
-  it("remote 拒绝相对路径", () => {
-    expect(() => ctx.gateway.set({ extraWritableRoots: ["relative/path"] })).toThrow(/absolute path/);
+  it("remote 拒绝相对路径", async () => {
+    await expect(ctx.gateway.set({ extraWritableRoots: ["relative/path"] })).rejects.toThrow(/absolute path/);
   });
 });
 
@@ -288,8 +306,8 @@ describe("sandbox-extra-roots 危险根校验", () => {
     const sandboxMock = makeSandboxMock();
     const ctx = makeCtx(sandboxMock, makeFsMock());
     await apply(ctx, { extraWritableRoots: [] });
-    expect(() => ctx.gateway.set({ extraWritableRoots: ["/"] })).toThrow(/dangerous/);
-    expect(() => ctx.gateway.set({ extraWritableRoots: [fakeHome] })).toThrow(/dangerous/);
+    await expect(ctx.gateway.set({ extraWritableRoots: ["/"] })).rejects.toThrow(/dangerous/);
+    await expect(ctx.gateway.set({ extraWritableRoots: [fakeHome] })).rejects.toThrow(/dangerous/);
   });
 
   it("危险根的词法祖先被拒绝,后代仍允许(祖先判定回归)", async () => {
@@ -302,15 +320,16 @@ describe("sandbox-extra-roots 危险根校验", () => {
     const ctx = makeCtx(sandboxMock, makeFsMock());
     await apply(ctx, { extraWritableRoots: [] });
     const homeParent = dirname(fakeHome);
-    expect(() => ctx.gateway.set({ extraWritableRoots: [homeParent] })).toThrow(/dangerous/);
+    await expect(ctx.gateway.set({ extraWritableRoots: [homeParent] })).rejects.toThrow(/dangerous/);
     // 危险根的后代比危险根更窄,授予仍然安全:home 下的子目录照常接受。
     const nested = join(fakeHome, "cache");
     mkdirSync(nested, { recursive: true });
-    expect(() => ctx.gateway.set({ extraWritableRoots: [nested] })).not.toThrow();
-    // 授予确实生效(不是被静默丢弃):confine 里的拼写是 canonicalPath 的
+    await expect(ctx.gateway.set({ extraWritableRoots: [nested] })).resolves.toBeDefined();
+    // 授予确实生效(不是被静默丢弃):patch 候选里的拼写是 canonicalPath 的
     // 产物,断言用同一函数取值,跨平台对齐。
-    const out = await sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
-    expect(out.argv[2]).toContain('(subpath "' + canonicalPath(nested) + '")');
+    expect(ctx.configEditorEdits.at(-1)).toEqual(
+      expect.objectContaining({ extraWritableRoots: [nested] }),
+    );
   });
 
   // /private 是 macOS 的 canonical 前缀拼写;该平台差异用例显式 skipIf,

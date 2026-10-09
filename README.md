@@ -14,7 +14,7 @@ DSH（DeepSeek Harness）host 层全局插件的 monorepo：
 - **host 插件**（`src/` 编译为 `lib/`，纯 ESM，随 harness 加载）
 - **client 插件**（`client/index.tsx` 预打包为 `client/client.cjs`，宿主直接加载）——
   配置类插件在设置页「插件配置」提供配置卡片；`session-archive` 在侧边栏提供归档面板
-- **远程服务**：配置经 `ctx.remote.<svc>` 读写，持久化到 `~/.dsh/plugins/<name>/config.json`，
+- **远程服务**：配置经 `ctx.remote.<svc>` 读写，经官方 config-editor 持久化到当前 profile 的 `cordis.patch.yml`，
   保存后热生效；`session-archive` 提供 `ctx.remote.sessionArchive`（列表/详情/删除/恢复）
 - **bundle patch**：自带 `cordis.patch.yml`，`dsh plugin` 安装后自动成为 profile bundle 层
 

@@ -1,112 +1,74 @@
 /**
- * config-store — 插件配置持久化
+ * config-store.ts — 官方 configEditor 持久化适配 + 旧版 config.json 的一次性迁移。
  *
- * 配置文件位于 $DSH_HOME/plugins/<name>/config.json（默认 ~/.dsh，与
- * file:// 部署模式共用）。生效顺序（后者覆盖前者）：
- *   1. 插件内置默认值（DEFAULT_CONFIG）
- *   2. cordis.patch.yml 传入的 config（安装时生成的默认块）
- *   3. config.json（设置页 UI 保存，权威）
+ * 0.4.x 及之前配置持久化在 $DSH_HOME/plugins/<name>/config.json——那是自创
+ * 目录，harness 官方目录布局（dsh-home-paths）并不存在它，被当作插件目录
+ * 清理时会连带丢配置。现改走官方途径：设置页保存经 ctx.configEditor.edit()
+ * 写入当前 profile 的 cordis.patch.yml 本行 config（与 Web 设置编辑器同一
+ * 途径，dsh-base 内置该服务），由 Loader 对账生效；本文件不再读写任何自建
+ * 配置文件。
  *
- * 保存后通过 onUpdate 回调立即热更新运行中的配置（包装闭包读共享 state）。
- * 写入采用随机临时文件 + fsync + rename，权限 0600；损坏 JSON 只告警并回退。
+ * 旧文件迁移：apply 时检测到旧 config.json 则把其值并入本行 patch config
+ * 一次性写入，然后把旧文件改名 *.imported（官方 settings.yaml →
+ * settings.yaml.imported 的同款模式），旧位置从此不再读取。
+ *
+ * 本文件在 sandbox-extra-roots 与 session-archive 两包里**必须逐字相同**：
+ * 两包刻意零运行时依赖、可独立安装，这份机制无法提为共享 npm 包，只能各持
+ * 一份，靠根 `test/bundle.test.ts` 的「共享实现一致性」锁逐字比较来防漂移
+ * ——改任意一侧都会红灯，请同时改另一侧。
  */
 
-import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, renameSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 
-export interface ConfigStoreOptions {
-  name: string;
-  defaults: Record<string, any>;
-  patchConfig: Record<string, any>;
-  onUpdate?: (merged: Record<string, any>, next: Record<string, any>) => void;
-  validate?: (partial: Record<string, any>) => void;
-  warn?: (message: string) => void;
-}
-
-export interface ConfigStore {
-  file: string;
-  effective(): Record<string, any>;
-  set(partial: Record<string, any>): Record<string, any>;
+/** 官方持久化通道：edit(change) 编辑本行 config，由 Loader 对账后生效。 */
+export interface ConfigPersist {
+  edit(change: (current: Record<string, any>) => Record<string, any>): Promise<void>;
 }
 
 /**
- * 创建配置存储。
- * @param options - { name, defaults, patchConfig, onUpdate,
- *   validate?: (partial) => void, warn?: (message) => void }
+ * 从插件 ctx 解析官方持久化通道。profile 部署下必然可用；返回 undefined
+ * 表示当前部署没有本行 entry 或 config-editor 服务（调用方应放弃持久化，
+ * 不要静默自建存储）。ctx 为 cordis 上下文，字段均按运行时形态宽容访问。
  */
-export function createConfigStore(options: ConfigStoreOptions): ConfigStore {
-  // 与 harness 的 DSH_HOME 约定保持一致：默认 ~/.dsh，可用 $DSH_HOME 覆盖。
+export function resolveConfigPersist(ctx: any): ConfigPersist | undefined {
+  const entry = ctx?.fiber?.entry;
+  if (entry === undefined) return undefined;
+  let editor: any;
+  try {
+    editor = ctx.get("configEditor");
+  } catch {
+    return undefined;
+  }
+  if (editor === undefined || editor === null) return undefined;
+  return { edit: (change) => editor.edit(entry, change) };
+}
+
+/** 旧版配置文件路径：$DSH_HOME/plugins/<name>/config.json（只服务于迁移）。 */
+export function legacyConfigPath(name: string): string {
   const dshHome = process.env.DSH_HOME?.trim() ? resolve(process.env.DSH_HOME) : join(homedir(), ".dsh");
-  const file = join(dshHome, "plugins", options.name, "config.json");
-  const warn = options.warn ?? (() => {});
-  let readWarningShown = false;
+  return join(dshHome, "plugins", name, "config.json");
+}
 
-  function readJson(): Record<string, any> {
-    try {
-      if (!existsSync(file)) return {};
-      const parsed = JSON.parse(readFileSync(file, "utf8"));
-      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-        readWarningShown = false;
-        return parsed;
-      }
-      if (!readWarningShown) {
-        readWarningShown = true;
-        warn(`config file ${file} must contain a JSON object; using empty config`);
-      }
-      return {};
-    } catch (error) {
-      if (!readWarningShown) {
-        readWarningShown = true;
-        warn(`failed to read config file ${file}: ${(error as Error)?.message ?? String(error)}; using empty config`);
-      }
-      return {};
-    }
-  }
+/**
+ * 读取旧版配置值。文件不存在或内容损坏（非 JSON 对象）返回 undefined；
+ * 迁移调用方对 undefined 直接跳过。
+ */
+export function readLegacyConfig(name: string): Record<string, any> | undefined {
+  const file = legacyConfigPath(name);
+  try {
+    if (!existsSync(file)) return undefined;
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+  } catch {}
+  return undefined;
+}
 
-  /** 当前生效配置（默认 + patch + json 合并）。 */
-  function effective(): Record<string, any> {
-    return { ...options.defaults, ...options.patchConfig, ...readJson() };
-  }
-
-  /** 保存部分配置到 config.json 并触发热更新，返回新的生效配置。 */
-  function set(partial: Record<string, any>): Record<string, any> {
-    if (partial === null || typeof partial !== "object" || Array.isArray(partial)) {
-      throw new TypeError("set expects a plain config object");
-    }
-    options.validate?.(partial);
-    const merged = { ...readJson(), ...partial };
-    mkdirSync(dirname(file), { recursive: true });
-
-    const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
-    let fd: number | undefined;
-    try {
-      fd = openSync(tmp, "w", 0o600);
-      writeFileSync(fd, JSON.stringify(merged, null, 2) + "\n", "utf8");
-      fsyncSync(fd);
-      closeSync(fd);
-      fd = void 0;
-      renameSync(tmp, file);
-      // POSIX 目录项持久化（Windows 上目录句柄不可打开时忽略）。
-      try {
-        const dir = openSync(dirname(file), "r");
-        try { fsyncSync(dir); } finally { closeSync(dir); }
-      } catch {}
-    } catch (error) {
-      if (fd !== void 0) try { closeSync(fd); } catch {}
-      try { unlinkSync(tmp); } catch {}
-      throw error;
-    }
-
-    const next = { ...options.defaults, ...options.patchConfig, ...merged };
-    try {
-      options.onUpdate?.(merged, next);
-    } catch (error) {
-      warn(`onUpdate failed after config save: ${(error as Error)?.message ?? String(error)}`);
-    }
-    return next;
-  }
-
-  return { file, effective, set };
+/** 迁移写入成功后把旧文件改名 *.imported，保留现场且不再参与读取。 */
+export function markLegacyImported(name: string): void {
+  const file = legacyConfigPath(name);
+  try {
+    if (existsSync(file)) renameSync(file, `${file}.imported`);
+  } catch {}
 }

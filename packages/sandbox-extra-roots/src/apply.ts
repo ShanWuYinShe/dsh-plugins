@@ -11,13 +11,13 @@ import { statSync } from 'node:fs'
 import { isAbsolute, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { isPathUnder, sandboxAvailable, seatbeltProfileArgs } from './common.js'
-import { createConfigStore } from './config-store.js'
+import { markLegacyImported, readLegacyConfig, resolveConfigPersist } from './config-store.js'
 import { PluginConfigGateway } from './gateway.js'
 import { name, DEFAULT_CONFIG, config } from './plugin-config.js'
 import { STATE, ORIGINAL, canon, expandTilde, classifyRoot, extraGrantRoots } from './roots.js'
 import { getLandlockExec } from './landlock-exec.js'
 import { clearDirExistCache, existingDirectoryRoots } from './roots-filter.js'
-import { normalizeRoots, validateSandboxConfig } from './config-validate.js'
+import { normalizeRoots } from './config-validate.js'
 
 export async function apply(ctx: Context, config?: any): Promise<void> {
   // fail-safe:初始化失败只记录,绝不让本插件拖垮 harness(host 层挂载时
@@ -80,26 +80,32 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
       }
     });
 
-    // 配置存储:patch config 低优先级,config.json(设置页 UI)权威。
-    // 热更新:onUpdate 里同步刷新两个 state 的 extraRoots。
-    // （目录存在性缓存声明在 store 之前:onUpdate 回调引用它,不能让
-    // 回调看到 TDZ 中的绑定——将来 createConfigStore 若在构造期同步调
-    // onUpdate 会直接 ReferenceError。）
+    // 生效配置:defaults 与 cordis 注入的 patch config（含 profile patch 里的
+    // 用户 override——设置页保存经官方 configEditor 写入,由 Loader 对账后
+    // reload 本行使新配置在这里生效）。热更新即行 reload:目录存在性缓存
+    // 在每次 apply 重建时整体失效,保证按真实文件系统判定。
     const warn = (message: string) => ctx.logger?.warn?.(message);
 
-    const store = createConfigStore({
-      name: "sandbox-extra-roots",
-      defaults: DEFAULT_CONFIG,
-      patchConfig,
-      validate: validateSandboxConfig,
-      warn: (message) => ctx.logger?.warn?.(`sandbox-extra-roots: ${message}`),
-      onUpdate: (merged) => {
-        sandboxState.extraRoots = normalizeRoots({ ...DEFAULT_CONFIG, ...patchConfig, ...merged }, warn);
-        fsState.extraRoots = sandboxState.extraRoots;
-        clearDirExistCache(); // 新配置按真实文件系统立即判定，不沿用旧 TTL
+    const cfg = { ...DEFAULT_CONFIG, ...patchConfig };
+
+    // 旧版 config.json（0.4.x 自建目录）一次性迁移进 profile patch;后台执行,
+    // 不阻塞激活。写入成功才把旧文件改名 *.imported;config-editor 不可用时
+    // 保留旧文件,下次启动重试。
+    void (async () => {
+      const legacy = readLegacyConfig(name);
+      if (legacy === undefined) return;
+      const persist = resolveConfigPersist(ctx);
+      if (persist === undefined) {
+        ctx.logger?.warn?.("sandbox-extra-roots: config-editor unavailable; legacy config.json kept for a later migration");
+        return;
       }
-    });
-    const cfg = store.effective();
+      try {
+        await persist.edit(() => ({ ...DEFAULT_CONFIG, ...patchConfig, ...legacy }));
+        markLegacyImported(name);
+      } catch (error) {
+        ctx.logger?.warn?.(`sandbox-extra-roots: legacy config migration failed (${(error as Error)?.message ?? String(error)}); will retry on next start`);
+      }
+    })();
 
 
     // 运行期危险根复查:配置期的 classifyRoot 只看配置时刻的文件系统,而
@@ -129,14 +135,15 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
     // 拒绝复核都会按根逐个 statSync（同步 IO 落在 bash 启动热路径上）。目录的
     // 创建/删除是低频事件，TTL 内沿用上次结果；代价是新建目录最多延迟 TTL
     // 才被授予（对"配置了还不存在的目录，稍后创建"的场景可接受）。
-    // 配置热更新时整体失效（onUpdate），保证新配置立即按真实文件系统判定。
-    // （缓存本体声明在 apply 前段、store 创建之前——onUpdate 回调引用它。）
+    // 配置热更新（行 reload）后 apply 重跑,缓存整体失效,新配置立即按真实
+    // 文件系统判定。
 
     // ── 前置:官方 dsh-sandbox 可用性检查 ──
     // 官方 dsh-sandbox 解析失败(包缺失/file:// 部署三个 profile anchor 都
     // 找不到)时降级为"插件不存在":跳过全部包装,只留一条高音量告警;
     // 绝不能让静态导入链的异常逃出 apply——那会拖垮 harness 启动。
     if (sandboxAvailable) {
+      clearDirExistCache();
       sandboxState.extraRoots = normalizeRoots(cfg, warn);
       fsState.extraRoots = sandboxState.extraRoots;
 
@@ -321,7 +328,7 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
     // 远程配置服务(设置页 UI 读写；typert 不可用时 PluginConfigGateway 为 null)
     if (PluginConfigGateway !== null) {
       try {
-        ctx.plugin(PluginConfigGateway, { store, serviceKey: "sandboxExtraRootsConfig" });
+        ctx.plugin(PluginConfigGateway, { config: cfg, serviceKey: "sandboxExtraRootsConfig" });
       } catch (error) {
         ctx.logger?.warn?.(`sandbox-extra-roots: settings gateway failed (core sandbox extension unaffected): ${(error as Error)?.message ?? String(error)}`);
       }

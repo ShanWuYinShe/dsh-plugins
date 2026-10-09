@@ -19,8 +19,8 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { createConfigStore } from './config-store.js'
-import { name, DEFAULT_CONFIG, config, validateConfig, normalizeConfig } from './plugin-config.js'
+import { markLegacyImported, readLegacyConfig, resolveConfigPersist } from './config-store.js'
+import { name, DEFAULT_CONFIG, normalizeConfig } from './plugin-config.js'
 import { createArchiveHost } from './archive-host.js'
 
 export { name, inject, config } from './plugin-config.js'
@@ -36,21 +36,31 @@ try {
 /** 插件 apply：注册远程服务（面板 UI 读写）。 */
 export function apply(ctx: Context, config?: any): any {
   const patchConfig = config || {};
+  // 生效配置：defaults 与 cordis 注入的 patch config（含 profile patch 里的
+  // 用户 override——保存经官方 configEditor 写入,由 Loader 对账后 reload 本行
+  // 使新配置在这里生效）。
   const cfg = normalizeConfig({ ...DEFAULT_CONFIG, ...patchConfig });
-  const store = createConfigStore({
-    name,
-    defaults: DEFAULT_CONFIG,
-    patchConfig,
-    validate: validateConfig,
-    onUpdate: (merged) => {
-      Object.assign(cfg, normalizeConfig({ ...DEFAULT_CONFIG, ...patchConfig, ...merged }));
-    },
-  });
-  // 启动时也以 config.json（若有）为权威，和其余插件保持一致。
-  Object.assign(cfg, normalizeConfig(store.effective()));
+
+  // 旧版 config.json（0.3.x 自建目录）一次性迁移进 profile patch;后台执行,
+  // 不阻塞激活。写入成功才把旧文件改名 *.imported;config-editor 不可用时
+  // 保留旧文件,下次启动重试。
+  void (async () => {
+    const legacy = readLegacyConfig(name);
+    if (legacy === undefined) return;
+    const persist = resolveConfigPersist(ctx);
+    if (persist === undefined) {
+      ctx.logger?.warn?.('session-archive: config-editor unavailable; legacy config.json kept for a later migration');
+      return;
+    }
+    try {
+      await persist.edit(() => normalizeConfig({ ...DEFAULT_CONFIG, ...patchConfig, ...legacy }));
+      markLegacyImported(name);
+    } catch (error) {
+      ctx.logger?.warn?.(`session-archive: legacy config migration failed (${(error as Error)?.message ?? String(error)}); will retry on next start`);
+    }
+  })();
 
   if (SessionArchiveGateway !== null) {
     ctx.plugin(SessionArchiveGateway, { host: createArchiveHost(ctx, cfg), serviceKey: 'sessionArchive' });
   }
-  return store;
 }
