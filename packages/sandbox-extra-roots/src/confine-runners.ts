@@ -81,7 +81,12 @@ export function seatbeltArgv(a: string[], roots: string[], policy: any, deps: Co
     deps.warnOnce("seatbelt-separator-position", "seatbelt argv shape changed (args between profile and --); refusing to rebuild it — bash-side extra roots stay OFF (the fs fence still grants them)");
     return null;
   }
-  return [a[0], ...seatbeltProfileArgs(policy, roots), ...a.slice(sbSep + 1)];
+  // 分隔符必须原样保留：a.slice(sbSep + 1) 是从 -- **之后**取的 inner 命令，
+  // 重建时必须把 "--" 自己补回去，否则 sandbox-exec 收到
+  // [ -p, <profile>, bash, -c, ... ] —— 缺分隔符它会把 bash 当 profile/参数
+  // 解析，macOS 上每条受限 bash 命令都执行不了（2026-10-10 实测发现：
+  // 重建后 argv 长度 6、已无 "--"，而官方是 7 且含 "--"）。
+  return [a[0], ...seatbeltProfileArgs(policy, roots), "--", ...a.slice(sbSep + 1)];
 }
 
 /**
