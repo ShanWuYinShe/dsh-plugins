@@ -48,7 +48,7 @@ export const inject = ['slots', 'locale']
  * status` reports host health via the heartbeat file.
  *
  * The guarded boundary itself is covered by the real-entry regression in
- * `test/bundle.test.ts` ("client apply() 的兜底边界对真实入口成立"): it
+ * `test/bundle.test.ts`（仓根，"client apply() 的兜底边界对真实入口成立（slot 注入抛错不穿透）"）: it
  * imports this module and asserts a throwing slot registration never reaches
  * the loader.
  */

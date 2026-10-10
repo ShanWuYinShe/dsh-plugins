@@ -135,10 +135,16 @@ describe('claim 响应分类（captcha-required 与 captcha-rejected 必须分�
     expect(parseClaimResponse(200, { code: 401, msg: 'token expired' }).status).toBe('auth-failed')
   })
 
+  it('空 message 时状态码渲染为 HTTP_401/HTTP_500 形，不触发宿主 401/403 正则', () => {
+    expect(parseClaimResponse(401, { code: 3001, msg: '' })).toEqual({ status: 'auth-failed', message: 'HTTP_401' })
+    const failed = parseClaimResponse(500, { code: 0, data: {}, msg: '' })
+    expect(failed).toEqual({ status: 'failed', message: 'HTTP_500' })
+  })
+
   it('其他 HTTP 错误与非 0 code 归 failed，且保留上游 msg', () => {
     const http = parseClaimResponse(500, { code: 500, msg: 'boom' })
     expect(http.status).toBe('failed')
-    if (http.status === 'failed') expect(http.message).toContain('HTTP 500')
+    if (http.status === 'failed') expect(http.message).toContain('HTTP_500')
     const code = parseClaimResponse(200, { code: 3006, msg: 'model not allowed' })
     expect(code.status).toBe('failed')
     if (code.status === 'failed') expect(code.message).toContain('3006')

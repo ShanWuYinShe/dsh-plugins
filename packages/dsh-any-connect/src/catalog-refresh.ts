@@ -234,7 +234,7 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
             (credential as unknown as { zcodePlan?: ZCodePlanKind }).zcodePlan !== 'start-plan',
           )
         }
-        if (identity !== runtime.lastIdentity) adoptIdentity(runtime, identity, publishCatalog)
+        if (identity !== runtime.lastIdentity) await adoptIdentity(runtime, identity, publishCatalog)
         const generation = runtime.lastIdentity
         const models = await (runtime.client ?? client).fetchModels(credential as Parameters<WorkBuddyUpstreamClient['fetchModels']>[0])
         if (isStopped()) return

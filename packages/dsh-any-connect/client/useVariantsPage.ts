@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { fetchJsonOrThrow } from './fetch-json.js'
 import type { WorkBuddyWebStatus } from '../src/status-paths.js'
 import { CARD_VARIANTS } from './config-types.js'
 import type { WorkBuddyConfigPageInjected } from './config-types.js'
@@ -38,13 +39,7 @@ export function useVariantsPage(t: WorkBuddyConfigPageInjected['t']) {
       credentials: 'same-origin',
       ...signal === undefined ? {} : { signal },
     })
-    const value: unknown = await response.json().catch(() => undefined)
-    if (!response.ok) {
-      const detail = typeof (value as { error?: unknown } | null)?.error === 'string'
-        ? `: ${(value as { error: string }).error}`
-        : ''
-      throw new Error(`HTTP ${response.status}${detail}`)
-    }
+    const value: unknown = await fetchJsonOrThrow(response)
     // 非 JSON 的 200（中间代理、204）不能进状态表：形状不对按失败处理，
     // 渲染层要读 status.status，undefined 会直接把渲染树打崩。
     if (value === null || typeof value !== 'object' || typeof (value as { status?: unknown }).status !== 'string') {

@@ -8,14 +8,14 @@
  */
 
 import { type StartPlanEntitlement } from './zcode-plan-models.js'
+import { ERROR_BODY_LIMIT, JSON_TIMEOUT_MS, httpStatusLabel } from './upstream-shared.js'
+
+export { ERROR_BODY_LIMIT }
 
 export const ZCODE_ACCOUNT_BASE = 'https://zcode.z.ai'
 
-/** 与其余 JSON 端点的「响应头 30s」超时口径一致。 */
-export const CLAIM_TIMEOUT_MS = 30_000
-
-/** 错误体读取上限，避免一个不健康的响应把内存吃掉。 */
-export const ERROR_BODY_LIMIT = 4096
+/** JSON 端点统一 30s 超时（单一来源：upstream-shared.JSON_TIMEOUT_MS）。 */
+export const CLAIM_TIMEOUT_MS = JSON_TIMEOUT_MS
 
 /**
  * 上游的 captcha 失败码。实测不带 `X-Aliyun-Captcha-Verify-Param` 时返回
@@ -199,13 +199,13 @@ export function parseClaimResponse(httpStatus: number, body: unknown): StartPlan
   const code = upstreamCode(body)
   const message = upstreamMessage(body)
   if (httpStatus === 401 || httpStatus === 403 || AUTH_FAILURE_CODES.has(code)) {
-    return { status: 'auth-failed', message: message === '' ? `HTTP ${httpStatus}` : message }
+    return { status: 'auth-failed', message: message === '' ? httpStatusLabel(httpStatus) : message }
   }
   if (code === CAPTCHA_FAILED_CODE) {
     return { status: 'captcha-rejected', planId: '', message: message === '' ? 'captcha verify failed' : message }
   }
   if (httpStatus < 200 || httpStatus >= 300) {
-    return { status: 'failed', message: message === '' ? `HTTP ${httpStatus}` : `HTTP ${httpStatus}: ${message}` }
+    return { status: 'failed', message: message === '' ? httpStatusLabel(httpStatus) : `${httpStatusLabel(httpStatus)}: ${message}` }
   }
   if (code !== 0) {
     return { status: 'failed', message: message === '' ? `上游返回 code ${code}` : `code ${code}: ${message}` }

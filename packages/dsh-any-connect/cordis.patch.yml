@@ -13,3 +13,5 @@
       name: '@chaoset/dsh-any-connect'
       config:
         authFile: ''
+        authFileAI: ''
+        authFileZCode: ''

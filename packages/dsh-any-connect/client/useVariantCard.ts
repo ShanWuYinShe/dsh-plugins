@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { fetchJsonOrThrow } from './fetch-json.js'
 import type {
   WorkBuddyWebCatalog,
   WorkBuddyWebModelRow,
@@ -101,13 +102,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
       credentials: 'same-origin',
       body: JSON.stringify(action),
     })
-    const value: unknown = await response.json().catch(() => undefined)
-    if (!response.ok) {
-      const detail = typeof (value as { error?: unknown } | null)?.error === 'string'
-        ? `: ${(value as { error: string }).error}`
-        : ''
-      throw new Error(`HTTP ${response.status}${detail}`)
-    }
+    const value: unknown = await fetchJsonOrThrow(response)
   }, [probeKey, t, variant.probePath])
 
   /** 等目录落地：每次重读 status，live 即停、超时即停。首读立即发生，

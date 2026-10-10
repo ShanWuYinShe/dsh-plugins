@@ -14,14 +14,14 @@ import { filterByCodingPlanWhitelist } from './zcode-builtin-catalog.js'
 import type { ZCodeUpstreamClient } from './upstream-zcode.js'
 
 /** 账号真的换了（不是首次采用）时采用该账号最好的已知目录，并立即发布。 */
-export function adoptIdentity(
+export async function adoptIdentity(
   runtime: VariantRuntime,
   identity: string,
   publish: (runtime: VariantRuntime) => void,
-): void {
+): Promise<void> {
   // 账号真的换了（不是首次采用）：旧账号的探针记录不能留给新账号。
   // 首次登录不清除——那会删掉该账号自己在重启前写入的记录。
-  if (runtime.lastIdentity !== undefined) runtime.probeStore!.clear()
+  if (runtime.lastIdentity !== undefined) await runtime.probeStore!.clear()
   runtime.lastIdentity = identity
   // 该账号最好的已知目录：上次成功拉取的 saved 优先于编译期 fallback。
   // saved 是"这个账号实际被服务过"的名单，比一次性快照更可信；这同时
