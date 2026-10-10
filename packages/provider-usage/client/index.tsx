@@ -16,6 +16,7 @@
  * - useProviderUsage.ts — 状态与取数（订阅目录、60s 轮询、交互状态）
  * - WindowRow.tsx pill-types.ts — 展开面板的一行窗口、注入面与 props 类型
  * - pill-styles.ts pill-format.ts — 样式表与注入、纯格式化助手
+ * - pill-headline.ts fetch-snapshot.ts — 头行文案纯函数、路由取数（fetch+解析）
  * - locales.ts — pill 文案
  *
  * @module provider-usage-client

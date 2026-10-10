@@ -9,6 +9,7 @@
  * - VariantCard.tsx useVariantCard.ts — 单卡（渲染）与卡片状态/动作
  * - StartPlanClaimBox.tsx ModelRow.tsx SignedOutRow.tsx — 今日待领取提示框、模型行、未登录行
  * - config-types.ts config-styles.ts config-format.ts — 共享类型/常量、内联样式与注入 CSS、展示格式化
+ * - fetch-json.ts — JSON 响应读取共用助手（非 2xx 统一 HTTP_xxx 形抛错）
  * - locales.ts — 卡片文案
  *
  * @module dsh-any-connect-client
