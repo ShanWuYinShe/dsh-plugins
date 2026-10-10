@@ -8,7 +8,7 @@
  */
 
 import type { ProviderUsageQuerier, UsageWindow } from './types.js'
-import { num, rec, getJson, trimBase } from './provider-shared.js'
+import { num, rec, getJson, joinRoot, trimBase } from './provider-shared.js'
 
 /**
  * Moonshot (Kimi)'s balance.
@@ -20,7 +20,7 @@ import { num, rec, getJson, trimBase } from './provider-shared.js'
 export const moonshotUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
   if (apiKey === undefined) return { provider: 'moonshot', windows: [], fetchedAt: Date.now() }
   const root = trimBase(baseURL ?? 'https://api.moonshot.cn')
-  const body = await getJson(`${root}/v1/users/me/balance`, { authorization: `Bearer ${apiKey}` }, signal)
+  const body = await getJson(joinRoot(root, '/v1/users/me/balance'), { authorization: `Bearer ${apiKey}` }, signal)
   const data = rec(body['data'])
   const windows: UsageWindow[] = []
   const available = num(data['available_balance'])

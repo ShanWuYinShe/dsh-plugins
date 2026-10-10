@@ -15,8 +15,8 @@ import { num, str, rec, getJson, trimBase } from './provider-shared.js'
  *
  * `GET {base}/usage` returns current usage percentages and reset timestamps.
  */
-export const opencodeUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
-  if (apiKey === undefined) return { provider: 'opencode-go', windows: [], fetchedAt: Date.now() }
+export const opencodeUsage: ProviderUsageQuerier = async ({ provider, baseURL, apiKey, signal }) => {
+  if (apiKey === undefined) return { provider, windows: [], fetchedAt: Date.now() }
   const root = trimBase(baseURL ?? 'https://opencode.ai/zen/go/v1')
   const headers = { authorization: `Bearer ${apiKey}` }
   let body: Record<string, unknown> = {}
@@ -55,8 +55,8 @@ export const opencodeUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, sig
   }
 
   return {
-    provider: 'opencode-go',
-    plan: 'OpenCode Go',
+    provider,
+    plan: provider === 'opencode' ? 'OpenCode' : 'OpenCode Go',
     windows,
     fetchedAt: Date.now(),
     ...windows.length === 0 ? { error: 'the usage endpoint reported no quota windows' } : {},

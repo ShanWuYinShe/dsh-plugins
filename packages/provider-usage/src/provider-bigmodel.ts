@@ -14,12 +14,18 @@ import { num, str, rec, records, getJson, trimBase } from './provider-shared.js'
  * BigModel (Zhipu AI) Coding Plan and subscription quota.
  *
  * First checks `GET {base}/api/monitor/usage/quota/limit`, which returns rolling
- * 5-hour and weekly limits. If unavailable or empty, falls back to
- * `GET https://bigmodel.cn/api/biz/subscription/list`.
+ * 5-hour and weekly limits. If unavailable or empty, falls back to the
+ * subscription list — under the configured baseURL first (proxy/dedicated
+ * deployments must not hairpin to the public internet), then the public URL.
  */
+
+/** 默认 quota 根；用户配了代理/专线 baseURL 时订阅回退优先走它，不直连公网。 */
+const QUOTA_ROOT_DEFAULT = 'https://open.bigmodel.cn'
+/** 订阅回退的公网兜底（默认根或回退无果时才用）。 */
+const SUBSCRIPTION_PUBLIC_URL = 'https://bigmodel.cn/api/biz/subscription/list'
 export const bigmodelUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
   if (apiKey === undefined) return { provider: 'bigmodel', windows: [], fetchedAt: Date.now() }
-  const root = trimBase(baseURL ?? 'https://open.bigmodel.cn')
+  const root = trimBase(baseURL ?? QUOTA_ROOT_DEFAULT)
   const headers = { authorization: apiKey.startsWith('Bearer ') ? apiKey : `Bearer ${apiKey}` }
   const windows: UsageWindow[] = []
   let plan: string | undefined
@@ -51,25 +57,31 @@ export const bigmodelUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, sig
   }
 
   if (windows.length === 0) {
-    try {
-      const body = await getJson('https://bigmodel.cn/api/biz/subscription/list', headers, signal)
-      const list = records(rec(body['data'])['list'])
-      for (const item of list) {
-        const status = str(item['status'])
-        const productName = str(item['productName']) ?? 'Subscription'
-        const expireTime = str(item['expireTime'])
-        if (status === 'VALID') {
-          plan = productName
-          windows.push({
-            id: `sub-${productName.toLowerCase().replace(/\s+/g, '-')}`,
-            label: productName,
-            unit: 'VALID',
-            ...expireTime !== undefined ? { resetsAt: expireTime } : {},
-          })
+    const subscriptionUrls = root === QUOTA_ROOT_DEFAULT || root === 'https://bigmodel.cn'
+      ? [SUBSCRIPTION_PUBLIC_URL]
+      : [`${root}/api/biz/subscription/list`, SUBSCRIPTION_PUBLIC_URL]
+    for (const url of subscriptionUrls) {
+      try {
+        const body = await getJson(url, headers, signal)
+        const list = records(rec(body['data'])['list'])
+        for (const item of list) {
+          const status = str(item['status'])
+          const productName = str(item['productName']) ?? 'Subscription'
+          const expireTime = str(item['expireTime'])
+          if (status === 'VALID') {
+            plan = productName
+            windows.push({
+              id: `sub-${productName.toLowerCase().replace(/\s+/g, '-')}`,
+              label: productName,
+              unit: 'VALID',
+              ...expireTime !== undefined ? { resetsAt: expireTime } : {},
+            })
+          }
         }
+        if (windows.length > 0) break
+      } catch {
+        // Try the next subscription source.
       }
-    } catch {
-      // Subscription list not available
     }
   }
 

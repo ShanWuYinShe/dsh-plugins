@@ -8,10 +8,12 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import { PROVIDER_USAGE_PATH, type UsageSnapshot } from '../src/types.js'
-import { formatAmount } from './pill-format.js'
+import type { UsageSnapshot } from '../src/types.js'
+import { fetchSnapshot } from './fetch-snapshot.js'
+import { headlineText } from './pill-headline.js'
 import type { ProviderUsagePillProps } from './pill-types.js'
 
+/** Poll cadence while a session is open; the host caches on the same order. */
 const POLL_INTERVAL_MS = 60_000
 
 /** One provider answer as the route serializes it: a snapshot, or a not-queried marker. */
@@ -100,15 +102,7 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
     if (provider === undefined || provider === '') return
     setBusy(true)
     try {
-      const response = await fetch(`${PROVIDER_USAGE_PATH}?providers=${encodeURIComponent(provider)}`, {
-        headers: { accept: 'application/json' },
-        credentials: 'same-origin',
-        ...signal === undefined ? {} : { signal },
-      })
-      const value: unknown = await response.json().catch(() => undefined)
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const first = (value as { snapshots?: unknown } | null)?.snapshots
-      const snapshot = Array.isArray(first) ? first[0] as RouteAnswer : undefined
+      const snapshot = await fetchSnapshot(provider, signal)
       if (mounted.current && signal?.aborted !== true && providerRef.current === provider) {
         answerRef.current = snapshot
         setAnswer(snapshot)
@@ -169,20 +163,7 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
 
   const queried = answer !== undefined && !('queried' in answer)
   const snapshot = queried ? answer as UsageSnapshot : undefined
-  const headline = answer === undefined
-    ? t('loading')
-    : !queried
-      ? t('noQuerier', { provider })
-      : snapshot!.error !== undefined && snapshot!.windows.length === 0
-        ? t('failed')
-        : snapshot!.windows.length === 0
-          ? t('noWindows')
-          : snapshot!.windows[0]!.remain === undefined
-            ? `${snapshot!.windows[0]!.label}: ${snapshot!.windows[0]!.unit}${snapshot!.windows.length > 1 ? ` +${snapshot!.windows.length - 1}` : ''}`
-            : `${formatAmount(snapshot!.windows[0]!.remain ?? 0)} ${snapshot!.windows[0]!.unit} ${t('remaining')}${snapshot!.windows.length > 1 ? ` +${snapshot!.windows.length - 1}` : ''}`
-
-  // 过期后缀同时进可见文案与 aria-label：读屏用户同样感知数据新鲜度。
-  const headlineText = stale ? `${headline} · ${t('staleData')}` : headline
+  const headline = headlineText(answer, provider, stale, t)
 
 
   return {
@@ -201,6 +182,6 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
     refresh,
     queried,
     snapshot,
-    headlineText,
+    headlineText: headline,
   }
 }

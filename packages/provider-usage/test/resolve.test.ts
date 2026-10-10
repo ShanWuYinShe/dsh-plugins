@@ -8,7 +8,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { createProviderResolver } from '../src/resolve.js'
+import { createProviderResolver, inferProviderFromBaseUrl, normalizeProviderKey } from '../src/resolve.js'
 
 /** One configurable-provider directory entry. */
 function entry(provider: string, settingsNs: string, settingsPath: readonly string[] = []) {
@@ -132,6 +132,23 @@ describe('createProviderResolver', () => {
         { currency: 'USD', recharge: 0, bonus: 2.5 },
       ],
     })
+  })
+
+  it('passes AccountClientMetadata to getBalance（宿主 0.2.1-alpha.2 契约要求 client 参数）', async () => {
+    const seen: unknown[] = []
+    const services: Record<string, unknown> = {
+      llm: { listConfigurableProviders: () => [entry('deepseek', 'llm-deepseek')] },
+      settings: { describe: () => [{ ns: 'llm-deepseek', value: {} }] },
+      credentials: { resolve: async () => undefined },
+      deepseekAccount: { getBalance: async (...args: unknown[]) => { seen.push(...args); return null } },
+    }
+    const ctx = { get: (name: string) => services[name] } as unknown as Context
+    await createProviderResolver(ctx)('deepseek', signal)
+    expect(seen).toHaveLength(1)
+    const client = seen[0] as Record<string, unknown>
+    expect(typeof client['version']).toBe('string')
+    expect(typeof client['locale']).toBe('string')
+    expect(typeof client['timezoneOffsetSeconds']).toBe('number')
   })
 
   it('does not touch the account when an API key exists', async () => {
@@ -270,5 +287,34 @@ describe('createProviderResolver', () => {
       baseURL: 'https://api.moonshot.cn',
       apiKey: 'sk-kimi',
     })
+  })
+
+  it('normalizeProviderKey 回退返回去标点小写（与别名分支同口径）', () => {
+    expect(normalizeProviderKey('foo-bar')).toBe('foobar')
+    expect(normalizeProviderKey('foo bar')).toBe('foobar')
+    expect(normalizeProviderKey('MoonShot')).toBe('moonshot')
+  })
+
+  it.each([
+    ['https://api.deepseek.com', 'deepseek'],
+    ['https://api.siliconflow.cn/v1', 'siliconflow'],
+    ['https://api.moonshot.cn/v1', 'moonshot'],
+    ['https://open.bigmodel.cn/api/paas/v4', 'bigmodel'],
+    ['https://api.z.ai/api/paas/v4', 'bigmodel'],
+    ['https://api.minimax.chat/v1', 'minimax'],
+    ['https://minimax.io/api', 'minimax'],
+    ['https://openrouter.ai/api/v1', 'openrouter'],
+    ['https://oneapi.example/v1', 'openai'],
+    ['https://newapi.example/v1', 'openai'],
+    ['https://doneapi.example/v1', 'openai'],
+  ])('inferProviderFromBaseUrl(%s) -> %s', (baseURL, expected) => {
+    expect(inferProviderFromBaseUrl(baseURL)).toBe(expected)
+  })
+
+  it('inferProviderFromBaseUrl 对非法/空输入返回 undefined', () => {
+    expect(inferProviderFromBaseUrl(undefined)).toBeUndefined()
+    expect(inferProviderFromBaseUrl('')).toBeUndefined()
+    expect(inferProviderFromBaseUrl('not a url')).toBeUndefined()
+    expect(inferProviderFromBaseUrl('https://unknown.example/v1')).toBeUndefined()
   })
 })

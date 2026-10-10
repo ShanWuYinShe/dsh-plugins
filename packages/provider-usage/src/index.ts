@@ -66,6 +66,7 @@ export {
   deepseekUsage,
   minimaxUsage,
   moonshotUsage,
+  opencodeUsage,
   openaiUsage,
   openrouterUsage,
   siliconflowUsage,

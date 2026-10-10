@@ -8,7 +8,7 @@
  */
 
 import type { ProviderUsageQuerier, UsageWindow } from './types.js'
-import { num, rec, getJson, trimBase } from './provider-shared.js'
+import { num, rec, getJson, joinRoot, trimBase } from './provider-shared.js'
 
 /**
  * SiliconFlow's prepaid account balance.
@@ -18,7 +18,7 @@ import { num, rec, getJson, trimBase } from './provider-shared.js'
 export const siliconflowUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
   if (apiKey === undefined) return { provider: 'siliconflow', windows: [], fetchedAt: Date.now() }
   const root = trimBase(baseURL ?? 'https://api.siliconflow.cn')
-  const body = await getJson(`${root}/v1/user/info`, { authorization: `Bearer ${apiKey}` }, signal)
+  const body = await getJson(joinRoot(root, '/v1/user/info'), { authorization: `Bearer ${apiKey}` }, signal)
   const data = rec(body['data'])
   const windows: UsageWindow[] = []
   const total = num(data['totalBalance'])

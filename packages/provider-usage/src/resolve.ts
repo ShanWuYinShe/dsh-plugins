@@ -24,6 +24,8 @@
 
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { Context } from '@deepseek-ai/cordis'
+import type { AccountClientMetadata, AccountWallet } from '@deepseek-ai/dsh-deepseek-account'
+import { str } from './provider-shared.js'
 import type { AccountWalletBalance } from './types.js'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-settings'
@@ -48,11 +50,6 @@ function atPath(section: unknown, path: readonly string[]): unknown {
     current = (current as Record<string, unknown>)[segment]
   }
   return current
-}
-
-/** Read a non-empty string field. */
-function str(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
 }
 
 /** The provider's profile object, or `undefined` when the directory has none. */
@@ -89,7 +86,7 @@ export const CANONICAL_ALIASES: Readonly<Record<string, string>> = Object.freeze
 /** Normalize provider names (stripping punctuation, lowering case, applying aliases). */
 export function normalizeProviderKey(key: string): string {
   const clean = key.toLowerCase().replace(/[-_\s]/gu, '')
-  return CANONICAL_ALIASES[clean] ?? key.toLowerCase()
+  return CANONICAL_ALIASES[clean] ?? clean
 }
 
 /** Infer canonical provider ID from a configured baseURL hostname. */
@@ -115,10 +112,18 @@ export function inferProviderFromBaseUrl(baseURL?: string): string | undefined {
 /**
  * DeepSeek OAuth wallets for the keyless fallback: when the provider has no
  * API key but the harness holds a signed-in DeepSeek account, read its
- * recharge + bonus wallets so OAuth users still see a number. The account
- * service is genuinely optional (lazy ctx.get, never inject — same posture as
- * llm/settings/credentials above): without it the resolver returns no wallets
- * and the querier reports nothing-to-show.
+ * recharge + bonus wallets so OAuth users still see a number.
+ *
+ * 契约（@deepseek-ai/dsh-deepseek-account@0.2.1-alpha.2，同 optionalDependencies）：
+ * 服务名 `deepseekAccount` 由宿主挂载（Context augmentation 声明，非本包提供——
+ * owner 在宿主侧，故本包只做具名消费 + 版本声明，不自建影子服务）；`getBalance`
+ * 必带 `AccountClientMetadata`，返回 `{status:'ready', value, bonusWallets} |
+ * {status:'failed'} | null`（null = 未登录/授权变更中，按无钱包处理）。
+ *
+ * 注意 dsh-agent 也必须钉在 optionalDependencies（0.2.1-alpha.2 精确版）：
+ * account 包的 d.ts 经 account-tasks 引用 dsh-agent 类型，其 SessionId branding
+ * 必须与本仓其余宿主包（alpha.2）同源，否则 session-archive 出现双版本
+ * SessionId 类型冲突。agent 仅参与编译期，运行时从不加载。
  *
  * Amounts arrive as decimal strings; parsed per currency, unparseable entries
  * skipped. Recharge and bonus stay separate here (no summation — the querier
@@ -128,39 +133,40 @@ async function readDeepSeekAccountWallets(ctx: Context, signal: AbortSignal): Pr
   wallets?: AccountWalletBalance[]
   error?: string
 }> {
-  const account = (ctx as unknown as { get(name: string): unknown }).get('deepseekAccount') as
-    { getBalance?: () => Promise<unknown> } | undefined
+  const account = ctx.get('deepseekAccount')
   if (account === undefined || account === null || typeof account.getBalance !== 'function') return {}
-  let balance: unknown
+  const client: AccountClientMetadata = {
+    version: 'provider-usage',
+    locale: 'en',
+    timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
+  }
+  let balance: Awaited<ReturnType<typeof account.getBalance>> | undefined
   try {
-    balance = await account.getBalance()
+    balance = await account.getBalance(client)
   } catch (error: unknown) {
     return { error: error instanceof Error ? error.message : String(error) }
   }
   if (signal.aborted) return {}
   if (balance === null || typeof balance !== 'object') return {}
-  if ((balance as { status?: unknown }).status !== 'ready') return { error: 'DeepSeek account balance unavailable' }
-  const parseWallets = (list: unknown): Array<{ currency: string; amount: number }> => {
-    if (!Array.isArray(list)) return []
+  if (balance.status !== 'ready') return { error: 'DeepSeek account balance unavailable' }
+  const parseWallets = (list: readonly AccountWallet[]): Array<{ currency: string; amount: number }> => {
     const out: Array<{ currency: string; amount: number }> = []
     for (const entry of list) {
-      if (entry === null || typeof entry !== 'object') continue
-      const record = entry as Record<string, unknown>
-      if (typeof record['currency'] !== 'string' || record['currency'] === '' || typeof record['balance'] !== 'string') continue
-      const amount = Number(record['balance'])
+      const currency = entry.currency as string
+      if (typeof entry.currency !== 'string' || currency === '' || typeof entry.balance !== 'string') continue
+      const amount = Number(entry.balance)
       if (!Number.isFinite(amount) || amount < 0) continue
-      out.push({ currency: record['currency'], amount })
+      out.push({ currency, amount })
     }
     return out
   }
-  const body = balance as { value?: unknown; bonusWallets?: unknown }
   const grouped = new Map<string, AccountWalletBalance>()
-  for (const wallet of parseWallets(body.value)) {
+  for (const wallet of parseWallets(balance.value)) {
     const slot = grouped.get(wallet.currency) ?? { currency: wallet.currency, recharge: 0, bonus: 0 }
     slot.recharge += wallet.amount
     grouped.set(wallet.currency, slot)
   }
-  for (const wallet of parseWallets(body.bonusWallets)) {
+  for (const wallet of parseWallets(balance.bonusWallets)) {
     const slot = grouped.get(wallet.currency) ?? { currency: wallet.currency, recharge: 0, bonus: 0 }
     slot.bonus += wallet.amount
     grouped.set(wallet.currency, slot)
@@ -210,7 +216,12 @@ export function createProviderResolver(ctx: Context): (provider: string, signal:
       }
     }
 
-    // Fallback: check ambient or well-known credentials if still unresolved
+    // Fallback: check ambient or well-known credentials if still unresolved.
+    // Deliberately only these three routes: they are the ones whose ambient
+    // key names are stable public knowledge (documented by the vendors and
+    // mirrored in our own profile templates). Other providers resolve keys
+    // exclusively through their profile's apiKeyEnv — guessing names like
+    // MOONSHOT_API_KEY would silently pick up unrelated exports.
     if (apiKey === undefined && credentials !== undefined) {
       const fallbackRefs: Record<string, string[]> = {
         'opencode': ['OPENCODE_API_KEY', 'OPENCODE_GO_API_KEY'],

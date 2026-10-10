@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getJson, num, rec, records, str, trimBase } from '../src/provider-shared.js'
+import { getJson, joinRoot, num, rec, records, str, trimBase } from '../src/provider-shared.js'
 
 /**
  * 内置 querier 共用取值助手的直接测试。
@@ -76,6 +76,21 @@ describe('trimBase', () => {
 
   it('路径中间的斜杠不受影响', () => {
     expect(trimBase('https://api.example.com/v1/')).toBe('https://api.example.com/v1')
+  })
+})
+
+describe('joinRoot', () => {
+  it('普通拼接', () => {
+    expect(joinRoot('https://api.example.com', '/v1/key')).toBe('https://api.example.com/v1/key')
+  })
+
+  it('root 已带 /v1 时不再重复追加（用户配了带 /v1 的 baseURL）', () => {
+    expect(joinRoot('https://api.example.com/v1', '/v1/key')).toBe('https://api.example.com/v1/key')
+    expect(joinRoot('https://api.example.com/v1/', '/v1/key')).toBe('https://api.example.com/v1/key')
+  })
+
+  it('非 /v1 开头的路径不受影响', () => {
+    expect(joinRoot('https://api.example.com/v1', '/user/balance')).toBe('https://api.example.com/v1/user/balance')
   })
 })
 

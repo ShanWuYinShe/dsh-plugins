@@ -61,7 +61,13 @@ export function trimBase(baseURL: string): string {
   return baseURL.replace(/\/+$/u, '')
 }
 
-/** Share one balance reading per credential across a single snapshot build. */
-interface BalanceReader {
-  (): Promise<Record<string, unknown>>
+/**
+ * Join a (trimmed) root with a `/...` path, without doubling `/v1` when the
+ * user configured a baseURL that already ends with it (`.../api/v1` +
+ * `/v1/key` used to produce `.../api/v1/v1/key`, a certain 404).
+ */
+export function joinRoot(root: string, path: string): string {
+  const base = trimBase(root)
+  if (path.startsWith('/v1/') && base.endsWith('/v1')) return `${base}${path.slice(3)}`
+  return `${base}${path}`
 }

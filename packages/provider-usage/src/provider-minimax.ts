@@ -8,7 +8,7 @@
  */
 
 import type { ProviderUsageQuerier, UsageWindow } from './types.js'
-import { num, rec, getJson, trimBase } from './provider-shared.js'
+import { num, rec, getJson, joinRoot, trimBase } from './provider-shared.js'
 
 /**
  * MiniMax Token Plan quota.
@@ -20,7 +20,7 @@ export const minimaxUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, sign
   if (apiKey === undefined) return { provider: 'minimax', windows: [], fetchedAt: Date.now() }
   const root = trimBase(baseURL ?? 'https://api.minimaxi.com')
   const headers = { authorization: `Bearer ${apiKey}` }
-  const body = await getJson(`${root}/v1/token_plan/remains`, headers, signal)
+  const body = await getJson(joinRoot(root, '/v1/token_plan/remains'), headers, signal)
   const data = rec(body['data'])
   const windows: UsageWindow[] = []
 

@@ -48,9 +48,10 @@ export function hostIsLoopback(host: string | undefined): boolean {
  * clients (the plugin's own fetch calls) send no Origin at all and pass.
  *
  * 空串 Origin 也按「非浏览器客户端」放行（本插件自己的 fetch 不带 Origin，
- * 浏览器不会发空串）。provider-usage 的同名函数在这**唯一一处**收紧为拒绝
- * （「分化时偏向拒绝」），两边的其余部分必须逐字一致——见
- * test/loopback-parity.test.ts。
+ * 浏览器不会发空串）。注意 provider-usage 的同名函数在此**唯一一处**收紧
+ * 为拒绝（「分化时偏向拒绝」）；且 provider-usage 的 IP 字面量判定已委托
+ * 宿主 `isLoopbackHost`，本包保留本地 4 词名单——两边不再逐字一致，各自
+ * 的 route/loopback 单测是唯一的锁。
  */
 export function originIsLoopback(origin: string | undefined): boolean {
   if (origin === undefined || origin.trim() === '') return true

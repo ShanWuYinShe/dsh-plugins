@@ -13,7 +13,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-host-webserver'
+import { isLoopbackHost } from '@deepseek-ai/dsh-host-webserver'
 import { safeMessage } from './registry.js'
 import type { ProviderUsageRegistry } from './registry.js'
 import { PROVIDER_USAGE_PATH } from './types.js'
@@ -41,9 +41,9 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 }
 
 /**
- * Loopback guards. Semantics mirror dsh-any-connect's `src/loopback.ts`
- * (kept as a local copy: the two packages ship independently and cannot
- * import each other — intentional drift-toward-rejection if they diverge).
+ * Loopback guards. IP 字面量的判定委托宿主 `isLoopbackHost`（127/8 全段、
+ * ::1 及 IPv4-mapped 形态）；`localhost` 主机名宿主不认（非 IP 字面量），
+ * 在此显式允许。空串 Origin 按「分化时偏向拒绝」处理（见单测）。
  *
  * Usage is account-level information: a request without an origin is a
  * same-origin fetch from the served page (browsers omit it on some GETs),
@@ -51,7 +51,14 @@ function json(res: ServerResponse, status: number, body: unknown): void {
  * additionally drops DNS-rebinding navigation/form requests, which carry
  * no Origin but send the attacker's domain in Host.
  */
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+function unwrapBrackets(hostname: string): string {
+  return hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname
+}
+
+/** 环回主机名：localhost 或宿主认定的环回 IP 字面量。 */
+function isLoopbackName(hostname: string): boolean {
+  return hostname === 'localhost' || isLoopbackHost(unwrapBrackets(hostname))
+}
 
 function hostnameOfHost(host: string): string {
   let hostname = host.trim().toLowerCase()
@@ -71,15 +78,14 @@ function hostnameOfHost(host: string): string {
 
 function hostIsLoopback(host: string | undefined): boolean {
   if (host === undefined || host.trim() === '') return false
-  return LOOPBACK_HOSTS.has(hostnameOfHost(host))
+  return isLoopbackName(hostnameOfHost(host))
 }
 
 function originIsLoopback(origin: string | undefined): boolean {
   if (origin === undefined) return true
   try {
     const { hostname } = new URL(origin)
-    // WHATWG URL returns IPv6 hostnames bracketed.
-    return LOOPBACK_HOSTS.has(hostname) || hostname === '::1'
+    return isLoopbackName(hostname)
   } catch {
     return false
   }

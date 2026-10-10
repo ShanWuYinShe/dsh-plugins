@@ -30,5 +30,3 @@ export interface ProviderUsagePillInjected {
 export type ProviderUsagePillProps =
   PropsRuntime<'conversation.composer.dock'>
   & Partial<ProviderUsagePillInjected>
-
-/** Poll cadence while a session is open; the host caches on the same order. */

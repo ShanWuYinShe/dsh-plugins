@@ -8,7 +8,7 @@
  */
 
 import type { ProviderUsageQuerier, UsageWindow } from './types.js'
-import { num, rec, getJson, trimBase } from './provider-shared.js'
+import { num, rec, getJson, joinRoot, trimBase } from './provider-shared.js'
 
 /**
  * OpenRouter's credit balance.
@@ -25,7 +25,7 @@ export const openrouterUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, s
 
   // Key-scoped limit first: it answers "what can this key still spend".
   try {
-    const key = rec((await getJson(`${root}/v1/key`, headers, signal))['data'])
+    const key = rec((await getJson(joinRoot(root, '/v1/key'), headers, signal))['data'])
     const remaining = num(key['limit_remaining'])
     const limit = num(key['limit'])
     if (remaining !== undefined) {
@@ -42,7 +42,7 @@ export const openrouterUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, s
     // account-level credits below are the answer in that case.
   }
 
-  const credits = rec((await getJson(`${root}/v1/credits`, headers, signal))['data'])
+  const credits = rec((await getJson(joinRoot(root, '/v1/credits'), headers, signal))['data'])
   const total = num(credits['total_credits'])
   const used = num(credits['total_usage'])
   if (total !== undefined) {

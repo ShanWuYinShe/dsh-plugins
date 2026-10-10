@@ -102,7 +102,7 @@ describe('providerUsageHandler', () => {
     expect(exchange.result()).toEqual({ status: 403, body: { error: 'request-not-trusted' } })
   })
 
-  it.each(['127.0.0.1:3080', 'localhost:3080', '[::1]:3080'])(
+  it.each(['127.0.0.1:3080', '127.0.0.2:3080', 'localhost:3080', '[::1]:3080'])(
     'accepts the loopback Host %s',
     async host => {
       const handler = providerUsageHandler({ registry: makeRegistry() })
@@ -112,7 +112,7 @@ describe('providerUsageHandler', () => {
     },
   )
 
-  it.each(['http://localhost:3080', 'http://127.0.0.1:3080', 'http://[::1]:3080'])(
+  it.each(['http://localhost:3080', 'http://127.0.0.1:3080', 'http://127.0.0.2:3080', 'http://[::1]:3080'])(
     'accepts the loopback origin %s',
     async origin => {
       const handler = providerUsageHandler({ registry: makeRegistry() })
@@ -121,6 +121,13 @@ describe('providerUsageHandler', () => {
       expect(exchange.result().status).toBe(200)
     },
   )
+
+  it('refuses an empty-string Origin（分化点：any-connect 放行，本包偏向拒绝）', async () => {
+    const handler = providerUsageHandler({ registry: makeRegistry() })
+    const exchange = fakeExchange({ url: '/?providers=acme', origin: '' })
+    await handler(exchange.req, exchange.res)
+    expect(exchange.result()).toEqual({ status: 403, body: { error: 'request-not-trusted' } })
+  })
 
   it('never leaks a token embedded in a failure', async () => {
     const registry = new ProviderUsageRegistry(new Context(), { cacheTtlMs: 0 })
