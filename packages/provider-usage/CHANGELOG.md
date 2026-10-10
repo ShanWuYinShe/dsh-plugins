@@ -1,3 +1,14 @@
+## 0.1.7-alpha.5 (2026-10-10)
+
+### 变更
+
+* **环回 IP 判定委托宿主**：`route.ts` 的 IP 字面量判定改用宿主 `isLoopbackHost`（127/8 全段、`::1` 及 IPv4-mapped 形态），`localhost` 主机名宿主不认故显式允许；provider-usage 侧不再持有本地 4 词名单。
+* **账户契约具名化**：`deepseekAccount` 改为具名消费 + `optionalDependencies` 版本声明 + 真 `AccountClientMetadata` 参数。
+
+### 修复
+
+* **`dsh-agent` 精确钉改回 `^0.2.1-alpha.2`**：精确钉违反 `dsh-baseline` 的 `^<版本>` 形态铁律（该脚本只认 caret 形态，精确版直接 exit 1）。实测改回 `^` 后 branding 冲突未复活（typecheck 绿、全量用例绿），且 `0.2.1-alpha.2` 是 registry 上当前最高的 alpha 版本，无漂移风险。该可选依赖的真实作用是让 `dsh-deepseek-account` 的 `account-tasks.d.ts` 能解析 `@deepseek-ai/dsh-agent` 类型（其声明为 optional peer，无人直接依赖时 bun 不会安装）。
+
 ## 0.1.7-alpha.4 (2026-10-09)
 
 ### 修复

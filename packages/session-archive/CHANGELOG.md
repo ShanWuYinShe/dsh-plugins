@@ -1,3 +1,16 @@
+## 0.3.26-alpha.6 (2026-10-10)
+
+### 修复
+
+* **批量删除在畸形应答下谎报成功数**：`useArchiveActions.runBatch` 原用 `result.deleted || result.restored || []` 取值，是「真值即取」——`{deleted: "x", restored: ["r"]}` 会取到字符串 `"x"`，随后 `doneIds.length` 得到的是字符串长度而非删除条数，面板会把 1 个失败项报成成功。改为按「是数组才取」回退，并把决策核抽成纯函数 `summarizeBatchResult`（另过滤非字符串元素作纵深防御）。正常应答逐例与旧实现等价（已用旧实现逐字复刻对拍确认）。
+* **旧版配置迁移会覆盖用户的行编辑**：迁移改用 `edit(current)` 以 Loader 侧当前值为合并基，不再用 `apply` 时刻的配置快照——否则 `apply` 与迁移完成之间发生的一次行 reload（用户新编辑）会被旧快照覆盖。
+
+### 变更
+
+* **sessionQuery 可选探测收敛为单一来源**：新增 `session-query-bridge.ts`，host 上下文不再直接 import 官方 query 类型。服务缺席（返回 `null` → 逐行回退直读）的语义逐字不变；保留该快路径是因为 `list()` 是徽标关闭态每 5 秒每标签页的轮询端点，删掉会让轮询退化成「每条会话开整条事件流取标题」。
+* **client 远程贡献描述符的最小类型收敛**：新增 `passthroughCodec(typeSymbol): TypertCodec` 取代 `any` 泛滥的 `passthroughSchema`；描述符本身保持逐条内联字面量——仓根 `typert-surface-parity` 用正则从源码文本解析路由键，抽工厂会让静态解析漏条目。
+* 删除 `@deepseek-ai/dsh-session-projection` devDependency（包内零引用，且其实测并非类型链必要件）。
+
 ## 0.3.26-alpha.5 (2026-10-10)
 
 ### 修复

@@ -1,3 +1,18 @@
+## 0.4.14-alpha.9 (2026-10-10)
+
+### 变更
+
+* **错误文案统一走 `httpStatusLabel`**：wire 层 HTTP 状态渲染改用共享助手的 `HTTP_xxx` 形态，常量收敛到共享层。
+* **client 两处 fetch 错误拼装抽取 `fetchJsonOrThrow`**：JSON 响应读取与非 2xx 抛错收敛为一处。
+
+### 修复
+
+* **`probe-store` 状态持久化改走官方原子写**：改用 `dsh-atomic-write`，`set`/`clear` 转为 async，避免自建写入在中断时留下半截文件。
+
+### 测试
+
+* 补根 `test/loopback-parity.test.ts` 的回环守卫一致性锁：改为实测两包公开面的**绝对真值表**（不拿一边当基准，防「两边一起改坏仍相等」），并逐项登记实测的 4 处语义差（provider-usage 委托宿主后的 3 项放宽 + 空串 Origin 那一处收紧）。
+
 ## 0.4.14-alpha.8 (2026-10-09)
 
 ### 新增

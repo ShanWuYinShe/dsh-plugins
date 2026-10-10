@@ -1,3 +1,9 @@
+## 0.4.22-alpha.5 (2026-10-10)
+
+### 修复
+
+* **macOS 上配了额外可写根的会话，每条受限 bash 命令都执行不了**：`confine-runners.ts` 的 `seatbeltArgv` 重建 argv 时用 `a.slice(sbSep + 1)` 取 `--` 之后的 inner 命令，却没把 `"--"` 本身补回去——`sandbox-exec` 收到 `[-p, <profile>, bash, -c, …]` 会把 `bash` 当 profile/参数解析，命令无法执行。触发条件是三条同时成立（macOS + 配了 `extraWritableRoots` + profile 文本通过漂移自检），Linux 侧走 bwrap/Landlock 不受影响。**该缺陷自 0.4.11 起的所有已发布版本都存在**（引入于 `修复: 全仓审查问题集中修复`），本轮补测时发现：既有用例只覆盖「拒绝重建」的 fail-closed 分支，成功路径零覆盖，故长期未被发现。修复为补回 `"--"`，并补成功路径回归（断言分隔符保留且位置为 3、inner 命令原样、额外根进 profile）。
+
 ## 0.4.22-alpha.4 (2026-10-10)
 
 ### 修复
