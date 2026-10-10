@@ -14,18 +14,11 @@ import type { HostContext } from './archive-host-context.js'
 
 export function createArchiveQueries(deps: HostContext) {
   const {
-    ctx,
     cfg,
     persistence,
     archivedSet,
     isLive,
     snapshotsByIds,
-    settleStat,
-    exclusive,
-    removeFromArchiveSet,
-    resolveGenerationFile,
-    fileInfo,
-    filePresentAfterSettle,
     readTitlesBulk,
     rowFor,
   } = deps

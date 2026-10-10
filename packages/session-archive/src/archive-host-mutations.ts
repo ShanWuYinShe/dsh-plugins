@@ -16,10 +16,8 @@ import type { HostContext } from './archive-host-context.js'
 export function createArchiveMutations(deps: HostContext) {
   const {
     ctx,
-    cfg,
     persistence,
     archivedSet,
-    isLive,
     snapshotsByIds,
     settleStat,
     exclusive,
@@ -27,8 +25,6 @@ export function createArchiveMutations(deps: HostContext) {
     resolveGenerationFile,
     fileInfo,
     filePresentAfterSettle,
-    readTitlesBulk,
-    rowFor,
   } = deps
 
   return {

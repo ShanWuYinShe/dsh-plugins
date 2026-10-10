@@ -8,7 +8,7 @@
  */
 
 import * as React from "react";
-import { downloadMarkdown, detailToMarkdown, mergeArchivedMarkdown, needsDeleteAck } from "./archive-entries.js";
+import { downloadMarkdown, detailToMarkdown, mergeArchivedMarkdown, needsDeleteAck, summarizeBatchResult } from "./archive-entries.js";
 import { shortId } from "./archive-format.js";
 
 export function useArchiveActions(deps: {
@@ -144,17 +144,19 @@ export function useArchiveActions(deps: {
     setNotice(null);
     try {
       const result = await call(action, ids);
-      const doneIds = result.deleted || result.restored || [];
+      // 结果摘要的抽取（deleted/restored 取法、失败明细截断、needsRestart 计数）
+      // 收敛进 archive-entries.summarizeBatchResult——纯函数可单测，行为不变。
+      const outcome = summarizeBatchResult(result);
+      const { doneIds } = outcome;
       const n = doneIds.length;
       const doneText = t(doneKey).replace("{n}", String(n));
       // delete 成功但内存会话仍在的 id：原生"设置 → 已归档会话"页按归档集合
       // JOIN 会话摘要展示，ghost 保留 + 内存摘要仍在 → 该页在宿主重启前仍会
       // 显示这些条目。如实提示，不让用户以为删除没生效。
-      const restartIds = Array.isArray(result.needsRestart) ? result.needsRestart : [];
-      const restartText = restartIds.length > 0
-        ? t("restartNeeded").replace("{n}", String(restartIds.length))
+      const restartText = outcome.restartCount > 0
+        ? t("restartNeeded").replace("{n}", String(outcome.restartCount))
         : null;
-      if (Array.isArray(result.failed) && result.failed.length > 0) {
+      if (outcome.failures.length > 0 || outcome.hiddenFailures > 0) {
         // host 对每个失败项都给了 reason( live/busy/unenumerable/not-archived
         // /not-restorable/具体错误),只报数量会让用户不知道为什么失败、该等
         // 多久重试。全部本地化,未知 reason 原样透出兜底。
@@ -170,11 +172,11 @@ export function useArchiveActions(deps: {
           };
           return map[String(reason)] ?? String(reason ?? "error");
         };
-        const detail = result.failed.slice(0, 3)
-          .map((item: any) => shortId(item.sessionId) + ": " + reasonText(item.reason))
+        const detail = outcome.failures
+          .map((item) => shortId(item.sessionId) + ": " + reasonText(item.reason))
           .join("; ");
-        const more = result.failed.length > 3 ? " (+" + (result.failed.length - 3) + ")" : "";
-        const failText = t(failKey).replace("{n}", String(result.failed.length)) + " — " + detail + more;
+        const more = outcome.hiddenFailures > 0 ? " (+" + outcome.hiddenFailures + ")" : "";
+        const failText = t(failKey).replace("{n}", String(outcome.failures.length + outcome.hiddenFailures)) + " — " + detail + more;
         // 全失败才用 error 样式;部分成功是 warn,成功计数也要如实带上,
         // 不能只报失败让用户以为一个都没成。附带 needsRestart 时同样 warn。
         if (n > 0) setNotice({ kind: "warn", text: doneText + t("joiner") + " " + failText + (restartText !== null ? t("joiner") + " " + restartText : "") });

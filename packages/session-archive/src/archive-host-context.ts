@@ -12,6 +12,11 @@ import { readdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence, SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
+// sessionQuery 官方类型不再在本模块出现：可选服务的探测与契约收敛在
+// session-query-bridge.ts，本模块只消费它导出的自有最小契约
+// （SessionQueryTitles）。官方 d.ts 漂移不会再渗进 host 上下文。
+import { resolveSessionQueryTitles } from './session-query-bridge.js'
+import type { SessionQueryTitles } from './session-query-bridge.js'
 import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import type { LocatableSessionPersistence } from './dsh.js'
 import { name } from './plugin-config.js'
@@ -20,37 +25,16 @@ import type { Context } from '@deepseek-ai/cordis'
 
 export function createHostContext(ctx: Context, cfg: Record<string, any>) {
   /**
-   * sessionQuery 标题批量查询的最小结构契约（可选服务，运行时探测）。
-   * 官方 SessionTitleObservationResult 的读子集：故意不用官方类型——
-   * 服务缺席/降级/契约漂移时靠运行时收窄兜底，加 devDep 只为类型是虚假
-   * 安全（且该包不在插件依赖树内）；必填服务才走 dsh.d.ts 官方类型。
+   * sessionQuery 标题批量查询（可选服务，运行时探测）。
+   * 探测与契约见 session-query-bridge.ts：命中时返回批量读函数，
+   * 服务缺席/形状不符/探测抛错时为 undefined。
+   * 服务缺席或整单失败时 readTitlesBulk 返回 null，逐行回退直读。
    */
-  interface TitleBulkValue {
-    title?: { title?: unknown };
-  }
-  interface TitleBulkResult {
-    sessionId: string;
-    status: string;
-    value?: TitleBulkValue;
-  }
-  const sessionQueryTitles = ((): ((ids: readonly SessionId[]) => Promise<TitleBulkResult[]>) | undefined => {
-    // 可选服务必须走 ctx.get：真实 ctx 是 Proxy，未声明 inject 的服务直接
-    // 读属性即抛 cannot get property without inject（dsh web 启动实测），
-    // 只有 get() 会对缺席服务返回 undefined。极简 ctx 可能连 get 都没有，
-    // get 抛错也一样回退——可选探测永远不得连累 host 主逻辑。
-    let query: unknown;
-    try {
-      const get = (ctx as unknown as { get?: (name: string) => unknown }).get;
-      query = typeof get === 'function' ? get.call(ctx, 'sessionQuery') : undefined;
-    } catch {
-      return undefined;
-    }
-    if (query === null || typeof query !== 'object') return undefined;
-    const read = (query as { readTitleSnapshots?: unknown }).readTitleSnapshots;
-    if (typeof read !== 'function') return undefined;
-    const engine = query as { readTitleSnapshots(ids: readonly SessionId[]): Promise<TitleBulkResult[]> };
-    return (ids) => engine.readTitleSnapshots(ids);
-  })();
+  // get 先绑到局部再传：ctx 可能是极简对象（连 get 都没有），
+  // 桥内自行兜底，不在调用点判空以保持探测语义单点。
+  const ctxGet = (ctx as { get?: unknown }).get;
+  const sessionQueryTitles: SessionQueryTitles | undefined =
+    typeof ctxGet === 'function' ? resolveSessionQueryTitles(ctxGet.bind(ctx)) : undefined;
   const registry: WorkspaceRegistry = ctx.workspaceRegistry;
   const persistence: SessionPersistence & LocatableSessionPersistence = ctx.sessionPersistence;
 
@@ -252,7 +236,9 @@ export function createHostContext(ctx: Context, cfg: Record<string, any>) {
    */
   async function readTitlesBulk(ids: readonly SessionId[]): Promise<Map<string, string | null> | null> {
     if (sessionQueryTitles === undefined) return null;
-    let results: TitleBulkResult[];
+    // 桥的契约只承诺「一组观测结果」，逐项形状仍按官方语义在这里防御性读取
+    // （整单抛错 → null 全量回退；单行 rejected/异形 → 该行缺席 Map → 逐行回退）。
+    let results: readonly unknown[];
     try {
       results = await sessionQueryTitles(ids);
     } catch {
@@ -260,8 +246,10 @@ export function createHostContext(ctx: Context, cfg: Record<string, any>) {
     }
     if (!Array.isArray(results)) return null;
     const titles = new Map<string, string | null>();
-    for (const result of results) {
+    for (const entry of results) {
+      const result = entry as { status?: unknown; sessionId?: unknown; value?: { title?: { title?: unknown } } } | null;
       if (result === null || typeof result !== 'object' || result.status !== 'fulfilled') continue;
+      if (typeof result.sessionId !== 'string') continue;
       const title = result.value?.title?.title;
       titles.set(result.sessionId, typeof title === 'string' ? title : null);
     }

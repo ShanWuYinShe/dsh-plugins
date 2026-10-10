@@ -120,4 +120,52 @@ export function needsDeleteAck(selectedSize: number, confirming: boolean): boole
   return confirming && selectedSize >= DELETE_ACK_THRESHOLD;
 }
 
+/** 批量动作（恢复/删除）的 host 应答形状：只列本插件真正消费的字段。 */
+export interface BatchActionResult {
+  /** 成功处理的 id（delete 用 deleted，unarchive 用 restored——两者取其一）。 */
+  deleted?: unknown;
+  restored?: unknown;
+  /** 逐项失败原因（live / busy / unenumerable / not-archived / not-restorable / 具体错误）。 */
+  failed?: unknown;
+  /** 删除成功但内存会话仍在的 id：原生页需宿主重启才丢条目。 */
+  needsRestart?: unknown;
+}
+
+/** 批量动作的提示与状态变更决策（纯函数，见 useArchiveActions 的 runBatch）。 */
+export interface BatchOutcome {
+  /** 成功处理的 id（已去重前的原始数组）。 */
+  doneIds: string[];
+  /** 逐项失败明细（至多 3 条，reason 保持原样交给调用方本地化）。 */
+  failures: Array<{ sessionId: unknown; reason: unknown }>;
+  /** 未展示的失败条数（failures 之外的），用于 "+N" 后缀。 */
+  hiddenFailures: number;
+  /** 需要宿主重启才消失的条目数。 */
+  restartCount: number;
+}
+
+/**
+ * 从 host 应答里抽出批量动作的结果摘要。
+ *
+ * 这是 useArchiveActions 里 `runBatch` 的**决策核**（原先内联在 hook 闭包里，
+ * 无法单测：hook 依赖十几个 setter 且本仓没有 renderHook 设施）。抽出后
+ * 纯逻辑可测，hook 只负责把结果喂给 setter——行为逐字不变。
+ *
+ * `deleted || restored` 的取法保持原样：host 的 delete 应答给 `deleted`、
+ * unarchive 给 `restored`，同一段代码服务两个动作，故先取前者再回退。
+ * 非数组一律当空（畸形应答不得让面板显示 Undefined 个）。
+ */
+export function summarizeBatchResult(result: BatchActionResult | null | undefined): BatchOutcome {
+  const source = result ?? {};
+  const rawDone = Array.isArray(source.deleted) ? source.deleted : (Array.isArray(source.restored) ? source.restored : []);
+  const doneIds = rawDone.filter((id: unknown): id is string => typeof id === "string");
+  const failed = Array.isArray(source.failed) ? source.failed : [];
+  const restartCount = Array.isArray(source.needsRestart) ? source.needsRestart.length : 0;
+  return {
+    doneIds,
+    failures: failed.slice(0, 3).map((item: any) => ({ sessionId: item?.sessionId, reason: item?.reason })),
+    hiddenFailures: Math.max(0, failed.length - 3),
+    restartCount,
+  };
+}
+
 // ── 归档面板 ─────────────────────────────────────────────────────────

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * typert.host.js — 手写的 Typert host 工件（typert-loader 机制）。
  *
@@ -20,12 +19,19 @@
 
 import { assertSessionId, assertSessionIdArray } from "./session-id.js";
 
-const passthrough = (value) => value;
+/** 入参/结果 codec 值形态（网关 decode/encode 经 create().parse()）。 */
+interface HostCodec {
+  mode: string;
+  typeSymbol: string;
+  create(): { _zod: boolean; parse: (value: unknown) => unknown };
+}
+
+const passthrough = (value: unknown): unknown => value;
 // 入参断言与 remote.ts 方法层共享同一实现（session-id.ts）：历史版本两处
 // 手抄曾漂移（方法层漏了非空与上限），现抽成单一来源。
-const parseSessionId = (value) => assertSessionId(value);
-const parseSessionIdArray = (value) => assertSessionIdArray(value);
-const codec = (typeSymbol, parse = passthrough) => ({
+const parseSessionId = (value: unknown): string => assertSessionId(value);
+const parseSessionIdArray = (value: unknown): string[] => assertSessionIdArray(value);
+const codec = (typeSymbol: string, parse: (value: unknown) => unknown = passthrough): HostCodec => ({
   mode: 'strict',
   typeSymbol,
   create: () => ({ _zod: true, parse }),

@@ -19,27 +19,50 @@
  * @module @chaoset/session-archive/client/index
  */
 
-import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
+import type { TypertCodec, TypertRemoteContribution, TypertSchema } from '@deepseek-ai/dsh-typert-protocol'
 import { NS, zh, en } from './locales.js'
 import { ArchivePanel } from './ArchivePanel.js'
 
-export { filterArchived, ARCHIVE_SORT_KEYS, sortArchived, exportFilename, detailToMarkdown, mergeArchivedMarkdown, trapTarget, needsDeleteAck, DELETE_ACK_THRESHOLD, ARCHIVE_PAGE_SIZE } from './archive-entries.js'
-export type { ArchiveSortKey } from './archive-entries.js'
+export { filterArchived, ARCHIVE_SORT_KEYS, sortArchived, exportFilename, detailToMarkdown, mergeArchivedMarkdown, trapTarget, needsDeleteAck, DELETE_ACK_THRESHOLD, ARCHIVE_PAGE_SIZE, summarizeBatchResult } from './archive-entries.js'
+export type { ArchiveSortKey, BatchActionResult, BatchOutcome } from './archive-entries.js'
 export { css } from './styles.js'
 export { apply, inject }
 
 const inject = ["slots", "locale", "remote"];
 
-const passthroughSchema = { parse: (value: any) => value };
+/**
+ * 结果/参数的透传 codec 工厂（本插件的最小类型面）。
+ *
+ * 生成器对每个参数与结果都会产出一个 `TypertCodec`；本包的服务面两端都在
+ * 同一仓内、host 侧已做严格校验（见 src/typert.host.ts 的参数 codec），
+ * client 侧只需要**形状正确**的描述符让 `$mount` 能接线，因此这里用最小的
+ * 显式类型给出「恒等 parse」的 schema，而不是把每个描述符都写成 `any`。
+ *
+ * 注意这不是省略校验：官方 `TypertSchema.parse(value: unknown): Output`
+ * 契约本身就被满足（透传即 Output = unknown），且 host 方法层另有手写检查
+ * （src/remote.ts）——两处语义一致的约束由测试锁住。
+ */
+function passthroughCodec(typeSymbol: string): TypertCodec {
+  const schema: TypertSchema = { parse: (value: unknown): unknown => value };
+  return { mode: 'strict', typeSymbol, create: (): TypertSchema => schema };
+}
 
 const REMOTE_CONTRIBUTION: TypertRemoteContribution = {
   package: "@chaoset/session-archive",
+  // 方法集合与 host 侧 src/remote.ts 的 markRemoteMethod 一一对应：
+  // 单侧增减即由 test/typert-codec.test.ts 的对称用例报红。
+  //
+  // 描述符保持**逐条内联字面量**（不抽工厂、不用模板拼接）：仓根的
+  // test/typert-surface-parity.test.ts 用正则从源码文本解析每条 descriptor
+  // 的 id/method/参数名，再与宿主服务面逐字比对。抽工厂或拼字符串会让静态
+  // 解析漏条目，等于悄悄废掉那条路由键回归——「少写几行」不值得这个代价。
+  // 「client 最小类型」的收窄落在 passthroughCodec 上（见上），描述符形状不动。
   descriptors: [
-    { id: "@chaoset/session-archive#sessionArchive/list", service: "sessionArchive", namespace: "sessionArchive", method: "list", invocation: { kind: "direct" }, parameters: [], result: { mode: "strict", typeSymbol: "sessionArchive/list:result", create: () => passthroughSchema } },
-    { id: "@chaoset/session-archive#sessionArchive/count", service: "sessionArchive", namespace: "sessionArchive", method: "count", invocation: { kind: "direct" }, parameters: [], result: { mode: "strict", typeSymbol: "sessionArchive/count:result", create: () => passthroughSchema } },
-    { id: "@chaoset/session-archive#sessionArchive/detail", service: "sessionArchive", namespace: "sessionArchive", method: "detail", invocation: { kind: "direct" }, parameters: [{ name: "sessionId", wire: "sessionId", source: "json", codec: { mode: "strict", typeSymbol: "sessionArchive/detail:sessionId", create: () => passthroughSchema } }], result: { mode: "strict", typeSymbol: "sessionArchive/detail:result", create: () => passthroughSchema } },
-    { id: "@chaoset/session-archive#sessionArchive/delete", service: "sessionArchive", namespace: "sessionArchive", method: "delete", invocation: { kind: "direct" }, parameters: [{ name: "sessionIds", wire: "sessionIds", source: "json", codec: { mode: "strict", typeSymbol: "sessionArchive/delete:sessionIds", create: () => passthroughSchema } }], result: { mode: "strict", typeSymbol: "sessionArchive/delete:result", create: () => passthroughSchema } },
-    { id: "@chaoset/session-archive#sessionArchive/unarchive", service: "sessionArchive", namespace: "sessionArchive", method: "unarchive", invocation: { kind: "direct" }, parameters: [{ name: "sessionIds", wire: "sessionIds", source: "json", codec: { mode: "strict", typeSymbol: "sessionArchive/unarchive:sessionIds", create: () => passthroughSchema } }], result: { mode: "strict", typeSymbol: "sessionArchive/unarchive:result", create: () => passthroughSchema } }
+    { id: "@chaoset/session-archive#sessionArchive/list", service: "sessionArchive", namespace: "sessionArchive", method: "list", invocation: { kind: "direct" }, parameters: [], result: passthroughCodec("sessionArchive/list:result") },
+    { id: "@chaoset/session-archive#sessionArchive/count", service: "sessionArchive", namespace: "sessionArchive", method: "count", invocation: { kind: "direct" }, parameters: [], result: passthroughCodec("sessionArchive/count:result") },
+    { id: "@chaoset/session-archive#sessionArchive/detail", service: "sessionArchive", namespace: "sessionArchive", method: "detail", invocation: { kind: "direct" }, parameters: [{ name: "sessionId", wire: "sessionId", source: "json", codec: passthroughCodec("sessionArchive/detail:sessionId") }], result: passthroughCodec("sessionArchive/detail:result") },
+    { id: "@chaoset/session-archive#sessionArchive/delete", service: "sessionArchive", namespace: "sessionArchive", method: "delete", invocation: { kind: "direct" }, parameters: [{ name: "sessionIds", wire: "sessionIds", source: "json", codec: passthroughCodec("sessionArchive/delete:sessionIds") }], result: passthroughCodec("sessionArchive/delete:result") },
+    { id: "@chaoset/session-archive#sessionArchive/unarchive", service: "sessionArchive", namespace: "sessionArchive", method: "unarchive", invocation: { kind: "direct" }, parameters: [{ name: "sessionIds", wire: "sessionIds", source: "json", codec: passthroughCodec("sessionArchive/unarchive:sessionIds") }], result: passthroughCodec("sessionArchive/unarchive:result") }
   ]
 };
 // 与 dsh-any-connect / provider-usage 同一条兜底边界：slot API 破坏时
