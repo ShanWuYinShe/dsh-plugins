@@ -41,6 +41,21 @@ describe("sandbox-extra-roots client preview", () => {
     // 分别是 darwin/Windows 分支,这里只锁定本分支行为。
     expect(kinds("/home")).toEqual(["homeAncestor"]);
     expect(kinds("/home/user/cache")).toEqual([]); // home 的后代是合法根
+  })
+
+  it("darwin 平台参数：/private 系 realpath 与 /Users 祖先可判", () => {
+    const darwin = { isDarwin: true, isWindows: false }
+    const ks = (lines: string) => analyzeRootsText(lines, darwin).map((p) => p.kind)
+    expect(ks("/private/etc")).toEqual(["system"])
+    expect(ks("/Users")).toEqual(["homeAncestor"])
+    expect(ks("/home")).toEqual([])
+  })
+
+  it("windows 平台参数：C:\\Users 祖先可判", () => {
+    const windows = { isDarwin: false, isWindows: true }
+    const ks = (lines: string) => analyzeRootsText(lines, windows).map((p) => p.kind)
+    expect(ks("C:\\Users")).toEqual(["homeAncestor"])
+    expect(ks("/home")).toEqual([])
   });
 
   it("阻塞级问题(invalid/danger/homeAncestor)可被保存按钮识别", () => {

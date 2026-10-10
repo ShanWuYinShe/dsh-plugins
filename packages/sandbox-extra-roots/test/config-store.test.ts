@@ -85,12 +85,13 @@ describe('markLegacyImported', () => {
     expect(() => markLegacyImported('test-plugin')).not.toThrow()
   })
 
-  it('已存在 *.imported 时再次迁移覆盖之（rename 语义），不抛错', () => {
+  it('已存在 *.imported 时旧备份加序号保留，不静默覆盖', () => {
     const file = writeLegacyConfig('{"v":1}')
     renameSync(file, `${file}.imported`)
     writeLegacyConfig('{"v":2}')
     expect(() => markLegacyImported('test-plugin')).not.toThrow()
-    expect(readFileSync(`${file}.imported`, 'utf8')).toBe('{"v":2}')
+    expect(readFileSync(`${file}.imported`, 'utf8')).toBe('{"v":1}')
+    expect(readFileSync(`${file}.imported.1`, 'utf8')).toBe('{"v":2}')
   })
 })
 

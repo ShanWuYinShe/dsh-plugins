@@ -13,5 +13,7 @@ export let PluginConfigGateway: any = null;
 try {
   ({ PluginConfigGateway } = await import("./remote.js"));
 } catch (error) {
+  // 模块求值期尚无 ctx 可用，console 是唯一日志通道（全包其余 host 日志
+  // 均走 ctx.logger）。fail-safe：网关缺席时配置页降级，插件不崩。
   console.warn("sandbox-extra-roots: settings gateway unavailable: " + ((error as Error)?.message ?? String(error)));
 }

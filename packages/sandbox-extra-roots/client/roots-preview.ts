@@ -14,23 +14,31 @@ export var isDarwin = /Mac/i.test(ua);
 export var isWindows = /Win/i.test(ua);
 // 与 host classifyRoot 的过滤口径保持一致的客户端预览（词法级）：
 // 让"会被静默丢弃的行"在保存前就可见，而不是保存后只看到"已保存"。
+// 名单镜像 src/roots.ts 的 SYSTEM_DIR_SPELLINGS（filter 级：无写入必要且
+// 高危的四系统目录；/var /opt 等不在名单是有意为之——filter 只收最危险的）。
 const SYSTEM_DIRS = ["/etc", "/usr", "/bin", "/sbin"];
 // darwin 下系统目录的 realpath 拼写(/etc → /private/etc):/private 是
 // 这些目录的词法祖先,host 判为 filter 级静默剔除——预览若只比字面
 // 会漏掉用户最常见的 macOS 拼写。
 const DARWIN_SYSTEM_REALPATHS = ["/private/etc", "/private/usr", "/private/bin", "/private/sbin"];
-// 主目录的词法祖先是 reject 级(host 拒绝保存),典型拼写按平台近似:
-// darwin 在 /Users/<name>,Linux 在 /home/<name>,Windows 在 C:\Users\<name>。
-// host 按 homedir 精确判定;客户端只标这些常见祖先,宁可少标(交给 host
-// 拒绝),不误标合法路径。
-const HOME_ANCESTORS = isDarwin ? ["/users"] : isWindows ? ["c:/users"] : ["/home"];
+/** 平台快照（默认用模块加载时的 UA 判定；单测可注入）。 */
+export interface PreviewPlatform {
+  isDarwin: boolean;
+  isWindows: boolean;
+}
+
+const CURRENT_PLATFORM: PreviewPlatform = { isDarwin, isWindows };
 function isDirPrefix(prefix: string, path: string): boolean {
   if (prefix === "" || path === "") return false;
   return (path + "/").startsWith(prefix.endsWith("/") ? prefix : prefix + "/");
 }
-export function analyzeRootsText(text: string) {
+export function analyzeRootsText(text: string, platform: PreviewPlatform = CURRENT_PLATFORM) {
   const problems: Array<{ line: number; kind: string; value: string }> = [];
   const seen = new Set<string>();
+  // 主目录的词法祖先是 reject 级(host 按 homedir 精确拒绝):只标常见拼写,
+  // 宁可少标(交给 host 拒绝),不误标合法路径。
+  const homeAncestors = platform.isDarwin ? ["/users"] : platform.isWindows ? ["c:/users"] : ["/home"];
+  const systemDirs = platform.isDarwin ? [...SYSTEM_DIRS, ...DARWIN_SYSTEM_REALPATHS] : SYSTEM_DIRS;
   text.split("\n").forEach((rawLine, index) => {
     const line = rawLine.trim();
     if (line.length === 0) return;
@@ -56,9 +64,9 @@ export function analyzeRootsText(text: string) {
     const cmp = normalized.replace(/\\/g, "/").toLowerCase();
     if (normalized === "/" || /^[a-zA-Z]:[\\/]?$/.test(normalized)) {
       problems.push({ line: index + 1, kind: "danger", value: line });
-    } else if (HOME_ANCESTORS.includes(cmp)) {
+    } else if (homeAncestors.includes(cmp)) {
       problems.push({ line: index + 1, kind: "homeAncestor", value: line });
-    } else if ([...SYSTEM_DIRS, ...(isDarwin ? DARWIN_SYSTEM_REALPATHS : [])].some((dir) => {
+    } else if (systemDirs.some((dir) => {
       const d = dir.toLowerCase();
       return cmp === d || isDirPrefix(cmp, d);
     })) {

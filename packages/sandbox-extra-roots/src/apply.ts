@@ -7,15 +7,14 @@
  * @module @chaoset/sandbox-extra-roots/apply
  */
 
-import { statSync } from 'node:fs'
-import { isAbsolute, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { isPathUnder, sandboxAvailable, seatbeltProfileArgs } from './common.js'
-import { markLegacyImported, readLegacyConfig, resolveConfigPersist } from './config-store.js'
+import { bindMountArgv, safeRuntimeRoots, seatbeltArgv, type ConfineRunnerDeps } from './confine-runners.js'
 import { PluginConfigGateway } from './gateway.js'
-import { name, DEFAULT_CONFIG, config } from './plugin-config.js'
-import { STATE, ORIGINAL, canon, expandTilde, classifyRoot, extraGrantRoots } from './roots.js'
+import { name, DEFAULT_CONFIG } from './plugin-config.js'
+import { STATE, ORIGINAL, canon } from './roots.js'
 import { getLandlockExec } from './landlock-exec.js'
+import { migrateLegacyConfig } from './legacy-migrate.js'
 import { clearDirExistCache, existingDirectoryRoots } from './roots-filter.js'
 import { normalizeRoots } from './config-validate.js'
 
@@ -88,49 +87,14 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
 
     const cfg = { ...DEFAULT_CONFIG, ...patchConfig };
 
-    // 旧版 config.json（0.4.x 自建目录）一次性迁移进 profile patch;后台执行,
-    // 不阻塞激活。写入成功才把旧文件改名 *.imported;config-editor 不可用时
-    // 保留旧文件,下次启动重试。
-    void (async () => {
-      const legacy = readLegacyConfig(name);
-      if (legacy === undefined) return;
-      const persist = resolveConfigPersist(ctx);
-      if (persist === undefined) {
-        ctx.logger?.warn?.("sandbox-extra-roots: config-editor unavailable; legacy config.json kept for a later migration");
-        return;
-      }
-      try {
-        await persist.edit(() => ({ ...DEFAULT_CONFIG, ...patchConfig, ...legacy }));
-        markLegacyImported(name);
-      } catch (error) {
-        ctx.logger?.warn?.(`sandbox-extra-roots: legacy config migration failed (${(error as Error)?.message ?? String(error)}); will retry on next start`);
-      }
-    })();
+    // 旧版 config.json（0.4.x 自建目录）一次性迁移进 profile patch;主流程内
+    // await（本地文件读写，不阻塞感知），失败只 warn、下次启动重试。
+    await migrateLegacyConfig(name, ctx);
 
 
-    // 运行期危险根复查:配置期的 classifyRoot 只看配置时刻的文件系统,而
-    // confine 与 fs fence 每次调用都会重新 canonical 化并跟随符号链接。
-    // 若 extra root 位于沙盒可写区,沙盒内的 agent 可以把它替换成指向
-    // "/"、homedir 等危险根的符号链接——重新 canonical 化会得到危险根,
-    // 不复查就等于给"跟随重定向"开了沙盒逃逸通道。因此每次调用对最新
-    // canonical 结果重跑分类,reject/filter 一律剔除;同一侧同一根只告警
-    // 一次(每次 confine 都会走到这里,不能按调用告警)。
-    function safeRuntimeRoots(roots: string[], warned: Set<string>, side: string): string[] {
-      const safe: string[] = [];
-      for (const root of roots) {
-        if (classifyRoot(root) === null) {
-          safe.push(root);
-          continue;
-        }
-        const key = `runtime-danger:${side}:${root}`;
-        if (!warned.has(key)) {
-          warned.add(key);
-          ctx.logger?.warn?.(`sandbox-extra-roots: extra writable root now resolves to a dangerous root (symlink swap?); not granting it to ${side}: ${root}`);
-        }
-      }
-      return safe;
-    }
-
+    // 运行期危险根复查见 confine-runners.safeRuntimeRoots（confine 与 fs
+    // fence 共用）：每次调用对最新 canonical 结果重跑分类，reject/filter
+    // 一律剔除（防沙盒内符号链接交换）。
     // 目录存在性短 TTL 缓存：bwrap/Landlock 的每次 confine 与 fs fence 的每次
     // 拒绝复核都会按根逐个 statSync（同步 IO 落在 bash 启动热路径上）。目录的
     // 创建/删除是低频事件，TTL 内沿用上次结果；代价是新建目录最多延迟 TTL
@@ -173,71 +137,46 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
             [...new Set<string>(sandboxState.extraRoots.map(canon))],
             sandboxState.warned,
             "bash commands",
+            warn,
           );
+          const deps: ConfineRunnerDeps = {
+            warnOnce,
+            checkSeatbeltDrift: (policy, profile) => {
+              if (sandboxState.profileDrifted) return true;
+              if (!sandboxState.checkedProfile) {
+                sandboxState.checkedProfile = true;
+                try {
+                  const official = seatbeltProfileArgs(policy, []);
+                  if (official[1] !== profile) {
+                    sandboxState.profileDrifted = true;
+                    ctx.logger?.warn?.("sandbox-extra-roots: official seatbelt profile shape changed; refusing to rebuild it — bash-side extra roots stay OFF (the fs fence still grants them). Check common.ts seatbeltProfileArgs against dsh-sandbox-local.");
+                  }
+                } catch {}
+              }
+              return sandboxState.profileDrifted;
+            },
+          };
           const a = wrapped.argv;
           // Seatbelt:官方 argv 为 [sandbox-exec, -p, <profile>, --, ...inner]。
           if (a[1] === "-p" && typeof a[2] === "string" && a[2].includes("(version 1)")) {
-            // 漂移自检:官方 profile(空额外目录)应与本实现重建结果一致。检出
-            // 漂移后**放弃重建**、保持官方 argv 原样(fail-closed)——用本插件
-            // 可能过时的模板整体替换官方 profile,若官方新增了限制项会被静默
-            // 丢掉,沙盒比官方更宽,这对安全敏感组件不可接受。bash 侧额外根
-            // 随之失效(告警注明),fs 侧放行不受影响。
-            if (!sandboxState.checkedProfile) {
-              sandboxState.checkedProfile = true;
-              try {
-                const official = seatbeltProfileArgs(policy, []);
-                if (official[1] !== a[2]) {
-                  sandboxState.profileDrifted = true;
-                  ctx.logger?.warn?.("sandbox-extra-roots: official seatbelt profile shape changed; refusing to rebuild it — bash-side extra roots stay OFF (the fs fence still grants them). Check common.ts seatbeltProfileArgs against dsh-sandbox-local.");
-                }
-              } catch {}
-            }
-            if (sandboxState.profileDrifted) return wrapped;
-            // inner 命令从 -- 分隔符之后取,不硬编码下标:官方若在 -p 之前
-            // 后追加参数,slice(3) 会静默错位。分隔符缺失(契约漂移)时不加
-            // 额外根、保持官方 argv 原样(fail-safe,与 bwrap/Landlock 同策略)。
-            const sbSep = a.indexOf("--");
-            if (sbSep === -1) {
-              warnOnce("seatbelt-separator", "seatbelt argv has no -- separator; cannot add extra writable roots");
-              return wrapped;
-            }
-            // 分隔符不在期望位置(profile 后紧跟 --)同样是契约漂移:官方若在
-            // profile 与 -- 之间新增参数,整表重建会把它静默丢掉,沙盒比官方
-            // 更宽。与分隔符缺失同策略:放弃追加,保持官方 argv 原样。
-            // 漂移自检只比对 profile 文本,检不出这种形态,必须在这里挡。
-            if (sbSep !== 3) {
-              warnOnce("seatbelt-separator-position", "seatbelt argv shape changed (args between profile and --); refusing to rebuild it — bash-side extra roots stay OFF (the fs fence still grants them)");
-              return wrapped;
-            }
-            wrapped.argv = [a[0], ...seatbeltProfileArgs(policy, roots), ...a.slice(sbSep + 1)];
+            const rebuilt = seatbeltArgv(a, roots, policy, deps);
+            if (rebuilt !== null) wrapped.argv = rebuilt;
             return wrapped;
           }
           // bwrap:在 -- 前插入 --bind <root> <root>(后挂载覆盖 --ro-bind / /)。
           // 插入集合与 Seatbelt 对齐:官方根 ∪ 额外根去重后减去官方已授予的
           // 部分;且只授予当前真实存在的目录,缺失 root 会让 bwrap 启动失败。
           if (a[0] === "bwrap") {
-            const sep = a.indexOf("--");
-            if (sep === -1) {
-              warnOnce("bwrap-separator", "bwrap argv has no -- separator; cannot add extra writable roots");
-              return wrapped;
-            }
-            const extra = [];
-            for (const root of existingDirectoryRoots(extraGrantRoots(policy, roots), sandboxState.warned, "bwrap/Landlock", warn)) extra.push("--bind", root, root);
-            wrapped.argv = [...a.slice(0, sep), ...extra, ...a.slice(sep)];
+            const rebuilt = bindMountArgv(a, roots, policy, sandboxState.warned, warn, warnOnce, "--bind", "bwrap");
+            if (rebuilt !== null) wrapped.argv = rebuilt;
             return wrapped;
           }
           // Landlock:在 -- 前插入 --rw <root>(runner 原生参数)。
           // 与 bwrap 同一插入集合;同样只授予存在的目录（launcher 把
           // unopenable grant root 视为失败）。
           if (landlockExec !== null && a[0] === landlockExec) {
-            const sep = a.indexOf("--");
-            if (sep === -1) {
-              warnOnce("landlock-separator", "landlock argv has no -- separator; cannot add extra writable roots");
-              return wrapped;
-            }
-            const extra = [];
-            for (const root of existingDirectoryRoots(extraGrantRoots(policy, roots), sandboxState.warned, "bwrap/Landlock", warn)) extra.push("--rw", root);
-            wrapped.argv = [...a.slice(0, sep), ...extra, ...a.slice(sep)];
+            const rebuilt = bindMountArgv(a, roots, policy, sandboxState.warned, warn, warnOnce, "--rw", "landlock");
+            if (rebuilt !== null) wrapped.argv = rebuilt;
             return wrapped;
           }
           // Windows ACL runner:argv 层面无法追加额外根目录,仅告警一次。
@@ -299,6 +238,7 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
                   [...new Set<string>(fsState.extraRoots.map(canon))],
                   fsState.warned,
                   "the fs fence",
+                  warn,
                 ),
                 fsState.warned,
                 "the fs fence",

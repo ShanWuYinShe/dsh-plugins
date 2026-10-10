@@ -29,6 +29,7 @@ import { pathToFileURL } from "node:url";
 // 不支持目录导入,用包目录的 package.json 作 require 锚解析入口文件
 // (require.resolve 默认 realpath 化,得到 harness 同源实体路径)。
 // 失败返回 null,由调用方 fall through 原有解析链。
+// DSH_HOME 回退下两行与 config-store.ts legacyConfigPath 同形（刻意各持一份，改一处时同步）。
 function loadInstallFallback(specifier: string): Promise<any> | null {
   try {
     const dshHome = process.env.DSH_HOME?.trim() ? resolve(process.env.DSH_HOME) : join(homedir(), ".dsh");

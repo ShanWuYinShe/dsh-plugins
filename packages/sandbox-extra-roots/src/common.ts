@@ -21,6 +21,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
+/** DSH_HOME 回退（与 config-store.ts legacyConfigPath、typert-loader.ts 内两处同形——三处刻意各持一份，改一处时同步另两处）。 */
 function dshHome() {
   return process.env.DSH_HOME?.trim() ? resolve(process.env.DSH_HOME) : join(homedir(), ".dsh");
 }

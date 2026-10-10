@@ -45,7 +45,7 @@ export function resolveConfigPersist(ctx: any): ConfigPersist | undefined {
   return { edit: (change) => editor.edit(entry, change) };
 }
 
-/** 旧版配置文件路径：$DSH_HOME/plugins/<name>/config.json（只服务于迁移）。 */
+/** 旧版配置文件路径：$DSH_HOME/plugins/<name>/config.json（只服务于迁移）。DSH_HOME 回退与本包外两处同形（sandbox 的 common.ts dshHome、typert-loader.ts 内两处），三处刻意各持一份，改一处时同步另两处。 */
 export function legacyConfigPath(name: string): string {
   const dshHome = process.env.DSH_HOME?.trim() ? resolve(process.env.DSH_HOME) : join(homedir(), ".dsh");
   return join(dshHome, "plugins", name, "config.json");
@@ -65,10 +65,13 @@ export function readLegacyConfig(name: string): Record<string, any> | undefined 
   return undefined;
 }
 
-/** 迁移写入成功后把旧文件改名 *.imported，保留现场且不再参与读取。 */
+/** 迁移写入成功后把旧文件改名 *.imported，保留现场且不再参与读取。目标已存在时加序号后缀（*.imported.1…），旧备份永不静默覆盖。 */
 export function markLegacyImported(name: string): void {
   const file = legacyConfigPath(name);
   try {
-    if (existsSync(file)) renameSync(file, `${file}.imported`);
+    if (!existsSync(file)) return;
+    let target = `${file}.imported`;
+    for (let index = 1; existsSync(target); index++) target = `${file}.imported.${index}`;
+    renameSync(file, target);
   } catch {}
 }

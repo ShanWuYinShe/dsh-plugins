@@ -9,13 +9,20 @@
 
 import { loadLandlock } from './common.js'
 
-/** Landlock runner 可执行路径，惰性加载（仅 Linux 且真正进入 apply 时解析）。 */
+/** Landlock runner 可执行路径，惰性加载（仅 Linux 且真正进入 apply 时解析）。成功永久缓存；失败不缓存——launcher 稍后安装/修复后下一次 apply 重新探测。 */
 let landlockExecPromise: Promise<string | null> | null = null;
 
 export function getLandlockExec(): Promise<string | null> | null {
   if (process.platform !== "linux") return null;
-  landlockExecPromise ??= loadLandlock()
-    .then((landlock) => landlock.launcherPath())
-    .catch(() => null);
+  if (landlockExecPromise === null) {
+    landlockExecPromise = loadLandlock()
+      .then((landlock) => landlock.launcherPath())
+      .catch(() => null)
+      .then((resolved) => {
+        // 失败不清、成功才留：null 结果下次调用重新探测。
+        if (resolved === null) landlockExecPromise = null;
+        return resolved;
+      });
+  }
   return landlockExecPromise;
 }
