@@ -20,7 +20,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { Readable } from 'node:stream'
 import type { WorkBuddyCredentialStore } from './auth.js'
 import type { WorkBuddyCatalog } from './catalog.js'
-import { applyDefaultEffort } from './reasoning-default.js'
+import { applyDefaultEffort, applyDefaultThinking } from './reasoning-default.js'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { prepareChatBody, WorkBuddyUpstreamClient, type UpstreamErrorKind } from './upstream.js'
 import { isJsonContentType, KIND_STATUS, writeJson, writeOpenAIError, writeAnthropicError, RequestBodyTooLarge, readBody, upstreamFailureMessage } from './shim-http.js'
@@ -296,11 +296,17 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     }
 
     const raw = (await readBody(req)).toString('utf8')
+    // Anthropic 通道的「默认」档回落（见 reasoning-default.ts）：与 OpenAI 通道同一
+    // 规则，只是表达成 thinking 预算对象——形状与算式对齐 pi-ai 显式选该档位时的行为。
+    const prepared = applyDefaultThinking(
+      raw,
+      (id) => catalog.current().find(model => model.id === id),
+    )
     const controller = new AbortController()
     // 与 chatCompletions 同口径:res 'close' 才是流式阶段的断开信号(req
     // 'close' 在响应开始后不再触发)。
     res.once('close', () => controller.abort())
-    const result = await client.chatStream(credential, raw, controller.signal)
+    const result = await client.chatStream(credential, prepared, controller.signal)
 
     if (!result.ok) {
       if (controller.signal.aborted || res.destroyed) return

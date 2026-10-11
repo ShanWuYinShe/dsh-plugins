@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyDefaultEffort, defaultFallbackEffort } from '../src/reasoning-default.js'
+import { applyDefaultEffort, applyDefaultThinking, defaultFallbackEffort } from '../src/reasoning-default.js'
 import type { WorkBuddyModelInfo } from '../src/catalog.js'
 
 /**
@@ -73,15 +73,68 @@ describe('applyDefaultEffort', () => {
   })
 
   it('returns inputs it must not rewrite unchanged', () => {
-    const cases = [
-      'not json',
-      '"a string"',
-      '[1,2,3]',
-      JSON.stringify({ model: 'unknown-model', messages: [] }),
-      JSON.stringify({ messages: [] }),
-    ]
+    const cases = ['not json', '"a string"', '[1,2,3]', JSON.stringify({ model: 'unknown-model', messages: [] }), JSON.stringify({ messages: [] })]
     for (const source of cases) {
       expect(applyDefaultEffort(source, (id) => (id === 'only-thinking' ? info : undefined))).toBe(source)
     }
+  })
+})
+
+/**
+ * Anthropic 通道的同一条规则：补 `thinking` 预算对象，形状与算式对齐 pi-ai
+ * 显式选该档位时的行为（enabled + 抬高 max_tokens + 留出答案余量）。
+ */
+describe('applyDefaultThinking', () => {
+  const only = {
+    id: 'only-thinking', name: 'M', contextWindow: 200_000, maxTokens: 64_000, supportsImages: false,
+    reasoning: { supports: true, onlyReasoning: true, supportedEfforts: ['low', 'high', 'max'] as const, defaultEffort: 'high' as const, canDisableThinking: true },
+  }
+  const lookup = (id: string): typeof only | undefined => (id === 'only-thinking' ? only : undefined)
+
+  it('opens thinking at the fallback level, mirroring pi-ai', () => {
+    const out = JSON.parse(applyDefaultThinking(
+      JSON.stringify({ model: 'only-thinking', max_tokens: 8192, messages: [] }),
+      lookup,
+    )) as Record<string, unknown>
+    expect(out['thinking']).toEqual({ type: 'enabled', budget_tokens: 16384, display: 'summarized' })
+    expect(out['max_tokens']).toBe(8192 + 16384)
+  })
+
+  it('caps max_tokens at the model ceiling and clamps the budget to keep answer room', () => {
+    const small = { ...only, maxTokens: 4096 }
+    const out = JSON.parse(applyDefaultThinking(
+      JSON.stringify({ model: 'only-thinking', max_tokens: 8192 }),
+      () => small,
+    )) as Record<string, unknown>
+    // maxTokens = min(8192 + 16384, 4096) = 4096 → 4096 ≤ 16384 → budget = 4096 - 1024
+    expect(out['max_tokens']).toBe(4096)
+    expect((out['thinking'] as { budget_tokens: number }).budget_tokens).toBe(3072)
+  })
+
+  it('uses the model ceiling when the request carries no max_tokens', () => {
+    const out = JSON.parse(applyDefaultThinking(
+      JSON.stringify({ model: 'only-thinking', messages: [] }),
+      lookup,
+    )) as Record<string, unknown>
+    expect(out['max_tokens']).toBe(64_000)
+    expect((out['thinking'] as { budget_tokens: number }).budget_tokens).toBe(16384)
+  })
+
+  it('never touches a request that already carries thinking', () => {
+    const source = JSON.stringify({ model: 'only-thinking', max_tokens: 8192, thinking: { type: 'disabled' } })
+    expect(applyDefaultThinking(source, lookup)).toBe(source)
+  })
+
+  it('stays silent when no ceiling can be derived', () => {
+    const source = JSON.stringify({ model: 'only-thinking', messages: [] })
+    expect(applyDefaultThinking(source, () => ({ ...only, maxTokens: 0 } as typeof only))).toBe(source)
+  })
+
+  it('stays silent for models outside the fallback rule and for non-JSON', () => {
+    const optional = { ...only, reasoning: { ...only.reasoning, onlyReasoning: false } }
+    const source = JSON.stringify({ model: 'only-thinking', max_tokens: 8192 })
+    expect(applyDefaultThinking(source, () => optional)).toBe(source)
+    expect(applyDefaultThinking(source, () => undefined)).toBe(source)
+    expect(applyDefaultThinking('not json', lookup)).toBe('not json')
   })
 })

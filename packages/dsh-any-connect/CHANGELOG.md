@@ -1,3 +1,13 @@
+## 0.4.14-alpha.15 (2026-10-11)
+
+### 新增
+
+* **Anthropic 形通道（ZCode）按同一规则补齐「默认」档**：`applyDefaultThinking` 在请求**完全没有** `thinking` 字段且模型为 `onlyReasoning` 时，补 `thinking: { type: 'enabled', budget_tokens, display: 'summarized' }`，形状与算式对齐宿主 pi-ai 显式选该档位时的行为（预算表 `minimal/low/medium/high = 1024/2048/8192/16384`、`xhigh`/`max` 的预算等同 `high`、按 `adjustMaxTokensForThinking` 抬高 `max_tokens` 并留出 1024 答案余量）。显式带 `thinking` 的请求一律不动。
+
+### 测试
+
+* `reasoning-default.test.ts` 补 Anthropic 六个用例（开档、封顶与余量夹取、无 `max_tokens` 时用模型上限、显式 `thinking` 不动、推不出上限时不动、非回落模型不动）；`shim.test.ts` 补 `/v1/messages` 端到端用例。
+
 ## 0.4.14-alpha.14 (2026-10-11)
 
 ### 新增

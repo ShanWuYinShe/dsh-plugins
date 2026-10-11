@@ -254,6 +254,27 @@ describe('WorkBuddy shim', () => {
     expect(harness.upstreamBodies).toHaveLength(1)
   })
 
+  it('opens thinking at the fallback level on /v1/messages when the request carries none', async () => {
+    // Anthropic 通道同一条规则（用户指定 2026-10-11）：onlyReasoning 模型的「默认」
+    // 不再等于「什么都不发」，而是补成 pi-ai 显式选该档位时的同形请求。
+    const harness = await startShim(() => ({
+      ok: true,
+      response: new Response('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}\n\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    }))
+    const response = await fetch(`${harness.shim.baseUrl()}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': harness.shim.token() },
+      body: JSON.stringify({ model: 'glm-5.3', max_tokens: 1024, messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    expect(response.status).toBe(200)
+    const forwarded = JSON.parse(harness.upstreamBodies[0] ?? '') as Record<string, unknown>
+    expect(forwarded['thinking']).toEqual({ type: 'enabled', budget_tokens: 16384, display: 'summarized' })
+    expect(forwarded['max_tokens']).toBe(1024 + 16384)
+  })
+
   it('maps an upstream credit failure on /v1/messages onto Anthropic error format', async () => {
     const harness = await startShim(() => ({
       ok: false,
