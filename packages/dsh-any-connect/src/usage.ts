@@ -2,7 +2,7 @@
  * usage.ts — provider-usage 的注册 seam 与 composer dock 的额度窗口助手。
  *
  * 2026-10-08 从 index.ts 提出：查询器注册与 pill 窗口构造（WorkBuddy 总积分 /
- * ZCode 当前套餐 / Start Plan 当日池 / Coding Plan 5 小时与 7 天窗口）是一件事，
+ * ZCode 当前套餐 / Start Plan 池子 / Coding Plan 5 小时与 7 天窗口）是一件事，
  * 独立成模块后 index.ts 只负责把 runtime 列表接上去。
  *
  * registry 的服务面以结构类型声明（{@link ProviderUsageRegistryLike}）而不是
@@ -83,7 +83,7 @@ export function totalCreditsWindows(accounts: readonly WorkBuddyCreditAccount[])
  * 的 zcodePlan 取法一致——pill 与卡片看到的是同一个“当前套餐”，而不是
  * 一摞计划名。
  *
- * Start Plan 的当日 token 池数字是真实的（billing/balance 的 remain/size），
+ * Start Plan 的 token 池数字是真实的（billing/balance 的 remain/size），
  * 窗口必须带上它们——composer dock 的 pill 在窗口缺 remain 时只渲染
  * 「套餐名: 有效」，用户在聊天框下方就看不到剩余额度（2026-10-06 用户报告）。
  * Coding Plan 订阅的 remain/size 恒为 1，只是有效性标志而非用量，没有数字
@@ -201,7 +201,7 @@ export function registerUsageQueriers(
             // 三套口径，各有真源：
             // - Coding Plan：客户端同款 monitor 端点的窗口额度（5 小时 / 7 天 /
             //   工具调用）——用户要的就是这三个；拿不到时回退订阅有效性窗口。
-            // - Start Plan：当日 token 池（有池子报真实 token 数，没领取时说
+            // - Start Plan：token 池（有池子报真实 token 数，没领取时说
             //   「今日待领取」）。
             // - WorkBuddy：同币种分包求和的总积分。
             windows: isStartPlan

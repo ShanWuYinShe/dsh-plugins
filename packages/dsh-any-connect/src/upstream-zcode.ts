@@ -205,7 +205,7 @@ export class ZCodeUpstreamClient {
 
   /**
    * Start Plan 专属通道：`zcode-plan/anthropic` + 账号 JWT（`zcodejwttoken`）
-   * + 设备号。额度扣 Start Plan 专属余额（一次性、当日有效），与 Coding Plan
+   * + 设备号。额度扣 Start Plan 专属余额（一次性，有效期以 expires_at 为准），与 Coding Plan
    * 订阅互不占用。
    *
    * 该通道校验**请求体指纹**：`system` 必须以官方客户端的固定提示词开头
@@ -224,7 +224,7 @@ export class ZCodeUpstreamClient {
   }
 
   async fetchCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
-    // 额度来源跟生效计划走：Start Plan 查专属余额（billing/balance，当日有效的
+    // 额度来源跟生效计划走：Start Plan 查专属余额（billing/balance，一次性、
     // 一次性 token 包），其余计划查 coding-plan 订阅（subscription/list）。两个
     // 口径绝不混报——Start Plan 档显示订阅余额、或 Coding Plan 档显示专属余额，
     // 都会让用户对着错误的池子做决定。
@@ -307,7 +307,7 @@ export class ZCodeUpstreamClient {
 
   /**
    * Start Plan 专属额度（`billing/balance`）：`data.plans[]` 给活动名与有效期
-   * （一次性包，当日过期），`data.balances[]` 给 token 级的总量/已用/剩余。
+   * （一次性包，有效期见各条的 expires_at），`data.balances[]` 给 token 级的总量/已用/剩余。
    * 查询失败如实抛错（卡片转 creditsError），绝不拿 Coding Plan 的订阅状态
    * 冒充 Start Plan 的额度。
    */

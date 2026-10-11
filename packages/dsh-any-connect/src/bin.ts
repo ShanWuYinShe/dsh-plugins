@@ -224,7 +224,7 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
       credits: credits?.total,
       ...credits?.error === undefined ? {} : { creditsError: credits.error },
       // ZCode 的额度语义与 WorkBuddy 点数不同:窗口按 pill 同一口径给出
-      // (Start Plan 是当日 token 池,Coding Plan 是订阅有效性),total 只是
+      // (Start Plan 是 token 计数池,Coding Plan 是订阅有效性),total 只是
       // 兼容字段。
       ...variant.kind === 'zcode' && creditAccounts !== undefined
         ? { quotaWindows: currentPlanWindow(creditAccounts) }

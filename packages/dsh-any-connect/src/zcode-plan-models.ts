@@ -40,9 +40,9 @@ export interface StartPlanActivity {
  * `account:bigmodel-start-plan` 的 `builtinModelIds`（GLM-5.3-Flash /
  * GLM-5.2 / GLM-5-Turbo）。
  *
- * Start Plan 是与 Coding Plan 完全独立的产品：专属通道按 token 计量（当日
- * 有效的一次性余额），没有 Coding Plan 的 150% 折扣与夜间免费促销——徽标
- * 一概不带。
+ * Start Plan 是与 Coding Plan 完全独立的产品：专属通道按 token 计量（一次性
+ * 余额，有效期以每份额度的 expires_at 为准），没有 Coding Plan 的 150% 折扣
+ * 与夜间免费促销——徽标一概不带。
  *
  * **活动授权是名单的真源**：内置目录只是客户端给的候选，服务端按当前活动
  * 的 entitlements 放行——实测（2026-09-30，Trust Build）只授权 GLM-5.3-Flash，
@@ -128,7 +128,7 @@ export function startPlanModelInfo(
  * `ends_at` 缺失时按**有效**处理：名单宁可多给一次（上游会回明确的配额错误），
  * 也不能因为字段缺失就让用户丢掉整组模型。`now` 默认取真实时钟，测试可显式传入。
  *
- * 注意：**当日额度用尽 ≠ 活动过期**。这里只看活动本身的有效期与状态；"今天还没
+ * 注意：**额度用尽 ≠ 活动过期**。这里只看活动本身的有效期与状态；"今天还没
  * 领取/还没发放" 是另一回事（表现为活动列表里根本没有条目），不在这里判定。
  */
 export function isStartPlanActivityActive(
@@ -164,7 +164,7 @@ export type StartPlanEntitlements = readonly {
  *   `granted` 为 `false`（默认）时沿用历史语义"没有可用授权信息"，调用方应当
  *   回退 `fallback`，否则一次上游抖动就会让整个 Start Plan 分组从 DSH 里消失。
  *
- * 额度用尽与否不影响登记：余额是当日一次性池子（见卡片），额度耗尽应由上游
+ * 额度用尽与否不影响登记：余额是一次性池子（见卡片），额度耗尽应由上游
  * 给出明确的配额错误，而不是让模型在选择器里凭空消失。
  */
 export function startPlanModelsFromEntitlements(
