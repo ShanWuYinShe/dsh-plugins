@@ -136,6 +136,25 @@ profile/home 的 `cordis.patch.yml`（DSH 0.1.7 起第三方 provider 的模型�
 > 关于 ZCode 通道的实测证据与复现脚本，见仓库 `.workwork/zcode-startplan/`
 > （该目录不入库）。
 
+## 数据与文件位置
+
+插件在 DSH home（默认 `~/.dsh`，可被 `$DSH_HOME` 覆盖）内维护三处数据，
+2026-10-11 起不再向 home 根目录平铺散文件：
+
+| 位置 | 内容 | 说明 |
+|---|---|---|
+| `storages/dsh_any_connect/auth/` | 四个变体的自有凭据副本（每变体一个 JSON） | 宿主存储域（storageDomain）：schema 校验、原子写、损坏记录自动备份。桌面端凭据可读时通常为空。 |
+| `.dsh-any-connect/` | `zcode-device-mid` 设备标识；存储域不可用时的凭据副本文件回落 | 正常情况只有设备标识一个文件。 |
+| `cache/dsh-any-connect/` | 模型目录 ×4、档位探测结果、桌面版本记录、host 心跳 | 可再生缓存，删除后自动重建。 |
+
+旧版平铺在 home 根目录的散文件（`.workbuddy-auth.json` 等）在启动时自动
+迁移进上述位置：先写入成功才删除旧文件，损坏文件原样保留并在日志告警。
+
+**不属于本插件**（只读）：WorkBuddy 桌面端的
+`~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/*.info`
+与 ZCode 桌面端的 `~/.zcode/v2/credentials.json`——这两个文件由各自的桌面
+应用管理，插件读取它们以获得登录态，从不写入。
+
 ## 发布线
 
 稳定线随 monorepo `main` 分支发布；适配 dsh 预发布线的版本在 alpha 分支

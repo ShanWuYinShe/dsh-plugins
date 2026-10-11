@@ -1,8 +1,8 @@
-文档(dsh-any-connect): 清理 Start Plan 额度语义的注释漂移
+新增(dsh-any-connect): README 数据布局章节、CLI 状态域句柄统一释放与域分支测试
 
-sameDay 动态化之后，若干「一次性、当日有效」的旧注释未同步——口径统一为
-「一次性池子，有效期以各份额度的 expires_at 为准」，防止下一个维护者
-再把时点实测结论当永久事实写回实现（即 alpha.11 修掉的同类问题）。
-纯注释修订，不影响构建产物，不发版。
+- README 新增「数据与文件位置」：三处落点、自动迁移行为与桌面端只读边界
+- CLI（bin）状态域句柄进程内共享、run() 收尾统一 close（此前从不释放）
+- auth.test 补 storageDomain 分支三个用例：读域/刷新落域/注销清域
+- usage.test 修一处 Date.now 两侧求值的 flaky（跨毫秒边界 toISOString 差 1ms）
 
 Model: glm-5.3-flash

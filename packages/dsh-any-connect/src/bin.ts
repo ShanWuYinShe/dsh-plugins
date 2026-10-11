@@ -55,6 +55,9 @@ function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`)
 }
 
+/** 进程内共享的 standalone 状态域句柄；run() 结束时统一释放（见 closeSharedState）。 */
+let sharedStateClose: (() => Promise<void>) | undefined
+
 /** Credential store wired for CLI diagnostics. */
 async function makeWorkBuddyStore(variant: WorkBuddyVariant): Promise<WorkBuddyCredentialStore> {
   // 与插件运行时同一份装配（见 variant-wiring.ts）：计划语义 / 刷新通道都由它
@@ -62,13 +65,23 @@ async function makeWorkBuddyStore(variant: WorkBuddyVariant): Promise<WorkBuddyC
   // zcode-start-plan 的额度查询指到了 coding 池子。
   // 状态域独立打开（与插件运行时同一存储单元，见 state-store.ts）：logout 删的
   // 域副本与插件运行时所见一致；域打不开时降级文件回落并告警，诊断照常工作。
+  // 句柄进程内只开一份（单命令单次），close 由 run() 的收尾统一调用。
   let state
   try {
-    state = await openStandaloneStateStore()
+    const standalone = await openStandaloneStateStore()
+    state = standalone
+    sharedStateClose = () => standalone.close()
   } catch (error: unknown) {
     console.warn(`dsh-any-connect: state domain unavailable (${String(error)}); owned-copy operations use the file fallback`)
   }
   return createVariantCredentialStore({ variant, client: upstreamClientFor(variant), ...state === undefined ? {} : { state } })
+}
+
+/** run() 收尾：释放状态域句柄（幂等；未打开过则空操作）。 */
+async function closeSharedState(): Promise<void> {
+  const close = sharedStateClose
+  sharedStateClose = undefined
+  await close?.().catch(() => {})
 }
 
 /** Compiled-in roster size per provider id. */
@@ -312,6 +325,9 @@ export async function run(argv: readonly string[]): Promise<number> {
   } catch (error: unknown) {
     process.stderr.write(`dsh-any-connect: ${action} failed: ${safeMessage(error)}\n`)
     return 1
+  } finally {
+    // 所有出口（含各分支的 return 与异常路径）之后统一释放状态域句柄。
+    await closeSharedState()
   }
 }
 

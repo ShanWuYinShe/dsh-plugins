@@ -260,10 +260,12 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
       { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, sameDay: true, unit: 'tokens' },
     ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens' }])
     // 多日有效期的池子同样画进度条（sameDay 只管文案口径，不再决定进度条
-    // 的有无）——unit: 'tokens' 在就能画。
+    // 的有无）——unit: 'tokens' 在就能画。过期时刻先算成常量再两侧共用：
+    // 断言两边各取一次 Date.now() 会偶发跨毫秒边界，toISOString 差 1ms 导致 flaky。
+    const expiry = new Date(Date.now() + 3 * 86_400_000).toISOString()
     expect(WorkBuddy.startPlanWindows([
-      { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, unit: 'tokens', expiredAt: new Date(Date.now() + 3 * 86_400_000).toISOString() },
-    ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens', resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() }])
+      { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, unit: 'tokens', expiredAt: expiry },
+    ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens', resetsAt: expiry }])
   })
 })
 
