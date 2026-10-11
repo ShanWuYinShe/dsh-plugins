@@ -1,3 +1,14 @@
+## 0.4.14-alpha.13 (2026-10-11)
+
+### 修复
+
+* **默认思考等级不再向上游下发 `reasoning_effort: "off"`（修 HTTP 400 / code 11150）**：`reasoningFields` 原先把 `canDisableThinking: true` 的模型的 `off` 档映射成 wire 拼写 `'off'`。而 pi-ai 的 openai-completions 分发把 `thinkingLevelMap.off` 当作「**未指定档位时要下发的值**」（`!options?.reasoningEffort` 分支），于是**每一条不带 effort 的请求**都会带上它——会话标题生成、auto review、任何省略该字段的调用；上游拒绝该拼写（400 / 11150「the reasoning effort value is not supported by the current model」），实测真正让这类模型不思考的做法是**不发该字段**。现在 `off` 恒为 `null`：默认请求不带字段（上游默认行为），选择器也不再展示做不到的「Off」项。
+* **探针识别上游变更后的拒绝词表**：同一语义的拒绝从 `extError.code: invalid_reasoning_effort` 变为 `extError.code: invalid_request_error` + 顶层 `code: 11150` + 消息「the reasoning effort value is not supported by the current model」。`errorCodeOf` 把两种词表归一化为规范码，避免整轮档位探测退化成 `unknown`——那会让「上游确实会拒绝某些值」这一事实永远学不到。
+
+### 测试
+
+* `reasoning` 补「`off` 永不给 wire 拼写」断言（含 `canDisableThinking: true` 的模型）；`upstream` 补新词表归一化用例。
+
 ## 0.4.14-alpha.12 (2026-10-11)
 
 ### 修复

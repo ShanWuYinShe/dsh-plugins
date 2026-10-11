@@ -548,6 +548,26 @@ describe('WorkBuddyUpstreamClient.probeEffort', () => {
     expect(attempt).toEqual({ status: 400, streamed: false, errorCode: 'invalid_reasoning_effort', detail: 'invalid_reasoning_effort' })
   })
 
+  it('normalizes the 2026-10-11 rejection vocabulary to the canonical effort code', async () => {
+    // 实测（deepseek-v4.1-flash，2026-10-11）：同一语义的拒绝换了词表——
+    // extError.code 从 invalid_reasoning_effort 变成 invalid_request_error，顶层
+    // code 11150，msg 明说 "the reasoning effort value is not supported by the
+    // current model"。不归一化的话探针的 isEffortRejection 认不出它，整轮探测
+    // 退化成 unknown，于是「上游确实会拒绝某些档位」这个事实永远学不到。
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({
+        code: 11150,
+        msg: 'the reasoning effort value is not supported by the current model',
+        extError: { code: 'invalid_request_error', message: 'the reasoning effort value is not supported by the current model' },
+      }),
+      { status: 400 },
+    )))
+    const attempt = await new WorkBuddyUpstreamClient().probeEffort(CREDENTIAL, 'm', 'off', ctrl.signal)
+    expect(attempt.status).toBe(400)
+    expect(attempt.errorCode).toBe('invalid_reasoning_effort')
+    expect(attempt.detail).toContain('reasoning effort')
+  })
+
   it('uses the international body shape and ceiling on the global region', async () => {
     const seen: { body: string }[] = []
     vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init: { body: string }) => {

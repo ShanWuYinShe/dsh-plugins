@@ -191,17 +191,53 @@ export async function readEnvelope(response: Response): Promise<Envelope> {
   return envelope
 }
 
-/** Pull `extError.code` out of an upstream error body, if it is shaped that way. */
+/**
+ * The canonical token meaning "the upstream rejected this reasoning-effort
+ * value". Only the probe keys on it.
+ */
+const INVALID_EFFORT_CODE = 'invalid_reasoning_effort'
+
+/**
+ * Vendor code carrying the same meaning since the 2026-10-11 vocabulary change
+ * (top-level `code`, with `extError.code` downgraded to `invalid_request_error`).
+ */
+const REASONING_EFFORT_REJECTED_CODE = 11150
+
+/**
+ * Pull the upstream's error identity out of an error body.
+ *
+ * The "effort value rejected" answer changed vocabulary: it used to arrive as
+ * `extError.code: invalid_reasoning_effort`, and now comes back as
+ * `extError.code: invalid_request_error` + top-level `code: 11150` + the
+ * message "the reasoning effort value is not supported by the current model".
+ * Both are normalized to the canonical {@link INVALID_EFFORT_CODE} here, so
+ * the effort probe keys on one vocabulary: a vendor rename must not silently
+ * downgrade every probe to `unknown` (measured 2026-10-11: `deepseek-v4.1-flash`
+ * rejects `off` exactly this way, and the plugin's own `off` mapping was
+ * sending it on every default request).
+ */
 export function errorCodeOf(text: string): { errorCode?: string; detail?: string } {
   try {
     const parsed: unknown = JSON.parse(text)
     if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
       const wrapped = parsed as Record<string, unknown>
-      const extError = wrapped['extError']
-      if (typeof extError === 'object' && extError !== null && !Array.isArray(extError)) {
-        const code = (extError as Record<string, unknown>)['code']
-        if (typeof code === 'string') return { errorCode: code, detail: code }
+      const rawExtError = wrapped['extError']
+      const extError = typeof rawExtError === 'object' && rawExtError !== null && !Array.isArray(rawExtError)
+        ? rawExtError as Record<string, unknown>
+        : undefined
+      const code = typeof extError?.['code'] === 'string' ? extError['code'] as string : undefined
+      if (code === INVALID_EFFORT_CODE) return { errorCode: code, detail: code }
+      const message = typeof wrapped['msg'] === 'string' && wrapped['msg'] !== ''
+        ? wrapped['msg'] as string
+        : typeof extError?.['message'] === 'string' ? extError['message'] as string : ''
+      const numericCode = typeof wrapped['code'] === 'number' ? wrapped['code'] : undefined
+      if (numericCode === REASONING_EFFORT_REJECTED_CODE || /reasoning effort/i.test(message)) {
+        return {
+          errorCode: INVALID_EFFORT_CODE,
+          detail: message === '' ? code ?? `code ${String(numericCode)}` : message,
+        }
       }
+      if (code !== undefined) return { errorCode: code, detail: code }
     }
   } catch {
     // Not JSON: fall through to a plain detail line.

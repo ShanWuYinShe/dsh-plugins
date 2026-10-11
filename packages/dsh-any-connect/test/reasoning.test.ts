@@ -31,7 +31,7 @@ describe('reasoningFields', () => {
     }))
     expect(reasoning).toBe(true)
     expect(thinkingLevelMap).toEqual({
-      off: 'off',
+      off: null,
       minimal: null,
       low: 'low',
       medium: null,
@@ -39,6 +39,21 @@ describe('reasoningFields', () => {
       xhigh: 'xhigh',
       max: null,
     })
+  })
+
+  it('never maps off to a wire spelling, even when the model can disable thinking', () => {
+    // 2026-10-11 实测修正：pi-ai 会把 thinkingLevelMap.off 当作「未指定档位时的
+    // 下发值」注入每一条默认请求（会话标题 / auto review 都不带 effort）。而
+    // 上游拒绝字符串 'off'（400 code 11150），真正关闭思考的做法是不发该字段。
+    // 所以这里恒为 null：既不再污染默认请求，也不展示做不到的「Off」选项。
+    const { thinkingLevelMap } = reasoningFields(model({
+      supports: true,
+      onlyReasoning: true,
+      supportedEfforts: ['low', 'high'],
+      defaultEffort: 'high',
+      canDisableThinking: true,
+    }))
+    expect(thinkingLevelMap?.off).toBeNull()
   })
 
   it('offers only the default effort for an old-form model (wire value is ignored)', () => {

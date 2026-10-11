@@ -144,8 +144,11 @@ export interface WorkBuddyAdapter {
  *   rows), and for these rows an unverified value demonstrably does not change
  *   behavior — offering a selectable ladder there would advertise control the
  *   upstream ignores.
- * - `off` is offered only when the model explicitly reports thinking can be
- *   disabled (`canDisableThinking === true`); probing never grants `off`.
+ * - `off` never carries a wire spelling: the upstream rejects the string
+ *   `off` (400 / code 11150) and pi-ai injects this entry into every request
+ *   that omits an effort, so a string here breaks default calls (session
+ *   titles, auto review) rather than only an explicit "off" pick. See the map
+ *   below for the measurements.
  */
 export function reasoningFields(
   info: WorkBuddyModelInfo,
@@ -168,10 +171,20 @@ export function reasoningFields(
     : undefined
   const efforts: readonly string[] = declared ?? observedSet ?? [reasoning.defaultEffort ?? 'high']
   const map: Record<ModelThinkingLevel, string | null> = {
-    // Probing never grants `off`; only an explicit declaration on a declared
-    // set does — disabling thinking is a separate capability, and the
-    // per-model acceptance of `off` cannot be inferred from the row's shape.
-    off: reasoning.canDisableThinking === true && declared !== undefined && declared.length > 0 ? 'off' : null,
+    // `off` 刻意不给 wire 拼写（2026-10-11 实测修正）。两条理由都是实测的：
+    //
+    // 1. pi-ai 的 openai-completions 分发把这个条目当作「未指定档位时要下发的
+    //    值」（`!options?.reasoningEffort` → `reasoning_effort = thinkingLevelMap.off`）。
+    //    所以这里放字符串，会被注入**每一条**默认请求——会话标题、auto review、
+    //    任何不带 effort 的调用——而不只是用户显式选「Off」时。
+    // 2. 上游拒绝 `off` 这个拼写（HTTP 400 / code 11150「the reasoning effort
+    //    value is not supported by the current model」），而真正让模型不思考的
+    //    做法是**不下发该字段**（同模型实测：不传 → 响应无 reasoning；传 high
+    //    → 有）。也就是说原来的 'off' 字符串既买不到关闭思考，还让每条默认请求
+    //    都吃一个 400。
+    // 置 null 后：默认请求不带字段（上游默认行为），选择器也不再提供「Off」——
+    // 在拿到**逐模型验证过**的关闭拼写之前，不展示做不到的控制。
+    off: null,
     minimal: efforts.includes('minimal') ? 'minimal' : null,
     low: efforts.includes('low') ? 'low' : null,
     medium: efforts.includes('medium') ? 'medium' : null,
