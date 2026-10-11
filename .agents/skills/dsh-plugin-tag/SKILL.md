@@ -68,8 +68,11 @@ pending → tag3 排队**把 tag2 顶掉** → tag4 排队**把 tag3 顶掉**—
 
 ```bash
 bun run gate                       # 1. 干跑，确认该版本可发布
-git tag -a <目录>-v<版本> -m "<包名> v<版本>"   # 2. 打 annotated tag
-git show <tag> --stat              # 3. 核对 tag 指向的提交与内容
+# 2. 打 annotated tag：显式给出目标提交，禁止用 `||` 兜底（见下）
+git tag -a <目录>-v<版本> -m "<包名> v<版本>" <发布提交>
+# 3. 回验哈希：tag 指向的提交必须就是发布提交（不靠肉眼）
+git rev-parse <tag>^{commit}       # 必须等于 git rev-parse <发布提交>
+git show <tag> --stat              # 顺带确认内容
 
 # 4. 先推分支（只跑测试），确保 tag 落在远程已存在的提交上
 git push
@@ -80,6 +83,14 @@ gh run list --workflow=publish.yml --branch <tag> \
   --limit 1 --json databaseId,event \
   --jq 'map(select(.event=="push")) | .[0].databaseId // empty'
 ```
+
+**tag 的目标提交必须显式给出，并在推送前回验哈希。** 实测踩坑（2026-10-11）：
+写成 `git tag -a T -m M <旧提交> 2>/dev/null || git tag -a T -m M HEAD` 时，前半段
+在旧提交上**成功**，`||` 根本不触发，tag 静默指向上一个版本的提交；因为推送前用
+`git rev-parse <tag>^{commit}` 和 `HEAD` 比过哈希才发现（若直接推就会把错版发出去）。
+两条规则：① 目标提交一律显式写（`HEAD` 或具体哈希），不用「失败再兜底」的写法；
+② 打完立刻 `git rev-parse <tag>^{commit}` 与发布提交逐字符比对。另：tag 命令上的
+`2>/dev/null` 会吞掉失败原因，不要加。
 
 **第 5 步的确认输出为空 = 没触发 push 流水，必须停下排查，不要继续推下一个**
 （多半是批量推送超限或流水被顶掉，通用机制见全局 `git-workflow`）。`--branch` 接受 tag 名
