@@ -812,18 +812,23 @@ describe('Start Plan 专属通道（额度绝不与 Coding Plan 混用）', () =
     expect(mockFetch).toHaveBeenCalledTimes(1)
   })
 
-  it('start-plan 额度查 billing/balance 并映射 token 数与活动名', async () => {
+  it('start-plan 额度查 billing/balance 并映射 token 数与活动名（当日到期 → sameDay）', async () => {
+    // expires_at 取「今天 23:59 本地」：日历日与当前时刻相同，sameDay 置位。
+    // 用相对时间构造而不是固定 epoch，避免测试在某一天固定失败。
+    const endOfToday = new Date()
+    endOfToday.setHours(23, 59, 0, 0)
+    const expiresAtSec = Math.floor(endOfToday.getTime() / 1000)
     const mockFetch = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response(JSON.stringify({
       code: 0,
       data: {
-        plans: [{ name: 'ZCode Trust Build', plan_id: 'zcode-v3-start-plan-trust-0930', ends_at: 1790784000 }],
+        plans: [{ name: 'ZCode Trust Build', plan_id: 'zcode-v3-start-plan-trust-0930', ends_at: expiresAtSec }],
         balances: [{
           show_name: 'GLM-5.3-Flash',
           plan_id: 'zcode-v3-start-plan-trust-0930',
           total_units: 100000000,
           used_units: 5701561,
           remaining_units: 94298439,
-          expires_at: 1790784000,
+          expires_at: expiresAtSec,
         }],
       },
     }), { status: 200 }))
@@ -833,12 +838,35 @@ describe('Start Plan 专属通道（额度绝不与 Coding Plan 混用）', () =
     expect(credits.accounts[0]?.planName).toBe('ZCode Trust Build')
     expect(credits.accounts[0]?.remain).toBe(94298439)
     expect(credits.accounts[0]?.size).toBe(100000000)
-    expect(credits.accounts[0]?.expiredAt).toBe(new Date(1790784000 * 1000).toISOString())
-    // 当日一次性池子：卡片据此声明"不结转"，而不是让它读成可累积余额。
+    expect(credits.accounts[0]?.expiredAt).toBe(new Date(expiresAtSec * 1000).toISOString())
+    // 到期时刻落在今天 → 卡片据此声明「当日作废，不结转」。
     expect(credits.accounts[0]?.sameDay).toBe(true)
     const headers = ((mockFetch.mock.calls[0]![1] ?? {}) as RequestInit).headers as Record<string, string>
     expect(headers['Authorization']).toBe('Bearer jwt-token')
     expect(headers['X-Device-Mid']).toBe('mid-1')
+  })
+
+  it('start-plan 额度非当日到期 → 不置 sameDay（如实报有效期，不说「当日清零」）', async () => {
+    // 实测出现过多日有效期的包：官方白名单/响应没有承诺「当日」，
+    // 硬编码 sameDay 会让卡片同时显示「当日作废」与「有效期至三天后」。
+    const expiresAtSec = Math.floor(Date.now() / 1000) + 3 * 86_400
+    const mockFetch = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      code: 0,
+      data: {
+        plans: [{ name: 'ZCode Trust Build', plan_id: 'zcode-v3-start-plan-trust-0930' }],
+        balances: [{
+          show_name: 'GLM-5.3-Flash',
+          plan_id: 'zcode-v3-start-plan-trust-0930',
+          total_units: 100000000,
+          remaining_units: 94298439,
+          expires_at: expiresAtSec,
+        }],
+      },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', mockFetch)
+    const credits = await new ZCodeUpstreamClient().fetchCredits(startPlanCredential)
+    expect(credits.accounts[0]?.expiredAt).toBe(new Date(expiresAtSec * 1000).toISOString())
+    expect(credits.accounts[0]?.sameDay).toBeUndefined()
   })
 
   it('模型名单按活动 entitlements 派生：只登记活动实际放行的模型', async () => {

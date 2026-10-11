@@ -223,10 +223,11 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
 
   it('Start Plan 的当日 token 池带真实数字,pill 才有剩余额度可显示', () => {
     // billing/balance 的实测形状(2026-10-06):remain/size 是真实 token 数,
-    // sameDay: true。窗口缺 remain 时 pill 只渲染「套餐名: 有效」——数字被
+    // unit: 'tokens'（2026-10-11 起进度条判据是 unit，sameDay 只管文案口径）。
+    // 窗口缺 remain 时 pill 只渲染「套餐名: 有效」——数字被
     // 丢掉等于用户在聊天框下方看不到剩余额度。
     expect(WorkBuddy.currentPlanWindow([
-      { packageName: 'GLM-5.3-Flash (有效)', planName: 'ZCode Trust Build', remain: 91_464_568, size: 100_000_000, sameDay: true, expiredAt: '2026-10-06T16:00:00.000Z' },
+      { packageName: 'GLM-5.3-Flash (有效)', planName: 'ZCode Trust Build', remain: 91_464_568, size: 100_000_000, sameDay: true, unit: 'tokens', expiredAt: '2026-10-06T16:00:00.000Z' },
     ])).toEqual([{
       id: 'plan',
       label: 'GLM-5.3-Flash',
@@ -237,11 +238,11 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
     }])
     // 当日用完(remain=0):照样带数字——红色空条正是「今天用完了」的语义。
     expect(WorkBuddy.currentPlanWindow([
-      { packageName: 'GLM-5.3-Flash (有效)', remain: 0, size: 100_000_000, sameDay: true },
+      { packageName: 'GLM-5.3-Flash (有效)', remain: 0, size: 100_000_000, sameDay: true, unit: 'tokens' },
     ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 0, limit: 100_000_000, unit: 'tokens' }])
     // size = 0(理论不应出现)防御:退回「有效」展示,避免 limit 0 的除零与无意义进度条。
     expect(WorkBuddy.currentPlanWindow([
-      { packageName: 'Odd (有效)', remain: 5, size: 0, sameDay: true },
+      { packageName: 'Odd (有效)', remain: 5, size: 0, sameDay: true, unit: 'tokens' },
     ])).toEqual([{ id: 'plan', label: 'Odd', unit: '有效' }])
     // Coding Plan 订阅(无 sameDay,remain/size=1 的有效性标志)维持原样。
     expect(WorkBuddy.currentPlanWindow([
@@ -254,10 +255,15 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
     // 空 balances）。pill 若落到通用的「该 provider 不上报额度」，用户会以为额度
     // 功能坏了——额度接口其实是通的，只是今天还没有池子。
     expect(WorkBuddy.startPlanWindows([])).toEqual([{ id: 'plan', label: 'Start Plan', unit: '今日待领取' }])
-    // 有当日池子时仍然报真实 token 数（复用 currentPlanWindow 的 sameDay 口径）。
+    // 有池子时仍然报真实 token 数（unit: 'tokens' 声明 token 计数池）。
     expect(WorkBuddy.startPlanWindows([
-      { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, sameDay: true },
+      { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, sameDay: true, unit: 'tokens' },
     ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens' }])
+    // 多日有效期的池子同样画进度条（sameDay 只管文案口径，不再决定进度条
+    // 的有无）——unit: 'tokens' 在就能画。
+    expect(WorkBuddy.startPlanWindows([
+      { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, unit: 'tokens', expiredAt: new Date(Date.now() + 3 * 86_400_000).toISOString() },
+    ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens', resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() }])
   })
 })
 

@@ -102,16 +102,16 @@ export function currentPlanWindow(accounts: readonly WorkBuddyCreditAccount[]): 
   const current = accounts.find(account => account.remain > 0) ?? accounts[0]
   if (current === undefined) return []
   const label = current.packageName.replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, '')
-  // sameDay 是 Start Plan 当日池的特有标志（fetchStartPlanCredits 恒置）；
-  // size > 0 才有进度条可画。remain = 0（当日用完）照样带数字——红色空条
-  // 正是「今天用完了」的正确语义。
-  if (current.sameDay === true && current.size > 0) {
+  // token 计数池（Start Plan，无论当日还是多日有效期）画 remain/size 进度条。
+  // remain = 0（用完了）照样带数字——红色空条正是「用完了」的正确语义。
+  // WorkBuddy 的积分制账户不带 unit，走下面的「有效」窗口。
+  if (current.unit === 'tokens' && current.size > 0) {
     return [{
       id: 'plan',
       label,
       remain: current.remain,
       limit: current.size,
-      unit: 'tokens',
+      unit: current.unit,
       ...current.expiredAt ? { resetsAt: current.expiredAt } : {},
     }]
   }
@@ -124,8 +124,8 @@ export function currentPlanWindow(accounts: readonly WorkBuddyCreditAccount[]): 
 }
 
 /**
- * Start Plan 的 pill 窗口：当日池子存在时报真实 token 数（{@link currentPlanWindow}
- * 对 sameDay 池已带 remain/limit）；今天还没领取或尚未发放时**如实说「今日待领取」**，
+ * Start Plan 的 pill 窗口：池子存在时报真实 token 数（remain/limit，当日与
+ * 多日有效期都画进度条）；今天还没领取或尚未发放时**如实说「今日待领取」**，
  * 而不是让 pill 落到通用的「该 provider 不上报额度」——那会让用户以为额度功能坏了，
  * 而且额度接口本身是通的（billing/balance 返回空 balances 才是事实）。
  *

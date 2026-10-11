@@ -126,8 +126,14 @@ export interface WorkBuddyWebCreditAccount {
   size: number
   expiredAt?: string
   /**
-   * The pool is granted for one day and does not carry over — the card says so
-   * instead of letting a daily reset read as an accumulating balance.
+   * 这个池子是 token 计数池：pill/进度条据此画 remain/size（WorkBuddy 的
+   * 积分制账户不带它，走「有效」窗口）。Start Plan 的池子恒为 tokens。
+   */
+  unit?: 'tokens'
+  /**
+   * 到期时刻落在今天（本地日历日）：卡片据此说「当日作废，不结转」。
+   * 多日有效期的包不置位——如实只报到期时间，不说「今天清零」。
+   * （2026-10-11 起由 expires_at 动态判定，不再硬编码当日。）
    */
   sameDay?: true
 }

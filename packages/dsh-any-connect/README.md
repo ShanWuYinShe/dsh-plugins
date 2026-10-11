@@ -125,7 +125,7 @@ profile/home 的 `cordis.patch.yml`（DSH 0.1.7 起第三方 provider 的模型�
     自动恢复。
   * **Start Plan 专属通道与每日领取**：`zcode-start-plan` 走
     `zcode.z.ai/api/v1/zcode-plan/anthropic`（Bearer 账号 JWT + 设备号），
-    额度扣**当日有效的一次性 token 包**（不结转，过期清零），请求失败如实
+    额度扣**一次性 token 包**（各有有效期，到期作废不结转），请求失败如实
     报错、绝不静默回落到 Coding Plan 通道。每日领取必须通过 ZCode 客户端
     （领取需客户端渲染进程签发的验证码，纯 HTTP 侧无法生成——插件每天自动
     探测可领活动并在卡片提示，领取动作为手动）。

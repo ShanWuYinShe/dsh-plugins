@@ -128,13 +128,19 @@ export interface WorkBuddyCreditAccount {
    */
   planName?: string
   /**
-   * This pool is granted for one day and expires the same day — an unconsumed
-   * remainder is not carried over.
+   * Token-counted pool: the pill draws a remain/size progress bar for it
+   * (WorkBuddy's credit accounts are points-based and walk the validity
+   * window instead). ZCode Start Plan pools are always tokens.
+   */
+  unit?: 'tokens'
+  /**
+   * The pool expires today (local calendar day) — the card says "use it or
+   * lose it by the end of today". Pools with a longer validity do NOT set
+   * this: they report their real expiry instead of claiming a same-day wipe.
    *
-   * Set for ZCode Start Plan quota (measured 2026-09-30: `period: "one_time"`,
-   * `expires_at` pinned to the day's end). The card must say so: a balance that
-   * silently resets reads as "use it or lose it", and a user who thinks it
-   * accumulates would budget against credit that does not exist.
+   * Dynamically derived from `expires_at` since 2026-10-11; the 2026-09-30
+   * measurement (`period: "one_time"`, expiry pinned to that day's end) was
+   * a sample of one, and multi-day packs do occur.
    */
   sameDay?: true
 }

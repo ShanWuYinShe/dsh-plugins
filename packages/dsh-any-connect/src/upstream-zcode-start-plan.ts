@@ -214,22 +214,37 @@ export async function fetchStartPlanCredits(
       }
     }
     const plans = json.data?.plans ?? []
-    // 额度是**当日一次性池子**：活动当天发放、当天到期、余额不结转（实测
-    // `period: "one_time"` + `expires_at` 固定当日 16:00Z）。所以卡片与 pill
-    // 报的都是"这个池子此刻还剩多少"，而不是任何可累积的订阅余额。
+    // 额度是**一次性池子，各有有效期**：`expires_at` 是每份额度自己的到期时刻
+    // （2026-09-30 实测样本恰好都是当日 16:00Z，之后实测也出现过更长的有效期——
+    // 官方没承诺「当日」，所以 sameDay 按到期时刻是否落在今天**动态判定**，
+    // 不再硬编码；不结转的语义对两种都成立）。卡片与 pill 报的都是
+    // "这个池子此刻还剩多少"，而不是任何可累积的订阅余额。
+    const now = Date.now()
     const accounts: WorkBuddyCreditAccount[] = (json.data?.balances ?? []).map(balance => {
       const plan = plans.find(entry => entry.plan_id !== undefined && entry.plan_id === balance.plan_id)
       let expiredAt: string | undefined
+      let sameDay: true | undefined
       if (typeof balance.expires_at === 'number' && balance.expires_at > 0) {
         const d = new Date(balance.expires_at * 1000)
-        if (!Number.isNaN(d.getTime())) expiredAt = d.toISOString()
+        if (!Number.isNaN(d.getTime())) {
+          expiredAt = d.toISOString()
+          // 「当日作废」只在到期时刻确实落在今天（本地日历日）时成立；
+          // 多日有效期的包如实只报到期时间，不说「今天清零」。
+          const nowDate = new Date(now)
+          sameDay = d.getFullYear() === nowDate.getFullYear()
+            && d.getMonth() === nowDate.getMonth()
+            && d.getDate() === nowDate.getDate()
+            ? true
+            : undefined
+        }
       }
       return {
         packageName: `${balance.show_name ?? 'Start Plan'} (有效)`,
         // 活动名（如 "ZCode Trust Build"）是用户看到的套餐名。
         planName: plan?.name ?? balance.show_name ?? 'Start Plan',
-        // 该池子当日有效、不结转：到期时间就是它的"清零时刻"。
-        sameDay: true,
+        // 到期时间就是它的"清零时刻"；sameDay 只在确实当日到期时置位。
+        ...sameDay === undefined ? {} : { sameDay },
+        unit: 'tokens',
         remain: typeof balance.remaining_units === 'number' ? balance.remaining_units : 0,
         size: typeof balance.total_units === 'number' ? balance.total_units : 0,
         ...expiredAt === undefined ? {} : { expiredAt },
