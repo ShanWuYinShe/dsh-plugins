@@ -65,6 +65,20 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    ```
    （2026-09-25 实测：0.1.7-rc.2 验证即用此法；根路径探测返回 401 属正常——服务在跑、只是要 token。）
 
+   **隔离 home 必须是全新目录，宿主启动后必须核对 URL 行（2026-10-11 实测）**：
+
+   - 复用旧验证 home 会混入用户全局配置的残留（`cordis.patch.yml` 的
+     agent-default-model/welcomeNotice patch、旧 `.credentials.yaml` 等），
+     表象是**宿主正常监听、插件心跳也在写，但 `dsh web:` URL 行永远不打印、
+     页面 401**——极像插件把宿主搞挂。重建全新 home 后同样操作一切正常。
+     判定法：`ls -la <DSH_HOME>`，发现早于本次会话时间戳的文件即为污染，整目录删掉重建。
+   - 宿主**端口被占（EADDRINUSE）时静默退出、无任何输出**——起宿主后必须
+     同时确认 `lsof -iTCP:<port> -sTCP:LISTEN` 有监听**且**日志/终端里出现了
+     `dsh web: http://…token=` 行，二者齐备才算启动成功。
+   - 启动日志里 URL 的 `token=` 每次启动随机变化，重启后旧 token 一律失效；
+     后台起宿主用双重 fork（`( nohup … >log 2>&1 & )`）——普通 `… &` 会让
+     bash 等待整棵进程树直到超时。
+
    **沙盒下 bun 装包要先重定向缓存（2026-09-30 实测）**：新 rc 的包尚未进本机
    bun 缓存时，`bun install` 需要写工作区外的默认缓存目录，在 `workspace-write`
    下报 `error: bun is unable to write files to tempdir: EPERM`（重定向 `TMPDIR`
