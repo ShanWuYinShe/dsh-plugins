@@ -178,7 +178,21 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
   const zcodePlanName = zcodePlan
     ? (zcodePlan.planName ?? zcodePlan.packageName).replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, '')
     : undefined
-  const isPlanActive = zcodePlan !== undefined && zcodePlan.remain > 0
+  // 展示状态三态（2026-10-11 修）：有剩余额度=有效；无剩余且仍在有效期内=已用完；
+  // 无剩余且已过到期时刻=已过期。**remain 与到期是两件独立事实**——额度可能在到
+  // 期前就耗尽（本机实测 SP 额度 0/300M、到期在次日 09:00），原来的
+  // `remain > 0 ? 有效 : 已过期` 会把「用完了」误报成「已过期」。
+  const planState: 'active' | 'exhausted' | 'expired' | undefined = zcodePlan === undefined
+    ? undefined
+    : zcodePlan.remain > 0
+      ? 'active'
+      : zcodePlan.expiredAt !== undefined && Date.parse(zcodePlan.expiredAt) <= Date.now()
+        ? 'expired'
+        : 'exhausted'
+  const isPlanActive = planState === 'active'
+  const planStateLabel = planState === undefined
+    ? undefined
+    : t(planState === 'active' ? 'codingPlanActive' : planState === 'expired' ? 'codingPlanExpired' : 'planQuotaExhausted')
   const displayPlanName = isStartPlanCard ? (zcodePlanName ?? t('startPlanLabel')) : zcodePlanName
 
   // 卡头摘要：已登录身份 + 当前积分/套餐状态，收起态下也要一眼看到。
@@ -187,7 +201,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
       ? [
           label,
           displayPlanName !== undefined
-            ? `${displayPlanName} · ${t(isPlanActive ? 'codingPlanActive' : 'codingPlanExpired')}`
+            ? `${displayPlanName} · ${planStateLabel ?? t('codingPlanActive')}`
             : (status.credits !== undefined ? t('codingPlanActive') : undefined),
         ].filter(part => part !== undefined).join(' · ')
       : [
@@ -229,6 +243,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     isStartPlanCard,
     zcodePlan,
     isPlanActive,
+    planStateLabel,
     displayPlanName,
     headerSummary,
     catalogOffline,

@@ -60,7 +60,7 @@ export function VariantCard(props: {
     t, variant, status, open, onToggle,
     busy, notice, modelsOpen, setModelsOpen, copiedPlanId,
     probe, startPlanClaim, copyPlanId, refresh,
-    refreshWithCatalog, title, label, isZCode, isStartPlanCard, zcodePlan, isPlanActive, displayPlanName, headerSummary, catalogOffline, effortsOf,
+    refreshWithCatalog, title, label, isZCode, isStartPlanCard, zcodePlan, isPlanActive, planStateLabel, displayPlanName, headerSummary, catalogOffline, effortsOf,
   } = useVariantCard(props)
 
   return (
@@ -92,7 +92,7 @@ export function VariantCard(props: {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                     <span style={planNameStyle}>{displayPlanName ?? t('codingPlanLabel')}</span>
                     <span style={isPlanActive ? chipStyle : { ...chipStyle, background: 'var(--dsw-alias-bg-layer-3, rgba(128, 128, 128, 0.12))', color: 'var(--dsw-alias-label-tertiary)' }}>
-                      {t(isPlanActive ? 'codingPlanActive' : 'codingPlanExpired')}
+                      {planStateLabel ?? t('codingPlanActive')}
                     </span>
                   </div>
                   <button

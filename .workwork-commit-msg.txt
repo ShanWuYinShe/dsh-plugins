@@ -1,8 +1,9 @@
-新增(dsh-any-connect): README 数据布局章节、CLI 状态域句柄统一释放与域分支测试
+修复(dsh-any-connect): 额度「已用完」不再误报为「已过期」
 
-- README 新增「数据与文件位置」：三处落点、自动迁移行为与桌面端只读边界
-- CLI（bin）状态域句柄进程内共享、run() 收尾统一 close（此前从不释放）
-- auth.test 补 storageDomain 分支三个用例：读域/刷新落域/注销清域
-- usage.test 修一处 Date.now 两侧求值的 flaky（跨毫秒边界 toISOString 差 1ms）
+- 卡片状态徽标原按 remain > 0 ? 有效 : 已过期 判定：额度在到期前耗尽时
+  误报「已过期」——实测本机 Start Plan 额度 0/3 亿、有效期到次日 09:00
+- 改三态：有剩余=有效、无剩余未到期=已用完（新增文案）、无剩余已到期=已过期
+  判定读各账户 expiredAt，不再用「有无剩余」推断有效期
+- config-page 补三种口径的渲染断言
 
 Model: glm-5.3-flash
