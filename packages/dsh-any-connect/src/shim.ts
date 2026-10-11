@@ -20,6 +20,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { Readable } from 'node:stream'
 import type { WorkBuddyCredentialStore } from './auth.js'
 import type { WorkBuddyCatalog } from './catalog.js'
+import { applyDefaultEffort } from './reasoning-default.js'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { prepareChatBody, WorkBuddyUpstreamClient, type UpstreamErrorKind } from './upstream.js'
 import { isJsonContentType, KIND_STATUS, writeJson, writeOpenAIError, writeAnthropicError, RequestBodyTooLarge, readBody, upstreamFailureMessage } from './shim-http.js'
@@ -217,7 +218,13 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     }
 
     const raw = (await readBody(req)).toString('utf8')
-    const prepared = prepareChatBody(raw)
+    // 「默认」档的回落（见 reasoning-default.ts）：模型没有非思考状态时，「不发字段」
+    // 等于让上游按自身默认跑——实测表现为完全不返回思考内容。这里补上 high（没有
+    // high 则可用档位里的最高一档）；请求本来带了显式档位时一个字都不动。
+    const prepared = applyDefaultEffort(
+      prepareChatBody(raw),
+      (id) => catalog.current().find(model => model.id === id),
+    )
 
     const controller = new AbortController()
     // Node ≥16 起 IncomingMessage 的 'close' 是「请求完成」而非「socket 关闭」:

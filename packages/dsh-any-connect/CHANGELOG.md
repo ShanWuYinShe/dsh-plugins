@@ -1,3 +1,13 @@
+## 0.4.14-alpha.14 (2026-10-11)
+
+### 新增
+
+* **「默认」思考等级对只能思考的模型回落为具体档位**：上游 `onlyReasoning: true` 的模型没有「不思考 / default」状态，实测「不发 `reasoning_effort`」等于**完全不思考**（deepseek-v4.1-flash / glm-5.3 / glm-5.3-flash 三行同为 0 字符思考内容，而显式 low/medium/high/max 都有）。现在这类模型收到「默认」请求时补上 **`high`**；没有 `high` 则取可用档位里的**最高**一档（与选择器展示的档位同源）。有非思考状态（`onlyReasoning: false`）的模型与显式档位请求一律不动。
+
+### 测试
+
+* 新增 `reasoning-default.test.ts`（档位选择 + 请求体改写）；`shim.test.ts` 补「缺省请求补 high」与「目录外模型不改写」两个端到端用例。
+
 ## 0.4.14-alpha.13 (2026-10-11)
 
 ### 修复

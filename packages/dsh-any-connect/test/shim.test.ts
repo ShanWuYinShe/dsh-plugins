@@ -167,6 +167,44 @@ describe('WorkBuddy shim', () => {
     expect(forwarded['stream']).toBe(true)
   })
 
+  it('supplies the default fallback effort when the request carries none', async () => {
+    // 「默认」不再等于「不思考」：onlyReasoning 模型（如 deepseek-v4.1-flash）没有
+    // 非思考状态，缺省请求补 high；显式档位由上一用例保证原样保留。
+    const harness = await startShim(() => ({
+      ok: true,
+      response: new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    }))
+    const response = await fetch(`${harness.shim.baseUrl()}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${harness.shim.token()}` },
+      body: JSON.stringify({ model: 'deepseek-v4.1-flash', messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    expect(response.status).toBe(200)
+    const forwarded = JSON.parse(harness.upstreamBodies[0] ?? '') as Record<string, unknown>
+    expect(forwarded['reasoning_effort']).toBe('high')
+  })
+
+  it('leaves the body alone for a model outside the catalog', async () => {
+    const harness = await startShim(() => ({
+      ok: true,
+      response: new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    }))
+    const response = await fetch(`${harness.shim.baseUrl()}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${harness.shim.token()}` },
+      body: JSON.stringify({ model: 'not-a-real-model', messages: [] }),
+    })
+    expect(response.status).toBe(200)
+    const forwarded = JSON.parse(harness.upstreamBodies[0] ?? '') as Record<string, unknown>
+    expect(forwarded['reasoning_effort']).toBeUndefined()
+  })
+
   it('maps an upstream credit failure onto HTTP 402', async () => {
     const harness = await startShim(() => ({
       ok: false,
