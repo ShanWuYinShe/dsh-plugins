@@ -12,6 +12,7 @@
 import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { WorkBuddyCredentialStore, workbuddyOwnAuthPath, WORKBUDDY_AUTH_FILE_ENV } from './auth.js'
+import { openStandaloneStateStore } from './state-store.js'
 import type { WorkBuddyCreditAccount } from './upstream.js'
 import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS } from './catalog.js'
 import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
@@ -55,11 +56,19 @@ function printJson(value: unknown): void {
 }
 
 /** Credential store wired for CLI diagnostics. */
-function makeWorkBuddyStore(variant: WorkBuddyVariant): WorkBuddyCredentialStore {
+async function makeWorkBuddyStore(variant: WorkBuddyVariant): Promise<WorkBuddyCredentialStore> {
   // 与插件运行时同一份装配（见 variant-wiring.ts）：计划语义 / 刷新通道都由它
   // 决定，CLI 不再自己拼一遍——历史上正是这里漏掉 transformCredential，把
   // zcode-start-plan 的额度查询指到了 coding 池子。
-  return createVariantCredentialStore({ variant, client: upstreamClientFor(variant) })
+  // 状态域独立打开（与插件运行时同一存储单元，见 state-store.ts）：logout 删的
+  // 域副本与插件运行时所见一致；域打不开时降级文件回落并告警，诊断照常工作。
+  let state
+  try {
+    state = await openStandaloneStateStore()
+  } catch (error: unknown) {
+    console.warn(`dsh-any-connect: state domain unavailable (${String(error)}); owned-copy operations use the file fallback`)
+  }
+  return createVariantCredentialStore({ variant, client: upstreamClientFor(variant), ...state === undefined ? {} : { state } })
 }
 
 /** Compiled-in roster size per provider id. */
@@ -75,7 +84,7 @@ function fallbackFor(variant: WorkBuddyVariant): number {
 }
 
 async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
-  const store = makeWorkBuddyStore(variant)
+  const store = await makeWorkBuddyStore(variant)
   const status = await store.status()
   const desktopPresent = await store.desktopFilePresent()
   const desktopPath = await store.resolvedDesktopAuthPath()
@@ -166,7 +175,7 @@ function humanCredits(
 }
 
 async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
-  const store = makeWorkBuddyStore(variant)
+  const store = await makeWorkBuddyStore(variant)
   const authStatus = await store.status()
   const heartbeat = await readHostHeartbeat()
   const hostAlive = heartbeat !== undefined && isHeartbeatProcessAlive(heartbeat)
@@ -294,9 +303,9 @@ export async function run(argv: readonly string[]): Promise<number> {
       case 'status':
         return await status(jsonOutput, variant)
       case 'logout': {
-        const store = makeWorkBuddyStore(variant)
+        const store = await makeWorkBuddyStore(variant)
         await store.logout()
-        process.stdout.write(`${variant.displayName} Connect: removed ${workbuddyOwnAuthPath(variant.ownFilename)}; the desktop app's sign-in is untouched\n`)
+        process.stdout.write(`${variant.displayName} Connect: removed the plugin-owned credential copy (state domain, file fallback ${workbuddyOwnAuthPath(variant.ownFilename)}); the desktop app's sign-in is untouched\n`)
         return 0
       }
     }

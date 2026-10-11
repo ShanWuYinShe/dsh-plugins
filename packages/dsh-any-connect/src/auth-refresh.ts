@@ -14,6 +14,7 @@ import type { WorkBuddyCredential, WorkBuddyStoreOptions } from './auth-types.js
 import type { WorkBuddyVariant } from './variants.js'
 import type { WorkBuddyRefreshOutcome } from './upstream.js'
 import { ownDocument } from './auth-document.js'
+import type { WorkBuddyStateStore } from './state-store.js'
 
 /** 刷新节流状态（调用方持有，跨调用保持）。 */
 export interface RefreshState {
@@ -33,6 +34,12 @@ export interface RefreshContext {
   ownPath: string
   onWarning: (message: string) => void
   state: RefreshState
+  /**
+   * 状态域存取（storageDomain，见 state-store.ts）；给了就把刷新结果写进域，
+   * 否则落到状态目录下的文件副本。域名取 `domain` 以避开 {@link RefreshContext.state}
+   * （刷新节流状态）。
+   */
+  domain?: WorkBuddyStateStore
 }
 
 /** 刷新响应缺 expiresIn 时新 access token 的保守寿命下限(10 分钟)。 */
@@ -98,6 +105,12 @@ const MIN_REUSABLE_LIFETIME_MS = 30_000
   }
 
   export async function saveOwn(ctx: RefreshContext, credential: WorkBuddyCredential): Promise<void> {
+    // 状态域优先（storageDomain 的单写链自带原子性）；没有域才走状态目录下的
+    // 文件副本（CLI 与测试的轻量路径，文件锁 + 原子写）。
+    if (ctx.domain !== undefined) {
+      await ctx.domain.write(ctx.variant.id, credential)
+      return
+    }
     await withFileLock(ctx.ownPath, async () => {
       await writeFileAtomic(ctx.ownPath, `${JSON.stringify(ownDocument(credential), null, 2)}\n`, {
         mode: 0o600,

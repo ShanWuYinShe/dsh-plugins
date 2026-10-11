@@ -18,6 +18,7 @@ import {
 } from './desktop-credential-protection.js'
 import { RegionMismatchError } from './auth-types.js'
 import type { WorkBuddyCredential, WorkBuddyAuthStatus, WorkBuddyStoreOptions } from './auth-types.js'
+import type { WorkBuddyStateStore } from './state-store.js'
 import { WORKBUDDY_AUTH_FILE_ENV, workbuddyOwnAuthPath, desktopAuthCandidatesFor } from './auth-paths.js'
 import { parseZCodeAuth } from './auth-zcode.js'
 import { parseOwnDocument } from './auth-document.js'
@@ -53,6 +54,7 @@ export class WorkBuddyCredentialStore {
    * variants, whose credentials document is plaintext and never encrypted.
    */
   private readonly keyProvider: WorkBuddyStoreOptions['keyProvider']
+  private stateStore: WorkBuddyStateStore | undefined
   private desktopPathOverride: string | undefined
   private inflight: Promise<WorkBuddyCredential> | undefined
   /** 刷新节流与内存兜底状态（由 auth-refresh 读写）。 */
@@ -72,6 +74,16 @@ export class WorkBuddyCredentialStore {
     // one the provider would actually spawn.
     this.keyProvider = options.keyProvider
       ?? (options.variant.kind === 'workbuddy' ? atRestKeyProviderFor(options.variant) : undefined)
+    this.stateStore = options.state
+  }
+
+  /**
+   * 后补注入状态域存取：宿主在 storageDomain 服务就绪并完成旧文件迁移后调用
+   * （见 index.ts 的 inject 时序）。注入后自有副本的读写立即切到域；注入前的
+   * 读写走状态目录下的文件回落，两侧由迁移例程衔接。
+   */
+  setState(state: WorkBuddyStateStore): void {
+    this.stateStore = state
   }
 
   /**
@@ -237,6 +249,14 @@ export class WorkBuddyCredentialStore {
     this.refreshState.memoryCredential = undefined
     this.refreshState.lastRefreshAttemptMs = 0
     this.refreshState.lastRefreshFailureMs = 0
+    if (this.stateStore !== undefined) {
+      try {
+        await this.stateStore.clear(this.variant.id)
+      } catch (error: unknown) {
+        // 域删失败要可见但不阻塞登出:文件回落副本照删,告警说明域副本仍在。
+        this.onWarning(`workbuddy: removing the state-domain credential copy failed: ${String(error)}`)
+      }
+    }
     await rm(this.ownPath, { force: true })
     await rm(`${this.ownPath}.lock`, { force: true })
   }
@@ -253,7 +273,7 @@ export class WorkBuddyCredentialStore {
     await saveOwn(this.refreshContext(), credential)
   }
 
-  /** 刷新策略的入参（含调用方持有的节流状态）。 */
+  /** 刷新策略的入参（含调用方持有的节流状态与状态域存取）。 */
   private refreshContext(): RefreshContext {
     return {
       variant: this.variant,
@@ -262,6 +282,7 @@ export class WorkBuddyCredentialStore {
       ownPath: this.ownPath,
       onWarning: this.onWarning,
       state: this.refreshState,
+      domain: this.stateStore,
     }
   }
   /**
@@ -285,6 +306,15 @@ export class WorkBuddyCredentialStore {
   }
 
   private async readOwn(): Promise<WorkBuddyCredential | undefined> {
+    if (this.stateStore !== undefined) {
+      try {
+        return await this.stateStore.read(this.variant.id)
+      } catch {
+        // 与文件回落同策略:自有副本不是权威源,读失败(域不可用/记录损坏)
+        // 视为无凭据并静默回落桌面文件——抛错只会让每次 resolve 都失败。
+        return undefined
+      }
+    }
     try {
       return parseOwnDocument(await readFile(this.ownPath, 'utf8'))
     } catch {

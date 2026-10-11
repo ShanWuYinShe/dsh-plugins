@@ -24,7 +24,8 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { dshCachePath } from '@deepseek-ai/dsh-home-paths'
+import { CACHE_DIRNAME } from './catalog-store.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import type { WorkBuddyEffort } from './upstream.js'
 
@@ -93,7 +94,8 @@ interface ProbeDocument {
  * observation answer for the other. The paths differ; the format does not.
  */
 export function workbuddyProbePath(filename: string = WORKBUDDY_PROBE_FILENAME): string {
-  return join(resolveDshHome(), filename)
+  // 2026-10-11 起探测缓存进宿主官方 cache 目录（见 catalog-store 的同名改动）。
+  return dshCachePath(CACHE_DIRNAME, filename.replace(/^\./u, ''))
 }
 
 /**

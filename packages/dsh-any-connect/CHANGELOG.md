@@ -1,3 +1,18 @@
+## 0.4.14-alpha.10 (2026-10-11)
+
+### 变更
+
+* **自有凭据副本收敛进宿主存储域（storageDomain）**：4 份自有副本（`.workbuddy-auth.json` / `.workbuddy-ai-auth.json` / `.zcode-auth.json` / `.zcode-sp-auth.json`）从 `$DSH_HOME` 根散文件迁入 `<DSH_HOME>/storages/dsh_any_connect/`（`@deepseek-ai/dsh-storage-domain`，与 dsh-workspace / dsh-schedule 同一机制），白拿宿主的 zod schema 校验、每域单写链原子写与损坏记录 `backup-and-skip` 备份；`withFileLock` + `writeFileAtomic` 的自管实现退役为「域不可用时的文件回落」。CLI 经独立 json backend 打开**同一**存储单元，logout / doctor 与插件运行时所见一致。启动时自动迁移旧散文件（先写域成功才删源，损坏文件原样保留并告警），升级无感。
+* **缓存文件归位官方 cache 目录**：4 份模型目录、4 份探测结果、桌面版本记录与 host 心跳从 `$DSH_HOME` 根迁入 `<DSH_HOME>/cache/dsh-any-connect/`（`dshCachePath`，dsh-attachment-local 同款约定），文件名去掉点前缀；心跳写入补目录创建，全新 home 首次写入不再依赖目录已存在。启动迁移例程一并搬运。
+* **ZCode 设备标识文件随状态目录收敛**：`.zcode-device-mid` 迁入 `.dsh-any-connect/`，读取命中旧位置时顺手搬运（先写新成功再删旧）。
+
+`$DSH_HOME` 根目录不再有本包的散文件；桌面端凭据文件（WorkBuddy / ZCode 应用自己的）不在此列，位置由桌面应用决定。
+
+### 测试
+
+* 新增 `test/state-store.test.ts`：standalone 存取的写/读/改/删闭环、schema 拒绝坏记录、迁移的四种边界（旧根搬运、回落副本优先、损坏文件保留、空迁移 no-op）。
+* `host-heartbeat` / `settings-integration` 的路径断言随新布局更新。
+
 ## 0.4.14-alpha.9 (2026-10-10)
 
 ### 变更

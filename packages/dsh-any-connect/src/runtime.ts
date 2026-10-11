@@ -35,12 +35,15 @@ import { createCatalogLifecycle } from './catalog-lifecycle.js'
 import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
 import type { Options } from './config.js'
 import { createVariantCredentialStore, upstreamClientFor } from './variant-wiring.js'
+import type { WorkBuddyStateStore } from './state-store.js'
 
 /** apply() 拿到的运行时集合句柄。 */
 export interface VariantRuntimeSet {
   readonly runtimes: readonly VariantRuntime[]
   /** `loader/volatile-update`：把新配置推进每个变体并重拉目录。 */
   applyConfiguredAuthFiles(): void
+  /** 状态域就绪后注入自有副本的域存取（见 index.ts 的 inject 时序）。 */
+  setState(state: WorkBuddyStateStore): void
   /** 启动两条定时器与适配器注册（shim 就绪后逐个注册）。 */
   start(): void
   /** 卸载：停定时器、关 shim、清心跳。返回 Promise，宿主会等它落定。 */
@@ -325,5 +328,11 @@ export function createVariantRuntimeSet(deps: {
   }
   }
 
-  return { runtimes, applyConfiguredAuthFiles, start, dispose }
+  /** 状态域就绪后把域存取推进每个变体的凭据存储（见接口注释）。 */
+  function setState(state: WorkBuddyStateStore): void {
+    if (stopped) return
+    for (const runtime of runtimes) runtime.credentialStore?.setState(state)
+  }
+
+  return { runtimes, applyConfiguredAuthFiles, setState, start, dispose }
 }

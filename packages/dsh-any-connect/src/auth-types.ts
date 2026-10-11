@@ -10,6 +10,7 @@
 import type { WorkBuddyRefreshOutcome } from './upstream.js'
 import type { WorkBuddyVariant } from './variants.js'
 import type { WorkBuddyAtRestKeyProvider, WorkBuddySignedOutReasonCode } from './desktop-credential-protection.js'
+import type { WorkBuddyStateStore } from './state-store.js'
 
 /** Normalized WorkBuddy credential, timestamps in epoch milliseconds. */
 export interface WorkBuddyCredential {
@@ -107,6 +108,12 @@ export interface WorkBuddyStoreOptions {
    * the ZCode variants never read an encrypted document.
    */
   keyProvider?: Pick<WorkBuddyAtRestKeyProvider, 'protectorKeyFor' | 'helperPath'>
+  /**
+   * 自有凭据副本的状态域存取（storageDomain，见 state-store.ts）。给了就走域，
+   * 不给回落到状态目录下的文件副本——CLI 与测试的轻量路径。运行时在域就绪后
+   * 也可以经 store 的 setState 后补注入。
+   */
+  state?: WorkBuddyStateStore
 }
 
 /** A credential belonging to the other product was refused. Callers treat it

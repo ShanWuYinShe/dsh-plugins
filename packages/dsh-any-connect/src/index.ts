@@ -26,6 +26,7 @@
  * - desktop-credential-protection.ts desktop-auth-envelope.ts desktop-discovery.ts
  *   desktop-discovery-windows.ts desktop-at-rest-key.ts desktop-app-discovery.ts — at-rest 凭据门面与
  *   信封/发现/密钥解析器、按平台找 Electron 二进制
+ * - state-store.ts — 自有凭据副本的状态域持久化（storageDomain）与旧散文件迁移
  * 上游通道
  * - upstream.ts upstream-shared.ts upstream-types.ts — 上游门面、协议共享层（常量与助手）、
  *   协议类型（纯声明，零运行时）
@@ -49,7 +50,17 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-attachment'
+import { legacyOwnAuthPath, workbuddyOwnAuthPath } from './auth-paths.js'
+import { anyConnectDomain, domainStateStore, migrateLegacyCredentialFiles } from './state-store.js'
 import { WorkBuddyUpstreamClient } from './upstream.js'
+
+export {
+  anyConnectDomain,
+  domainStateStore,
+  openStandaloneStateStore,
+  migrateLegacyCredentialFiles,
+  type WorkBuddyStateStore,
+} from './state-store.js'
 import { registerUsageQueriers } from './usage.js'
 import { createVariantRuntimeSet } from './runtime.js'
 import { Config } from './config.js'
@@ -264,6 +275,30 @@ export function apply(ctx: Context, config: Config): void {
   // still serves its models, as before.
   ctx.inject(['settings'], (child: Context) => {
     child.effect(() => child.settings.configure({ auto: false }, ctx.fiber))
+  })
+
+  // 状态域（storageDomain）：自有凭据副本的官方持久化位（storages/dsh_any_connect/，
+  // 见 state-store.ts）。服务就绪后搬旧散文件、把域存取推进每个变体；注入前的
+  // 读写走 `.dsh-any-connect/` 下的文件回落，由迁移例程收编，两侧无缝衔接。
+  // 域不可用时 error 日志 + 继续文件回落——模型代理的主链路不该因持久化层
+  // 故障整体不可用；回落与域之间由迁移例程保证单向收敛（先写域成功才删源）。
+  // 宿主未挂 storage-domain 表单（更老的宿主）时 inject 永不触发，行为同回落。
+  ctx.inject(['storageDomain'], child => {
+    void (async () => {
+      const domain = await child.storageDomain.open(anyConnectDomain)
+      const state = domainStateStore(domain)
+      const warn = (message: string) => ctx.logger?.warn?.(message)
+      await migrateLegacyCredentialFiles(state, legacyOwnAuthPath, workbuddyOwnAuthPath, warn)
+      variants.setState(state)
+      ctx.effect(() => async () => {
+        await domain.close()
+      })
+    })().catch((error: unknown) => {
+      ctx.logger?.error?.(
+        'dsh-any-connect: state domain unavailable; owned-copy persistence stays on the file fallback:'
+        + ` ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
   })
 
   // The host commits profile edits into the volatile references without a

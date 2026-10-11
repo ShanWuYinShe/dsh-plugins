@@ -19,6 +19,7 @@ import { WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
 import type { WorkBuddyUpstreamModel } from './upstream.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { applyZCodePlanOverride } from './zcode-plan-store.js'
+import type { WorkBuddyStateStore } from './state-store.js'
 
 /** 该变体对应的上游客户端：zcode 走专属通道，其余走 WorkBuddy。 */
 export function upstreamClientFor(
@@ -49,14 +50,17 @@ export function zcodePlanTransformFor(
  * @param options.client - 该变体的上游客户端（见 {@link upstreamClientFor}）。
  * @param options.desktopPath - 显式桌面 auth 文件路径；缺省走变体默认与环境变量。
  * @param options.onWarning - 读凭据过程中的非致命告警出口（宿主 logger）。
+ * @param options.state - 状态域存取（storageDomain）；给了副本读写走域，不给
+ *   走状态目录下的文件回落。插件运行时在域就绪后经 setState 后补注入，CLI 直接传。
  */
 export function createVariantCredentialStore(options: {
   variant: WorkBuddyVariant
   client: WorkBuddyUpstreamClient | ZCodeUpstreamClient
   desktopPath?: string | undefined
   onWarning?: ((message: string) => void) | undefined
+  state?: WorkBuddyStateStore | undefined
 }): WorkBuddyCredentialStore {
-  const { variant, client, desktopPath, onWarning } = options
+  const { variant, client, desktopPath, onWarning, state } = options
   const transform = zcodePlanTransformFor(variant)
   return new WorkBuddyCredentialStore({
     variant,
@@ -64,5 +68,6 @@ export function createVariantCredentialStore(options: {
     refresh: credential => client.refreshToken(credential),
     ...onWarning === undefined ? {} : { onWarning },
     ...transform === undefined ? {} : { transformCredential: transform },
+    ...state === undefined ? {} : { state },
   })
 }

@@ -9,9 +9,10 @@
 
 import crypto from 'node:crypto'
 import os from 'node:os'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { WORKBUDDY_STATE_DIRNAME } from './auth-paths.js'
 import type { WorkBuddyCredential, ZCodeFamily, ZCodePlanKind } from './auth-types.js'
 import { decryptZCodeEncryptedKey } from './auth-zcode-crypto.js'
 import type { DecryptZCodeKeyOptions } from './auth-zcode-crypto.js'
@@ -141,8 +142,11 @@ function readZCodeSelection(desktopPath: string | undefined): ZCodeAccountSelect
   }
 }
 
-/** Basename of the fallback device-id file inside the Harness home. */
-export const ZCODE_DEVICE_MID_FILENAME = '.zcode-device-mid'
+/** Basename of the fallback device-id file inside the Harness state directory. */
+export const ZCODE_DEVICE_MID_FILENAME = 'zcode-device-mid'
+
+/** Pre-migration device-id file (the Harness home root); read-migrated on first hit. */
+export const LEGACY_DEVICE_MID_FILENAME = '.zcode-device-mid'
 
 /**
  * Resolve the stable device id the account-plan endpoints require
@@ -161,12 +165,31 @@ export function resolveZCodeDeviceMid(desktopPath: string | undefined): string {
       // absent or unreadable telemetry state — fall through
     }
   }
-  const fallbackPath = join(resolveDshHome(), ZCODE_DEVICE_MID_FILENAME)
+  // 2026-10-11 起状态文件收敛进 `.dsh-any-connect/` 子目录；旧根位置文件在
+  // 读取命中时顺手搬过去（先写新成功再删旧，失败保留旧文件）。
+  const stateDir = join(resolveDshHome(), WORKBUDDY_STATE_DIRNAME)
+  const fallbackPath = join(stateDir, ZCODE_DEVICE_MID_FILENAME)
+  const legacyPath = join(resolveDshHome(), LEGACY_DEVICE_MID_FILENAME)
   try {
     const persisted = readFileSync(fallbackPath, 'utf8').trim()
     if (persisted !== '') return persisted
   } catch {
-    // no persisted fallback yet — generate one
+    // no persisted fallback yet — fall through to the legacy location
+  }
+  try {
+    const legacy = readFileSync(legacyPath, 'utf8').trim()
+    if (legacy !== '') {
+      try {
+        mkdirSync(stateDir, { recursive: true, mode: 0o700 })
+        writeFileSync(fallbackPath, `${legacy}\n`, { mode: 0o600 })
+        rmSync(legacyPath, { force: true })
+      } catch {
+        // 搬运失败不影响使用：旧文件仍在，下次再搬。
+      }
+      return legacy
+    }
+  } catch {
+    // no legacy file either — generate one below
   }
   const generated = crypto.randomUUID()
   try {

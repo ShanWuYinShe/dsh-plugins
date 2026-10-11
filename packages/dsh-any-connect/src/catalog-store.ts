@@ -22,7 +22,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { dshCachePath } from '@deepseek-ai/dsh-home-paths'
 import type { WorkBuddyCredential } from './auth.js'
 import type { WorkBuddyUpstreamModel } from './upstream.js'
 
@@ -30,6 +30,9 @@ import type { WorkBuddyUpstreamModel } from './upstream.js'
 const CATALOG_FORMAT_VERSION = 1
 
 /** Basename of the CN saved catalog inside the Harness home. */
+/** 缓存子目录名（`<DSH_HOME>/cache/` 之下）；与包名一致，不受域的 UNIT_NAME_RE 约束。 */
+export const CACHE_DIRNAME = 'dsh-any-connect'
+
 export const WORKBUDDY_CATALOG_FILENAME = '.workbuddy-catalog.json'
 
 /** Basename of the international saved catalog inside the Harness home. */
@@ -54,7 +57,10 @@ interface CatalogDocument {
 
 /** Plugin-owned saved-catalog path inside the Harness home. */
 export function workbuddyCatalogPath(filename: string = WORKBUDDY_CATALOG_FILENAME): string {
-  return join(resolveDshHome(), filename)
+  // 2026-10-11 起目录缓存收敛进宿主官方 cache 目录（`<DSH_HOME>/cache/`，
+  // dsh-attachment-local 同款）：`cache/dsh-any-connect/<name>.json`。文件名去掉
+  // 点前缀（子目录已隔离）；旧根位置文件由启动迁移例程搬运。
+  return dshCachePath(CACHE_DIRNAME, filename.replace(/^\./u, ''))
 }
 
 /** Account identity keying one saved catalog. */

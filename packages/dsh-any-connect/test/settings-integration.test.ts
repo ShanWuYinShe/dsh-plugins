@@ -155,7 +155,7 @@ describe('WorkBuddy Host settings integration', () => {
       // set 先于 save 落盘：等文件出现再"重启"，否则第二程读不到 saved。
       const { existsSync } = await import('node:fs')
       await vi.waitFor(() => {
-        expect(existsSync(join(root as string, '.workbuddy-catalog.json'))).toBe(true)
+        expect(existsSync(join(root as string, 'cache', 'dsh-any-connect', 'workbuddy-catalog.json'))).toBe(true)
       }, { timeout: 5000 })
     } finally {
       okSpy.mockRestore()
@@ -202,7 +202,7 @@ describe('WorkBuddy Host settings integration', () => {
       }, { timeout: 5000 })
       const { existsSync } = await import('node:fs')
       await vi.waitFor(() => {
-        expect(existsSync(join(root as string, '.workbuddy-catalog.json'))).toBe(true)
+        expect(existsSync(join(root as string, 'cache', 'dsh-any-connect', 'workbuddy-catalog.json'))).toBe(true)
       }, { timeout: 5000 })
     } finally {
       okSpy.mockRestore()
@@ -225,7 +225,7 @@ describe('WorkBuddy Host settings integration', () => {
     }
     // 盘上仍是第一程的名单：空观测没有被持久化。
     const { readFile } = await import('node:fs/promises')
-    const saved = JSON.parse(await readFile(join(root as string, '.workbuddy-catalog.json'), 'utf8')) as {
+    const saved = JSON.parse(await readFile(join(root as string, 'cache', 'dsh-any-connect', 'workbuddy-catalog.json'), 'utf8')) as {
       entries: Record<string, { models: Array<{ id: string }> }>
     }
     const models = Object.values(saved.entries)[0]?.models.map(m => m.id)

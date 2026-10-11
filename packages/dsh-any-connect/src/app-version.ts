@@ -20,7 +20,8 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { dshCachePath } from '@deepseek-ai/dsh-home-paths'
+import { CACHE_DIRNAME } from './catalog-store.js'
 
 /**
  * Last-resort UA version.
@@ -103,7 +104,8 @@ export async function installedAppVersion(): Promise<{ version: string; bundle: 
 
 /** Saved-version file path under the Harness home. */
 export function appVersionPath(): string {
-  return join(resolveDshHome(), WORKBUDDY_APP_VERSION_FILENAME)
+  // 2026-10-11 起进宿主官方 cache 目录（见 catalog-store 的同名改动）。
+  return dshCachePath(CACHE_DIRNAME, WORKBUDDY_APP_VERSION_FILENAME.replace(/^\./u, ''))
 }
 
 /** Constructor dependencies; all injectable so tests never touch the real FS. */
