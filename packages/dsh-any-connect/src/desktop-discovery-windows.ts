@@ -10,6 +10,7 @@
  */
 
 import { execFile } from 'node:child_process'
+import type { ExecFileOptionsWithStringEncoding } from 'node:child_process'
 import { accessSync, constants, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { WORKBUDDY_DISCOVERY_STEP_TIMEOUT_MS, DiscoveryIncompleteError, isENOENT } from './desktop-discovery.js'
@@ -30,18 +31,41 @@ export interface WorkBuddyWindowsDiscoveryTools {
 }
 
 /**
+ * WSL 下 reg.exe 的探测候选：WSL 把固定盘自动挂载到 /mnt/<letter>，Windows
+ * 目录几乎总在 C（其余盘符兜底）。只用绝对路径——PATH 可被用户改写，不作为
+ * 发现来源。首个存在的候选惰性解析并缓存：构造期零 I/O（provider 构造器
+ * 保持 I/O-free 的约定），首次真正查询时才 stat。
+ */
+const WSL_REG_EXE_CANDIDATES = ['c', 'd', 'e', 'f'].map(drive => join('/mnt', drive, 'Windows', 'System32', 'reg.exe'))
+
+function resolveWslRegExe(): string | undefined {
+  for (const candidate of WSL_REG_EXE_CANDIDATES) {
+    try {
+      if (statSync(candidate).isFile()) return candidate
+    } catch {
+      // 盘符未挂载：换下一个候选。
+    }
+  }
+  return undefined
+}
+
+/**
  * The Windows registry discovery tool. It is deliberately separate from the
  * macOS Spotlight/plutil seam: the two platforms have different identity and
  * candidate rules, and neither tool should accidentally become cross-platform.
+ * `wsl` 为 true 时改经 interop 用 /mnt 侧的 reg.exe 查询同一批注册表根。
  */
-export function workBuddyWindowsDiscoveryTools(): WorkBuddyWindowsDiscoveryTools {
+export function workBuddyWindowsDiscoveryTools(wsl = false): WorkBuddyWindowsDiscoveryTools {
   const systemRoot = process.env.SystemRoot?.trim()
-  const regPath = systemRoot === undefined || systemRoot === ''
+  const nativeRegPath = systemRoot === undefined || systemRoot === ''
     ? undefined
     : join(systemRoot, 'System32', 'reg.exe')
   const runTool = (root: string, signal: AbortSignal): Promise<string> => new Promise<string>((resolve, reject) => {
+    const regPath = wsl ? resolveWslRegExe() : nativeRegPath
     if (regPath === undefined) {
-      reject(new DiscoveryIncompleteError('SystemRoot is not configured'))
+      reject(new DiscoveryIncompleteError(wsl
+        ? 'reg.exe was not found under /mnt/<drive>/Windows/System32 (interop automount missing?)'
+        : 'SystemRoot is not configured'))
       return
     }
     if (signal.aborted) {
@@ -53,7 +77,13 @@ export function workBuddyWindowsDiscoveryTools(): WorkBuddyWindowsDiscoveryTools
       maxBuffer: WINDOWS_REGISTRY_OUTPUT_MAX_BYTES,
       timeout: WORKBUDDY_DISCOVERY_STEP_TIMEOUT_MS,
       windowsHide: true,
-    }, (error, stdout, stderr) => {
+      encoding: 'utf8',
+      // stdin 显式断开：interop 的控制台子进程挂在继承的 stdin 上会阻塞
+      // （实测 WSL2），reg.exe 不读输入，丢弃是纯收益。
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // 运行时 execFile 接受 stdio（spawn 透传），@types 的
+      // ExecFileOptionsWithStringEncoding 未声明——整对象断言收口在此一处。
+    } as ExecFileOptionsWithStringEncoding, (error, stdout, stderr) => {
       if (settled) return
       settled = true
       // `reg query` uses exit code 1 for more than a missing key. Only a
@@ -155,14 +185,18 @@ interface WindowsCandidateInspection {
 /**
  * Validate the known Windows layout for the product's exe. `undefined` is a
  * decidable exclusion; `unresolved` is reserved for errors that prevent
- * checking.
+ * checking. `wsl`（WSL 经 /mnt 校验 Windows 安装）下平台门放宽到 linux，
+ * x-bit 校验跳过（drvfs 权限呈现不可靠，见 desktop-discovery 的
+ * isExecutable），路径身份按 Windows 大小写不敏感折叠。
  */
 export function inspectWindowsElectronCandidate(
   electronPath: string,
   platform: NodeJS.Platform,
   exeBasename: string,
+  wsl = false,
 ): WindowsCandidateInspection | 'unresolved' | undefined {
-  if (platform !== 'win32' || basename(electronPath).toLowerCase() !== exeBasename) return undefined
+  if (platform !== 'win32' && !wsl) return undefined
+  if (basename(electronPath).toLowerCase() !== exeBasename) return undefined
   let binaryStat
   try {
     binaryStat = statSync(electronPath)
@@ -170,10 +204,12 @@ export function inspectWindowsElectronCandidate(
     return isENOENT(error) ? undefined : 'unresolved'
   }
   if (!binaryStat.isFile()) return undefined
-  try {
-    accessSync(electronPath, constants.X_OK)
-  } catch (error: unknown) {
-    return isENOENT(error) ? undefined : 'unresolved'
+  if (!wsl) {
+    try {
+      accessSync(electronPath, constants.X_OK)
+    } catch (error: unknown) {
+      return isENOENT(error) ? undefined : 'unresolved'
+    }
   }
 
   const installRoot = dirname(electronPath)
@@ -205,7 +241,8 @@ export function inspectWindowsElectronCandidate(
   return {
     electronPath,
     // Windows paths are case-insensitive even when a registry entry preserved
-    // a different casing from the filesystem spelling.
-    identity: platform === 'win32' ? identity.toLowerCase() : identity,
+    // a different casing from the filesystem spelling; WSL 校验的也是同一条
+    // Windows 路径（经 /mnt），同样折叠。
+    identity: platform === 'win32' || wsl ? identity.toLowerCase() : identity,
   }
 }

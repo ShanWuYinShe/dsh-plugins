@@ -1,3 +1,13 @@
+## 0.4.14-alpha.16 (2026-10-12)
+
+### 修复
+
+* **WSL2 里识别 Windows 侧的 WorkBuddy（5.6+ 加密凭据解密助手跨系统可达）**：此前 WSL 内凭据文件能经 `/mnt` 找到，但 5.6 起字段是 `$wbEncrypted` 信封，解密密钥只在桌面 App 自己的 Electron 里；发现层把 Linux 一律判「无已验证布局」（discovery `none`），整个插件在 WSL2 里恒报未登录（实测 `doctor`：文件 present/format encrypted，助手 "not configured; set WORKBUDDY_ELECTRON_BIN"）。现在：Linux+WSL 时按 Windows 规则发现——默认布局从 `LOCALAPPDATA`/`USERPROFILE`（经 `/mnt` 转换，无环境信号回落 Linux 同名用户目录）推导，找不到再经 interop 用 `/mnt/c/Windows/System32/reg.exe` 查卸载注册表（DisplayIcon 的 `C:\` 路径转回 `/mnt` 后做布局校验，x-bit 校验在 WSL 下放宽为「存在且是文件」——drvfs 权限呈现不可靠）；解密助手经 interop 拉起 Windows 侧 App，`ELECTRON_RUN_AS_NODE=1` 通过 `WSLENV` 的 `/w` 方向注入（interop 只传 WSLENV 点名的变量，漏传会让 App 以完整 GUI 形态启动），子进程 stdin 显式断开（实测继承的 stdin 会让 interop 控制台子进程挂住）。两个产品仍只按各自身份定位，不会互相误选；国内版默认布局已实测，国际版仍只走注册表发现。
+
+### 测试
+
+* 新增 `wsl-electron-discovery.test.ts`：发现路由（linux+WSL → windows-workbuddy，环境纯）、默认布局推导的 env 优先级、注册表候选的 /mnt 转换与可判定排除、x-bit 放宽、WSLENV 注入、stdin 断开；真机端到端用例（Linux 容器 CI 自动跳过）。`electron-discovery.test.ts` 组合根断言改为 WSL 感知（期望值取同源纯函数），`windows-electron-discovery.test.ts` 钉死 `wsl: false` 保持原口径。
+
 ## 0.4.14-alpha.15 (2026-10-11)
 
 ### 新增

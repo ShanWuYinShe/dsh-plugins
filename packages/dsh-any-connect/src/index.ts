@@ -24,8 +24,8 @@
  *   auth-desktop-read.ts auth-desktop-inspect.ts auth-refresh.ts auth-store.ts — 凭据解析门面与
  *   类型/路径/ZCode 解析/enc:v1 解密/文档/桌面文件读取与诊断检查/刷新策略/存储门面
  * - desktop-credential-protection.ts desktop-auth-envelope.ts desktop-discovery.ts
- *   desktop-discovery-windows.ts desktop-at-rest-key.ts desktop-app-discovery.ts — at-rest 凭据门面与
- *   信封/发现/密钥解析器、按平台找 Electron 二进制
+ *   desktop-discovery-windows.ts desktop-at-rest-key.ts desktop-app-discovery.ts wsl.ts — at-rest 凭据门面与
+ *   信封/发现/密钥解析器、按平台找 Electron 二进制、WSL 判定与 Windows 路径转换
  * - state-store.ts — 自有凭据副本的状态域持久化（storageDomain）与旧散文件迁移
  * 上游通道
  * - upstream.ts upstream-shared.ts upstream-types.ts — 上游门面、协议共享层（常量与助手）、

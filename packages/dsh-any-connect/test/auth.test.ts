@@ -18,6 +18,7 @@ import {
   WORKBUDDY_ELECTRON_BIN_ENV,
 } from '../src/desktop-credential-protection.js'
 import { openStandaloneStateStore } from '../src/state-store.js'
+import { isWsl } from '../src/wsl.js'
 import type { WorkBuddyStoreOptions } from '../src/auth-types.js'
 
 function baseCredential(): WorkBuddyCredential {
@@ -832,7 +833,10 @@ describe('WorkBuddy 5.6 at-rest key helper wiring', () => {
         variant: CN_VARIANT,
         refresh: async credential => ({ accessToken: credential.accessToken }),
       })
-      expect(workbuddy.atRestHelperPath()).toBe(defaultWorkBuddyElectronPath(electronProfileFor(CN_VARIANT)))
+      // 组合根在 Linux+WSL 下按 Windows 规则发现（/mnt 默认布局推导），
+      // 期望值与 store 同源：同样的平台与 WSL 旗标。
+      expect(workbuddy.atRestHelperPath())
+        .toBe(defaultWorkBuddyElectronPath(electronProfileFor(CN_VARIANT), process.platform, isWsl()))
       const zcode = new WorkBuddyCredentialStore({
         variant: ZCODE_VARIANT,
         refresh: async credential => ({ accessToken: credential.accessToken }),

@@ -10,6 +10,7 @@
  */
 
 import { execFile } from 'node:child_process'
+import type { ExecFileOptionsWithStringEncoding } from 'node:child_process'
 import { realpathSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
@@ -20,6 +21,7 @@ import type { ResolvedKey, WorkBuddyElectronDiscovery, DiscoveredApp, WorkBuddyD
 import { parseAtRestPayload, deriveProtectorKey } from './desktop-auth-envelope.js'
 import { WINDOWS_REGISTRY_ROOTS, workBuddyWindowsDiscoveryTools, parseWindowsRegistryOutput, inspectWindowsElectronCandidate } from './desktop-discovery-windows.js'
 import type { WorkBuddyWindowsDiscoveryTools } from './desktop-discovery-windows.js'
+import { isWsl, helperSpawnEnv } from './wsl.js'
 
 /** The spawned helper. Separated from the provider so tests can stand it in. */
 export type WorkBuddyKeyPayloadSource = () => Promise<string>
@@ -32,7 +34,9 @@ export type WorkBuddyKeyPayloadSource = () => Promise<string>
 export function atRestKeyProviderFor(variant: Pick<WorkBuddyVariant, 'id' | 'electron'>): WorkBuddyAtRestKeyProvider {
   return new WorkBuddyAtRestKeyProvider({
     product: electronProfileFor(variant),
-    discovery: electronDiscoveryFor(),
+    // 组合根唯一嗅探真实环境的位置：WSL2 里 Linux 平台也走 Windows 发现
+    // （/mnt 自动挂载 + interop 拉起桌面 App 取 at-rest key）。
+    discovery: electronDiscoveryFor(process.platform, isWsl()),
   })
 }
 
@@ -85,6 +89,12 @@ export interface WorkBuddyAtRestKeyProviderOptions {
   /** Platform override for deterministic discovery tests. */
   platform?: NodeJS.Platform
   /**
+   * WSL2 运行环境。默认运行时判定；测试显式传入以保持确定性。影响：平台
+   * 发现门（linux+WSL 走 Windows 搜索）、默认安装路径的 /mnt 推导、注册表
+   * 候选的盘符路径转换、x-bit 校验放宽、助手子进程的 WSLENV 注入。
+   */
+  wsl?: boolean
+  /**
    * Total budget for one discovery run, covering the search and every
    * candidate check. Injectable so tests can exercise exhaustion without
    * waiting out the production 10s.
@@ -111,6 +121,7 @@ export class WorkBuddyAtRestKeyProvider {
   private readonly tools: WorkBuddyDiscoveryTools
   private readonly windowsTools: WorkBuddyWindowsDiscoveryTools
   private readonly platform: NodeJS.Platform
+  private readonly wsl: boolean
   private readonly discoveryBudgetMs: number
   private readonly timeoutMs: number
   private readonly source: WorkBuddyKeyPayloadSource
@@ -134,13 +145,16 @@ export class WorkBuddyAtRestKeyProvider {
     this.explicitPath = options.electronPath ?? envPath
     this.discovery = options.discovery ?? 'none'
     this.platform = options.platform ?? process.platform
+    this.wsl = options.wsl ?? isWsl()
     this.defaultPath = this.discovery === 'none'
       ? undefined
       : options.defaultElectronPath === undefined
-        ? defaultWorkBuddyElectronPath(options.product, this.platform)
+        // WSL 的 /mnt 默认布局推导只在 Windows 搜索下有意义；macOS 发现配置
+        // （哪怕配错平台）沿用 macOS 默认路径语义，不被 WSL 分支劫持。
+        ? defaultWorkBuddyElectronPath(options.product, this.platform, this.discovery === 'windows-workbuddy' && this.wsl)
         : options.defaultElectronPath ?? undefined
     this.tools = options.tools ?? workBuddyDiscoveryTools(options.product.macOS.bundleId)
-    this.windowsTools = options.windowsTools ?? workBuddyWindowsDiscoveryTools()
+    this.windowsTools = options.windowsTools ?? workBuddyWindowsDiscoveryTools(this.wsl)
     this.discoveryBudgetMs = options.discoveryBudgetMs ?? WORKBUDDY_DISCOVERY_BUDGET_MS
     this.timeoutMs = options.timeoutMs ?? 10_000
     this.spawnHelper = options.spawnHelper ?? (path => this.spawnAt(path))
@@ -233,12 +247,13 @@ export class WorkBuddyAtRestKeyProvider {
       windowsTools: this.windowsTools,
       platform: this.platform,
       discoveryBudgetMs: this.discoveryBudgetMs,
+      wsl: this.wsl,
     }
   }
 
   private async resolveElectronPath(): Promise<string> {
     if (this.explicitPath !== undefined) {
-      if (!isExecutable(this.explicitPath)) {
+      if (!isExecutable(this.explicitPath, { wsl: this.wsl })) {
         throw new WorkBuddyElectronPathError(
           'electron-path-invalid',
           `the configured ${this.product.productName} Electron binary is not available at ${this.explicitPath};`
@@ -258,11 +273,11 @@ export class WorkBuddyAtRestKeyProvider {
     }
     // The default path is the ordinary case and costs one stat; discovery is
     // reserved for the installations the default misses.
-    if (this.defaultPath !== undefined && isExecutable(this.defaultPath)) return this.defaultPath
+    if (this.defaultPath !== undefined && isExecutable(this.defaultPath, { wsl: this.wsl })) return this.defaultPath
     // A previously discovered path is re-checked rather than trusted: the app
     // may have been moved or removed since, and a stale path must not win.
     if (this.discoveredPath !== undefined) {
-      if (isExecutable(this.discoveredPath)) return this.discoveredPath
+      if (isExecutable(this.discoveredPath, { wsl: this.wsl })) return this.discoveredPath
       this.discoveredPath = undefined
     }
     const found = this.discovery === 'macos-workbuddy'
@@ -284,8 +299,16 @@ export class WorkBuddyAtRestKeyProvider {
         timeout: this.timeoutMs,
         maxBuffer: 1024 * 1024,
         windowsHide: true,
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-      }, (error, stdout) => {
+        encoding: 'utf8',
+        // WSL 下 ELECTRON_RUN_AS_NODE 还要经 WSLENV 的 /w 方向送进 Windows
+        // 侧进程（interop 只传 WSLENV 点名的变量），否则助手会以完整 GUI
+        // 形态启动。env 组装在 wsl.ts（helperSpawnEnv，纯函数可测）。
+        env: helperSpawnEnv(process.env, this.wsl),
+        // stdin 显式断开：interop 的控制台子进程挂在继承的 stdin 上会阻塞
+        // （WSL2 实测；守护进程给子进程的任何 stdin 同理）。
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // 运行时 execFile 接受 stdio，@types 未声明——断言收口在此。
+      } as ExecFileOptionsWithStringEncoding, (error, stdout) => {
         if (error !== null && error !== undefined) {
           // Code and reason only: stdout/stderr can carry paths or crash dumps,
           // and the payload must never appear in a message.

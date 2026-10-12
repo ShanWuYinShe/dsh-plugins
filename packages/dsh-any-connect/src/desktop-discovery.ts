@@ -10,10 +10,12 @@
  */
 
 import { execFile } from 'node:child_process'
-import { accessSync, constants } from 'node:fs'
-import { join } from 'node:path'
+import { accessSync, constants, statSync } from 'node:fs'
+import { basename, join } from 'node:path'
+import { homedir } from 'node:os'
 import type { WorkBuddyElectronProduct } from './variants.js'
 import type { WorkBuddySignedOutReasonCode } from './desktop-auth-envelope.js'
+import { windowsPathForWsl } from './wsl.js'
 
 /**
  * Env variable naming an explicit Electron binary for the CN product. The
@@ -32,13 +34,27 @@ export const WORKBUDDY_ELECTRON_BIN_ENV = 'WORKBUDDY_ELECTRON_BIN'
 export function defaultWorkBuddyElectronPath(
   product: WorkBuddyElectronProduct,
   platform: NodeJS.Platform = process.platform,
+  wsl = false,
 ): string | undefined {
   if (platform === 'darwin') return product.macOS.defaultPath
-  if (platform !== 'win32' || product.windows.defaultPathSegments === undefined) return undefined
-  const localAppData = process.env.LOCALAPPDATA?.trim()
-  return localAppData === undefined || localAppData === ''
-    ? undefined
-    : join(localAppData, ...product.windows.defaultPathSegments)
+  if (platform === 'win32' && product.windows.defaultPathSegments !== undefined) {
+    const localAppData = process.env.LOCALAPPDATA?.trim()
+    return localAppData === undefined || localAppData === ''
+      ? undefined
+      : join(localAppData, ...product.windows.defaultPathSegments)
+  }
+  // WSL2: Windows 侧的默认安装布局经 /mnt 自动挂载可达。环境优先级与凭据
+  // 候选（auth-paths 的 wslDesktopAuthCandidates）一致：LOCALAPPDATA 命名了
+  // 就转换用，否则 USERPROFILE 的 AppData\Local，再否则按 Linux 用户名猜
+  // 挂载的用户目录。路径拼接零 I/O，构造期可安全调用。
+  if (platform === 'linux' && wsl && product.windows.defaultPathSegments !== undefined) {
+    const profile = windowsPathForWsl(process.env['USERPROFILE']?.trim())
+      ?? join('/mnt/c/Users', basename(homedir()))
+    const localAppData = windowsPathForWsl(process.env['LOCALAPPDATA']?.trim())
+      ?? join(profile, 'AppData', 'Local')
+    return join(localAppData, ...product.windows.defaultPathSegments)
+  }
+  return undefined
 }
 
 /** A resolved protector key and the id envelopes name for it. */
@@ -66,9 +82,14 @@ export type WorkBuddyElectronDiscovery = 'none' | 'macos-workbuddy' | 'windows-w
  */
 export function electronDiscoveryFor(
   platform: NodeJS.Platform = process.platform,
+  wsl = false,
 ): WorkBuddyElectronDiscovery {
   if (platform === 'darwin') return 'macos-workbuddy'
   if (platform === 'win32') return 'windows-workbuddy'
+  // WSL2：Windows 侧安装经 /mnt 可达、助手可经 interop 运行，Windows 搜索
+  // 规则原样适用。WSL 与否由调用方显式传入——本函数保持环境纯，单测不因
+  // 跑在 WSL 里而漂移；组合根（atRestKeyProviderFor）负责嗅探真实环境。
+  if (platform === 'linux' && wsl) return 'windows-workbuddy'
   return 'none'
 }
 
@@ -198,9 +219,15 @@ export function workBuddyDiscoveryTools(bundleId: string): WorkBuddyDiscoveryToo
   }
 }
 
-/** Whether a path exists and is executable; never throws. */
-export function isExecutable(path: string): boolean {
+/** Whether a path exists and is executable; never throws.
+ *
+ * WSL 下放宽为「存在且是常规文件」：drvfs 的权限呈现随挂载配置漂移
+ * （metadata/fmask/dmask），x-bit 不可靠；可执行性由 interop 在拉起时真实
+ * 裁决，这里替它把关到「这个路径确实是文件」即可。
+ */
+export function isExecutable(path: string, options: { wsl?: boolean } = {}): boolean {
   try {
+    if (options.wsl === true) return statSync(path).isFile()
     accessSync(path, constants.X_OK)
     return true
   } catch {

@@ -24,6 +24,7 @@ import {
 } from './desktop-discovery-windows.js'
 import type { WorkBuddyWindowsDiscoveryTools } from './desktop-discovery-windows.js'
 import type { WorkBuddyElectronProduct } from './variants.js'
+import { windowsPathForWsl } from './wsl.js'
 
 
 /** 发现流程的入参：类把它自己的字段打包传进来。 */
@@ -33,6 +34,8 @@ export interface AppDiscoveryContext {
   windowsTools: WorkBuddyWindowsDiscoveryTools
   platform: NodeJS.Platform
   discoveryBudgetMs: number
+  /** WSL2：注册表候选是 Windows 路径，须经 /mnt 转换后再做布局校验。 */
+  wsl?: boolean
 }
 
   /**
@@ -154,7 +157,7 @@ export interface AppDiscoveryContext {
    * execution.
    */
   export async function discoverWindowsApp(ctx: AppDiscoveryContext): Promise<string> {
-    if (ctx.platform !== 'win32') {
+    if (ctx.platform !== 'win32' && ctx.wsl !== true) {
       throw new WorkBuddyElectronPathError(
         'electron-binary-unavailable',
         `no ${ctx.product.productName} Electron binary is configured for this platform;`
@@ -175,14 +178,17 @@ export interface AppDiscoveryContext {
           continue
         }
         const parsed = parseWindowsRegistryOutput(output, ctx.product.windows.displayNamePattern)
-        candidates.push(...parsed.candidates)
+        // WSL：注册表里的 DisplayIcon 是 Windows 盘符路径（C:\...），布局校验
+        // 与后续拉起都发生在 /mnt 侧，先转换。转换不了（UNC 等）保留原值，让
+        // statSync 给出可判定的排除而不是在这里猜。
+        candidates.push(...parsed.candidates.map(path => ctx.wsl === true ? windowsPathForWsl(path) ?? path : path))
         unresolved ||= parsed.incomplete
       }
 
       const seen = new Map<string, string>()
       const rejected: string[] = []
       for (const candidate of new Set(candidates)) {
-        const inspection = inspectWindowsElectronCandidate(candidate, ctx.platform, ctx.product.windows.exeBasename)
+        const inspection = inspectWindowsElectronCandidate(candidate, ctx.platform, ctx.product.windows.exeBasename, ctx.wsl === true)
         if (inspection === 'unresolved') {
           unresolved = true
           continue

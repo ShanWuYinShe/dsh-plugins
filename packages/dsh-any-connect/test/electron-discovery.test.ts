@@ -7,9 +7,11 @@ import {
   WorkBuddyAtRestKeyProvider,
   WORKBUDDY_ELECTRON_BIN_ENV,
   atRestKeyProviderFor,
+  defaultWorkBuddyElectronPath,
   deriveProtectorKey,
   reasonCodeOf,
 } from '../src/desktop-credential-protection.js'
+import { isWsl } from '../src/wsl.js'
 import type {
   WorkBuddyAtRestKeyProviderOptions,
   WorkBuddyDiscoveryTools,
@@ -677,8 +679,13 @@ describe('#59/#60 the shared construction helper both entries use', () => {
       expect(ai.helperPath()).toBeUndefined()
       return
     }
-    // Platforms without a verified layout answer "not configured yet" for both.
-    expect(cn.helperPath()).toBeUndefined()
+    // Platforms without a verified layout answer "not configured yet" for
+    // both — WSL2 除外：组合根会嗅探出 Windows 搜索，CN 版默认路径变成 /mnt
+    // 侧的 Windows 安装布局推导（"a location to try"，不必真实存在）；AI 版
+    // 没有实测过的 Windows 默认布局，仍是 undefined（注册表发现未运行，
+    // discoveredPath 为空）。期望值直接取同源纯函数，组合根与推导永不打架。
+    const wsl = isWsl()
+    expect(cn.helperPath()).toBe(defaultWorkBuddyElectronPath(electronProfileFor(CN_VARIANT), 'linux', wsl))
     expect(ai.helperPath()).toBeUndefined()
   })
 })

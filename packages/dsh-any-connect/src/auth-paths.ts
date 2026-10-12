@@ -7,10 +7,15 @@
  * @module dsh-any-connect/auth-paths
  */
 
-import { homedir, release } from 'node:os'
+import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { isWsl, windowsPathForWsl } from './wsl.js'
 import type { WorkBuddyVariant } from './variants.js'
+
+// WSL 判定与路径转换本体在 ./wsl.ts（desktop-discovery 链路同源共用）；这里
+// re-export 维持拆分前的对外 API 不变。
+export { isWsl, windowsPathForWsl }
 
 /** Basename of the plugin-owned credential copy inside the Harness home. */
 export const WORKBUDDY_AUTH_FILENAME = '.workbuddy-auth.json'
@@ -42,23 +47,6 @@ export function legacyOwnAuthPath(filename: string): string {
 const DESKTOP_AUTH_DIR_PARTS = ['CodeBuddyExtension', 'Data', 'Public', 'auth'] as const
 
 const DESKTOP_AUTH_RELATIVE_PATH = [...DESKTOP_AUTH_DIR_PARTS, 'workbuddy-desktop.info'] as const
-
-/** Whether this Linux process is running inside Windows Subsystem for Linux. */
-export function isWsl(): boolean {
-  if (process.platform !== 'linux') return false
-  if (process.env['WSL_DISTRO_NAME'] !== undefined || process.env['WSL_INTEROP'] !== undefined) return true
-  return release().toLowerCase().includes('microsoft')
-}
-
-/** Convert a Windows drive path to WSL's conventional `/mnt/<drive>` form. */
-export function windowsPathForWsl(value: string | undefined): string | undefined {
-  const path = value?.trim()
-  if (!path) return undefined
-  if (path.startsWith('/')) return path
-  const drivePath = /^([a-z]):[\\/](.*)$/iu.exec(path)
-  if (drivePath === null) return undefined
-  return join('/mnt', drivePath[1]!.toLowerCase(), ...drivePath[2]!.split(/[\\/]+/u))
-}
 
 /** Windows desktop credential candidates visible from a WSL process. */
 function wslDesktopAuthCandidates(home: string): string[] {
