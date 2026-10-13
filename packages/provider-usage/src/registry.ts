@@ -39,6 +39,9 @@ export const DEFAULT_CACHE_TTL_MS = 60_000
 /** 失败答案的复用时长:错误没有成功答案的保质期,按更短负缓存处理。 */
 export const DEFAULT_ERROR_CACHE_TTL_MS = 10_000
 
+/** 无推断结果(`snapshot` 为 undefined)的负缓存时长,过期后才再次尝试推断。 */
+export const DEFAULT_UNRESOLVED_TTL_MS = 60_000
+
 /** How long one query may run before it is abandoned. */
 export const DEFAULT_QUERY_TIMEOUT_MS = 15_000
 
@@ -48,6 +51,8 @@ export interface ProviderUsageRegistryOptions {
   cacheTtlMs?: number
   /** 失败快照的负缓存时长;过期后第一次读取即重试上游。 */
   errorCacheTtlMs?: number
+  /** 无推断结果(未注册且 baseURL 推断不出 querier)的负缓存时长。 */
+  unresolvedTtlMs?: number
   /** Per-query deadline in milliseconds. */
   queryTimeoutMs?: number
   /** Clock, injectable so tests never sleep. */
@@ -102,13 +107,17 @@ export class ProviderUsageRegistry extends Service {
   private readonly inflight = new Map<string, Promise<UsageSnapshot>>()
   private readonly cacheTtlMs: number
   private readonly errorCacheTtlMs: number
+  private readonly unresolvedTtlMs: number
   private readonly queryTimeoutMs: number
   private readonly now: () => number
+  /** 推断无果的 provider → 负缓存到期时刻;直接/别名注册查表不受它影响。 */
+  private readonly unresolved = new Map<string, number>()
 
   constructor(ctx: Context, options: ProviderUsageRegistryOptions = {}) {
     super(ctx, 'providerUsage')
     this.cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS
     this.errorCacheTtlMs = options.errorCacheTtlMs ?? DEFAULT_ERROR_CACHE_TTL_MS
+    this.unresolvedTtlMs = options.unresolvedTtlMs ?? DEFAULT_UNRESOLVED_TTL_MS
     this.queryTimeoutMs = options.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS
     this.now = options.now ?? Date.now
   }
@@ -134,6 +143,8 @@ export class ProviderUsageRegistry extends Service {
     // A replaced querier invalidates whatever the last one said: the answer on
     // screen describes a query that no longer exists.
     this.clearCacheFor(provider)
+    // 新注册可能让此前推断无果的 provider 变得可推断,负缓存一并让路。
+    this.unresolved.clear()
     return () => {
       // Only withdraw our own registration: a reload may have replaced it
       // already, and dropping the newer querier would leave the provider dark.
@@ -193,6 +204,13 @@ export class ProviderUsageRegistry extends Service {
       return this.snapshotWithRegistration(provider, lookupKey, registration, options.force === true)
     }
 
+    // 推断无果的负缓存:未注册且推断不出 querier 的 provider,每次轮询
+    // 都会白跑一遍 settings/credentials 解析;负缓存窗口内直接回答
+    // 「无 querier」。直接/别名注册查表在上方,不受它影响。
+    const now = this.now()
+    const unresolvedUntil = this.unresolved.get(provider)
+    if (unresolvedUntil !== undefined && unresolvedUntil > now) return undefined
+
     // Heuristic fallback: if provider has no direct or alias registration,
     // resolve its baseURL and infer the querier (e.g. for custom providers like "my-silicon").
     // resolve 阶段与注册路径同受 queryTimeoutMs 约束（resolveWithDeadline）：
@@ -212,6 +230,7 @@ export class ProviderUsageRegistry extends Service {
       // Resolution failed
     }
 
+    this.unresolved.set(provider, this.now() + this.unresolvedTtlMs)
     return undefined
   }
 
@@ -302,6 +321,9 @@ export class ProviderUsageRegistry extends Service {
         fetchedAt,
       }
     } catch (error: unknown) {
+      // 承接旧答案时带上 degraded:客户端据此调暗展示,不把旧数字当作
+      // 新鲜值呈现——没有这个标记,圆点照绿、文案照常,过期无从感知。
+      const degraded = previous !== undefined
       return {
         ...base,
         // A failed refetch keeps the last good windows: the previous answer is
@@ -311,6 +333,7 @@ export class ProviderUsageRegistry extends Service {
         windows: previous?.windows ?? [],
         fetchedAt,
         error: safeMessage(error),
+        ...degraded ? { degraded: true } : {},
       }
     }
   }

@@ -36,6 +36,16 @@ export function getDotColor(snapshot?: UsageSnapshot, queried?: boolean): string
   return 'var(--dsw-alias-state-success-primary, #52c41a)'
 }
 
+/**
+ * 展示层的「数据可能过期」：客户端请求失败（保旧值），或宿主把上一次
+ * 成功答案折叠进了失败快照（`degraded`）。圆点调暗与文案后缀由它统一驱动——
+ * 没有后半段，宿主折叠的旧数字会顶着绿点冒充新鲜值。
+ */
+export function isStaleDisplay(stale: boolean, snapshot?: UsageSnapshot): boolean {
+  if (stale) return true
+  return snapshot !== undefined && snapshot.degraded === true
+}
+
 /** Group digits; a fractional balance keeps up to two decimals. */
 export function formatAmount(value: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)

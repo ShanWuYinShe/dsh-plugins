@@ -55,6 +55,7 @@ export {
   ProviderUsageRegistry,
   DEFAULT_CACHE_TTL_MS,
   DEFAULT_ERROR_CACHE_TTL_MS,
+  DEFAULT_UNRESOLVED_TTL_MS,
   DEFAULT_QUERY_TIMEOUT_MS,
   safeMessage,
 } from './registry.js'

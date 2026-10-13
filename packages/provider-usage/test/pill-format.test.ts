@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { fillStyle, formatAmount, formatReset, getDotColor } from '../client/pill-format.ts'
+import type { UsageSnapshot } from '../src/types.ts'
+import { fillStyle, formatAmount, formatReset, getDotColor, isStaleDisplay } from '../client/pill-format.ts'
 
 /**
  * pill-format 阈值回归：5%/20% 两档颜色是用户可感知的语义，
@@ -59,5 +60,26 @@ describe('formatReset', () => {
     const out = formatReset('2026-10-01T00:00:00.000Z')
     expect(out).not.toBe('2026-10-01T00:00:00.000Z')
     expect(out.length).toBeGreaterThan(0)
+  })
+})
+
+describe('isStaleDisplay', () => {
+  const snapshot = (fields: Partial<UsageSnapshot>): UsageSnapshot => ({
+    provider: 'acme',
+    windows: [],
+    fetchedAt: 0,
+    ...fields,
+  })
+
+  it('客户端请求失败(stale)恒为真', () => {
+    expect(isStaleDisplay(true)).toBe(true)
+    expect(isStaleDisplay(true, snapshot({ degraded: true }))).toBe(true)
+  })
+
+  it('宿主折叠旧答案(degraded)视为过期', () => {
+    expect(isStaleDisplay(false, snapshot({ degraded: true, error: 'transient' }))).toBe(true)
+    expect(isStaleDisplay(false, snapshot({ error: 'no usable balance' }))).toBe(false)
+    expect(isStaleDisplay(false, snapshot({}))).toBe(false)
+    expect(isStaleDisplay(false, undefined)).toBe(false)
   })
 })

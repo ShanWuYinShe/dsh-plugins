@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { UsageSnapshot } from '../src/types.js'
 import { fetchSnapshot } from './fetch-snapshot.js'
+import { isStaleDisplay } from './pill-format.js'
 import { headlineText } from './pill-headline.js'
 import type { ProviderUsagePillProps } from './pill-types.js'
 
@@ -165,7 +166,9 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
 
   const queried = answer !== undefined && !('queried' in answer)
   const snapshot = queried ? answer as UsageSnapshot : undefined
-  const headline = headlineText(answer, provider, stale, t)
+  // 宿主折叠旧答案（degraded）与客户端请求失败同视为「数据可能过期」。
+  const displayStale = isStaleDisplay(stale, snapshot)
+  const headline = headlineText(answer, provider, displayStale, t)
 
 
   return {
@@ -175,7 +178,7 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
     open,
     setOpen,
     busy,
-    stale,
+    stale: displayStale,
     alignRight,
     setAlignRight,
     rootRef,

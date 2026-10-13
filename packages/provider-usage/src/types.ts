@@ -51,6 +51,12 @@ export interface UsageSnapshot {
    * error means nothing usable was ever returned.
    */
   error?: string
+  /**
+   * True when `windows` were carried over from the previous successful
+   * answer because the latest query failed (`error` is set). The surface
+   * dims the readout instead of presenting stale numbers as fresh.
+   */
+  degraded?: boolean
 }
 
 /** One OAuth/account wallet bucket, amounts already parsed to numbers. */

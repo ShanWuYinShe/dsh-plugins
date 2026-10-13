@@ -6,12 +6,13 @@ import { ProviderUsageRegistry, safeMessage } from '../src/registry.js'
 import type { UsageSnapshot } from '../src/types.js'
 
 /** Build a registry with a pinned clock so no test ever sleeps. */
-function makeRegistry(options: { ttlMs?: number; errorTtlMs?: number; timeoutMs?: number } = {}) {
+function makeRegistry(options: { ttlMs?: number; errorTtlMs?: number; unresolvedTtlMs?: number; timeoutMs?: number } = {}) {
   const ctx = new Context()
   let now = 1_000
   const registry = new ProviderUsageRegistry(ctx, {
     cacheTtlMs: options.ttlMs ?? 60_000,
     errorCacheTtlMs: options.errorTtlMs ?? 10_000,
+    unresolvedTtlMs: options.unresolvedTtlMs ?? 60_000,
     queryTimeoutMs: options.timeoutMs ?? 15_000,
     now: () => now,
   })
@@ -232,6 +233,9 @@ describe('ProviderUsageRegistry', () => {
     // A transient outage must not blank the number the user was reading.
     expect(snapshot?.windows).toEqual([{ id: 'a', label: 'A', remain: 9, unit: 'credits' }])
     expect(snapshot?.error).toContain('transient')
+    // 折叠的旧答案必须自带 degraded 标记:客户端据此调暗展示,不把旧
+    // 数字当新鲜值呈现。
+    expect(snapshot?.degraded).toBe(true)
   })
 
   it('redacts the credential a failing endpoint quotes back', async () => {
@@ -360,6 +364,8 @@ describe('ProviderUsageRegistry', () => {
     const snapshot = await registry.snapshot('acme')
     expect(snapshot?.error).toContain('no usable balance')
     expect(snapshot?.windows).toEqual([])
+    // windows 是查询器本轮Fresh返回的空表,不是折叠的旧答案:不标 degraded。
+    expect(snapshot?.degraded).toBeUndefined()
   })
 
   it('passes the resolved endpoint and credential to the querier', async () => {
@@ -398,6 +404,47 @@ describe('ProviderUsageRegistry', () => {
     const snapshot = await registry.snapshot('my-cloud')
     expect(sfQuerier).toHaveBeenCalledTimes(1)
     expect(snapshot?.windows).toEqual([{ id: 'sf', label: 'Balance', remain: 99, unit: 'cny' }])
+  })
+
+  it('推断无果的 provider 在负缓存窗口内不重复跑 resolve', async () => {
+    const { registry, advance } = makeRegistry({ unresolvedTtlMs: 30_000 })
+    const resolver = vi.fn(async () => ({ baseURL: 'https://api.unmatched.example' }))
+    registry.setResolver(resolver)
+
+    await registry.snapshot('my-cloud')
+    await registry.snapshot('my-cloud')
+    // 轮询每 60s 一次,推断无果就别每轮都白读一遍 settings/credentials。
+    expect(resolver).toHaveBeenCalledTimes(1)
+
+    advance(31_000)
+    await registry.snapshot('my-cloud')
+    expect(resolver).toHaveBeenCalledTimes(2)
+  })
+
+  it('直接注册与推断负缓存互不影响，新注册让其让路', async () => {
+    const { registry, advance } = makeRegistry({ unresolvedTtlMs: 30_000 })
+    const resolver = vi.fn(async () => ({}))
+    registry.setResolver(resolver)
+    await registry.snapshot('acme')
+    await registry.snapshot('acme')
+    expect(resolver).toHaveBeenCalledTimes(1)
+
+    // 直接注册同一名字:注册查表在负缓存判断之前,必须立即可用。
+    const querier = fixedQuerier([{ id: 'a', label: 'A', remain: 1, unit: 'credits' }])
+    registry.register('acme', querier)
+    const snapshot = await registry.snapshot('acme')
+    expect(snapshot?.windows).toEqual([{ id: 'a', label: 'A', remain: 1, unit: 'credits' }])
+    // resolver 同时服务注册查询路径(每次查询都要解析端点/凭据),这里的
+    // 计数把两条路径都算上;断言点是「注册查询不多跑推断负缓存的账」。
+    expect(resolver).toHaveBeenCalledTimes(2)
+
+    // 新注册也让其它 provider 的推断负缓存清零(可能变得可推断)。
+    advance(1)
+    await registry.snapshot('other-cloud')
+    expect(resolver).toHaveBeenCalledTimes(3)
+    registry.register('siliconflow', fixedQuerier([{ id: 's', label: 'S', remain: 2, unit: 'cny' }]))
+    await registry.snapshot('other-cloud')
+    expect(resolver).toHaveBeenCalledTimes(4)
   })
 
   it('applies the query deadline to the inference resolve, not just the querier', async () => {
