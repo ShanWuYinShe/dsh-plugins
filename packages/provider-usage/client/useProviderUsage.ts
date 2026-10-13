@@ -98,11 +98,11 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
   // 当前值,否则 A 的旧余额会顶着 B 的名字显示到下一轮轮询。
   const providerRef = useRef(provider)
   useEffect(() => { providerRef.current = provider }, [provider])
-  const refresh = useCallback(async (signal?: AbortSignal): Promise<void> => {
+  const refresh = useCallback(async (signal?: AbortSignal, options?: { force?: boolean }): Promise<void> => {
     if (provider === undefined || provider === '') return
     setBusy(true)
     try {
-      const snapshot = await fetchSnapshot(provider, signal)
+      const snapshot = await fetchSnapshot(provider, signal, options)
       if (mounted.current && signal?.aborted !== true && providerRef.current === provider) {
         answerRef.current = snapshot
         setAnswer(snapshot)
@@ -147,7 +147,9 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
     const start = () => { timer = window.setInterval(() => { void refresh(controller.signal) }, POLL_INTERVAL_MS) }
     const stop = () => { if (timer !== undefined) { window.clearInterval(timer); timer = undefined } }
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') { void refresh(controller.signal); start() }
+      // 先 stop 再 start:visible 事件可能在 interval 仍在跑时到达,
+      // 直接 start 会覆盖 timer 引用,旧 interval 泄漏、轮询翻倍。
+      if (document.visibilityState === 'visible') { stop(); void refresh(controller.signal); start() }
       else stop()
     }
     if (document.visibilityState === 'visible') start()

@@ -13,8 +13,10 @@ import { PROVIDER_USAGE_PATH, type UsageSnapshot } from '../src/types.js'
 export type SnapshotAnswer = UsageSnapshot | { provider: string; queried: false }
 
 /** 拉取一行答案；非 2xx 或形状不对都抛错（调用方决定保旧值还是失败）。 */
-export async function fetchSnapshot(provider: string, signal?: AbortSignal): Promise<SnapshotAnswer | undefined> {
-  const response = await fetch(`${PROVIDER_USAGE_PATH}?providers=${encodeURIComponent(provider)}`, {
+export async function fetchSnapshot(provider: string, signal?: AbortSignal, options?: { force?: boolean }): Promise<SnapshotAnswer | undefined> {
+  // force 追加 refresh=1:宿主绕过缓存读(手动刷新);自动轮询不带。
+  const suffix = options?.force === true ? '&refresh=1' : ''
+  const response = await fetch(`${PROVIDER_USAGE_PATH}?providers=${encodeURIComponent(provider)}${suffix}`, {
     headers: { accept: 'application/json' },
     credentials: 'same-origin',
     ...signal === undefined ? {} : { signal },

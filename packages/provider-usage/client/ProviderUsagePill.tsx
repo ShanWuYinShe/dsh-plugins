@@ -91,7 +91,9 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
               disabled={busy}
               title={t('refresh')}
               aria-label={t('refresh')}
-              onClick={() => { void refresh() }}
+              // 手动刷新要真刷新:force 让宿主绕过缓存读——否则轮询间隔与
+              // 宿主 TTL 同为 60s,缓存恒新鲜,按钮永远拿回上一轮轮询的数。
+              onClick={() => { void refresh(undefined, { force: true }) }}
             >
               {busy ? <><span className="pu-spin" aria-hidden="true" />{t('refreshing')}</> : t('refresh')}
             </button>

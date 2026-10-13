@@ -74,6 +74,33 @@ describe('providerUsageHandler', () => {
     expect(body.snapshots).toHaveLength(2)
   })
 
+  it('refresh=1 以 force 透传 registry（手动刷新穿透宿主缓存）', async () => {
+    const registry = makeRegistry()
+    const spy = vi.spyOn(registry, 'snapshot').mockResolvedValue(undefined)
+    const handler = providerUsageHandler({ registry })
+    const exchange = fakeExchange({ url: '/?providers=acme&refresh=1' })
+    await handler(exchange.req, exchange.res)
+    expect(spy).toHaveBeenCalledWith('acme', { force: true })
+  })
+
+  it('不带 refresh 参数时不开 force（自动轮询保持走缓存）', async () => {
+    const registry = makeRegistry()
+    const spy = vi.spyOn(registry, 'snapshot').mockResolvedValue(undefined)
+    const handler = providerUsageHandler({ registry })
+    const exchange = fakeExchange({ url: '/?providers=acme' })
+    await handler(exchange.req, exchange.res)
+    expect(spy).toHaveBeenCalledWith('acme', { force: false })
+  })
+
+  it('refresh 取值 1/true 之外不生效', async () => {
+    const registry = makeRegistry()
+    const spy = vi.spyOn(registry, 'snapshot').mockResolvedValue(undefined)
+    const handler = providerUsageHandler({ registry })
+    const exchange = fakeExchange({ url: '/?providers=acme&refresh=yes' })
+    await handler(exchange.req, exchange.res)
+    expect(spy).toHaveBeenCalledWith('acme', { force: false })
+  })
+
   it('refuses a non-GET method', async () => {
     const handler = providerUsageHandler({ registry: makeRegistry() })
     const exchange = fakeExchange({ method: 'POST', url: '/?providers=acme' })

@@ -91,6 +91,12 @@ function originIsLoopback(origin: string | undefined): boolean {
   }
 }
 
+/** `refresh=1|true` 表示绕过缓存读:面板手动刷新用,自动轮询不带。 */
+function forceRequested(url: URL): boolean {
+  const value = url.searchParams.get('refresh')
+  return value === '1' || value === 'true'
+}
+
 /** Parse the comma-separated `providers` query parameter. */
 function requestedProviders(url: URL, max: number): readonly string[] {
   const raw = url.searchParams.get('providers')
@@ -126,12 +132,13 @@ export function providerUsageHandler(options: ProviderUsageRouteOptions): (req: 
     try {
       const url = new URL(req.url ?? '/', 'http://dsh.invalid')
       const providers = requestedProviders(url, max)
+      const force = forceRequested(url)
       // Sequential rather than parallel: these are billing endpoints, and
       // firing twenty at once from one page poll is how an account gets
       // rate-limited for merely displaying a number.
       const snapshots: unknown[] = []
       for (const provider of providers) {
-        const snapshot = await options.registry.snapshot(provider)
+        const snapshot = await options.registry.snapshot(provider, { force })
         snapshots.push(snapshot ?? { provider, queried: false })
       }
       json(res, 200, { snapshots })

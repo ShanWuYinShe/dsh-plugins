@@ -6,11 +6,12 @@ import { ProviderUsageRegistry, safeMessage } from '../src/registry.js'
 import type { UsageSnapshot } from '../src/types.js'
 
 /** Build a registry with a pinned clock so no test ever sleeps. */
-function makeRegistry(options: { ttlMs?: number; timeoutMs?: number } = {}) {
+function makeRegistry(options: { ttlMs?: number; errorTtlMs?: number; timeoutMs?: number } = {}) {
   const ctx = new Context()
   let now = 1_000
   const registry = new ProviderUsageRegistry(ctx, {
     cacheTtlMs: options.ttlMs ?? 60_000,
+    errorCacheTtlMs: options.errorTtlMs ?? 10_000,
     queryTimeoutMs: options.timeoutMs ?? 15_000,
     now: () => now,
   })
@@ -59,6 +60,133 @@ describe('ProviderUsageRegistry', () => {
     advance(101)
     await registry.snapshot('acme')
     expect(querier).toHaveBeenCalledTimes(2)
+  })
+
+  it('force 绕过缓存重新查询，新答案回写后普通读恢复走缓存', async () => {
+    const { registry } = makeRegistry({ ttlMs: 60_000 })
+    const querier = fixedQuerier([{ id: 'a', label: 'A', remain: 5, unit: 'credits' }])
+    registry.register('acme', querier)
+
+    await registry.snapshot('acme')
+    await registry.snapshot('acme')
+    expect(querier).toHaveBeenCalledTimes(1)
+
+    // 手动刷新:尽管缓存仍新鲜,也要真打一次上游——轮询间隔与成功 TTL
+    // 同为 60s 时缓存恒新鲜,不穿透的话刷新按钮永远拿回上一轮的数。
+    await registry.snapshot('acme', { force: true })
+    expect(querier).toHaveBeenCalledTimes(2)
+
+    await registry.snapshot('acme')
+    expect(querier).toHaveBeenCalledTimes(2)
+  })
+
+  it('force 命中在途查询时共享同一次上游请求', async () => {
+    const { registry } = makeRegistry()
+    let release: (() => void) | undefined
+    const querier = vi.fn(async (): Promise<UsageSnapshot> => {
+      await new Promise<void>(resolve => { release = resolve })
+      return { provider: 'acme', windows: [], fetchedAt: 0 }
+    })
+    registry.register('acme', querier)
+
+    const first = registry.snapshot('acme', { force: true })
+    const second = registry.snapshot('acme', { force: true })
+    await vi.waitFor(() => { expect(release).toBeDefined() }, { timeout: 5000 })
+    release?.()
+    await Promise.all([first, second])
+    // 连点刷新按钮不得放大账单接口压力:force 绕过的是缓存读,不是在途合并。
+    expect(querier).toHaveBeenCalledTimes(1)
+  })
+
+  it('失败快照按更短负缓存复用，过期后即重试且成功答案仍享全 TTL', async () => {
+    const { registry, advance } = makeRegistry({ ttlMs: 60_000, errorTtlMs: 10_000 })
+    let fail = true
+    const querier = vi.fn(async (): Promise<UsageSnapshot> => {
+      if (fail) throw new Error('transient')
+      return { provider: 'acme', windows: [{ id: 'a', label: 'A', remain: 9, unit: 'credits' }], fetchedAt: 0 }
+    })
+    registry.register('acme', querier)
+
+    await registry.snapshot('acme')
+    advance(5_000)
+    await registry.snapshot('acme')
+    // 负缓存窗口内不重试:挂掉的端点不被轮询打爆。
+    expect(querier).toHaveBeenCalledTimes(1)
+
+    advance(6_000)
+    fail = false
+    const recovered = await registry.snapshot('acme')
+    // 11s > 10s:错误过期,恢复后第一次读取即重试,不再等满成功 TTL。
+    expect(querier).toHaveBeenCalledTimes(2)
+    expect(recovered?.error).toBeUndefined()
+
+    advance(30_000)
+    await registry.snapshot('acme')
+    expect(querier).toHaveBeenCalledTimes(2)
+  })
+
+  it('替换注册清掉别名键缓存（kimi 归一到 moonshot）', async () => {
+    const { registry } = makeRegistry()
+    registry.register('moonshot', fixedQuerier([{ id: 'old', label: 'old', remain: 1, unit: 'cny' }]))
+    await registry.snapshot('kimi')
+
+    // 缓存按请求键 'kimi' 存:热替换 'moonshot' 注册若只删注册键,
+    // 别名键里的旧答案会在下一个 TTL 内继续供应已被替换的 querier。
+    registry.register('moonshot', fixedQuerier([{ id: 'new', label: 'new', remain: 2, unit: 'cny' }]))
+    const snapshot = await registry.snapshot('kimi')
+    expect(snapshot?.windows[0]?.id).toBe('new')
+  })
+
+  it('invalidate 按归一化匹配清除别名键缓存', async () => {
+    const { registry } = makeRegistry()
+    const querier = fixedQuerier([{ id: 'm', label: 'M', remain: 3, unit: 'cny' }])
+    registry.register('moonshot', querier)
+
+    await registry.snapshot('kimi')
+    registry.invalidate('moonshot')
+    await registry.snapshot('kimi')
+    expect(querier).toHaveBeenCalledTimes(2)
+  })
+
+  it('被替换注册的在途旧查询结算后不得回写缓存', async () => {
+    const { registry } = makeRegistry()
+    let release: (() => void) | undefined
+    const stale = vi.fn(async (): Promise<UsageSnapshot> => {
+      await new Promise<void>(resolve => { release = resolve })
+      return { provider: 'acme', windows: [{ id: 'old', label: 'old', remain: 1, unit: 'credits' }], fetchedAt: 0 }
+    })
+    registry.register('acme', stale)
+    const pending = registry.snapshot('acme')
+    await vi.waitFor(() => { expect(release).toBeDefined() }, { timeout: 5000 })
+
+    // 查询在途时热替换注册:旧查询仍要把结果交还给发起它的调用方,
+    // 但缓存里留下的必须是新 querier 的答案。
+    const live = fixedQuerier([{ id: 'new', label: 'new', remain: 2, unit: 'credits' }])
+    registry.register('acme', live)
+    release?.()
+    await pending
+    expect(stale).toHaveBeenCalledTimes(1)
+
+    const snapshot = await registry.snapshot('acme')
+    expect(snapshot?.windows[0]?.id).toBe('new')
+    expect(live).toHaveBeenCalledTimes(1)
+  })
+
+  it('推断路径连续读取共享缓存（回写身份校验按注册键）', async () => {
+    const { registry } = makeRegistry()
+    registry.setResolver(async () => ({ baseURL: 'https://api.siliconflow.cn/v1', apiKey: 'sk-sf' }))
+    const sfQuerier = vi.fn(async context => ({
+      provider: context.provider,
+      windows: [{ id: 'sf', label: 'Balance', remain: 99, unit: 'cny' }],
+      fetchedAt: 0,
+    }))
+    registry.register('siliconflow', sfQuerier, 'SiliconFlow')
+
+    // 推断路径缓存键是请求键('my-cloud'),注册身份校验键是 'siliconflow':
+    // 回写不得因请求键本身无注册而被拒,否则推断路径每次读取都真打上游。
+    await registry.snapshot('my-cloud')
+    await registry.snapshot('my-cloud')
+    expect(sfQuerier).toHaveBeenCalledTimes(1)
   })
 
   it('shares one in-flight query between concurrent readers', async () => {

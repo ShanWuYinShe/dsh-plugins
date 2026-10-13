@@ -51,8 +51,14 @@ export const name = 'provider-usage'
  */
 export const inject: string[] = []
 
-export { ProviderUsageRegistry, DEFAULT_CACHE_TTL_MS, DEFAULT_QUERY_TIMEOUT_MS, safeMessage } from './registry.js'
-export type { ProviderUsageRegistryOptions } from './registry.js'
+export {
+  ProviderUsageRegistry,
+  DEFAULT_CACHE_TTL_MS,
+  DEFAULT_ERROR_CACHE_TTL_MS,
+  DEFAULT_QUERY_TIMEOUT_MS,
+  safeMessage,
+} from './registry.js'
+export type { ProviderUsageRegistryOptions, ProviderUsageSnapshotOptions } from './registry.js'
 export {
   CANONICAL_ALIASES,
   createProviderResolver,

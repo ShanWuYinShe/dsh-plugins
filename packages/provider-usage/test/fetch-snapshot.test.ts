@@ -49,4 +49,20 @@ describe('fetchSnapshot', () => {
       vi.unstubAllGlobals()
     }
   })
+
+  it('force 追加 refresh=1，默认不带（自动轮询保持走宿主缓存）', async () => {
+    const fetchStub = vi.fn(async () => new Response(JSON.stringify({ snapshots: [] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchStub)
+    try {
+      await fetchSnapshot('acme')
+      let url = (fetchStub.mock.calls[0] as unknown[] | undefined)?.[0] as string
+      expect(url).toBe('/plugins/provider-usage/usage?providers=acme')
+
+      await fetchSnapshot('acme', undefined, { force: true })
+      url = (fetchStub.mock.calls[1] as unknown[] | undefined)?.[0] as string
+      expect(url).toBe('/plugins/provider-usage/usage?providers=acme&refresh=1')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })
