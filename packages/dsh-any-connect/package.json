@@ -1,6 +1,6 @@
 {
   "name": "@chaoset/dsh-any-connect",
-  "version": "0.4.14-alpha.16",
+  "version": "0.4.14-alpha.17",
   "description": "DSH plugin: bring models offered by WorkBuddy-style desktop agents into DeepSeek Harness — zero configuration, per-model thinking effort, and billing rate at a glance",
   "engines": {
     "node": ">=22.19.0"
@@ -26,7 +26,7 @@
     "dsh-any-connect": "./lib/bin.js"
   },
   "dsh": {
-    "host": "0.2.1-alpha.2",
+    "host": "0.2.1-alpha.3",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -39,13 +39,13 @@
     }
   },
   "optionalDependencies": {
-    "@deepseek-ai/dsh-atomic-write": "^0.2.1-alpha.2",
-    "@deepseek-ai/dsh-attachment": "^0.2.1-alpha.2",
-    "@deepseek-ai/dsh-home-paths": "^0.2.1-alpha.2",
-    "@deepseek-ai/dsh-host-webserver": "^0.2.1-alpha.2",
-    "@deepseek-ai/dsh-llm": "^0.2.1-alpha.2",
-    "@deepseek-ai/dsh-llm-pi-ai": "^0.2.1-alpha.2",
-    "@deepseek-ai/dsh-settings": "^0.2.1-alpha.2",
+    "@deepseek-ai/dsh-atomic-write": "^0.2.1-alpha.3",
+    "@deepseek-ai/dsh-attachment": "^0.2.1-alpha.3",
+    "@deepseek-ai/dsh-home-paths": "^0.2.1-alpha.3",
+    "@deepseek-ai/dsh-host-webserver": "^0.2.1-alpha.3",
+    "@deepseek-ai/dsh-llm": "^0.2.1-alpha.3",
+    "@deepseek-ai/dsh-llm-pi-ai": "^0.2.1-alpha.3",
+    "@deepseek-ai/dsh-settings": "^0.2.1-alpha.3",
     "@earendil-works/pi-ai": "^1.1.0"
   },
   "scripts": {
@@ -63,13 +63,13 @@
     "access": "public"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "~4.0.5-alpha.1",
-    "@deepseek-ai/cordis-plugin-loader": "~1.0.6-alpha.1",
-    "@deepseek-ai/dsh-client-locale": "^0.2.1-alpha.2",
-    "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-alpha.2",
-    "@deepseek-ai/dsh-client-ui-plugin-manager": "^0.2.1-alpha.2",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.2.1-alpha.2",
-    "@deepseek-ai/dsh-timeout": "^0.2.1-alpha.2",
+    "@deepseek-ai/cordis": "~4.0.5-alpha.2",
+    "@deepseek-ai/cordis-plugin-loader": "~1.0.6-alpha.2",
+    "@deepseek-ai/dsh-client-locale": "^0.2.1-alpha.3",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.2.1-alpha.3",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": "^0.2.1-alpha.3",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.2.1-alpha.3",
+    "@deepseek-ai/dsh-timeout": "^0.2.1-alpha.3",
     "vitest": "^4.1.11"
   },
   "bugs": {
@@ -77,9 +77,9 @@
   },
   "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/dsh-any-connect#readme",
   "dependencies": {
-    "@deepseek-ai/dsh-storage": "^0.2.1-alpha.2",
-    "@deepseek-ai/dsh-storage-domain": "^0.2.1-alpha.2",
-    "@deepseek-ai/dsh-storage-json": "^0.2.1-alpha.2",
-    "zod": "^4.4.3"
+    "@deepseek-ai/dsh-storage": "^0.2.1-alpha.3",
+    "@deepseek-ai/dsh-storage-domain": "^0.2.1-alpha.3",
+    "@deepseek-ai/dsh-storage-json": "^0.2.1-alpha.3",
+    "zod": "4.4.3"
   }
 }

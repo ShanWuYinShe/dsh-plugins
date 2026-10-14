@@ -1,3 +1,11 @@
+## 0.4.14-alpha.17 (2026-10-14)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.1-alpha.3` 预发布线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-alpha.3`。
+* **对齐 `cordis` 到 `4.0.5-alpha.2`、`schemastery` 到 `3.18.5-alpha.2`、`cordis-plugin-loader` 到 `1.0.6-alpha.2`**：新宿主线把这三个基础包又前移了一档（`dsh-settings` 等 peer 声明 `~4.0.5-alpha.2` / `~3.18.5-alpha.2`）。不同步时 bun 会给宿主包嵌套出另一份副本，`Context.settings` 的服务声明 augment 落在宿主选中的那份上，类型检查报「Property settings does not exist on type Context」。对齐后与宿主共用同一份。
+* **`zod` 精确 pin 到 `4.4.3`**：宿主 alpha.3 把 zod 依赖从 `^4.4.3` 收紧为精确 `4.4.3`，我们的 `^4.4.3` 解析出 4.6.5 与宿主嵌套副本并存，`domainTable` 泛型对两版 zod 的类型宇宙互拼即报 TS2589（Type instantiation is excessively deep）。对齐后单副本。
+
 ## 0.4.14-alpha.16 (2026-10-12)
 
 ### 修复
