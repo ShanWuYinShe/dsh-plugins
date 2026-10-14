@@ -20,6 +20,7 @@
  * @module dsh-any-connect/reasoning-default
  */
 
+import { clampThinkingBudgetToAnswerRoom, MIN_ANSWER_TOKENS, thinkingBudgetForLevel } from '@earendil-works/pi-ai/api/simple-options'
 import type { WorkBuddyModelInfo } from './catalog.js'
 
 /** 档位升级顺序（用于「最高一档」）。与上游 `WorkBuddyEffort` 取值域一致。 */
@@ -78,31 +79,28 @@ export function applyDefaultEffort(
 }
 
 /**
- * pi-ai 的档位预算表与保护常量，抄自
- * `@earendil-works/pi-ai/dist/api/simple-options.js`（2026-10-11 的实测版本）。
+ * 档位预算与保护常量直接取自 pi-ai 公开导出
+ * （`@earendil-works/pi-ai/api/simple-options`，pi-ai 1.2.0 起可用）。
+ * 此前这里抄录了一张本地副本（当时 pi-ai 未导出该表）；改为引用后
+ * 「默认」与「显式选高」随 pi-ai 升级自动保持字节等价，不再需要人工对账。
  *
- * 抄录而非引用：pi-ai 是宿主依赖、不是本插件的直接依赖，且它没有导出这张表。
- * 数字漂移不会让请求失败（预算只是个上限），但会让「默认」与「显式选高」在字节
- * 上不再等价——升级 pi-ai 后应重新核对这里。
+ * 有意不用 pi-ai 的 `adjustMaxTokensForThinking` 整块算式：它只在
+ * `max_tokens <= 预算` 的退化分支做答案余量夹取，而这里需要**无条件**保证
+ * `MIN_ANSWER_TOKENS` 的答案余量（`max_tokens` 被模型上限紧贴的那一段，
+ * 如预算 16384 / 上限 17000 时应夹到 15976 而不是放行 16384）。因此取其
+ * 分解式导出：`thinkingBudgetForLevel`（内含 `xhigh`/`max` → `high` 的档位
+ * 收敛，与 `clampReasoning` 同映射）与 `clampThinkingBudgetToAnswerRoom`；
+ * `max_tokens` 的一行算式保留在本地，因为本仓模型目录的 `maxTokens` 是
+ * 可选项，而 pi-ai 该函数签名要求必传。
  */
-const PI_THINKING_BUDGETS = { minimal: 1024, low: 2048, medium: 8192, high: 16384 } as const
-
-/** 与 pi-ai `MIN_ANSWER_TOKENS` 一致：共享响应上限里至少留出的答案余量。 */
-const MIN_ANSWER_TOKENS = 1024
-
-/** 与 pi-ai `clampReasoning` 同义：`xhigh`/`max` 的预算等同 `high`。 */
-function budgetForLevel(level: string): number {
-  const key = level === 'xhigh' || level === 'max' ? 'high' : level
-  return PI_THINKING_BUDGETS[key as keyof typeof PI_THINKING_BUDGETS] ?? PI_THINKING_BUDGETS.high
-}
 
 /**
  * 就一条准备转发的 Anthropic 形请求体，把「默认档」补成具体档位。
  *
  * 形状与算式都对齐 pi-ai 显式选该档位时的行为：
- * `thinking = { type: 'enabled', budget_tokens, display: 'summarized' }`，并按
- * `adjustMaxTokensForThinking` 抬高 `max_tokens` 以容纳预算（上限是该模型的
- * `maxTokens`），最后再按答案余量夹一次预算。
+ * `thinking = { type: 'enabled', budget_tokens, display: 'summarized' }`，并抬高
+ * `max_tokens` 以容纳预算（上限是该模型的 `maxTokens`），最后无条件按答案
+ * 余量夹一次预算（`clampThinkingBudgetToAnswerRoom`）。
  *
  * 触发条件与 OpenAI 通道完全一致（同一个 `defaultFallbackEffort`）：只有
  * `onlyReasoning: true` 的模型才补，且请求必须**完全没有** `thinking` 字段——
@@ -138,14 +136,14 @@ export function applyDefaultThinking(
   const bodyCap = typeof bodyCapRaw === 'number' && bodyCapRaw > 0 ? bodyCapRaw : undefined
   const baseMax = bodyCap ?? modelMax
   if (baseMax === undefined) return bodyJson
-  const budget = budgetForLevel(level)
+  // 档位域来自 defaultFallbackEffort（low/medium/high/xhigh/max），与 pi-ai 的
+  // ThinkingLevel 取值交集即全部输入，clampReasoning 的收敛覆盖 xhigh/max。
+  const budget = thinkingBudgetForLevel(level as Parameters<typeof thinkingBudgetForLevel>[0])
   const maxTokens = Math.min(baseMax + budget, modelMax ?? baseMax + budget)
-  let adjusted = budget
-  if (maxTokens <= adjusted) adjusted = Math.min(adjusted, Math.max(0, maxTokens - MIN_ANSWER_TOKENS))
   record['max_tokens'] = maxTokens
   record['thinking'] = {
     type: 'enabled',
-    budget_tokens: Math.min(adjusted, Math.max(0, maxTokens - MIN_ANSWER_TOKENS)),
+    budget_tokens: clampThinkingBudgetToAnswerRoom(budget, maxTokens),
     display: 'summarized',
   }
   return JSON.stringify(record)

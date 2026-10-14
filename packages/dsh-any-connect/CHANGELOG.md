@@ -1,3 +1,9 @@
+## 0.4.14-alpha.18 (2026-10-15)
+
+### 优化
+
+* **思考档位预算表改引用 pi-ai 公开导出**：`applyDefaultThinking` 的预算表（minimal/low/medium/high = 1024/2048/8192/16384）、`MIN_ANSWER_TOKENS` 与档位收敛改用 `@earendil-works/pi-ai/api/simple-options` 的同名导出（pi-ai 1.2.0 起公开），删除 2026-10-11 抄录的本地副本。当时注释的两个前提均已失效：「pi-ai 非本插件直接依赖」——依赖自 0.3.16 的 adapter 起就已声明；「未导出该表」——1.2.0 已导出。手抄副本最大的风险（pi-ai 升级后数字漂移，「默认」与「显式选高」不再字节等价）随之消除。**有意不整块换用 `adjustMaxTokensForThinking`**：它只在 `max_tokens ≤ 预算` 的退化分支做答案余量夹取，而本插件需要无条件保证 `MIN_ANSWER_TOKENS` 的答案余量，故取其分解式导出（`thinkingBudgetForLevel` + `clampThinkingBudgetToAnswerRoom`）；`max_tokens` 的一行算式因本仓模型目录的 `maxTokens` 为可选项而保留本地。行为与 alpha.17 逐字节等价（既有用例全绿钉住）。
+
 ## 0.4.14-alpha.17 (2026-10-14)
 
 ### 优化
