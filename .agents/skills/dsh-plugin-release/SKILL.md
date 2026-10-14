@@ -88,6 +88,19 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    BUN_INSTALL_CACHE_DIR=<repo>/.workwork/bun-cache bun install
    ```
 
+   **新 alpha 线刚发布时 npmmirror 会同步滞后（2026-10-14 实测，0.2.1-alpha.3）**：
+   在 `.workwork/dsh-host` 装目标宿主时 `bun add` 报个别子包 404（如
+   `@deepseek-ai/dsh-api-remote-access@0.2.1-alpha.3 failed to resolve`，本机
+   npm/bun 默认走 npmmirror），漏的恰是宿主刚新增/刚发版的子包。解法是单次
+   安装显式覆盖官方源（env 前缀即可，不落任何配置）：
+
+   ```bash
+   npm_config_registry=https://registry.npmjs.org bun add @deepseek-ai/dsh@<目标版本>
+   ```
+
+   `bun pm trust` 同样要带 `BUN_INSTALL_CACHE_DIR` 重定向（漏了报同款
+   `unable to write files to tempdir: EPERM`——trust 也要写缓存/临时目录）。
+
    **适配 rc 时务必检查传递依赖的版本漂移**：`adapt-dsh` 只改 `@deepseek-ai/dsh-*`
    的 range，**不会动第三方依赖**。若宿主新增/升级了某个被插件直接依赖的库
    （如 `@earendil-works/pi-ai`），会出现两版并存、同名类型互不兼容，`typecheck`
