@@ -79,10 +79,11 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
      后台起宿主用双重 fork（`( nohup … >log 2>&1 & )`）——普通 `… &` 会让
      bash 等待整棵进程树直到超时。
 
-   **沙盒下 bun 装包要先重定向缓存（2026-09-30 实测）**：新 rc 的包尚未进本机
-   bun 缓存时，`bun install` 需要写工作区外的默认缓存目录，在 `workspace-write`
-   下报 `error: bun is unable to write files to tempdir: EPERM`（重定向 `TMPDIR`
-   无效，报错指的是缓存而非临时目录）。解法是给它一个工作区内的缓存目录：
+   **沙盒下 bun 装包（2026-10-14 起可直接跑）**：`~/.bun/install/cache` 已由
+   sandbox-extra-roots 插件放行并实测，`bun install` 无需任何重定向。历史记录
+   （未配插件的机器，2026-09-30 实测）：`workspace-write` 下报 `error: bun is unable
+   to write files to tempdir: EPERM`——报错有误导，真因是默认缓存目录不可写
+   （重定向 `TMPDIR` 无效），解法是给它一个工作区内的缓存目录：
 
    ```bash
    BUN_INSTALL_CACHE_DIR=<repo>/.workwork/bun-cache bun install
