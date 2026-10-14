@@ -27,6 +27,7 @@ const EXTERNAL_FACTS: Record<string, string> = {
   ZCODE_BIGMODEL_USAGE_QUOTA_URL: "同上",
   DISCOVERY_UNSUPPORTED: "DSH 宿主的 provider discovery 错误码，不在本仓代码里",
   TMPDIR: "POSIX 环境变量（沙盒/发布流程里重定向用），不是本仓符号",
+  BUN_INSTALL_CACHE_DIR: "bun 自身的包缓存目录环境变量（沙盒内装包/trust 前重定向到工作区，见 .workwork/bun-cache 惯例），不是本仓符号",
 };
 
 // 比其它锁多跳过 `test`：本锁的判据是「文档引用的标识符在**实现**里存在」，而测试文件里
