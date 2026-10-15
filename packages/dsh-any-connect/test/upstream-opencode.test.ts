@@ -104,6 +104,22 @@ describe('OpenCodeUpstreamClient', () => {
     expect(models.some(m => m.id === 'mimo-v2.6-flash-free')).toBe(true)
   })
 
+  it('FALLBACK_OPENCODE_MODELS 拥有正确的官方真实上下文与限制', () => {
+    const spaceBunny = FALLBACK_OPENCODE_MODELS.find(m => m.id === 'space-bunny-free')
+    expect(spaceBunny?.contextWindow).toBe(1048576)
+    expect(spaceBunny?.maxTokens).toBe(524288)
+    expect(spaceBunny?.supportsImages).toBe(true)
+
+    const dsFlash = FALLBACK_OPENCODE_MODELS.find(m => m.id === 'deepseek-v4.1-flash-free')
+    expect(dsFlash?.contextWindow).toBe(200000)
+    expect(dsFlash?.maxTokens).toBe(32000)
+    expect(dsFlash?.supportsImages).toBe(true)
+
+    const step5 = FALLBACK_OPENCODE_MODELS.find(m => m.id === 'step-5-preview-free')
+    expect(step5?.contextWindow).toBe(1000000)
+    expect(step5?.maxTokens).toBe(65536)
+  })
+
   it('fetchCredits 返回无限免费模型额度', async () => {
     const client = new OpenCodeUpstreamClient()
     const cred = makeCredential()

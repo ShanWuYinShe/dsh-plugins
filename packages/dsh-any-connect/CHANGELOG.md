@@ -1,3 +1,11 @@
+## 0.4.14-alpha.22 (2026-10-16)
+
+### 优化
+
+* **对齐 OpenCode 官方免费模型真实上下文容量与规格**：
+  * 将此前统一采用的 128K（131,072 tokens）兜底数值更新为 OpenCode 官方实际规格：`Space Bunny Free`（1M 上下文 / 512K 最大输出）、`Step 5 Preview Free`（1M 上下文 / 64K 最大输出）、`LongCat 2.5 Preview Free`（1M 上下文 / 128K 最大输出）、`Nemotron 3 Ultra Free`（1M 上下文 / 128K 最大输出）、`Nemotron 3.5 Lightning Free`（256K 上下文 / 256K 最大输出）、`DeepSeek V4.1 Flash Free`（200K 上下文 / 32K 最大输出）、`MiMo-V2.6-Flash Free`（200K 上下文 / 32K 最大输出）、`Big Pickle`（200K 上下文 / 32K 最大输出）。
+  * 补全各模型的图片多模态输入支持（`supportsImages`）与推理档位声明。
+
 ## 0.4.14-alpha.21 (2026-10-16)
 
 ### 优化
