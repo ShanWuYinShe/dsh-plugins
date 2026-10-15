@@ -30,7 +30,9 @@
  * 上游通道
  * - upstream.ts upstream-shared.ts upstream-types.ts — 上游门面、协议共享层（常量与助手）、
  *   协议类型（纯声明，零运行时）
+ * - upstream-opencode.ts — OpenCode 客户端（官方免费通道、过闸标头与工具守卫）
  * - upstream-zcode.ts upstream-zcode-body.ts upstream-zcode-normalize.ts
+
  *   upstream-zcode-start-plan.ts — ZCode 客户端（通道分发与 Coding Plan）、请求体整形与兜底
  *   元数据、响应归一化（目录合流/订阅额度）、Start Plan 通道（余额/名单/领取预览）
  * - upstream-workbuddy.ts upstream-workbuddy-parse.ts upstream-workbuddy-http.ts — WorkBuddy
@@ -70,12 +72,14 @@ import type { Options } from './config.js'
 export { WORKBUDDY_PROVIDER, WORKBUDDY_STREAM_IDLE_TIMEOUT_MS, createWorkBuddyAdapter, type WorkBuddyAdapter } from './adapter.js'
 export { createWorkBuddyShim, type WorkBuddyShim } from './shim.js'
 export {
+  FALLBACK_OPENCODE_MODELS,
   FALLBACK_WORKBUDDY_AI_MODELS,
   FALLBACK_WORKBUDDY_MODELS,
   FALLBACK_ZCODE_MODELS,
   WorkBuddyCatalog,
   type WorkBuddyModelInfo,
 } from './catalog.js'
+
 export {
   FALLBACK_ZCODE_START_PLAN_MODELS,
   isStartPlanActivityActive,
@@ -148,9 +152,11 @@ export {
   variantFor,
   WORKBUDDY_VARIANTS,
   ZCODE_VARIANT,
+  OPENCODE_VARIANT,
   type VariantKind,
   type WorkBuddyVariant,
 } from './variants.js'
+
 export {
   FALLBACK_APP_VERSION,
   WORKBUDDY_APP_VERSION_FILENAME,
@@ -204,6 +210,7 @@ export {
   regionOf,
   WorkBuddyUpstreamClient,
   ZCodeUpstreamClient,
+  OpenCodeUpstreamClient,
   type UpstreamErrorKind,
   type WorkBuddyChatResult,
   type WorkBuddyCredits,
@@ -218,8 +225,9 @@ export {
 // pill 窗口助手（provider-usage 注册 seam 的同一模块）；CLI 也直接从这里取。
 export { currentPlanWindow, startPlanWindows, totalCreditsWindows } from './usage.js'
 export { catalogFingerprint } from './catalog-fingerprint.js'
-export { Config, WORKBUDDY_SETTINGS_NS, WORKBUDDY_AI_SETTINGS_NS, ZCODE_SETTINGS_NS } from './config.js'
+export { Config, WORKBUDDY_SETTINGS_NS, WORKBUDDY_AI_SETTINGS_NS, ZCODE_SETTINGS_NS, OPENCODE_SETTINGS_NS } from './config.js'
 export type { Options } from './config.js'
+
 export { applyVariantConfig } from './variant-runtime.js'
 export {
   parseZCodeApiKey,
@@ -262,6 +270,7 @@ export function apply(ctx: Context, config: Config): void {
     authFile: config.authFile.get(),
     authFileAI: config.authFileAI.get(),
     authFileZCode: config.authFileZCode.get(),
+    authFileOpenCode: config.authFileOpenCode?.get(),
   })
 
   // 变体运行时（构造 / 路由 / 目录生命周期 / 定时器 / 适配器注册）见 runtime.ts。

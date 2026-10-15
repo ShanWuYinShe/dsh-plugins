@@ -135,6 +135,153 @@ export const FALLBACK_ZCODE_MODELS: readonly WorkBuddyModelInfo[] = [
   },
 ]
 
+/**
+ * Static free models provided by OpenCode.
+ */
+export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
+  {
+    id: 'mimo-v2.6-flash-free',
+    name: 'MiMo-V2.6-Flash Free',
+    contextWindow: 131072,
+    maxTokens: 8192,
+    supportsImages: false,
+    reasoning: {
+      supports: false,
+      onlyReasoning: false,
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x0.00',
+      badges: ['免费'],
+      free: true,
+    },
+  },
+  {
+    id: 'deepseek-v4.1-flash-free',
+    name: 'DeepSeek V4.1 Flash Free',
+    contextWindow: 131072,
+    maxTokens: 8192,
+    supportsImages: false,
+    reasoning: {
+      supports: true,
+      onlyReasoning: false,
+      supportedEfforts: ['low', 'medium', 'high', 'max'],
+      defaultEffort: 'medium',
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x0.00',
+      badges: ['免费', '推理'],
+      free: true,
+    },
+  },
+  {
+    id: 'space-bunny-free',
+    name: 'Space Bunny Free',
+    contextWindow: 131072,
+    maxTokens: 8192,
+    supportsImages: false,
+    reasoning: {
+      supports: true,
+      onlyReasoning: false,
+      supportedEfforts: ['low', 'medium', 'high', 'max'],
+      defaultEffort: 'medium',
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x0.00',
+      badges: ['免费', '推理'],
+      free: true,
+    },
+  },
+  {
+    id: 'nemotron-3.5-lightning-free',
+    name: 'Nemotron 3.5 Lightning Free',
+    contextWindow: 131072,
+    maxTokens: 8192,
+    supportsImages: false,
+    reasoning: {
+      supports: false,
+      onlyReasoning: false,
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x0.00',
+      badges: ['免费'],
+      free: true,
+    },
+  },
+  {
+    id: 'nemotron-3-ultra-free',
+    name: 'Nemotron 3 Ultra Free',
+    contextWindow: 131072,
+    maxTokens: 8192,
+    supportsImages: false,
+    reasoning: {
+      supports: false,
+      onlyReasoning: false,
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x0.00',
+      badges: ['免费'],
+      free: true,
+    },
+  },
+  {
+    id: 'longcat-2.5-preview-free',
+    name: 'LongCat 2.5 Preview Free',
+    contextWindow: 131072,
+    maxTokens: 8192,
+    supportsImages: false,
+    reasoning: {
+      supports: false,
+      onlyReasoning: false,
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x0.00',
+      badges: ['免费'],
+      free: true,
+    },
+  },
+  {
+    id: 'big-pickle',
+    name: 'Big Pickle',
+    contextWindow: 131072,
+    maxTokens: 8192,
+    supportsImages: false,
+    reasoning: {
+      supports: false,
+      onlyReasoning: false,
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x0.00',
+      badges: ['免费'],
+      free: true,
+    },
+  },
+  {
+    id: 'step-5-preview-free',
+    name: 'Step 5 Preview Free',
+    contextWindow: 131072,
+    maxTokens: 8192,
+    supportsImages: false,
+    reasoning: {
+      supports: false,
+      onlyReasoning: false,
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x0.00',
+      badges: ['免费'],
+      free: true,
+    },
+  },
+]
+
+
 /** Mutable catalog shared by the shim's `/v1/models` and the adapter.
  *
  * Visibility gates the whole roster: a signed-out variant is *empty* rather

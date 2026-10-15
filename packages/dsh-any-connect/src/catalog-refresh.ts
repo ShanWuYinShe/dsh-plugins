@@ -258,8 +258,11 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
         if (models.length > 0) {
           await catalogStore!.save({
             account: identity,
-            source: variant.kind === 'zcode' ? 'https://open.bigmodel.cn' : chatBase(credential as unknown as Parameters<typeof chatBase>[0]),
+            source: variant.kind === 'opencode'
+              ? 'https://opencode.ai'
+              : (variant.kind === 'zcode' ? 'https://open.bigmodel.cn' : chatBase(credential as unknown as Parameters<typeof chatBase>[0])),
             fetchedAtMs: runtime.catalogFetchedAtMs,
+
             models: [...models],
           })
         }

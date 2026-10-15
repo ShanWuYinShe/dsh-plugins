@@ -124,11 +124,13 @@ describe('WorkBuddy usage querier', () => {
   it('registers a querier for each variant it serves', async () => {
     const { registry } = await boot({ signedIn: false })
     await vi.waitFor(() => {
-      expect(registry.registered.map(entry => entry.provider).sort()).toEqual(['workbuddy', 'workbuddy-ai', 'zcode', 'zcode-start-plan'])
+      expect(registry.registered.map(entry => entry.provider).sort()).toEqual(['opencode-free', 'workbuddy', 'workbuddy-ai', 'zcode', 'zcode-start-plan'])
     }, { timeout: 5000 })
     expect(registry.registered.find(entry => entry.provider === 'workbuddy')?.displayName).toBe('WorkBuddy')
     expect(registry.registered.find(entry => entry.provider === 'zcode')?.displayName).toBe('ZCode')
+    expect(registry.registered.find(entry => entry.provider === 'opencode-free')?.displayName).toBe('OpenCode Free')
   })
+
 
   it('reports a single total window summing live packages', async () => {
     const { registry } = await boot({ signedIn: true })

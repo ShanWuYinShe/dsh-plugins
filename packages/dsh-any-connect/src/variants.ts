@@ -22,12 +22,15 @@ import {
   ZCODE_SP_PROBE_PATH,
   ZCODE_SP_STATUS_PATH,
   ZCODE_STATUS_PATH,
+  OPENCODE_PROBE_PATH,
+  OPENCODE_STATUS_PATH,
 } from './status-paths.js'
 import { WORKBUDDY_AI_CATALOG_FILENAME, WORKBUDDY_CATALOG_FILENAME } from './catalog-store.js'
 import type { WorkBuddyRegion } from './upstream.js'
 
 /** Which upstream family a variant talks to; selects the per-kind wiring. */
-export type VariantKind = 'workbuddy' | 'zcode'
+export type VariantKind = 'workbuddy' | 'zcode' | 'opencode'
+
 
 /**
  * How one WorkBuddy product's Electron binary is identified and located, and
@@ -221,12 +224,30 @@ export const ZCODE_START_PLAN_VARIANT: WorkBuddyVariant = {
   zcodePlanMode: 'start',
 }
 
+/** OpenCode provider variant: official free models channel. */
+export const OPENCODE_VARIANT: WorkBuddyVariant = {
+  id: 'opencode-free',
+  kind: 'opencode',
+  displayName: 'OpenCode Free',
+  appName: 'OpenCode',
+  env: 'OPENCODE_AUTH_FILE',
+  desktopFilename: 'credentials.json',
+  ownFilename: '.opencode-auth.json',
+  probeFilename: '.opencode-probe.json',
+  catalogFilename: '.opencode-catalog.json',
+  settingsNs: 'anyconnect-opencode' as SettingsNamespace,
+  statusPath: OPENCODE_STATUS_PATH,
+  probePath: OPENCODE_PROBE_PATH,
+}
+
 /** All provider variants, in registration order. */
 export const PROVIDER_VARIANTS: readonly WorkBuddyVariant[] = [
   ...WORKBUDDY_VARIANTS,
   ZCODE_VARIANT,
   ZCODE_START_PLAN_VARIANT,
+  OPENCODE_VARIANT,
 ]
+
 
 /** The CN variant; the plugin's long-standing default and compatibility anchor. */
 export const CN_VARIANT: WorkBuddyVariant = WORKBUDDY_VARIANTS[0]!

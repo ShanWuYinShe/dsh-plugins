@@ -103,6 +103,34 @@ export function createVariantRuntimeSet(deps: {
       return runtime
     }
 
+    if (variant.kind === 'opencode') {
+      const opencodeClient = upstreamClientFor(variant, {
+        models: fallbackFor(variant),
+      })
+      const credentialStore = createVariantCredentialStore({
+        variant,
+        client: opencodeClient,
+        desktopPath: configured,
+        onWarning: message => ctx.logger?.warn?.(message),
+      })
+      const catalogStore = new WorkBuddyCatalogStore({ path: workbuddyCatalogPath(variant.catalogFilename) })
+      const shim = createWorkBuddyShim({ kind: 'opencode', store: credentialStore, client: opencodeClient, catalog, logger: ctx.logger })
+      const runtime: VariantRuntime = {
+        variant, store: credentialStore, catalog, shim,
+        client: opencodeClient, credentialStore, catalogStore,
+        probeStore: undefined,
+        probeService: undefined,
+        catalogSource: 'fallback',
+        catalogFetchedAtMs: undefined,
+        catalogError: undefined,
+        lastIdentity: undefined,
+        publishedCatalog: '',
+        catalogEmpty: false,
+      }
+      return runtime
+    }
+
+
     const credentialStore = createVariantCredentialStore({
       variant,
       client,

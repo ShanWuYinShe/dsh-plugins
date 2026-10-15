@@ -30,6 +30,13 @@ export const ZCODE_SP_STATUS_PATH = '/plugins/dsh-any-connect/zcode-sp/status'
 /** ZCode Start Plan variant probe route. */
 export const ZCODE_SP_PROBE_PATH = '/plugins/dsh-any-connect/zcode-sp/probe'
 
+/** OpenCode variant status route. */
+export const OPENCODE_STATUS_PATH = '/plugins/dsh-any-connect/opencode/status'
+
+/** OpenCode variant probe route. */
+export const OPENCODE_PROBE_PATH = '/plugins/dsh-any-connect/opencode/probe'
+
+
 /** One model's recorded probe observation, as the card displays it. */
 export interface WorkBuddyWebProbeModel {
   id: string

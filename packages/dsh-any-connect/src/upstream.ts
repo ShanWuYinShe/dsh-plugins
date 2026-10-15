@@ -16,3 +16,7 @@ export { regionOf, chatBase, prepareChatBody, prepareInternationalChatBody, Work
 export type { WorkBuddyRegion, WorkBuddyUpstreamClientOptions } from './upstream-workbuddy.js'
 export { prepareAnthropicBody, ZCodeUpstreamClient } from './upstream-zcode.js'
 export type { ZCodeUpstreamClientOptions } from './upstream-zcode.js'
+export { OpenCodeUpstreamClient } from './upstream-opencode.js'
+export type { OpenCodeUpstreamClientOptions } from './upstream-opencode.js'
+
+

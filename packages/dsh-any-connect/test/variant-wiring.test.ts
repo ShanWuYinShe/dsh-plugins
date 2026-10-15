@@ -3,8 +3,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { upstreamClientFor, zcodePlanTransformFor } from "../src/variant-wiring.js";
-import { WorkBuddyUpstreamClient, ZCodeUpstreamClient } from "../src/upstream.js";
-import { AI_VARIANT, CN_VARIANT, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from "../src/variants.js";
+import { OpenCodeUpstreamClient, WorkBuddyUpstreamClient, ZCodeUpstreamClient } from "../src/upstream.js";
+import { AI_VARIANT, CN_VARIANT, OPENCODE_VARIANT, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from "../src/variants.js";
 import type { WorkBuddyCredential } from "../src/auth.js";
 
 /** 最小合法凭据：这些用例只看 zcodePlan 的折叠结果。 */
@@ -21,7 +21,8 @@ function credential(overrides: Partial<WorkBuddyCredential> = {}): WorkBuddyCred
 }
 
 describe("变体装配（CLI 与插件运行时共用）", () => {
-  it("客户端选择：zcode 变体走专属通道，其余走 WorkBuddy", () => {
+  it("客户端选择：opencode 走 OpenCode，zcode 走专属通道，其余走 WorkBuddy", () => {
+    expect(upstreamClientFor(OPENCODE_VARIANT)).toBeInstanceOf(OpenCodeUpstreamClient);
     expect(upstreamClientFor(ZCODE_VARIANT)).toBeInstanceOf(ZCodeUpstreamClient);
     expect(upstreamClientFor(ZCODE_START_PLAN_VARIANT)).toBeInstanceOf(ZCodeUpstreamClient);
     expect(upstreamClientFor(CN_VARIANT)).toBeInstanceOf(WorkBuddyUpstreamClient);
@@ -29,9 +30,11 @@ describe("变体装配（CLI 与插件运行时共用）", () => {
   });
 
   it("非 zcode 变体没有计划语义", () => {
+    expect(zcodePlanTransformFor(OPENCODE_VARIANT)).toBeUndefined();
     expect(zcodePlanTransformFor(CN_VARIANT)).toBeUndefined();
     expect(zcodePlanTransformFor(AI_VARIANT)).toBeUndefined();
   });
+
 
   it("Start Plan 变体把计划固定为 start-plan（即使凭据里写着别的计划）", () => {
     const transform = zcodePlanTransformFor(ZCODE_START_PLAN_VARIANT);

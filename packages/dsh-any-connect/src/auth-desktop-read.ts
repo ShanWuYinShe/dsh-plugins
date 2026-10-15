@@ -29,7 +29,8 @@ export interface DesktopReadContext {
   keyProvider: WorkBuddyStoreOptions['keyProvider']
 }
 
-  export async function readDesktopCredential(ctx: DesktopReadContext): Promise<WorkBuddyCredential | undefined> {
+export async function readDesktopCredential(ctx: DesktopReadContext): Promise<WorkBuddyCredential | undefined> {
+  if (ctx.variant.kind === 'opencode') {
     for (const desktopPath of ctx.candidates()) {
       let text: string
       try {
@@ -38,7 +39,22 @@ export interface DesktopReadContext {
         if (!isENOENT(error)) throw error
         continue
       }
-      if (ctx.variant.kind === 'zcode') return parseZCodeAuth(text, desktopPath)
+      if (text.trim() === '') continue
+      return parseOpenCodeAuth(text, desktopPath)
+    }
+    return defaultOpenCodePublicCredential()
+  }
+
+  for (const desktopPath of ctx.candidates()) {
+    let text: string
+    try {
+      text = await readFile(desktopPath, 'utf8')
+    } catch (error: unknown) {
+      if (!isENOENT(error)) throw error
+      continue
+    }
+    if (ctx.variant.kind === 'zcode') return parseZCodeAuth(text, desktopPath)
+
       const classification = classifyDesktopAuthDocument(text)
       if (classification.format === 'plaintext') return parseWorkBuddyAuth(text)
       // 空文件(尚未写入/被截断)不构成「凭据在这里」,让下一个候选继续探测。
@@ -82,3 +98,61 @@ export interface DesktopReadContext {
     })
     return parseWorkBuddyAuth(text)
   }
+
+/** Parse an OpenCode auth document (json with apiKey/token or plain text). */
+export function parseOpenCodeAuth(text: string, _path?: string): WorkBuddyCredential {
+  const trimmed = text.trim()
+  if (trimmed === '') {
+    return defaultOpenCodePublicCredential()
+  }
+  let token = trimmed
+  try {
+    const json = JSON.parse(trimmed) as Record<string, unknown>
+    if (typeof json === 'object' && json !== null) {
+      if (typeof json['apiKey'] === 'string' && json['apiKey'].trim() !== '') {
+        token = json['apiKey'].trim()
+      } else if (typeof json['token'] === 'string' && json['token'].trim() !== '') {
+        token = json['token'].trim()
+      } else if (typeof json['accessToken'] === 'string' && json['accessToken'].trim() !== '') {
+        token = json['accessToken'].trim()
+      }
+    }
+  } catch {
+    // 纯文本 token
+  }
+  return {
+    accessToken: token,
+    refreshToken: '',
+    expiresAtMs: Date.now() + 365 * 24 * 60 * 60 * 1000,
+    domain: 'opencode.ai',
+    uid: 'opencode-user',
+    nickname: token === 'public' ? 'Free Tier (public)' : 'OpenCode Key',
+    source: 'desktop',
+  }
+}
+
+/** Default public free tier credential for OpenCode. */
+export function defaultOpenCodePublicCredential(): WorkBuddyCredential {
+  const envKey = process.env['OPENCODE_API_KEY']
+  if (typeof envKey === 'string' && envKey.trim() !== '') {
+    return {
+      accessToken: envKey.trim(),
+      refreshToken: '',
+      expiresAtMs: Date.now() + 365 * 24 * 60 * 60 * 1000,
+      domain: 'opencode.ai',
+      uid: 'opencode-env',
+      nickname: 'OpenCode (env)',
+      source: 'desktop',
+    }
+  }
+  return {
+    accessToken: 'public',
+    refreshToken: '',
+    expiresAtMs: Date.now() + 365 * 24 * 60 * 60 * 1000,
+    domain: 'opencode.ai',
+    uid: 'opencode-public',
+    nickname: 'Free Tier (public)',
+    source: 'desktop',
+  }
+}
+

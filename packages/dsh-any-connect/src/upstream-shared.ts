@@ -94,9 +94,10 @@ export function isZCodeOffpeak(date: Date = new Date()): boolean {
 export function modelWithCurrentPromotion(
   model: WorkBuddyUpstreamModel,
   now = Date.now(),
-  variantKind?: 'workbuddy' | 'zcode',
+  variantKind?: 'workbuddy' | 'zcode' | 'opencode',
   nightFreeEligible = true,
 ): WorkBuddyUpstreamModel {
+
   // Determine if this model belongs to ZCode (either explicitly marked or by ZCode-specific privilege badges)
   const isZCode = variantKind === 'zcode'
     || (variantKind === undefined && (model.billing?.badges?.some(b => b.includes('150% 额度')) ?? false))

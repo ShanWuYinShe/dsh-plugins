@@ -101,7 +101,8 @@ async function install(home: string): Promise<Harness> {
     authFileAI: join(home, 'no-such-ai-file.info'),
     authFileZCode: credentials,
   })
-  await vi.waitFor(() => { expect(ctx.llm.listProviders().length).toBe(4) }, { timeout: 5000 })
+  await vi.waitFor(() => { expect(ctx.llm.listProviders().length).toBe(WorkBuddy.PROVIDER_VARIANTS.length) }, { timeout: 5000 })
+
   await drain(() => false, 300)
   return {
     ctx,

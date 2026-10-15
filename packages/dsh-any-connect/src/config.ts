@@ -27,6 +27,9 @@ export const WORKBUDDY_AI_SETTINGS_NS = 'anyconnect-ai' as SettingsNamespace
 /** Fallback settings namespace owning the ZCode variant's card. */
 export const ZCODE_SETTINGS_NS = 'anyconnect-zcode' as SettingsNamespace
 
+/** Fallback settings namespace owning the OpenCode variant's card. */
+export const OPENCODE_SETTINGS_NS = 'anyconnect-opencode' as SettingsNamespace
+
 /** Plugin configuration: live volatile references committed by the Loader.
  *
  * Editable fields are declared `.volatile()` and read with `.get()`, which
@@ -42,6 +45,8 @@ export interface Config {
   authFileAI: Volatile<string | undefined>
   /** Explicit ZCode desktop auth-file path, overriding env and platform defaults. */
   authFileZCode: Volatile<string | undefined>
+  /** Explicit OpenCode desktop auth-file / token path, overriding env and platform defaults. */
+  authFileOpenCode: Volatile<string | undefined>
   // schemastery strips unknown fields, so a stale field in a
   // cordis.patch.yml is ignored rather than rejected.
 }
@@ -55,4 +60,6 @@ export const Config = z.object({
   authFile: z.string().description('WorkBuddy desktop auth file (defaults to the app\'s own location)').volatile(),
   authFileAI: z.string().description('WorkBuddy AI desktop auth file (defaults to the app\'s own location)').volatile(),
   authFileZCode: z.string().description('ZCode desktop auth file (defaults to the app\'s own location)').volatile(),
+  authFileOpenCode: z.string().description('OpenCode auth / token (defaults to public free tier)').volatile(),
 })
+

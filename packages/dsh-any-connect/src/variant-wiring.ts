@@ -15,20 +15,24 @@
 
 import { WorkBuddyCredentialStore } from './auth.js'
 import type { WorkBuddyCredential } from './auth.js'
-import { WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
+import { OpenCodeUpstreamClient, WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
 import type { WorkBuddyUpstreamModel } from './upstream.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { applyZCodePlanOverride } from './zcode-plan-store.js'
 import type { WorkBuddyStateStore } from './state-store.js'
 
-/** 该变体对应的上游客户端：zcode 走专属通道，其余走 WorkBuddy。 */
+/** 该变体对应的上游客户端：opencode 走 OpenCode，zcode 走专属通道，其余走 WorkBuddy。 */
 export function upstreamClientFor(
   variant: WorkBuddyVariant,
   options: { models?: readonly WorkBuddyUpstreamModel[] } = {},
-): WorkBuddyUpstreamClient | ZCodeUpstreamClient {
+): WorkBuddyUpstreamClient | ZCodeUpstreamClient | OpenCodeUpstreamClient {
+  if (variant.kind === 'opencode') {
+    return new OpenCodeUpstreamClient(options.models === undefined ? {} : { models: options.models })
+  }
   if (variant.kind !== 'zcode') return new WorkBuddyUpstreamClient()
   return new ZCodeUpstreamClient(options.models === undefined ? {} : { models: options.models })
 }
+
 
 /**
  * zcode 变体的计划语义 transform；非 zcode 变体没有这回事，返回 undefined。
@@ -55,8 +59,9 @@ export function zcodePlanTransformFor(
  */
 export function createVariantCredentialStore(options: {
   variant: WorkBuddyVariant
-  client: WorkBuddyUpstreamClient | ZCodeUpstreamClient
+  client: WorkBuddyUpstreamClient | ZCodeUpstreamClient | OpenCodeUpstreamClient
   desktopPath?: string | undefined
+
   onWarning?: ((message: string) => void) | undefined
   state?: WorkBuddyStateStore | undefined
 }): WorkBuddyCredentialStore {

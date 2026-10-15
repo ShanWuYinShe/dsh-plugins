@@ -50,12 +50,13 @@ export interface WorkBuddyShim {
 
 /** Constructor dependencies. */
 export interface WorkBuddyShimOptions {
-  kind: 'workbuddy' | 'zcode'
+  kind: 'workbuddy' | 'zcode' | 'opencode'
   store: Pick<WorkBuddyCredentialStore, 'resolve'>
   client: Pick<WorkBuddyUpstreamClient, 'chatStream'>
   catalog: WorkBuddyCatalog
   logger?: ShimLogger
 }
+
 
 
 /**
