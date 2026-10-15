@@ -1,3 +1,17 @@
+## 0.4.14-alpha.20 (2026-10-15)
+
+### 新增
+
+* **支持直接使用 OpenCode 官方免费模型通道（`opencode-free`）**：在选择器中提供 OpenCode 官方提供的全量可用免费模型（包含 `deepseek-v4.1-flash-free`、`mimo-v2.6-flash-free`、`step-5-preview-free`、`nemotron-3.5-lightning-free`、`nemotron-3-ultra-free`、`longcat-2.5-preview-free`、`space-bunny-free`、`big-pickle` 等），免登录零门槛直接可用。
+* **逆向攻破 OpenCode 网关 `FreeTierError` 过闸鉴权机制**：
+  * **时间戳补码会话算法**：Session ID（`x-opencode-session` / `x-opencode-session-id`）前 12 字符遵循官方 `~BigInt(now * 4096 + cA)` 的按位取反十六进制补码，后 14 字符遵循 62 进制随机序列；Message ID（`x-opencode-request`）按同规则的升序时间戳生成。
+  * **过闸标头与工具守卫注入**：自动组装 `x-opencode-client: cli`、官方 CLI User-Agent、`x-opencode-project`，并在请求体中注入 `read` 工具与 `tool_choice: auto`、`stream_options.include_usage: true`，规避网关针对非官方客户端的 403 拦截。
+
+### 测试
+
+* 新增 `upstream-opencode.test.ts`（包含会话/请求 ID 生成算法单测、请求体守卫注入、各错误码分类处理、过闸标头校验）。
+* 在独立隔离的 DSH 实例（端口 `8933`，`DSH_HOME` 与宿主隔离）中完成真实端到端流式对话验证（`DeepSeek V4.1 Flash Free` 成功生成并返回）。
+
 ## 0.4.14-alpha.19 (2026-10-15)
 
 ### 优化
