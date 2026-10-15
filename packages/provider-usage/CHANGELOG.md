@@ -1,3 +1,10 @@
+## 0.1.7-alpha.9 (2026-10-15)
+
+### 修复
+
+* **低额度警示条纹流动动画失效修复**：`WindowRow` 在额度剩余 ≤20% 时挂载了 `.pu-stripe` 流动条纹背景，但 `fillStyle` 中返回了内联 CSS 简写属性 `background: color`，在浏览器层会将 `background-image` 重置为 `none`，导致警示斜条纹动画被静默清除。现将内联属性改为具体的 `backgroundColor: color`，确保 `.pu-stripe` 的流动条纹与渐变正常展示。
+* **浮动面板视口溢出保护**：将浮动面板的 `maxHeight` 从固定的 `380px` 优化为 `min(380px, calc(100vh - 120px))`，防止矮窗口或高缩放比例下底部内容超出视口。
+
 ## 0.1.7-alpha.8 (2026-10-14)
 
 ### 优化
