@@ -155,8 +155,10 @@ function SandboxRootsForm(props: any) {
           const isDanger = kind === "danger" || kind === "homeAncestor" || kind === "invalid";
           const isWarn = kind === "system";
           const cls = isDanger ? "ser_problem ser_problem--danger" : isWarn ? "ser_problem ser_problem--warn" : "ser_problem ser_problem--info";
+          const keyName = "root" + kind.charAt(0).toUpperCase() + kind.slice(1);
+          const tmpl = String(t(keyName) || `Line {n}: {v}`);
           return React.createElement("div", { key: index, className: cls },
-            t("root" + kind.charAt(0).toUpperCase() + kind.slice(1))
+            tmpl
               // 函数替换:{v} 是用户输入的原始行,字符串替换串里的 $&/$`/$'
               // 等特殊序列会把模板前后文拼进预览,显示的路径与实际输入不符。
               .replace("{n}", () => String(problem.line))
@@ -196,7 +198,7 @@ function SandboxRootsForm(props: any) {
         React.createElement(
           "button",
           { className: "ser_save", type: "button", disabled: saving || cfg === null || !dirty || hasBlocking, onClick: save },
-          saving ? t("saving") : t("save")
+          saving ? [React.createElement("span", { className: "ser_spin", key: "spin", "aria-hidden": true }), t("saving")] : t("save")
         )
       )
     ) : null

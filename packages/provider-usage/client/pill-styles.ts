@@ -108,7 +108,7 @@ export const panelStyle: CSSProperties = {
   zIndex: 30,
   minWidth: 260,
   maxWidth: 320,
-  maxHeight: 380,
+  maxHeight: 'min(380px, calc(100vh - 120px))',
   overflowY: 'auto',
   padding: '12px 14px',
   border: '1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1))',

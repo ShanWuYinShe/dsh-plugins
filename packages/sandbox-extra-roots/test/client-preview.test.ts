@@ -97,4 +97,18 @@ describe("sandbox-extra-roots client preview", () => {
     }
     expect(presetsForPlatform(false, true)).not.toContain("~/.npm");
   });
+
+  it("所有问题类型在 zh 与 en 中均有完整本地化文案与占位符", async () => {
+    const { zh, en } = await import("../client/locales.js");
+    const kinds = ["danger", "homeAncestor", "invalid", "duplicate", "system"];
+    for (const kind of kinds) {
+      const key = "root" + kind.charAt(0).toUpperCase() + kind.slice(1);
+      expect((zh as any)[key], `zh 必须包含 ${key}`).toBeDefined();
+      expect((en as any)[key], `en 必须包含 ${key}`).toBeDefined();
+      expect((zh as any)[key]).toContain("{n}");
+      expect((zh as any)[key]).toContain("{v}");
+      expect((en as any)[key]).toContain("{n}");
+      expect((en as any)[key]).toContain("{v}");
+    }
+  });
 });

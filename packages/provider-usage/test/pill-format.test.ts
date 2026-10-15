@@ -9,10 +9,10 @@ import { fillStyle, formatAmount, formatReset, getDotColor, isStaleDisplay } fro
 
 describe('fillStyle', () => {
   it('≤5% 红色、≤20% 黄色、以上蓝色（边界含端点）', () => {
-    expect(fillStyle(5).background).toContain('#ff4d4f')
-    expect(fillStyle(5.1).background).toContain('#faad14')
-    expect(fillStyle(20).background).toContain('#faad14')
-    expect(fillStyle(20.1).background).toContain('#1677ff')
+    expect(fillStyle(5).backgroundColor).toContain('#ff4d4f')
+    expect(fillStyle(5.1).backgroundColor).toContain('#faad14')
+    expect(fillStyle(20).backgroundColor).toContain('#faad14')
+    expect(fillStyle(20.1).backgroundColor).toContain('#1677ff')
   })
 
   it('宽度钳在 0–100%', () => {

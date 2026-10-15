@@ -61,6 +61,7 @@ export function ArchivePanel(props: any) {
     toggleDetail,
     exportSelected,
     restoreSelected,
+    restoreOne,
     deleteSelected,
     hasSelection,
     badgeTitle,
@@ -107,7 +108,7 @@ export function ArchivePanel(props: any) {
         items.length > 0 ? React.createElement(
           "ul",
           { className: "sa_rows" },
-          visibleItems.map((item) => React.createElement(ArchiveRow, { key: item.sessionId, item, t, loading, error, selected, expanded, details, detailLoading, busy, toggleOne, toggleDetail })),
+          visibleItems.map((item) => React.createElement(ArchiveRow, { key: item.sessionId, item, t, loading, error, selected, expanded, details, detailLoading, busy, toggleOne, toggleDetail, restoreOne })),
           // 分页：还有未渲的行就给“加载更多”，点一次追加一页。
           visibleCount < sortedItems.length ? React.createElement("button", {
             className: "sa_action",

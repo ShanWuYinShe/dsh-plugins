@@ -56,7 +56,7 @@ export function sortArchived<T extends { updatedAt: unknown; size: unknown; titl
 
 /** 会话导出文件名：标题安全化（非法字符换 -，截 40 字符），无标题用 ID。 */
 export function exportFilename(item: { title: unknown; sessionId: unknown }): string {
-  const base = String(item.title ?? "").replace(/[-\\/:*?"<>|\\s]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  const base = String(item.title ?? "").replace(/[-\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
   return "archive-" + (base || String(item.sessionId).slice(0, 12)) + ".md";
 }
 

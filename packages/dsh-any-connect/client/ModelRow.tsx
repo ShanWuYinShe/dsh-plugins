@@ -11,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type { WorkBuddyWebModelRow } from '../src/status-paths.js'
 import type { WorkBuddyConfigPageInjected } from './config-types.js'
 import {
+  buttonStyle,
   chipStyle,
   modelBadgesStyle,
   modelRowBaseStyle,
@@ -53,7 +54,7 @@ export function ModelRow({ row, efforts, t, even, onRefresh }: {
       <td style={metaCellStyle}>
         {row.free === true ? null : row.rateUnknown === true || row.credits === undefined
           ? <>{t('rateUnknown')}{onRefresh !== undefined
-              ? <button type="button" className="wb-btn" style={{ ...chipStyle, marginLeft: 6, cursor: 'pointer' }} onClick={onRefresh}>{t('refresh')}</button>
+              ? <button type="button" className="wb-btn" style={{ ...buttonStyle, marginLeft: 6, minHeight: 20, padding: '1px 8px', fontSize: 11, lineHeight: '16px' }} onClick={onRefresh}>{t('refresh')}</button>
               : null}</>
           : row.credits}
       </td>

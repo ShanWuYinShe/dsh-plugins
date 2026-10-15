@@ -134,8 +134,8 @@ export function useArchiveActions(deps: {
     }
   }, [selected, items, call, t]);
 
-  const runBatch = async (action: any, doneKey: any, failKey: any) => {
-    const ids = [...selected];
+  const runBatch = async (action: any, doneKey: any, failKey: any, targetIds?: string[]) => {
+    const ids = targetIds ?? [...selected];
     if (ids.length === 0) {
       setNotice({ kind: "warn", text: t("noSelection") });
       return;
@@ -198,7 +198,15 @@ export function useArchiveActions(deps: {
         });
         setExpanded((current: any) => (current !== null && done.has(current) ? null : current));
       }
-      setSelected(new Set());
+      if (targetIds === undefined) {
+        setSelected(new Set());
+      } else {
+        setSelected((current: any) => {
+          const next = new Set(current);
+          for (const id of doneIds) next.delete(id);
+          return next;
+        });
+      }
       disarmDelete();
       if (doneIds.length > 0 && typeof refreshSessions === "function") {
         // 删除/恢复后刷新客户端会话列表：原生"设置 → 已归档会话"页的每行是
@@ -216,6 +224,7 @@ export function useArchiveActions(deps: {
     }
   };
   const restoreSelected = () => runBatch("unarchive", "restoreDone", "restoreFailed");
+  const restoreOne = (sessionId: string) => runBatch("unarchive", "restoreDone", "restoreFailed", [sessionId]);
   const deleteSelected = () => {
     if (!confirmingDelete) {
       setConfirmingDelete(true);
@@ -239,6 +248,7 @@ export function useArchiveActions(deps: {
     toggleDetail,
     exportSelected,
     restoreSelected,
+    restoreOne,
     deleteSelected,
   }
 }

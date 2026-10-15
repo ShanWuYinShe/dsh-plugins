@@ -19,7 +19,7 @@ export function fillStyle(percent: number): CSSProperties {
     width: `${Math.max(0, Math.min(100, percent))}%`,
     height: '100%',
     borderRadius: 'inherit',
-    background: color,
+    backgroundColor: color,
     transition: 'width 0.3s ease',
   }
 }

@@ -24,8 +24,9 @@ export function ArchiveRow(props: {
   busy: any
   toggleOne: any
   toggleDetail: any
+  restoreOne: any
 }): React.ReactNode {
-  const { item, t, loading, error, selected, expanded, details, detailLoading, busy, toggleOne, toggleDetail } = props
+  const { item, t, loading, error, selected, expanded, details, detailLoading, busy, toggleOne, toggleDetail, restoreOne } = props
 
   const isExpanded = expanded === item.sessionId;
   const detail = details.get(item.sessionId);
@@ -71,6 +72,16 @@ export function ArchiveRow(props: {
       React.createElement(
         "div",
         { className: "sa_rowActions" },
+        !item.live && typeof restoreOne === "function" ? React.createElement("button", {
+          className: "sa_action",
+          type: "button",
+          disabled: busy || detailPending,
+          title: t("restoreOneTitle"),
+          onClick: (e: any) => {
+            e.stopPropagation();
+            restoreOne(item.sessionId);
+          }
+        }, t("restoreOne")) : null,
         React.createElement("button", {
           className: "sa_action",
           type: "button",
