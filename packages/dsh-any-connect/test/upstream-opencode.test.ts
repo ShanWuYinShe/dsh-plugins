@@ -4,8 +4,13 @@ import {
   OPENCODE_READ_TOOL,
   OPENCODE_CLI_USER_AGENT,
   OPENCODE_FALLBACK_CREDITS,
+  OPENCODE_MODELS_URL,
   prepareOpenCodeChatBody,
   generateOpenCodeId,
+  isOpenCodeFreeModelId,
+  formatOpenCodeModelName,
+  mergeOpenCodeCatalogue,
+  type OpenCodeModelSpec,
 } from '../src/upstream-opencode.js'
 import { FALLBACK_OPENCODE_MODELS } from '../src/catalog.js'
 import type { WorkBuddyCredential } from '../src/auth-types.js'
@@ -21,6 +26,184 @@ function makeCredential(overrides: Partial<WorkBuddyCredential> = {}): WorkBuddy
     ...overrides,
   }
 }
+
+describe('isOpenCodeFreeModelId', () => {
+  it('正确识别免费模型与收费模型', () => {
+    expect(isOpenCodeFreeModelId('big-pickle')).toBe(true)
+    expect(isOpenCodeFreeModelId('cat-jam-free')).toBe(true)
+    expect(isOpenCodeFreeModelId('deepseek-v4.1-flash-free')).toBe(true)
+    expect(isOpenCodeFreeModelId('muse-spark-1.2-contributor-free')).toBe(true)
+
+    expect(isOpenCodeFreeModelId('claude-opus-5-5')).toBe(false)
+    expect(isOpenCodeFreeModelId('deepseek-v4.1-flash')).toBe(false)
+    expect(isOpenCodeFreeModelId('gpt-5.5')).toBe(false)
+    expect(isOpenCodeFreeModelId('')).toBe(false)
+  })
+})
+
+describe('formatOpenCodeModelName', () => {
+  it('正确格式化固定字典与动态模型名称', () => {
+    expect(formatOpenCodeModelName('big-pickle')).toBe('Big Pickle')
+    expect(formatOpenCodeModelName('cat-jam-free')).toBe('Cat Jam Free')
+    expect(formatOpenCodeModelName('nemotron-3.5-super-vl-free')).toBe('Nemotron 3.5 Super VL Free')
+    expect(formatOpenCodeModelName('custom-model-vl-free')).toBe('Custom Model VL Free')
+  })
+})
+
+describe('mergeOpenCodeCatalogue', () => {
+  it('合流上游在线 ID 并优先应用规格元数据', () => {
+    const specs = new Map<string, OpenCodeModelSpec>([
+      [
+        'space-bunny-free',
+        {
+          name: 'Space Bunny Official',
+          limit: { context: 1048576, output: 524288 },
+          attachment: true,
+          reasoning: true,
+        },
+      ],
+      [
+        'brand-new-free',
+        {
+          limit: { context: 500000, output: 64000 },
+          attachment: false,
+        },
+      ],
+    ])
+
+    const upstreamIds = ['space-bunny-free', 'claude-opus-5-5', 'brand-new-free']
+    const merged = mergeOpenCodeCatalogue(FALLBACK_OPENCODE_MODELS, upstreamIds, specs)
+
+    // 收费模型应被过滤
+    expect(merged).toHaveLength(2)
+    expect(merged.some(m => m.id === 'claude-opus-5-5')).toBe(false)
+
+    const spaceBunny = merged.find(m => m.id === 'space-bunny-free')
+    expect(spaceBunny?.name).toBe('Space Bunny Official')
+    expect(spaceBunny?.contextWindow).toBe(1048576)
+    expect(spaceBunny?.maxTokens).toBe(524288)
+    expect(spaceBunny?.supportsImages).toBe(true)
+
+    const brandNew = merged.find(m => m.id === 'brand-new-free')
+    expect(brandNew?.contextWindow).toBe(500000)
+    expect(brandNew?.maxTokens).toBe(64000)
+  })
+
+  it('上游无有效免费模型时回退 fallbackModels', () => {
+    const merged = mergeOpenCodeCatalogue(FALLBACK_OPENCODE_MODELS, ['paid-model-1', 'paid-model-2'])
+    expect(merged).toEqual(FALLBACK_OPENCODE_MODELS)
+  })
+})
+
+describe('OpenCodeUpstreamClient.fetchModels', () => {
+  it('动态拉取上游在线模型并结合 specs 组装完整元数据', async () => {
+    const fakeSpecs = new Map<string, OpenCodeModelSpec>([
+      [
+        'test-free-1',
+        {
+          name: 'Test Free One',
+          limit: { context: 1000000, output: 65536 },
+          attachment: true,
+          reasoning: true,
+        },
+      ],
+    ])
+    const client = new OpenCodeUpstreamClient({
+      models: FALLBACK_OPENCODE_MODELS,
+      specs: fakeSpecs,
+    })
+
+    let capturedUrl = ''
+    let capturedHeaders: Record<string, string> = {}
+    const fakeFetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url)
+      capturedHeaders = (init?.headers ?? {}) as Record<string, string>
+      return new Response(JSON.stringify({
+        object: 'list',
+        data: [
+          { id: 'test-free-1', object: 'model' },
+          { id: 'paid-gpt-5', object: 'model' },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = fakeFetch as unknown as typeof fetch
+
+    try {
+      const models = await client.fetchModels(makeCredential())
+      expect(capturedUrl).toBe(OPENCODE_MODELS_URL)
+      expect(capturedHeaders['user-agent']).toBe(OPENCODE_CLI_USER_AGENT)
+      expect(capturedHeaders['Accept']).toBe('application/json')
+
+      expect(models).toHaveLength(1)
+      expect(models[0]?.id).toBe('test-free-1')
+      expect(models[0]?.contextWindow).toBe(1000000)
+      expect(models[0]?.maxTokens).toBe(65536)
+      expect(models[0]?.supportsImages).toBe(true)
+      expect(models[0]?.billing?.free).toBe(true)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('上游返回非 200 或异常时安全降级到 fallback 免费模型', async () => {
+    const client = new OpenCodeUpstreamClient({ models: FALLBACK_OPENCODE_MODELS })
+    const fakeFetch = vi.fn(async () => {
+      return new Response('Internal Server Error', { status: 500 })
+    })
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = fakeFetch as unknown as typeof fetch
+
+    try {
+      const models = await client.fetchModels(makeCredential())
+      expect(models).toEqual(FALLBACK_OPENCODE_MODELS)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('上游网络抛错或超时时安全降级到 fallback 免费模型', async () => {
+    const client = new OpenCodeUpstreamClient({ models: FALLBACK_OPENCODE_MODELS })
+    const fakeFetch = vi.fn(async () => {
+      throw new Error('Network offline or ECONNREFUSED')
+    })
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = fakeFetch as unknown as typeof fetch
+
+    try {
+      const models = await client.fetchModels(makeCredential())
+      expect(models).toEqual(FALLBACK_OPENCODE_MODELS)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('上游返回空列表时安全降级到 fallback 免费模型', async () => {
+    const client = new OpenCodeUpstreamClient({ models: FALLBACK_OPENCODE_MODELS })
+    const fakeFetch = vi.fn(async () => {
+      return new Response(JSON.stringify({ object: 'list', data: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = fakeFetch as unknown as typeof fetch
+
+    try {
+      const models = await client.fetchModels(makeCredential())
+      expect(models).toEqual(FALLBACK_OPENCODE_MODELS)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})
 
 describe('prepareOpenCodeChatBody', () => {
   it('注入 read tool 与 stream: true 当请求未带 tools 时', () => {
@@ -95,14 +278,6 @@ describe('generateOpenCodeId', () => {
 })
 
 describe('OpenCodeUpstreamClient', () => {
-  it('fetchModels 返回配置的模型或 fallback 免费模型', async () => {
-    const client = new OpenCodeUpstreamClient({ models: FALLBACK_OPENCODE_MODELS })
-    const cred = makeCredential()
-    const models = await client.fetchModels(cred)
-    expect(models).toHaveLength(FALLBACK_OPENCODE_MODELS.length)
-    expect(models.some(m => m.id === 'deepseek-v4.1-flash-free')).toBe(true)
-    expect(models.some(m => m.id === 'mimo-v2.6-flash-free')).toBe(true)
-  })
 
   it('FALLBACK_OPENCODE_MODELS 拥有正确的官方真实上下文与限制', () => {
     const spaceBunny = FALLBACK_OPENCODE_MODELS.find(m => m.id === 'space-bunny-free')

@@ -1,3 +1,12 @@
+## 0.4.14-alpha.23 (2026-10-16)
+
+### 新增
+
+* **OpenCode 免费模型目录支持动态感知与元数据实时同步**：
+  * 与 WorkBuddy / ZCode 保持同等动态同步能力：`fetchModels` 实时向 `https://opencode.ai/inference/v1/models` 网关拉取当前在线的全部免费模型名单（自动过滤非免费模型，在线动态覆盖 `Cat Jam Free`、`Muse Spark 1.2/1.3 Free`、`Nemotron 3.5 Super VL Free`、`Jev 1.13 Free`、`Space Bunny Free` 等在线模型）。
+  * 模型规格（上下文窗口 `contextWindow`、最大输出 `maxTokens`、图片多模态 `supportsImages`、推理开关 `reasoning`）按官方元数据（本地 OpenCode CLI 缓存 `~/.cache/opencode/models.json` 及官方规范）动态精准解析。
+  * 稳健兜底与网络抖动自愈：在上游接口离线、网络异常或超时时无缝回退至内置兜底目录，不影响选择器正常渲染与对话调用。
+
 ## 0.4.14-alpha.22 (2026-10-16)
 
 ### 优化
