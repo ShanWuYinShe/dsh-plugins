@@ -76,7 +76,7 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
           setOpen(!open)
         }}
       >
-        <span aria-hidden="true" style={{ ...dotStyle, background: getDotColor(snapshot, queried), opacity: stale ? 0.45 : 1 }} />
+        <span aria-hidden="true" className={busy ? 'pu-dot-pulse' : undefined} style={{ ...dotStyle, background: getDotColor(snapshot, queried), opacity: stale ? 0.45 : 1 }} />
         <span style={labelStyle}>{provider}</span>
         <span style={labelStyle}>{answer === undefined ? <><span className="pu-spin" aria-hidden="true" />{headlineText}</> : headlineText}</span>
       </button>

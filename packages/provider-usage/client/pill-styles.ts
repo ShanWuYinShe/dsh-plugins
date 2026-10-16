@@ -61,7 +61,14 @@ if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin
   margin-right: 4px;
 }
 @keyframes pu-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .pu-spin { animation: none; } }
+@keyframes pu-dot-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.35); opacity: 0.55; }
+}
+.pu-dot-pulse {
+  animation: pu-dot-pulse 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { .pu-spin, .pu-dot-pulse { animation: none; } }
 `
   document.head.appendChild(styleEl)
 }

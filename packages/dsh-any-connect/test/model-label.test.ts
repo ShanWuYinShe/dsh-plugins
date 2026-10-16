@@ -75,5 +75,22 @@ describe('ModelLabel client component', () => {
     expect(children[0]?.props.children).toBe('Claude 3.7 Sonnet')
     expect(children[1]?.props.children).toBe('150% 额度')
     expect(children[1]?.props.style.fontSize).toBe(11) // option placement is 11px
+    expect(children[1]?.props.style.color).toContain('var(--dsw-alias-state-warn-primary')
+  })
+
+  it('sets title tooltip and anti-squeeze flex rules on elements', () => {
+    const el = ModelLabel({
+      provider: { id: 'workbuddy', name: 'WorkBuddy' },
+      model: { id: 'expensive', name: 'Expensive · x3.5' },
+      placement: 'trigger',
+      selected: false,
+    }) as React.ReactElement<any>
+
+    expect(el.props.title).toBe('Expensive (x3.5)')
+    const children = React.Children.toArray(el.props.children) as Array<React.ReactElement<any>>
+    // Name shrinks, badge does not
+    expect(children[0]?.props.style.flex).toBe('1 1 auto')
+    expect(children[1]?.props.style.flex).toBe('0 0 auto')
+    expect(children[1]?.props.style.color).toContain('var(--dsw-alias-state-warn-primary')
   })
 })

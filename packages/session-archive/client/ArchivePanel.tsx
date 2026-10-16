@@ -100,11 +100,16 @@ export function ArchivePanel(props: any) {
             React.createElement("line", { x1: 9, y1: 14, x2: 15, y2: 14, strokeDasharray: "2 2" })
           ),
           React.createElement("p", { className: "sa_empty", style: { margin: "12px 0" } }, t("empty"))
-        // 筛选无匹配(与「完全无归档」区分:提示调整筛选条件)。
+        // 筛选无匹配(与「完全无归档」区分:提示调整筛选条件，提供一键清空)。
         ) : !loading && items.length > 0 && filteredItems.length === 0 ? React.createElement(
-          "p",
-          { className: "sa_empty", style: { margin: "12px 0" } },
-          t("noMatch")
+          "div",
+          { style: { display: "flex", flexDirection: "column", alignItems: "center", margin: "16px 0" } },
+          React.createElement("p", { className: "sa_empty", style: { margin: "0 0 10px" } }, t("noMatch")),
+          React.createElement("button", {
+            className: "sa_action",
+            type: "button",
+            onClick: () => setFilter("")
+          }, t("clearFilter"))
         ) : null,
         items.length > 0 ? React.createElement(
           "ul",
