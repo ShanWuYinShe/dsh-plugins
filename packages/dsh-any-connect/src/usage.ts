@@ -179,6 +179,7 @@ export function registerUsageQueriers(
           if (context.signal?.aborted === true) throw context.signal.reason ?? new Error('aborted')
           const credits = await (runtime.client ?? client).fetchCredits(credential)
           const isZCode = runtime.variant.kind === 'zcode'
+          const isOpenCode = runtime.variant.kind === 'opencode'
           const isStartPlan = variantIsStartPlan(runtime.variant)
           // Coding Plan 的窗口额度（5 小时 / 7 天 / 工具调用）来自客户端同款
           // `GET bigmodel.cn/api/monitor/usage/quota/limit`：拿得到就按它展示，
@@ -192,23 +193,26 @@ export function registerUsageQueriers(
             displayName: runtime.variant.displayName,
             // 套餐标签跟变体走（凭据 transform 已固定 zcodePlan）：Start Plan
             // 变体报 "Start Plan"（专属通道 + 专属额度），Coding Plan 变体报
-            // 上游订阅的真实名称。两条额度口径互不混报。
+            // 上游订阅的真实名称。两条额度口径互不混报。OpenCode 报 Free Tier。
             plan: isZCode
               ? (isStartPlan
                 ? 'Start Plan'
                 : credits.accounts.find(account => account.planName !== undefined)?.planName ?? 'Coding Plan')
-              : undefined,
-            // 三套口径，各有真源：
+              : (isOpenCode ? 'Free Tier' : undefined),
+            // 四套口径，各有真源：
+            // - OpenCode Free：官方免密通道，直接标示「官方免费」，不显示虚假点数。
             // - Coding Plan：客户端同款 monitor 端点的窗口额度（5 小时 / 7 天 /
             //   工具调用）——用户要的就是这三个；拿不到时回退订阅有效性窗口。
             // - Start Plan：token 池（有池子报真实 token 数，没领取时说
             //   「今日待领取」）。
             // - WorkBuddy：同币种分包求和的总积分。
-            windows: isStartPlan
-              ? startPlanWindows(credits.accounts)
-              : quotaWindows.length > 0
-                ? quotaWindows
-                : isZCode ? currentPlanWindow(credits.accounts) : totalCreditsWindows(credits.accounts),
+            windows: isOpenCode
+              ? [{ id: 'plan', label: 'OpenCode Free', unit: '官方免费' }]
+              : isStartPlan
+                ? startPlanWindows(credits.accounts)
+                : quotaWindows.length > 0
+                  ? quotaWindows
+                  : isZCode ? currentPlanWindow(credits.accounts) : totalCreditsWindows(credits.accounts),
             fetchedAt: Date.now(),
           }
         },

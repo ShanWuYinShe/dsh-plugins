@@ -1,3 +1,20 @@
+## 0.4.14-alpha.24 (2026-10-16)
+
+### 新增
+
+* **依据官方模型文档实现数据驱动的多通信协议动态适配与实时双向转码**：
+  * 精准对齐 [OpenCode Console Models 官方文档规范](https://opencode.ai/v2/docs/console/models/)，全面支持底层三大主流协议规范：
+    * `OpenAI Responses`（端点 `/inference/openai/v1/responses`）：支持 Muse 全系列、GPT 全系列、Grok 全系列；
+    * `Anthropic Messages`（端点 `/inference/anthropic/v1/messages`）：支持 Claude 全系列与 Qwen 编程/推理模型；
+    * `OpenAI Chat Completions`（端点 `/inference/openai/v1/chat/completions`）：支持全部开源免费模型（`deepseek-v4.1-flash-free`、`cat-jam-free`、`space-bunny-free`、`big-pickle` 等）、MiniMax 全系列、DeepSeek、GLM、Kimi 与 Qwen3.8 Max。
+  * **请求体规范化转换与工具守卫注入**：针对 Anthropic Messages 自动提升顶层 `system` 提示词、转换 OpenAI 格式工具为 `input_schema`、并注入 `read` 工具解除免费通道限制。
+  * **实时 SSE 响应流转码**：自动实时转码非 completions 协议的响应事件流，转为宿主能够消费的标准 `chat.completion.chunk`（完整支持 `reasoning_content` 思考流与正文），宿主体验平滑统一。
+* **OpenCode 免费模型免密公共使用**：移除 OpenCode 免费模型通道不必要的登录拦截与凭据校验，支持零配置直接调用。
+
+### 修复
+
+* **下线智谱 Coding Plan 过期的夜间限时免费活动与徽标**：活动已于官方下线，系统去除夜免标记与 `x0.00` 费率改写，恢复模型自身基准计费，并保留 150% 额度权益。
+
 ## 0.4.14-alpha.23 (2026-10-16)
 
 ### 新增

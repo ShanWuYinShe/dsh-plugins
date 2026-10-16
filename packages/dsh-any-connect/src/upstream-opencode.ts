@@ -18,6 +18,7 @@ import {
   settleChatFetch,
   classifyUpstreamError,
   JSON_TIMEOUT_MS,
+  type ModelWireProtocol,
   type WorkBuddyUpstreamModel,
   type WorkBuddyCredits,
   type WorkBuddyRefreshOutcome,
@@ -25,7 +26,9 @@ import {
 } from './upstream-shared.js'
 
 export const OPENCODE_BASE_URL = 'https://opencode.ai'
-export const OPENCODE_CHAT_COMPLETIONS_URL = 'https://opencode.ai/inference/v1/chat/completions'
+export const OPENCODE_CHAT_COMPLETIONS_URL = 'https://opencode.ai/inference/openai/v1/chat/completions'
+export const OPENCODE_RESPONSES_URL = 'https://opencode.ai/inference/openai/v1/responses'
+export const OPENCODE_ANTHROPIC_MESSAGES_URL = 'https://opencode.ai/inference/anthropic/v1/messages'
 export const OPENCODE_MODELS_URL = 'https://opencode.ai/inference/v1/models'
 export const OPENCODE_CLI_USER_AGENT = 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14'
 export const OPENCODE_DEFAULT_PROJECT_ID = '5da9b72c6f3d58f67b560a1dd82e3c067c3fbd18'
@@ -115,6 +118,241 @@ export function prepareOpenCodeChatBody(bodyJson: string): string {
   }
 }
 
+/** 网关免费通道强制要求的 Anthropic 格式只读文件工具定义 */
+export const OPENCODE_ANTHROPIC_READ_TOOL = {
+  name: 'read',
+  description: 'Read a file',
+  input_schema: {
+    type: 'object',
+    properties: {
+      filePath: { type: 'string' },
+    },
+    required: ['filePath'],
+  },
+} as const
+
+/** 检查 Anthropic tools 列表中是否已包含名为 read 的工具 */
+function hasAnthropicReadTool(tools: unknown[]): boolean {
+  for (const t of tools) {
+    if (typeof t !== 'object' || t === null) continue
+    const tool = t as { name?: unknown }
+    if (tool.name === 'read') return true
+  }
+  return false
+}
+
+/**
+ * 将输入请求整形为 OpenCode Anthropic Messages 规范请求体：
+ * 1. 提取 system/developer 消息至顶层 system 字段
+ * 2. 映射 messages 为 Anthropic user/assistant 规范
+ * 3. 确保 max_tokens 与 stream: true
+ * 4. 注入 Anthropic 格式的 read 工具守卫解除网关限制
+ */
+export function prepareOpenCodeAnthropicBody(bodyJson: string): string {
+  try {
+    const parsed = JSON.parse(bodyJson) as Record<string, unknown>
+    if (typeof parsed !== 'object' || parsed === null) return bodyJson
+
+    let system = typeof parsed['system'] === 'string' ? parsed['system'].trim() : ''
+    const rawMessages = Array.isArray(parsed['messages']) ? parsed['messages'] : []
+    const anthropicMessages: Array<{ role: string; content: unknown }> = []
+
+    for (const msg of rawMessages) {
+      if (typeof msg !== 'object' || msg === null) continue
+      const m = msg as { role?: unknown; content?: unknown }
+      const role = typeof m.role === 'string' ? m.role.trim().toLowerCase() : ''
+      if (role === 'system' || role === 'developer') {
+        const text = typeof m.content === 'string' ? m.content.trim() : ''
+        if (text !== '') {
+          system = system ? `${system}\n\n${text}` : text
+        }
+      } else if (role === 'user' || role === 'assistant') {
+        anthropicMessages.push({
+          role,
+          content: m.content ?? '',
+        })
+      }
+    }
+
+    if (anthropicMessages.length === 0) {
+      anthropicMessages.push({ role: 'user', content: ' ' })
+    }
+
+    const maxTokens = typeof parsed['max_tokens'] === 'number' && parsed['max_tokens'] > 0
+      ? parsed['max_tokens']
+      : 4096
+
+    const result: Record<string, unknown> = {
+      model: parsed['model'],
+      messages: anthropicMessages,
+      max_tokens: maxTokens,
+      stream: true,
+    }
+
+    if (system !== '') {
+      result['system'] = system
+    }
+
+    if (typeof parsed['temperature'] === 'number') {
+      result['temperature'] = parsed['temperature']
+    }
+
+    const existingTools = parsed['tools']
+    const normalizedTools: unknown[] = []
+    if (Array.isArray(existingTools)) {
+      for (const t of existingTools) {
+        if (typeof t !== 'object' || t === null) continue
+        const item = t as Record<string, unknown>
+        if (item['type'] === 'function' && typeof item['function'] === 'object' && item['function'] !== null) {
+          const fn = item['function'] as Record<string, unknown>
+          normalizedTools.push({
+            name: fn['name'],
+            description: fn['description'],
+            input_schema: fn['parameters'] ?? { type: 'object' },
+          })
+        } else {
+          normalizedTools.push(t)
+        }
+      }
+    }
+    if (!hasAnthropicReadTool(normalizedTools)) {
+      normalizedTools.push(OPENCODE_ANTHROPIC_READ_TOOL)
+    }
+    result['tools'] = normalizedTools
+
+    return JSON.stringify(result)
+  } catch {
+    return bodyJson
+  }
+}
+
+/**
+ * 将 Anthropic Messages API 的 SSE 事件流实时转码为标准 OpenAI Chat Completions SSE 流。
+ * 兼容 DSH 宿主前端与消费端（支持实时输出 reasoning_content 思考过程与 content 正文）。
+ */
+export function transformAnthropicStreamToChatCompletions(
+  inputStream: ReadableStream<Uint8Array>,
+  modelName: string,
+): ReadableStream<Uint8Array> {
+  const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
+  let buffer = ''
+  let responseId = `chatcmpl_ant_${Date.now()}`
+  let sentStart = false
+  let sentDone = false
+
+  function emitChunk(delta: Record<string, unknown>, finishReason: string | null = null): string {
+    const payload = {
+      id: responseId,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model: modelName,
+      choices: [
+        {
+          index: 0,
+          delta,
+          finish_reason: finishReason,
+        },
+      ],
+    }
+    return `data: ${JSON.stringify(payload)}\n\n`
+  }
+
+  function processLine(line: string): string {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) return ''
+    const dataStr = trimmed.slice(5).trim()
+    if (dataStr === '[DONE]') {
+      if (!sentDone) {
+        sentDone = true
+        return 'data: [DONE]\n\n'
+      }
+      return ''
+    }
+
+    try {
+      const parsed = JSON.parse(dataStr) as Record<string, unknown>
+      if (parsed['object'] === 'chat.completion.chunk' || Array.isArray(parsed['choices'])) {
+        return `${trimmed}\n\n`
+      }
+
+      const eventType = typeof parsed['type'] === 'string' ? parsed['type'] : ''
+      let out = ''
+
+      if (eventType === 'message_start') {
+        const msg = parsed['message'] as Record<string, unknown> | undefined
+        if (typeof msg?.['id'] === 'string' && msg['id'] !== '') {
+          responseId = msg['id']
+        }
+        if (!sentStart) {
+          sentStart = true
+          out += emitChunk({ role: 'assistant' })
+        }
+      } else if (eventType === 'content_block_start') {
+        if (!sentStart) {
+          sentStart = true
+          out += emitChunk({ role: 'assistant' })
+        }
+      } else if (eventType === 'content_block_delta') {
+        const deltaObj = parsed['delta'] as Record<string, unknown> | undefined
+        if (deltaObj && typeof deltaObj === 'object') {
+          if (deltaObj['type'] === 'thinking_delta' || typeof deltaObj['thinking'] === 'string') {
+            const thinking = typeof deltaObj['thinking'] === 'string' ? deltaObj['thinking'] : ''
+            if (thinking !== '') out += emitChunk({ reasoning_content: thinking })
+          } else if (deltaObj['type'] === 'text_delta' || typeof deltaObj['text'] === 'string') {
+            const text = typeof deltaObj['text'] === 'string' ? deltaObj['text'] : ''
+            if (text !== '') out += emitChunk({ content: text })
+          }
+        }
+      } else if (eventType === 'message_delta' || eventType === 'message_stop') {
+        if (!sentDone) {
+          out += emitChunk({}, 'stop')
+          out += 'data: [DONE]\n\n'
+          sentDone = true
+        }
+      }
+      return out
+    } catch {
+      return ''
+    }
+  }
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = inputStream.getReader()
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            const emitted = processLine(line)
+            if (emitted !== '') controller.enqueue(encoder.encode(emitted))
+          }
+        }
+        if (buffer.trim() !== '') {
+          const emitted = processLine(buffer)
+          if (emitted !== '') controller.enqueue(encoder.encode(emitted))
+        }
+        if (!sentDone) {
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+          sentDone = true
+        }
+        controller.close()
+      } catch (err) {
+        controller.error(err)
+      } finally {
+        reader.releaseLock()
+      }
+    },
+    cancel(reason) {
+      return inputStream.cancel(reason)
+    },
+  })
+}
+
 export const OPENCODE_FALLBACK_CREDITS: WorkBuddyCredits = {
   total: 999999,
   accounts: [
@@ -140,6 +378,248 @@ export interface OpenCodeModelSpec {
     context?: number
     output?: number
   }
+  provider?: {
+    npm?: string
+    api?: string
+  }
+  wireProtocol?: ModelWireProtocol
+}
+
+/**
+ * 根据 Provider 声明的 npm 包名决议底层推理协议：
+ * - '@ai-sdk/openai' -> 'responses'
+ * - '@ai-sdk/anthropic' -> 'anthropic-messages'
+ * - '@ai-sdk/openai-compatible' (及默认) -> 'chat-completions'
+ */
+export function resolveProtocolFromNpm(npm?: string): ModelWireProtocol {
+  if (!npm) return 'chat-completions'
+  const trimmed = npm.trim()
+  if (trimmed === '@ai-sdk/openai') return 'responses'
+  if (trimmed === '@ai-sdk/anthropic') return 'anthropic-messages'
+  return 'chat-completions'
+}
+
+/** 静态内置模型的协议映射（对齐官方 Console 文档 https://opencode.ai/v2/docs/console/models/） */
+const FALLBACK_PROTOCOL_MAP: Readonly<Record<string, ModelWireProtocol>> = {
+  'muse-spark-1.2-contributor-free': 'responses',
+  'muse-spark-1.3-contributor-free': 'responses',
+  'qwen3.6-plus-free': 'anthropic-messages',
+  'minimax-m2.1-free': 'chat-completions',
+}
+
+/**
+ * 对所有模型严格使用 provider 中对应模型真实支持的协议：
+ * 1. 优先查 models 中该模型已声明的 wireProtocol；
+ * 2. 查 specs 中该模型官方声明的 wireProtocol 或 provider.npm；
+ * 3. 查 fallback 静态表中的 wireProtocol；
+ * 4. 通用模型家族规则兜底。
+ */
+export function resolveOpenCodeModelProtocol(
+  modelId: string,
+  specs?: Map<string, OpenCodeModelSpec>,
+  models?: readonly WorkBuddyUpstreamModel[],
+): ModelWireProtocol {
+  const normalized = modelId.trim().toLowerCase()
+  if (normalized === '') return 'chat-completions'
+
+  // 1. 优先查 models 列表（如果传入了当前已合并或已注册的模型元数据）
+  if (models && models.length > 0) {
+    const found = models.find(m => m.id.toLowerCase() === normalized)
+    if (found?.wireProtocol) {
+      return found.wireProtocol
+    }
+  }
+
+  // 2. 查 specs（来自官方 models.json 本地缓存真源）
+  const spec = specs?.get(normalized) ?? specs?.get(modelId)
+  if (spec?.wireProtocol) {
+    return spec.wireProtocol
+  }
+  if (spec?.provider?.npm) {
+    return resolveProtocolFromNpm(spec.provider.npm)
+  }
+
+  // 3. 查内置静态模型的 wireProtocol 兜底
+  const staticProtocol = FALLBACK_PROTOCOL_MAP[normalized]
+  if (staticProtocol) {
+    return staticProtocol
+  }
+
+  // 4. 通用模型家族特征规则兜底（对齐官方文档 https://opencode.ai/v2/docs/console/models/）
+  if (
+    normalized.startsWith('muse-') ||
+    normalized.includes('muse-spark') ||
+    normalized.startsWith('gpt-') ||
+    normalized.startsWith('o1-') ||
+    normalized.startsWith('o3-') ||
+    normalized.startsWith('grok-')
+  ) {
+    return 'responses'
+  }
+  if (
+    normalized.startsWith('claude-') ||
+    (normalized.startsWith('qwen') && !normalized.includes('max'))
+  ) {
+    return 'anthropic-messages'
+  }
+
+  return 'chat-completions'
+}
+
+/**
+ * 根据模型真实协议决议目标上游推理 URL：
+ * - 'responses' -> /inference/v1/responses
+ * - 'anthropic-messages' -> /inference/anthropic/v1/messages
+ * - 'chat-completions' -> /inference/v1/chat/completions
+ */
+export function resolveOpenCodeEndpoint(
+  modelId: string,
+  specs?: Map<string, OpenCodeModelSpec>,
+  models?: readonly WorkBuddyUpstreamModel[],
+): string {
+  const protocol = resolveOpenCodeModelProtocol(modelId, specs, models)
+  switch (protocol) {
+    case 'responses':
+      return OPENCODE_RESPONSES_URL
+    case 'anthropic-messages':
+      return OPENCODE_ANTHROPIC_MESSAGES_URL
+    case 'chat-completions':
+    default:
+      return OPENCODE_CHAT_COMPLETIONS_URL
+  }
+}
+
+/**
+ * 将 OpenAI Responses API 的 SSE 事件流实时转码为标准 OpenAI Chat Completions SSE 流。
+ * 兼容 DSH 宿主前端与消费端（支持实时输出 reasoning_content 思考过程与 content 正文）。
+ */
+export function transformResponsesStreamToChatCompletions(
+  inputStream: ReadableStream<Uint8Array>,
+  modelName: string,
+): ReadableStream<Uint8Array> {
+  const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
+  let buffer = ''
+  let responseId = `chatcmpl_muse_${Date.now()}`
+  let sentStart = false
+  let sentDone = false
+
+  function emitChunk(delta: Record<string, unknown>, finishReason: string | null = null): string {
+    const payload = {
+      id: responseId,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model: modelName,
+      choices: [
+        {
+          index: 0,
+          delta,
+          finish_reason: finishReason,
+        },
+      ],
+    }
+    return `data: ${JSON.stringify(payload)}\n\n`
+  }
+
+  function processLine(line: string): string {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) {
+      return ''
+    }
+    const dataStr = trimmed.slice(5).trim()
+    if (dataStr === '[DONE]') {
+      if (!sentDone) {
+        sentDone = true
+        return 'data: [DONE]\n\n'
+      }
+      return ''
+    }
+
+    try {
+      const parsed = JSON.parse(dataStr) as Record<string, unknown>
+      // 若上游已是标准 chat.completion.chunk 格式，直接透传原行
+      if (parsed['object'] === 'chat.completion.chunk' || Array.isArray(parsed['choices'])) {
+        return `${trimmed}\n\n`
+      }
+
+      const eventType = typeof parsed['type'] === 'string' ? parsed['type'] : ''
+      let out = ''
+
+      if (eventType === 'response.created') {
+        const resp = parsed['response'] as Record<string, unknown> | undefined
+        if (typeof resp?.['id'] === 'string' && resp['id'] !== '') {
+          responseId = resp['id']
+        }
+        if (!sentStart) {
+          sentStart = true
+          out += emitChunk({ role: 'assistant' })
+        }
+      } else if (eventType === 'response.output_item.added') {
+        if (!sentStart) {
+          sentStart = true
+          out += emitChunk({ role: 'assistant' })
+        }
+      } else if (eventType === 'response.reasoning_text.delta') {
+        const delta = typeof parsed['delta'] === 'string' ? parsed['delta'] : ''
+        if (delta !== '') {
+          out += emitChunk({ reasoning_content: delta })
+        }
+      } else if (eventType === 'response.output_text.delta' || eventType === 'response.text.delta') {
+        const delta = typeof parsed['delta'] === 'string' ? parsed['delta'] : ''
+        if (delta !== '') {
+          out += emitChunk({ content: delta })
+        }
+      } else if (eventType === 'response.output_item.done' || eventType === 'response.completed') {
+        if (!sentDone) {
+          out += emitChunk({}, 'stop')
+          out += 'data: [DONE]\n\n'
+          sentDone = true
+        }
+      }
+      return out
+    } catch {
+      return ''
+    }
+  }
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = inputStream.getReader()
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            const emitted = processLine(line)
+            if (emitted !== '') {
+              controller.enqueue(encoder.encode(emitted))
+            }
+          }
+        }
+        if (buffer.trim() !== '') {
+          const emitted = processLine(buffer)
+          if (emitted !== '') {
+            controller.enqueue(encoder.encode(emitted))
+          }
+        }
+        if (!sentDone) {
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+          sentDone = true
+        }
+        controller.close()
+      } catch (err) {
+        controller.error(err)
+      } finally {
+        reader.releaseLock()
+      }
+    },
+    cancel(reason) {
+      return inputStream.cancel(reason)
+    },
+  })
 }
 
 export interface OpenCodeModelsApiResponse {
@@ -172,6 +652,10 @@ export function formatOpenCodeModelName(id: string): string {
     'mimo-v2.6-flash-free': 'MiMo-V2.6-Flash Free',
     'muse-spark-1.2-contributor-free': 'Muse Spark 1.2 Free',
     'muse-spark-1.3-contributor-free': 'Muse Spark 1.3 Free',
+    'qwen3.6-plus-free': 'Qwen3.6 Plus Free',
+    'minimax-m2.1-free': 'MiniMax-M2.1 Free',
+    'minimax-m2.5-free': 'MiniMax-M2.5 Free',
+    'minimax-m3-free': 'MiniMax-M3 Free',
     'nemotron-3.5-super-vl-free': 'Nemotron 3.5 Super VL Free',
     'nemotron-3.5-lightning-free': 'Nemotron 3.5 Lightning Free',
     'jev-1.13-free': 'Jev 1.13 Free',
@@ -207,15 +691,30 @@ export function defaultOpenCodeCachePath(): string {
 }
 
 /**
- * 读取本地 OpenCode 官方模型元数据规范（含真实 contextWindow, maxTokens, attachment）。
+ * 读取本地 OpenCode 官方模型元数据规范（含真实 contextWindow, maxTokens, attachment, wireProtocol）。
  */
 export function readLocalOpenCodeSpecs(cachePath: string = defaultOpenCodeCachePath()): Map<string, OpenCodeModelSpec> | undefined {
   try {
     if (!existsSync(cachePath)) return undefined
     const text = readFileSync(cachePath, 'utf8')
-    const json = JSON.parse(text) as { opencode?: { models?: Record<string, OpenCodeModelSpec> } }
-    if (!json?.opencode?.models || typeof json.opencode.models !== 'object') return undefined
-    return new Map(Object.entries(json.opencode.models))
+    const json = JSON.parse(text) as {
+      opencode?: {
+        npm?: string
+        models?: Record<string, OpenCodeModelSpec>
+      }
+    }
+    const opencode = json?.opencode
+    if (!opencode?.models || typeof opencode.models !== 'object') return undefined
+    const defaultNpm = opencode.npm ?? '@ai-sdk/openai-compatible'
+    const result = new Map<string, OpenCodeModelSpec>()
+    for (const [id, spec] of Object.entries(opencode.models)) {
+      const effectiveNpm = spec.provider?.npm ?? defaultNpm
+      result.set(id, {
+        ...spec,
+        wireProtocol: resolveProtocolFromNpm(effectiveNpm),
+      })
+    }
+    return result
   } catch {
     return undefined
   }
@@ -272,6 +771,12 @@ export function mergeOpenCodeCatalogue(
       free: true,
     }
 
+    // 真实底层推理协议决议：官方 spec -> fallback 表 -> 通用规则
+    const wireProtocol = spec?.wireProtocol
+      ?? (spec?.provider?.npm ? resolveProtocolFromNpm(spec.provider.npm) : undefined)
+      ?? fallback?.wireProtocol
+      ?? resolveOpenCodeModelProtocol(id, specs, fallbackModels)
+
     return {
       id,
       name,
@@ -280,6 +785,7 @@ export function mergeOpenCodeCatalogue(
       supportsImages,
       reasoning,
       billing,
+      wireProtocol,
     }
   })
 }
@@ -330,10 +836,29 @@ export class OpenCodeUpstreamClient {
       ? `Bearer ${credential.accessToken.trim()}`
       : 'Bearer public'
 
-    const preparedBody = prepareOpenCodeChatBody(bodyJson)
+    let targetModel = ''
+    try {
+      const parsed = JSON.parse(bodyJson) as { model?: unknown }
+      if (typeof parsed?.model === 'string') {
+        targetModel = parsed.model.trim()
+      }
+    } catch {
+      // ignore
+    }
+
+    const specs = this.resolveSpecs()
+    const protocol = resolveOpenCodeModelProtocol(targetModel, specs, this.models)
+    const endpoint = resolveOpenCodeEndpoint(targetModel, specs, this.models)
+
+    let preparedBody: string
+    if (protocol === 'anthropic-messages') {
+      preparedBody = prepareOpenCodeAnthropicBody(bodyJson)
+    } else {
+      preparedBody = prepareOpenCodeChatBody(bodyJson)
+    }
 
     const settled = await settleChatFetch(signal, async (fetchSignal) => {
-      return fetch(OPENCODE_CHAT_COMPLETIONS_URL, {
+      return fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -354,7 +879,33 @@ export class OpenCodeUpstreamClient {
       })
     })
 
-    if (settled.settled) return settled.result
+    if (settled.settled) {
+      if (settled.result.ok && settled.result.response.body) {
+        if (protocol === 'responses') {
+          const transformedBody = transformResponsesStreamToChatCompletions(settled.result.response.body, targetModel)
+          return {
+            ok: true,
+            response: new Response(transformedBody, {
+              status: settled.result.response.status,
+              statusText: settled.result.response.statusText,
+              headers: settled.result.response.headers,
+            }),
+          }
+        }
+        if (protocol === 'anthropic-messages') {
+          const transformedBody = transformAnthropicStreamToChatCompletions(settled.result.response.body, targetModel)
+          return {
+            ok: true,
+            response: new Response(transformedBody, {
+              status: settled.result.response.status,
+              statusText: settled.result.response.statusText,
+              headers: settled.result.response.headers,
+            }),
+          }
+        }
+      }
+      return settled.result
+    }
     const { response, text } = settled
     return {
       ok: false,

@@ -51,9 +51,11 @@ export function SignedOutRow({ t, variant, status, onRetry }: {
       </button>
       {open ? <div style={signedOutBodyStyle}>
         <p style={hintStyle}>{detail}</p>
-        {status.status === 'error' ? <div style={{ marginTop: 8 }}>
-          <button type="button" className="wb-btn" style={buttonStyle} onClick={onRetry}>{t('retry')}</button>
-        </div> : null}
+        <div style={{ marginTop: 8 }}>
+          <button type="button" className="wb-btn" style={buttonStyle} onClick={onRetry}>
+            {status.status === 'error' ? t('retry') : t('recheck')}
+          </button>
+        </div>
       </div> : null}
     </div>
   )

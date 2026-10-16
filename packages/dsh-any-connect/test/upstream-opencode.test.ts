@@ -2,10 +2,20 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   OpenCodeUpstreamClient,
   OPENCODE_READ_TOOL,
+  OPENCODE_ANTHROPIC_READ_TOOL,
   OPENCODE_CLI_USER_AGENT,
   OPENCODE_FALLBACK_CREDITS,
   OPENCODE_MODELS_URL,
+  OPENCODE_CHAT_COMPLETIONS_URL,
+  OPENCODE_RESPONSES_URL,
+  OPENCODE_ANTHROPIC_MESSAGES_URL,
+  resolveProtocolFromNpm,
+  resolveOpenCodeModelProtocol,
+  resolveOpenCodeEndpoint,
+  transformResponsesStreamToChatCompletions,
+  transformAnthropicStreamToChatCompletions,
   prepareOpenCodeChatBody,
+  prepareOpenCodeAnthropicBody,
   generateOpenCodeId,
   isOpenCodeFreeModelId,
   formatOpenCodeModelName,
@@ -67,6 +77,7 @@ describe('mergeOpenCodeCatalogue', () => {
         {
           limit: { context: 500000, output: 64000 },
           attachment: false,
+          provider: { npm: '@ai-sdk/anthropic' },
         },
       ],
     ])
@@ -87,6 +98,7 @@ describe('mergeOpenCodeCatalogue', () => {
     const brandNew = merged.find(m => m.id === 'brand-new-free')
     expect(brandNew?.contextWindow).toBe(500000)
     expect(brandNew?.maxTokens).toBe(64000)
+    expect(brandNew?.wireProtocol).toBe('anthropic-messages')
   })
 
   it('上游无有效免费模型时回退 fallbackModels', () => {
@@ -259,6 +271,99 @@ describe('prepareOpenCodeChatBody', () => {
   })
 })
 
+describe('resolveProtocolFromNpm', () => {
+  it('正确根据官方 SDK 包名解析协议规范', () => {
+    expect(resolveProtocolFromNpm('@ai-sdk/anthropic')).toBe('anthropic-messages')
+    expect(resolveProtocolFromNpm('@ai-sdk/openai')).toBe('responses')
+    expect(resolveProtocolFromNpm('@ai-sdk/openai-compatible')).toBe('chat-completions')
+    expect(resolveProtocolFromNpm('')).toBe('chat-completions')
+    expect(resolveProtocolFromNpm(undefined)).toBe('chat-completions')
+    expect(resolveProtocolFromNpm('unknown-npm-pkg')).toBe('chat-completions')
+  })
+})
+
+describe('prepareOpenCodeAnthropicBody', () => {
+  it('规范化 messages、提升 system 提示词、设置 max_tokens 并注入 Anthropic 工具守卫', () => {
+    const raw = JSON.stringify({
+      model: 'qwen3.6-plus-free',
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: 'hello' },
+        { role: 'assistant', content: 'hi' },
+        { role: 'user', content: 'write a poem' },
+      ],
+      temperature: 0.7,
+    })
+    const prepared = prepareOpenCodeAnthropicBody(raw)
+    const json = JSON.parse(prepared)
+
+    expect(json.system).toBe('You are a helpful assistant.')
+    expect(json.stream).toBe(true)
+    expect(json.max_tokens).toBe(4096)
+    expect(json.temperature).toBe(0.7)
+    expect(json.messages).toHaveLength(3)
+    expect(json.messages[0]).toEqual({ role: 'user', content: 'hello' })
+    expect(json.messages[1]).toEqual({ role: 'assistant', content: 'hi' })
+    expect(json.messages[2]).toEqual({ role: 'user', content: 'write a poem' })
+
+    // 工具守卫验证
+    expect(json.tools).toBeDefined()
+    expect(json.tools).toContainEqual(OPENCODE_ANTHROPIC_READ_TOOL)
+  })
+
+  it('保留已有 Anthropic 格式 tools 并追加 read 工具', () => {
+    const customTool = {
+      name: 'calc',
+      description: 'calculate math',
+      input_schema: { type: 'object' },
+    }
+    const raw = JSON.stringify({
+      model: 'minimax-m2.1-free',
+      max_tokens: 8192,
+      messages: [{ role: 'user', content: 'do calc' }],
+      tools: [customTool],
+    })
+    const prepared = prepareOpenCodeAnthropicBody(raw)
+    const json = JSON.parse(prepared)
+
+    expect(json.max_tokens).toBe(8192)
+    expect(json.tools).toHaveLength(2)
+    expect(json.tools[0]).toEqual(customTool)
+    expect(json.tools[1]).toEqual(OPENCODE_ANTHROPIC_READ_TOOL)
+  })
+
+  it('转换 OpenAI function tool 格式为 Anthropic tool 格式', () => {
+    const openAiTool = {
+      type: 'function',
+      function: {
+        name: 'search',
+        description: 'web search',
+        parameters: { type: 'object', properties: {} },
+      },
+    }
+    const raw = JSON.stringify({
+      model: 'qwen3.6-plus-free',
+      messages: [{ role: 'user', content: 'search something' }],
+      tools: [openAiTool],
+    })
+    const prepared = prepareOpenCodeAnthropicBody(raw)
+    const json = JSON.parse(prepared)
+
+    expect(json.tools).toHaveLength(2)
+    expect(json.tools[0]).toEqual({
+      name: 'search',
+      description: 'web search',
+      input_schema: { type: 'object', properties: {} },
+    })
+    expect(json.tools[1]).toEqual(OPENCODE_ANTHROPIC_READ_TOOL)
+  })
+
+  it('处理非法 JSON 时安全回退原字符串', () => {
+    const invalid = '{ broken json'
+    expect(prepareOpenCodeAnthropicBody(invalid)).toBe(invalid)
+  })
+})
+
 describe('generateOpenCodeId', () => {
   it('生成合法长度与格式的 descending (Session) ID', () => {
     const id = generateOpenCodeId(true, 1792073905435)
@@ -347,7 +452,7 @@ describe('OpenCodeUpstreamClient', () => {
 
       const result = await client.chatStream(cred, inputBody)
       expect(result.ok).toBe(true)
-      expect(capturedUrl).toBe('https://opencode.ai/inference/v1/chat/completions')
+      expect(capturedUrl).toBe(OPENCODE_CHAT_COMPLETIONS_URL)
       expect(capturedHeaders['Authorization']).toBe('Bearer test-custom-key')
       expect(capturedHeaders['user-agent']).toBe(OPENCODE_CLI_USER_AGENT)
       expect(capturedHeaders['x-opencode-client']).toBe('cli')
@@ -416,6 +521,354 @@ describe('OpenCodeUpstreamClient', () => {
     } finally {
       globalThis.fetch = originalFetch
     }
+  })
 
+  it('chatStream 针对 Muse 模型自动路由至 responses 端点并转码响应流', async () => {
+    const client = new OpenCodeUpstreamClient()
+    const cred = makeCredential()
+
+    let capturedUrl = ''
+    const fakeResponsesStream = [
+      'event: response.created\n',
+      'data: {"type":"response.created","response":{"id":"resp_muse_test_123","model":"muse-spark-1.3-contributor-free"}}\n\n',
+      'event: response.reasoning_text.delta\n',
+      'data: {"type":"response.reasoning_text.delta","delta":"thinking..."}\n\n',
+      'event: response.output_text.delta\n',
+      'data: {"type":"response.output_text.delta","delta":"Hello world!"}\n\n',
+      'event: response.completed\n',
+      'data: {"type":"response.completed"}\n\n',
+    ].join('')
+
+    const enc = new TextEncoder()
+    const fakeFetch = vi.fn(async (url: string | URL | Request) => {
+      capturedUrl = String(url)
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(enc.encode(fakeResponsesStream))
+          controller.close()
+        },
+      })
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    })
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = fakeFetch as unknown as typeof fetch
+
+    try {
+      const result = await client.chatStream(
+        cred,
+        JSON.stringify({
+          model: 'muse-spark-1.3-contributor-free',
+          messages: [{ role: 'user', content: 'hello' }],
+        }),
+      )
+      expect(result.ok).toBe(true)
+      expect(capturedUrl).toBe(OPENCODE_RESPONSES_URL)
+
+      if (result.ok && result.response.body) {
+        const reader = result.response.body.getReader()
+        const dec = new TextDecoder()
+        let received = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          received += dec.decode(value)
+        }
+
+        expect(received).toContain('"object":"chat.completion.chunk"')
+        expect(received).toContain('"reasoning_content":"thinking..."')
+        expect(received).toContain('"content":"Hello world!"')
+        expect(received).toContain('"finish_reason":"stop"')
+        expect(received).toContain('data: [DONE]')
+      }
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('chatStream 针对 Anthropic 协议模型自动路由至 messages 端点并转码响应流', async () => {
+    const client = new OpenCodeUpstreamClient()
+    const cred = makeCredential()
+
+    let capturedUrl = ''
+    let capturedBody = ''
+    const fakeAnthropicStream = [
+      'event: message_start\n',
+      'data: {"type":"message_start","message":{"id":"msg_anthropic_123","model":"qwen3.6-plus-free","role":"assistant"}}\n\n',
+      'event: content_block_delta\n',
+      'data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"thinking deep..."}}\n\n',
+      'event: content_block_delta\n',
+      'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello from Anthropic protocol!"}}\n\n',
+      'event: message_delta\n',
+      'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\n',
+      'event: message_stop\n',
+      'data: {"type":"message_stop"}\n\n',
+    ].join('')
+
+    const enc = new TextEncoder()
+    const fakeFetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url)
+      capturedBody = String(init?.body ?? '')
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(enc.encode(fakeAnthropicStream))
+          controller.close()
+        },
+      })
+      return new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    })
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = fakeFetch as unknown as typeof fetch
+
+    try {
+      const result = await client.chatStream(
+        cred,
+        JSON.stringify({
+          model: 'qwen3.6-plus-free',
+          messages: [
+            { role: 'system', content: 'You are an AI assistant.' },
+            { role: 'user', content: 'hello' },
+          ],
+        }),
+      )
+      expect(result.ok).toBe(true)
+      expect(capturedUrl).toBe(OPENCODE_ANTHROPIC_MESSAGES_URL)
+
+      // 验证 body 已经由 prepareOpenCodeAnthropicBody 处理
+      const parsedBody = JSON.parse(capturedBody)
+      expect(parsedBody.system).toBe('You are an AI assistant.')
+      expect(parsedBody.max_tokens).toBe(4096)
+      expect(parsedBody.tools).toContainEqual(OPENCODE_ANTHROPIC_READ_TOOL)
+
+      if (result.ok && result.response.body) {
+        const reader = result.response.body.getReader()
+        const dec = new TextDecoder()
+        let received = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          received += dec.decode(value)
+        }
+
+        expect(received).toContain('"object":"chat.completion.chunk"')
+        expect(received).toContain('"reasoning_content":"thinking deep..."')
+        expect(received).toContain('"content":"Hello from Anthropic protocol!"')
+        expect(received).toContain('"finish_reason":"stop"')
+        expect(received).toContain('data: [DONE]')
+      }
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })
+
+describe('resolveOpenCodeModelProtocol & resolveOpenCodeEndpoint', () => {
+  it('正确根据官方 spec.provider.npm 决议协议与端点', () => {
+    const specs = new Map<string, OpenCodeModelSpec>([
+      ['custom-responses-model', { provider: { npm: '@ai-sdk/openai' } }],
+      ['custom-anthropic-model', { provider: { npm: '@ai-sdk/anthropic' } }],
+      ['custom-chat-model', { provider: { npm: '@ai-sdk/openai-compatible' } }],
+    ])
+
+    expect(resolveOpenCodeModelProtocol('custom-responses-model', specs)).toBe('responses')
+    expect(resolveOpenCodeEndpoint('custom-responses-model', specs)).toBe(OPENCODE_RESPONSES_URL)
+
+    expect(resolveOpenCodeModelProtocol('custom-anthropic-model', specs)).toBe('anthropic-messages')
+    expect(resolveOpenCodeEndpoint('custom-anthropic-model', specs)).toBe(OPENCODE_ANTHROPIC_MESSAGES_URL)
+
+    expect(resolveOpenCodeModelProtocol('custom-chat-model', specs)).toBe('chat-completions')
+    expect(resolveOpenCodeEndpoint('custom-chat-model', specs)).toBe(OPENCODE_CHAT_COMPLETIONS_URL)
+  })
+
+  it('优先尊重 specs 或 models 中明确标记的 wireProtocol', () => {
+    const specs = new Map<string, OpenCodeModelSpec>([
+      ['override-model', { wireProtocol: 'anthropic-messages', provider: { npm: '@ai-sdk/openai' } }],
+    ])
+    expect(resolveOpenCodeModelProtocol('override-model', specs)).toBe('anthropic-messages')
+    expect(resolveOpenCodeEndpoint('override-model', specs)).toBe(OPENCODE_ANTHROPIC_MESSAGES_URL)
+  })
+
+  it('正确解析 fallback 目录中预设的各模型协议', () => {
+    expect(resolveOpenCodeModelProtocol('muse-spark-1.2-contributor-free')).toBe('responses')
+    expect(resolveOpenCodeEndpoint('muse-spark-1.2-contributor-free')).toBe(OPENCODE_RESPONSES_URL)
+
+    expect(resolveOpenCodeModelProtocol('muse-spark-1.3-contributor-free')).toBe('responses')
+    expect(resolveOpenCodeEndpoint('muse-spark-1.3-contributor-free')).toBe(OPENCODE_RESPONSES_URL)
+
+    expect(resolveOpenCodeModelProtocol('qwen3.6-plus-free')).toBe('anthropic-messages')
+    expect(resolveOpenCodeEndpoint('qwen3.6-plus-free')).toBe(OPENCODE_ANTHROPIC_MESSAGES_URL)
+
+    expect(resolveOpenCodeModelProtocol('minimax-m2.1-free')).toBe('chat-completions')
+    expect(resolveOpenCodeEndpoint('minimax-m2.1-free')).toBe(OPENCODE_CHAT_COMPLETIONS_URL)
+
+    expect(resolveOpenCodeModelProtocol('deepseek-v4.1-flash-free')).toBe('chat-completions')
+    expect(resolveOpenCodeEndpoint('deepseek-v4.1-flash-free')).toBe(OPENCODE_CHAT_COMPLETIONS_URL)
+  })
+
+  it('启发式规则优先识别模型家族', () => {
+    expect(resolveOpenCodeModelProtocol('muse-preview')).toBe('responses')
+    expect(resolveOpenCodeEndpoint('muse-preview')).toBe(OPENCODE_RESPONSES_URL)
+
+    expect(resolveOpenCodeModelProtocol('gpt-5.5-free')).toBe('responses')
+    expect(resolveOpenCodeEndpoint('gpt-5.5-free')).toBe(OPENCODE_RESPONSES_URL)
+
+    expect(resolveOpenCodeModelProtocol('claude-3-7-sonnet-free')).toBe('anthropic-messages')
+    expect(resolveOpenCodeEndpoint('claude-3-7-sonnet-free')).toBe(OPENCODE_ANTHROPIC_MESSAGES_URL)
+
+    expect(resolveOpenCodeModelProtocol('qwen-flash-free')).toBe('anthropic-messages')
+    expect(resolveOpenCodeEndpoint('qwen-flash-free')).toBe(OPENCODE_ANTHROPIC_MESSAGES_URL)
+
+    // 官方文档中 qwen3.8-max 明确走 chat-completions
+    expect(resolveOpenCodeModelProtocol('qwen3.8-max-free')).toBe('chat-completions')
+    expect(resolveOpenCodeEndpoint('qwen3.8-max-free')).toBe(OPENCODE_CHAT_COMPLETIONS_URL)
+
+    expect(resolveOpenCodeModelProtocol('big-pickle')).toBe('chat-completions')
+    expect(resolveOpenCodeEndpoint('big-pickle')).toBe(OPENCODE_CHAT_COMPLETIONS_URL)
+  })
+})
+
+describe('transformResponsesStreamToChatCompletions', () => {
+  it('正确将 Responses API 事件流转换为 Chat Completions SSE 格式', async () => {
+    const mockSse = [
+      'event: response.created\n',
+      'data: {"type":"response.created","response":{"id":"resp_abc","model":"muse-spark-1.3"}}\n\n',
+      'event: response.output_item.added\n',
+      'data: {"type":"response.output_item.added","item":{"role":"assistant"}}\n\n',
+      'event: response.reasoning_text.delta\n',
+      'data: {"type":"response.reasoning_text.delta","delta":"thinking"}\n\n',
+      'event: response.output_text.delta\n',
+      'data: {"type":"response.output_text.delta","delta":"result"}\n\n',
+      'event: response.completed\n',
+      'data: {"type":"response.completed"}\n\n',
+    ].join('')
+
+    const enc = new TextEncoder()
+    const dec = new TextDecoder()
+    const inStream = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(mockSse))
+        c.close()
+      },
+    })
+
+    const transformed = transformResponsesStreamToChatCompletions(inStream, 'muse-spark-1.3')
+    const reader = transformed.getReader()
+    let out = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      out += dec.decode(value)
+    }
+
+    expect(out).toContain('"role":"assistant"')
+    expect(out).toContain('"reasoning_content":"thinking"')
+    expect(out).toContain('"content":"result"')
+    expect(out).toContain('"finish_reason":"stop"')
+    expect(out).toContain('data: [DONE]')
+  })
+
+  it('透传上游已是标准 chat.completion.chunk 的流', async () => {
+    const mockSse = 'data: {"object":"chat.completion.chunk","choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n'
+    const enc = new TextEncoder()
+    const dec = new TextDecoder()
+    const inStream = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(mockSse))
+        c.close()
+      },
+    })
+
+    const transformed = transformResponsesStreamToChatCompletions(inStream, 'test-model')
+    const reader = transformed.getReader()
+    let out = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      out += dec.decode(value)
+    }
+
+    expect(out).toContain('{"object":"chat.completion.chunk","choices":[{"delta":{"content":"ok"}}]}')
+    expect(out).toContain('data: [DONE]')
+  })
+})
+
+describe('transformAnthropicStreamToChatCompletions', () => {
+  it('正确将 Anthropic Messages SSE 事件流转换为 Chat Completions SSE 格式', async () => {
+    const mockAnthropicSse = [
+      'event: message_start\n',
+      'data: {"type":"message_start","message":{"id":"msg_test_anthropic","model":"qwen3.6-plus-free","role":"assistant","usage":{"input_tokens":10,"output_tokens":0}}}\n\n',
+      'event: content_block_start\n',
+      'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n\n',
+      'event: content_block_delta\n',
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Plan step 1"}}\n\n',
+      'event: content_block_stop\n',
+      'data: {"type":"content_block_stop","index":0}\n\n',
+      'event: content_block_start\n',
+      'data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}\n\n',
+      'event: content_block_delta\n',
+      'data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Final response content"}}\n\n',
+      'event: content_block_stop\n',
+      'data: {"type":"content_block_stop","index":1}\n\n',
+      'event: message_delta\n',
+      'data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":25}}\n\n',
+      'event: message_stop\n',
+      'data: {"type":"message_stop"}\n\n',
+    ].join('')
+
+    const enc = new TextEncoder()
+    const dec = new TextDecoder()
+    const inStream = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(mockAnthropicSse))
+        c.close()
+      },
+    })
+
+    const transformed = transformAnthropicStreamToChatCompletions(inStream, 'qwen3.6-plus-free')
+    const reader = transformed.getReader()
+    let out = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      out += dec.decode(value)
+    }
+
+    expect(out).toContain('"role":"assistant"')
+    expect(out).toContain('"reasoning_content":"Plan step 1"')
+    expect(out).toContain('"content":"Final response content"')
+    expect(out).toContain('"finish_reason":"stop"')
+    expect(out).toContain('data: [DONE]')
+  })
+
+  it('透传已经是标准 chat.completion.chunk 的流', async () => {
+    const mockSse = 'data: {"object":"chat.completion.chunk","choices":[{"delta":{"content":"direct"}}]}\n\ndata: [DONE]\n\n'
+    const enc = new TextEncoder()
+    const dec = new TextDecoder()
+    const inStream = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode(mockSse))
+        c.close()
+      },
+    })
+
+    const transformed = transformAnthropicStreamToChatCompletions(inStream, 'test-model')
+    const reader = transformed.getReader()
+    let out = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      out += dec.decode(value)
+    }
+
+    expect(out).toContain('{"object":"chat.completion.chunk","choices":[{"delta":{"content":"direct"}}]}')
+    expect(out).toContain('data: [DONE]')
+  })
+})
+

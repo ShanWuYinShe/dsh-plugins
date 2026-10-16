@@ -224,14 +224,12 @@ export const ZCODE_START_PLAN_VARIANT: WorkBuddyVariant = {
   zcodePlanMode: 'start',
 }
 
-/** OpenCode provider variant: official free models channel. */
+/** OpenCode provider variant: official free models channel (keyless public). */
 export const OPENCODE_VARIANT: WorkBuddyVariant = {
   id: 'opencode-free',
   kind: 'opencode',
   displayName: 'OpenCode Free',
   appName: 'OpenCode',
-  env: 'OPENCODE_AUTH_FILE',
-  desktopFilename: 'credentials.json',
   ownFilename: '.opencode-auth.json',
   probeFilename: '.opencode-probe.json',
   catalogFilename: '.opencode-catalog.json',

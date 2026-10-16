@@ -10,7 +10,6 @@
 import { RegionMismatchError } from './auth.js'
 import { credentialIdentity } from './catalog-store.js'
 import { variantIsStartPlan } from './variant-runtime.js'
-import { isZCodeOffpeak } from './upstream.js'
 import type { VariantRuntime } from './variant-runtime.js'
 
 /** 定时器依赖：刷新链路的入口由 catalog-lifecycle 注入。 */
@@ -53,17 +52,12 @@ const CATALOG_REFRESH_INTERVAL_MS = 60 * 60_000
 
   /** 启动身份 sweep 与目录周期刷新（两者都 unref，不拖住进程退出）。 */
   function startTimers(): void {
-  // 身份与时段核对：只读 current()，身份没变就什么都不做（零上游请求）。
-  // 时段交界处（夜间免费 23:00 / 09:00）自动重新同步 ZCode 目录。
+  // 身份核对：只读 current()，身份没变就什么都不做（零上游请求）。
   // 用 unref 的 interval，vitest 假时钟下 advanceTimers 会触发它——回调内
   // 无身份变化时不触网，现有重试计数测试不受影响。区域错配在这里静默隐藏
   // （原因已由 status 报给卡片），不每 60s 打一条告警。
-  let lastOffpeak = isZCodeOffpeak()
   sweep = setInterval(() => {
     if (isStopped()) return
-    const currentOffpeak = isZCodeOffpeak()
-    const offpeakChanged = currentOffpeak !== lastOffpeak
-    lastOffpeak = currentOffpeak
 
     for (const runtime of runtimes) {
       void (async () => {
@@ -72,9 +66,9 @@ const CATALOG_REFRESH_INTERVAL_MS = 60 * 60_000
           const identity = signedIn === undefined
             ? undefined
             : credentialIdentity(signedIn as unknown as Parameters<typeof credentialIdentity>[0])
-          const shouldRefresh = identity !== runtime.lastIdentity || (offpeakChanged && runtime.variant.kind === 'zcode')
+          const shouldRefresh = identity !== runtime.lastIdentity
           if (shouldRefresh && !isStopped()) {
-            refreshCatalog(runtime, offpeakChanged ? 'offpeak boundary crossed' : 'identity sweep')
+            refreshCatalog(runtime, 'identity sweep')
             return
           }
           // Start Plan「领取后恢复」快通道。回归见

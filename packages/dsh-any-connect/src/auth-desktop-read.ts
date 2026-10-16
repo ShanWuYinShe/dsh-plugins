@@ -31,17 +31,6 @@ export interface DesktopReadContext {
 
 export async function readDesktopCredential(ctx: DesktopReadContext): Promise<WorkBuddyCredential | undefined> {
   if (ctx.variant.kind === 'opencode') {
-    for (const desktopPath of ctx.candidates()) {
-      let text: string
-      try {
-        text = await readFile(desktopPath, 'utf8')
-      } catch (error: unknown) {
-        if (!isENOENT(error)) throw error
-        continue
-      }
-      if (text.trim() === '') continue
-      return parseOpenCodeAuth(text, desktopPath)
-    }
     return defaultOpenCodePublicCredential()
   }
 
@@ -133,18 +122,6 @@ export function parseOpenCodeAuth(text: string, _path?: string): WorkBuddyCreden
 
 /** Default public free tier credential for OpenCode. */
 export function defaultOpenCodePublicCredential(): WorkBuddyCredential {
-  const envKey = process.env['OPENCODE_API_KEY']
-  if (typeof envKey === 'string' && envKey.trim() !== '') {
-    return {
-      accessToken: envKey.trim(),
-      refreshToken: '',
-      expiresAtMs: Date.now() + 365 * 24 * 60 * 60 * 1000,
-      domain: 'opencode.ai',
-      uid: 'opencode-env',
-      nickname: 'OpenCode (env)',
-      source: 'desktop',
-    }
-  }
   return {
     accessToken: 'public',
     refreshToken: '',

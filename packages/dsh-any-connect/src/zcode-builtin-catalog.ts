@@ -40,13 +40,37 @@ function darwinBuiltinConfigCandidates(): string[] {
   ].map(dir => join(dir, ...BUILTIN_CONFIG_RELATIVE))
 }
 
-/** 平台相关的候选路径；未经实测验证的平台返回空（降级，不猜路径）。 */
+function windowsBuiltinConfigCandidates(): string[] {
+  const home = homedir()
+  const localAppData = process.env['LOCALAPPDATA'] ?? join(home, 'AppData', 'Local')
+  const appData = process.env['APPDATA'] ?? join(home, 'AppData', 'Roaming')
+  const programFiles = process.env['ProgramFiles'] ?? 'C:\\Program Files'
+  return [
+    join(localAppData, 'Programs', 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
+    join(localAppData, 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
+    join(appData, 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
+    join(programFiles, 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
+  ]
+}
+
+function linuxBuiltinConfigCandidates(): string[] {
+  const home = homedir()
+  return [
+    '/opt/ZCode/resources/config/provider/zcode-builtin.json',
+    '/usr/share/zcode/resources/config/provider/zcode-builtin.json',
+    join(home, '.local', 'share', 'zcode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
+  ]
+}
+
+/** 平台相关的候选路径。 */
 function builtinConfigCandidates(): string[] {
   const override = process.env[BUILTIN_CONFIG_ENV]
   if (override !== undefined && override.trim() !== '') {
     return [override]
   }
   if (process.platform === 'darwin') return darwinBuiltinConfigCandidates()
+  if (process.platform === 'win32') return windowsBuiltinConfigCandidates()
+  if (process.platform === 'linux') return linuxBuiltinConfigCandidates()
   return []
 }
 

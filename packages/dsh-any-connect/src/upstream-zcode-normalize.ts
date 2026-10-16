@@ -37,14 +37,42 @@ export function mergeZCodeCatalogue(
     if (!whitelist.has(key)) continue
     seen.add(key)
     const hit = known.get(key)
-    merged.push(hit ?? defaultZCodeModelInfo(rawId))
+    if (hit !== undefined) {
+      if (hit.billing?.badges?.some(b => b.includes('夜间免费'))) {
+        const badges = hit.billing.badges.filter(b => !b.includes('夜间免费'))
+        merged.push({
+          ...hit,
+          billing: {
+            ...hit.billing,
+            free: false,
+            ...badges.length > 0 ? { badges } : { badges: undefined },
+          },
+        })
+      } else {
+        merged.push(hit)
+      }
+    } else {
+      merged.push(defaultZCodeModelInfo(rawId))
+    }
   }
   for (const model of models) {
     const key = model.id.toLowerCase()
     if (seen.has(key)) continue
     if (!whitelist.has(key)) continue
     seen.add(key)
-    merged.push(model)
+    if (model.billing?.badges?.some(b => b.includes('夜间免费'))) {
+      const badges = model.billing.badges.filter(b => !b.includes('夜间免费'))
+      merged.push({
+        ...model,
+        billing: {
+          ...model.billing,
+          free: false,
+          ...badges.length > 0 ? { badges } : { badges: undefined },
+        },
+      })
+    } else {
+      merged.push(model)
+    }
   }
   return merged
 }

@@ -107,7 +107,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
 
   /** 等目录落地：每次重读 status，live 即停、超时即停。首读立即发生，
    * 替代固定盲等（目录快时白等、慢时读到旧目录又触发二次刷新）。 */
-  const waitCatalogLive = useCallback(async (): Promise<void> => {
+  const waitCatalogLive = useCallback(async (previousFetchedAt?: number): Promise<void> => {
     const startedAt = Date.now()
     for (;;) {
       let next: WorkBuddyWebStatus
@@ -120,7 +120,11 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
       applyStatus(next)
       // signed-out 文档无 catalog 字段：按缺失处理（继续轮询至超时）。
       const catalog = (next as { catalog?: WorkBuddyWebCatalog }).catalog
-      if (isCatalogLive(catalog) || Date.now() - startedAt >= REFRESH_TIMEOUT_MS) return
+      const fetchedAt = catalog?.fetchedAt
+      const hasUpdated = previousFetchedAt !== undefined
+        ? (fetchedAt !== undefined && fetchedAt > previousFetchedAt)
+        : isCatalogLive(catalog)
+      if ((isCatalogLive(catalog) && hasUpdated) || Date.now() - startedAt >= REFRESH_TIMEOUT_MS) return
       await new Promise(resolve => setTimeout(resolve, REFRESH_POLL_MS))
     }
   }, [fetchStatus, applyStatus])
@@ -131,9 +135,10 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
   const refreshWithCatalog = useCallback(async (): Promise<void> => {
     setBusy(true)
     setNotice(undefined)
+    const prevFetchedAt = (status as any)?.catalog?.fetchedAt
     try {
       await control({ action: 'refresh' })
-      await waitCatalogLive()
+      await waitCatalogLive(prevFetchedAt)
     } catch (error: unknown) {
       // refresh POST 失败也照常读一次 status：读本身可能仍是成功的。
       if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
@@ -141,7 +146,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
       await refresh()
       if (mounted.current) setBusy(false)
     }
-  }, [control, refresh, t, waitCatalogLive])
+  }, [control, refresh, status, t, waitCatalogLive])
 
   // Stale 目录自动刷新一次：saved/fallback 或上次失败时，后台重拉目录，
   // 用户不用按刷新。once per mount；失败只进 notice，不打扰不循环。
@@ -170,6 +175,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
   const zcodeSide = variant.id === 'anyconnect-zcode' ? 'coding' : variant.id === 'anyconnect-zcode-sp' ? 'start' : undefined
   const isZCode = zcodeSide !== undefined
   const isStartPlanCard = zcodeSide === 'start'
+  const isOpenCode = variant.id === 'anyconnect-opencode'
   const zcodePlan = isZCode && status.credits?.accounts !== undefined
     ? (status.credits.accounts.find(a => a.remain > 0) ?? status.credits.accounts[0])
     : undefined
@@ -204,10 +210,12 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
             ? `${displayPlanName} · ${planStateLabel ?? t('codingPlanActive')}`
             : (status.credits !== undefined ? t('codingPlanActive') : undefined),
         ].filter(part => part !== undefined).join(' · ')
-      : [
-          label,
-          status.credits !== undefined ? t('creditsTotal', { total: formatNumber(status.credits.total) }) : undefined,
-        ].filter(part => part !== undefined).join(' · '),
+      : isOpenCode
+        ? [label, t('openCodeFreeBadge')].filter(part => part !== undefined).join(' · ')
+        : [
+            label,
+            status.credits !== undefined ? t('creditsTotal', { total: formatNumber(status.credits.total) }) : undefined,
+          ].filter(part => part !== undefined).join(' · '),
     ...(catalogOffline ? [t('catalogOfflineShort')] : []),
   ].filter(part => part !== '').join(' · ')
 
@@ -241,6 +249,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     label,
     isZCode,
     isStartPlanCard,
+    isOpenCode,
     zcodePlan,
     isPlanActive,
     planStateLabel,

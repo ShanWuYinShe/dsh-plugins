@@ -58,24 +58,7 @@ export function normalizeCredits(credits: string | undefined): string | undefine
 /** Session-invalidation markers that mean "sign in again in the WorkBuddy app". */
 const SESSION_DEAD_MARKERS: readonly string[] = ['Offline user session not found', '12153']
 
-/**
- * Whether the current time falls into the Beijing (UTC+8) off-peak night-free window (23:00 - 09:00).
- */
-export function isZCodeOffpeak(date: Date = new Date()): boolean {
-  try {
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Asia/Shanghai',
-      hour: 'numeric',
-      hour12: false,
-    })
-    const hour = parseInt(formatter.format(date), 10)
-    return hour >= 23 || hour < 9
-  } catch {
-    const utc = date.getTime() + date.getTimezoneOffset() * 60000
-    const beijingHour = new Date(utc + 3600000 * 8).getHours()
-    return beijingHour >= 23 || beijingHour < 9
-  }
-}
+
 
 /**
  * Layer the currently-effective promotion onto a copy of one model row.
@@ -103,57 +86,17 @@ export function modelWithCurrentPromotion(
     || (variantKind === undefined && (model.billing?.badges?.some(b => b.includes('150% 额度')) ?? false))
 
   if (isZCode) {
-    // 夜间免费是 Coding Plan 的权益：Start Plan 走普通通道、只有 150% 额度，
-    // 不享受 23:00–09:00 免费窗。此时既不能标「夜间免费」，也不能把费率改写成
-    // x0.00——那会给用户一个它拿不到的折扣。行里自带的夜免徽标一并摘掉，
-    // 其余徽标（如 150% 额度）保留。
-    if (!nightFreeEligible) {
-      return {
-        ...model,
-        billing: {
-          ...model.billing,
-          free: false,
-          badges: (model.billing?.badges ?? []).filter(b => !b.includes('夜间免费')),
-        },
-      }
+    // 智谱 Coding Plan 此前的 23:00~09:00 夜间免费限时活动已下线。
+    // 去除过期的夜免徽标及 x0.00 改写，保持 150% 额度及模型自身的基准计费。
+    const badges = (model.billing?.badges ?? []).filter(b => !b.includes('夜间免费'))
+    return {
+      ...model,
+      billing: {
+        ...model.billing,
+        free: false,
+        ...badges.length > 0 ? { badges } : { badges: undefined },
+      },
     }
-    const hasNightFreeBadge = model.billing?.badges?.some(b => b.includes('夜间免费'))
-    if (hasNightFreeBadge) {
-      const offpeak = isZCodeOffpeak(new Date(now))
-      if (offpeak) {
-        return {
-          ...model,
-          billing: {
-            ...model.billing,
-            credits: 'x0.00',
-            free: true,
-            badges: (model.billing?.badges ?? []).map(b => b === '夜间免费' ? '夜间免费 (生效中)' : b),
-          },
-        }
-      } else {
-        // Daytime: keep the row's own baseline when it carries one. When it
-        // doesn't (missing, or `x0.00` baked in by the night window), the
-        // real daytime price is not recoverable — assert `rateUnknown`
-        // instead of inventing a hardcoded rate the upstream may have
-        // changed (same posture as expired promotions below).
-        const daytimeCredits = model.billing?.credits !== undefined && model.billing.credits !== 'x0.00'
-          ? model.billing.credits
-          : undefined
-        return {
-          ...model,
-          billing: {
-            ...model.billing,
-            // credits: undefined 显式抹掉行里被夜间窗口烙上的 x0.00——
-            // spread 不能覆盖它,留着就会继续向用户展示已失效的免费价。
-            ...daytimeCredits === undefined ? { rateUnknown: true as const, credits: undefined } : { credits: daytimeCredits },
-            free: false,
-            badges: (model.billing?.badges ?? []).map(b => b === '夜间免费 (生效中)' ? '夜间免费' : b),
-          },
-        }
-      }
-    }
-    // Other ZCode models (e.g. GLM-5.3 x1.00) remain untouched with their own parameters and billing
-    return model
   }
 
   // WorkBuddy variant (CN and Global): never apply ZCode's 23:00~09:00 off-peak rule
@@ -327,6 +270,7 @@ export function normalizeToolChoice(obj: Record<string, unknown>): void {
 // 协议类型已搬到 upstream-types.ts：在这里再导出，既有导入路径（含门面）全部不变。
 export type {
   UpstreamErrorKind,
+  ModelWireProtocol,
   WorkBuddyUpstreamModel,
   WorkBuddyModelReasoning,
   WorkBuddyEffort,

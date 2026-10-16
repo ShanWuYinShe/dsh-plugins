@@ -231,7 +231,8 @@ it('attributes the plan to the client selection, not to the fallback key', async
       expect(models.find(m => m.id === 'glm-5.3')?.billing?.badges).toContain('150% 额度')
       expect(models.find(m => m.id === 'glm-5.3-flash')?.contextWindow).toBe(1000000)
       expect(models.find(m => m.id === 'glm-5.3-flash')?.maxTokens).toBe(128000)
-      expect(models.find(m => m.id === 'glm-5.3-flash')?.billing?.badges).toContain('夜间免费')
+      expect(models.find(m => m.id === 'glm-5.3-flash')?.billing?.badges).toContain('150% 额度')
+      expect(models.find(m => m.id === 'glm-5.3-flash')?.billing?.badges).not.toContain('夜间免费')
       vi.unstubAllGlobals()
     })
 
@@ -303,7 +304,8 @@ it('attributes the plan to the client selection, not to the fallback key', async
       expect(flash?.contextWindow).toBe(1000000)
       expect(flash?.maxTokens).toBe(128000)
       expect(flash?.billing?.credits).toBe('x0.06')
-      expect(flash?.billing?.badges).toContain('夜间免费')
+      expect(flash?.billing?.badges).toContain('150% 额度')
+      expect(flash?.billing?.badges).not.toContain('夜间免费')
       vi.unstubAllGlobals()
     })
 

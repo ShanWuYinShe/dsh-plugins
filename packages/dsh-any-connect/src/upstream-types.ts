@@ -16,6 +16,8 @@ export type UpstreamErrorKind =
   | 'server'
   | 'client'
 
+export type ModelWireProtocol = 'chat-completions' | 'responses' | 'anthropic-messages'
+
 /** One CLI-usable model as the upstream catalog describes it. */
 export interface WorkBuddyUpstreamModel {
   id: string
@@ -60,6 +62,13 @@ export interface WorkBuddyUpstreamModel {
    * on {@link WorkBuddyModelBilling.credits} for diagnostics.
    */
   billing?: WorkBuddyModelBilling
+  /**
+   * Upstream wire protocol used by the provider for this model.
+   * - 'chat-completions': OpenAI Chat Completions wire protocol (default)
+   * - 'responses': OpenAI Responses API wire protocol (e.g. Muse, GPT series)
+   * - 'anthropic-messages': Anthropic Messages wire protocol (e.g. Claude, Qwen, Minimax)
+   */
+  wireProtocol?: ModelWireProtocol
 }
 
 /** Reasoning metadata the upstream catalog declares for one model. */

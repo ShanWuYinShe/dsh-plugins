@@ -97,23 +97,27 @@ describe('Provider model parameter & billing isolation', () => {
     expect(hy4Night?.billing?.credits).toBe('x0.29')
     expect(hy4Night?.billing?.free).toBe(false)
 
-    // ZCode model follows off-peak night window
+    // ZCode 模型不再应用已下线的夜间免费促销，始终保留自身基准费率
     const zcodeCatalog = new WorkBuddyCatalog(FALLBACK_ZCODE_MODELS, 'zcode')
     const flashNight = zcodeCatalog.current().find(m => m.id === 'glm-5.3-flash')
+    expect(flashNight?.billing?.free).toBe(false)
+    expect(flashNight?.billing?.credits).toBe('x0.06')
+    expect(flashNight?.billing?.badges).toContain('150% 额度')
+    expect(flashNight?.billing?.badges).not.toContain('夜间免费')
 
-    // During daytime, ZCode retains its own baseline credits x0.06 without hardcoded overwrites
     const zcodeDayModel = FALLBACK_ZCODE_MODELS.find(m => m.id === 'glm-5.3-flash')!
     const resolvedDay = WorkBuddy.modelWithCurrentPromotion(zcodeDayModel, dayTime, 'zcode')
     expect(resolvedDay.billing?.free).toBe(false)
     expect(resolvedDay.billing?.credits).toBe('x0.06')
-    expect(resolvedDay.billing?.badges).toContain('夜间免费')
-    expect(resolvedDay.billing?.badges).not.toContain('夜间免费 (生效中)')
+    expect(resolvedDay.billing?.badges).toContain('150% 额度')
+    expect(resolvedDay.billing?.badges).not.toContain('夜间免费')
 
-    // During night, ZCode turns free x0.00
+    // 夜间也不再改写为免费 x0.00
     const resolvedNight = WorkBuddy.modelWithCurrentPromotion(zcodeDayModel, nightTime, 'zcode')
-    expect(resolvedNight.billing?.free).toBe(true)
-    expect(resolvedNight.billing?.credits).toBe('x0.00')
-    expect(resolvedNight.billing?.badges).toContain('夜间免费 (生效中)')
+    expect(resolvedNight.billing?.free).toBe(false)
+    expect(resolvedNight.billing?.credits).toBe('x0.06')
+    expect(resolvedNight.billing?.badges).toContain('150% 额度')
+    expect(resolvedNight.billing?.badges).not.toContain('夜间免费')
 
     // WorkBuddy Hy4 during night is NOT altered by ZCode offpeak
     const hy4Model = FALLBACK_WORKBUDDY_MODELS.find(m => m.id === 'hy4-preview')!
@@ -122,34 +126,30 @@ describe('Provider model parameter & billing isolation', () => {
     expect(resolvedWbHy4.billing?.free).toBe(false)
   })
 
-  it('Start Plan 账号不享受夜间免费（走普通通道，只有 150% 额度）', () => {
-    // 北京时间 02:00，正是 Coding Plan 的夜免窗口。
+  it('Start Plan 账号与 Coding Plan 账号均不带已下线的夜间免费徽标', () => {
     const nightTime = Date.parse('2026-09-24T18:00:00Z')
     const flash = FALLBACK_ZCODE_MODELS.find(m => m.id === 'glm-5.3-flash')!
 
-    // Coding Plan（默认资格）：夜间转免费。
+    // Coding Plan：夜间保持基准计费，不带已下线的夜间免费徽标。
     const codingPlan = WorkBuddy.modelWithCurrentPromotion(flash, nightTime, 'zcode')
-    expect(codingPlan.billing?.free).toBe(true)
-    expect(codingPlan.billing?.credits).toBe('x0.00')
-    expect(codingPlan.billing?.badges).toContain('夜间免费 (生效中)')
+    expect(codingPlan.billing?.free).toBe(false)
+    expect(codingPlan.billing?.credits).toBe('x0.06')
+    expect(codingPlan.billing?.badges).toContain('150% 额度')
+    expect(codingPlan.billing?.badges).not.toContain('夜间免费')
 
-    // Start Plan：不享受夜免——不能转免费，也不能留着「夜间免费」徽标。
+    // Start Plan：走普通通道，150% 额度，不带夜免徽标。
     const startPlan = WorkBuddy.modelWithCurrentPromotion(flash, nightTime, 'zcode', false)
     expect(startPlan.billing?.free).toBe(false)
     expect(startPlan.billing?.credits).toBe('x0.06')
     expect(startPlan.billing?.badges).not.toContain('夜间免费')
-    expect(startPlan.billing?.badges).not.toContain('夜间免费 (生效中)')
-    // 其余权益照常：150% 额度与白天基准价都不受影响。
     expect(startPlan.billing?.badges).toContain('150% 额度')
   })
 
-  it('catalog 的夜免资格开关按账号生效', () => {
-    const nightTime = Date.parse('2026-09-24T18:00:00Z')
+  it('catalog 模型不带已失效的夜间免费徽标', () => {
     const catalog = new WorkBuddyCatalog(FALLBACK_ZCODE_MODELS, 'zcode')
-    catalog.setNightFreeEligible(false)
     const flash = catalog.current().find(m => m.id === 'glm-5.3-flash')
     expect(flash?.billing?.free).toBe(false)
-    expect(flash?.billing?.badges ?? []).not.toContain('夜间免费 (生效中)')
-    expect(nightTime).toBeGreaterThan(0)
+    expect(flash?.billing?.credits).toBe('x0.06')
+    expect(flash?.billing?.badges ?? []).not.toContain('夜间免费')
   })
 })

@@ -129,7 +129,7 @@ export const FALLBACK_ZCODE_MODELS: readonly WorkBuddyModelInfo[] = [
     },
     billing: {
       credits: 'x0.06',
-      badges: ['夜间免费', '150% 额度'],
+      badges: ['150% 额度'],
       free: false,
     },
   },
@@ -157,6 +157,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'chat-completions',
   },
   {
     id: 'mimo-v2.6-flash-free',
@@ -174,6 +175,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'chat-completions',
   },
   {
     id: 'space-bunny-free',
@@ -193,6 +195,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'chat-completions',
   },
   {
     id: 'step-5-preview-free',
@@ -212,6 +215,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'chat-completions',
   },
   {
     id: 'longcat-2.5-preview-free',
@@ -229,6 +233,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'chat-completions',
   },
   {
     id: 'nemotron-3-ultra-free',
@@ -246,6 +251,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'chat-completions',
   },
   {
     id: 'nemotron-3.5-lightning-free',
@@ -263,6 +269,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'chat-completions',
   },
   {
     id: 'cat-jam-free',
@@ -280,6 +287,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'chat-completions',
   },
   {
     id: 'muse-spark-1.2-contributor-free',
@@ -297,6 +305,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'responses',
   },
   {
     id: 'muse-spark-1.3-contributor-free',
@@ -314,6 +323,43 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'responses',
+  },
+  {
+    id: 'qwen3.6-plus-free',
+    name: 'Qwen3.6 Plus Free',
+    contextWindow: 262144,
+    maxTokens: 65536,
+    supportsImages: true,
+    reasoning: {
+      supports: true,
+      onlyReasoning: false,
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x0.00',
+      badges: ['免费', '推理'],
+      free: true,
+    },
+    wireProtocol: 'anthropic-messages',
+  },
+  {
+    id: 'minimax-m2.1-free',
+    name: 'MiniMax-M2.1 Free',
+    contextWindow: 204800,
+    maxTokens: 131072,
+    supportsImages: false,
+    reasoning: {
+      supports: true,
+      onlyReasoning: false,
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x0.00',
+      badges: ['免费', '推理'],
+      free: true,
+    },
+    wireProtocol: 'chat-completions',
   },
   {
     id: 'nemotron-3.5-super-vl-free',
@@ -331,6 +377,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'chat-completions',
   },
   {
     id: 'jev-1.13-free',
@@ -348,6 +395,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'chat-completions',
   },
   {
     id: 'big-pickle',
@@ -365,6 +413,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
       badges: ['免费', '推理'],
       free: true,
     },
+    wireProtocol: 'chat-completions',
   },
 ]
 

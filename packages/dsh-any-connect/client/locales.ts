@@ -56,7 +56,6 @@ export const en = {
   codingPlanActive: 'Active',
   codingPlanExpired: 'Expired',
   planQuotaExhausted: 'Quota used up',
-  codingPlanNightFree: 'Free 23:00~09:00',
   codingPlanExtraQuota: '150% Quota',
   codingPlanExpiresAt: 'Expires {date}',
   titleZCodeSP: 'DSH ZCode Start Plan',
@@ -64,7 +63,6 @@ export const en = {
   signedOutHintZCodeSP: 'Sign in once in the ZCode desktop app; the Start Plan group appears here automatically.',
   startPlanLabel: 'Start Plan',
   planDedicatedQuota: 'Dedicated quota pool',
-  planNightFreeOff: 'No night-free',
   planQuotaLine: 'Quota {remain} / {size} tokens',
   planNoCarryOver: 'Expired quota is forfeited and does not roll over.',
   planStartNote: 'Model requests ride the Start Plan channel and bill this dedicated pool — Coding Plan is never touched. Each quota pack comes with its own expiry: whatever is left when it expires is forfeited, so it is not a balance that accumulates.',
@@ -75,6 +73,8 @@ export const en = {
   claimCopy: 'Copy',
   claimCopied: 'Copied',
   cardLoadFailed: 'WorkBuddy configuration failed to load; models still work.',
+  recheck: 'Check again',
+  openCodeFreeBadge: 'Free Public Tier',
 } as const
 
 export type WorkBuddySettingsKey = keyof typeof en
@@ -135,7 +135,6 @@ export const zh: Record<WorkBuddySettingsKey, string> = {
   codingPlanActive: '有效',
   codingPlanExpired: '已过期',
   planQuotaExhausted: '已用完',
-  codingPlanNightFree: '夜间 23:00~09:00 免费',
   codingPlanExtraQuota: '150% 专属额度',
   codingPlanExpiresAt: '到期时间：{date}',
   titleZCodeSP: 'DSH ZCode Start Plan',
@@ -143,7 +142,6 @@ export const zh: Record<WorkBuddySettingsKey, string> = {
   signedOutHintZCodeSP: '在 ZCode 桌面客户端登录一次即可，Start Plan 分组会自动出现在 DSH 中。',
   startPlanLabel: 'Start Plan',
   planDedicatedQuota: '专属额度池',
-  planNightFreeOff: '无夜间免费',
   planQuotaLine: '额度 {remain} / {size} tokens',
   planNoCarryOver: '额度到期作废，不结转。',
   planStartNote: '模型请求走 Start Plan 通道，扣的是这个专属额度池，绝不占用 Coding Plan。额度按包发放、各有有效期，到期没用完的部分作废——它不是可以累积的余额。',
@@ -154,4 +152,6 @@ export const zh: Record<WorkBuddySettingsKey, string> = {
   claimCopy: '复制',
   claimCopied: '已复制',
   cardLoadFailed: 'WorkBuddy 配置面板加载失败，模型不受影响。',
+  recheck: '重新检测',
+  openCodeFreeBadge: '免密公共通道 · 官方免费',
 }

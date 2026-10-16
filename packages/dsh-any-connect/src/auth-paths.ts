@@ -145,14 +145,9 @@ export function defaultZCodeDesktopCandidates(filename: string = 'credentials.js
   return [join(home, '.zcode', 'v2', filename)]
 }
 
-/** Platform-default candidates for OpenCode credentials file. */
-export function defaultOpenCodeCandidates(filename: string = 'credentials.json'): string[] {
-  const home = homedir()
-  return [
-    join(home, '.config', 'opencode', filename),
-    join(home, '.config', 'opencode', 'auth.json'),
-    join(home, '.opencode', filename),
-  ]
+/** Platform-default candidates for OpenCode credentials file (none, keyless public channel). */
+export function defaultOpenCodeCandidates(_filename: string = 'credentials.json'): string[] {
+  return []
 }
 
 /**
@@ -163,7 +158,7 @@ export function desktopAuthCandidatesFor(variant: WorkBuddyVariant): string[] {
     return defaultZCodeDesktopCandidates(variant.desktopFilename ?? 'credentials.json')
   }
   if (variant.kind === 'opencode') {
-    return defaultOpenCodeCandidates(variant.desktopFilename ?? 'credentials.json')
+    return []
   }
   return defaultDesktopAuthCandidates().map(path => join(dirname(path), variant.desktopFilename!))
 }

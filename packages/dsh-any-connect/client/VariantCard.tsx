@@ -35,7 +35,6 @@ import {
   planBadgeRowStyle,
   privilegeChipStyle,
   planMetaStyle,
-  planChipOffStyle,
   dotStyle,
 } from './config-styles.js'
 import { formatExpiry, formatNumber } from './config-format.js'
@@ -60,7 +59,7 @@ export function VariantCard(props: {
     t, variant, status, open, onToggle,
     busy, notice, modelsOpen, setModelsOpen, copiedPlanId,
     probe, startPlanClaim, copyPlanId, refresh,
-    refreshWithCatalog, title, label, isZCode, isStartPlanCard, zcodePlan, isPlanActive, planStateLabel, displayPlanName, headerSummary, catalogOffline, effortsOf,
+    refreshWithCatalog, title, label, isZCode, isStartPlanCard, isOpenCode, zcodePlan, isPlanActive, planStateLabel, displayPlanName, headerSummary, catalogOffline, effortsOf,
   } = useVariantCard(props)
 
   return (
@@ -113,9 +112,6 @@ export function VariantCard(props: {
                   ) : (
                     <span style={privilegeChipStyle}>{t('codingPlanExtraQuota')}</span>
                   )}
-                  {isStartPlanCard
-                    ? <span style={planChipOffStyle}>{t('planNightFreeOff')}</span>
-                    : <span style={privilegeChipStyle}>{t('codingPlanNightFree')}</span>}
                 </div>
                 {isStartPlanCard && zcodePlan !== undefined && zcodePlan.size > 0 ? (
                   <span style={planMetaStyle}>
@@ -141,6 +137,27 @@ export function VariantCard(props: {
                   "已领"（无需动作，不打扰）；unknown **绝不渲染成 none**——探测失败
                   时说"没得领"会让用户白丢一次领取机会。 */}
               <StartPlanClaimBox t={t} claim={startPlanClaim} copied={copiedPlanId} onCopy={copyPlanId} />
+            </>
+          ) : isOpenCode ? (
+            <>
+              <hr style={dividerStyle} />
+              <div style={summaryRowStyle}>
+                <span style={summaryLabelStyle}>{t('creditsLabel')}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={summaryValueStyle} title={status.domain}>
+                    {t('openCodeFreeBadge')}
+                  </span>
+                  <button
+                    type="button"
+                    className="wb-btn"
+                    style={buttonStyle}
+                    disabled={busy}
+                    onClick={() => { void refreshWithCatalog() }}
+                  >
+                    {busy ? <><span className="wb-spin" aria-hidden="true" />{t('refreshing')}</> : t('refresh')}
+                  </button>
+                </span>
+              </div>
             </>
           ) : (
             <>

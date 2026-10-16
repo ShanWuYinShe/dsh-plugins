@@ -175,7 +175,7 @@ describe('WorkBuddy 配置卡片', () => {
     const content = text()
     expect(content).toContain('GLM Coding Pro · 有效')
     expect(content).toContain('150% 专属额度')
-    expect(content).toContain('夜间 23:00~09:00 免费')
+    expect(content).not.toContain('夜间 23:00~09:00 免费')
     expect(content).not.toContain('当前积分 1')
   })
 
