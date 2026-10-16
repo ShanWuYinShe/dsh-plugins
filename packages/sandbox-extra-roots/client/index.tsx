@@ -18,7 +18,7 @@ import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 // 样式注入是**模块加载副作用**：必须有人导入 styles.ts，否则卡片渲染出来没有任何样式。
 // 2026-10-08 拆分后一度漏掉这条导入（产物里既无样式也无注入代码，测试没覆盖到）。
 import './styles.js'
-import { analyzeRootsText, hasBlockingProblems, presetsForPlatform, appendRootLine } from './roots-preview.js'
+import { analyzeRootsText, hasBlockingProblems, presetsForPlatform, appendRootLine, cleanRootLine } from './roots-preview.js'
 import { NS, zh, en } from './locales.js'
 import { SandboxRootsCard } from './SandboxRootsCard.js'
 
@@ -102,4 +102,4 @@ async function apply(ctx: any) {
   }
 }
 
-export { apply, inject, analyzeRootsText, hasBlockingProblems, appendRootLine, presetsForPlatform };
+export { apply, inject, analyzeRootsText, hasBlockingProblems, appendRootLine, presetsForPlatform, cleanRootLine };

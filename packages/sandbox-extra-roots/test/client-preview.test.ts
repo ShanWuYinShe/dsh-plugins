@@ -2,15 +2,22 @@ import { describe, expect, it } from "vitest";
 // 直接导入真实客户端模块（纯函数；模块顶层的 CSS 注入有 document 守卫，
 // React 是唯一运行时依赖）。此前 analyzeRootsText 零覆盖,/private 与
 // 主目录祖先的口径漂移只能在保存失败后才发现。
-import { analyzeRootsText, appendRootLine, hasBlockingProblems, presetsForPlatform } from "../client/index.tsx";
+import { analyzeRootsText, appendRootLine, hasBlockingProblems, presetsForPlatform, cleanRootLine } from "../client/index.tsx";
 
 function kinds(lines: string): string[] {
   return analyzeRootsText(lines).map((p) => p.kind);
 }
 
 describe("sandbox-extra-roots client preview", () => {
-  it("合法路径与 ~/子路径不标问题", () => {
+  it("cleanRootLine 容错去除行首尾单双引号与前后空白", () => {
+    expect(cleanRootLine('  "/tmp/cache"  ')).toBe("/tmp/cache");
+    expect(cleanRootLine("  '~/my-dir'  ")).toBe("~/my-dir");
+    expect(cleanRootLine('"/unmatched')).toBe('"/unmatched');
+  });
+
+  it("合法路径与 ~/子路径不标问题（含外层引号输入）", () => {
     expect(kinds("~/data\n/tmp/cache\n/workspace/build")).toEqual([]);
+    expect(kinds('"/tmp/cache"\n\'~/workspace\'')).toEqual([]);
     expect(kinds("")).toEqual([]);
   });
 
@@ -90,12 +97,15 @@ describe("sandbox-extra-roots client preview", () => {
     const linux = presetsForPlatform(false, false);
     expect(linux).toContain("~/.cache/pip");
     expect(linux).not.toContain("~/Library/Caches/pip");
+    expect(darwin).toContain("~/.bun/install/cache");
+    expect(linux).toContain("~/.bun/install/cache");
     // 三平台共有：cargo/go；Windows 没有 POSIX 专属缓存。
     for (const list of [darwin, linux, presetsForPlatform(false, true)]) {
       expect(list).toContain("~/.cargo");
       expect(list).toContain("~/go/pkg/mod");
     }
     expect(presetsForPlatform(false, true)).not.toContain("~/.npm");
+    expect(presetsForPlatform(false, true)).not.toContain("~/.bun/install/cache");
   });
 
   it("所有问题类型在 zh 与 en 中均有完整本地化文案与占位符", async () => {

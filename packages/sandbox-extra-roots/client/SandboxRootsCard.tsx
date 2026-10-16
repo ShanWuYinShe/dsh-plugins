@@ -7,7 +7,7 @@
  */
 
 import * as React from 'react'
-import { isDarwin, isWindows, analyzeRootsText, hasBlockingProblems, presetsForPlatform, appendRootLine } from './roots-preview.js'
+import { isDarwin, isWindows, analyzeRootsText, hasBlockingProblems, presetsForPlatform, appendRootLine, cleanRootLine } from './roots-preview.js'
 
 export function SandboxRootsCard(props: any) {
   // plugins.bundle.config 契约只 dispatch page 视图；防御性处理其余取值，
@@ -46,7 +46,7 @@ function SandboxRootsForm(props: any) {
       setCfg(value);
       setDraftText((current: any) => {
         const text = current === null ? prevRoots : String(current);
-        const normalized = text.split("\n").map((s: string) => s.trim()).filter((s: string) => s.length > 0).join("\n");
+        const normalized = text.split("\n").map(cleanRootLine).filter((s: string) => s.length > 0).join("\n");
         return normalized === prevRoots ? freshRoots : current;
       });
     }).catch((error: any) => {
@@ -64,7 +64,7 @@ function SandboxRootsForm(props: any) {
 
   const cfgRoots = cfg === null ? [] : (cfg.extraWritableRoots || []);
   const parsedRoots = draftText === null ? cfgRoots
-    : draftText.split("\n").map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+    : draftText.split("\n").map(cleanRootLine).filter((s: string) => s.length > 0);
   const dirty = cfg !== null && parsedRoots.join("\n") !== cfgRoots.join("\n");
   // 保存前的即时反馈：哪些行会被 host 拒绝/忽略/去重，不再等保存后才发现。
   const rootProblems = draftText === null ? [] : analyzeRootsText(draftText);

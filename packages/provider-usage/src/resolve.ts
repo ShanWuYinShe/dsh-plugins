@@ -80,6 +80,7 @@ export const CANONICAL_ALIASES: Readonly<Record<string, string>> = Object.freeze
   doneapi: 'openai',
   openai: 'openai',
   opencode: 'opencode',
+  opencodefree: 'opencode-free',
   opencodego: 'opencode-go',
 })
 
@@ -226,6 +227,7 @@ export function createProviderResolver(ctx: Context): (provider: string, signal:
       const fallbackRefs: Record<string, string[]> = {
         'opencode': ['OPENCODE_API_KEY', 'OPENCODE_GO_API_KEY'],
         'opencode-go': ['OPENCODE_GO_API_KEY', 'OPENCODE_API_KEY'],
+        'opencode-free': [],
         'deepseek': ['DEEPSEEK_API_KEY'],
       }
       const refs = fallbackRefs[provider] ?? fallbackRefs[normalized]

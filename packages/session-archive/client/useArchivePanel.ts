@@ -80,7 +80,7 @@ export function useArchivePanel(props: any) {
 
   // 两段式删除 armed 态的 4 秒复位 timer：存 id，改勾选/执行/卸载时清掉，
   // 过期 timer 不得在 armed 已解除后再次写 false（方向虽安全，属卫生债）。
-  const { disarmDelete, toggleAll, toggleOne, toggleDetail, exportSelected, restoreSelected, restoreOne, deleteSelected } = useArchiveActions({
+  const { disarmDelete, toggleAll, toggleOne, toggleDetail, exportSelected, exportOne, restoreSelected, restoreOne, deleteSelected } = useArchiveActions({
     refreshSessions: props.refreshSessions,
     busy,
     call,
@@ -155,6 +155,7 @@ export function useArchivePanel(props: any) {
     toggleOne,
     toggleDetail,
     exportSelected,
+    exportOne,
     restoreSelected,
     restoreOne,
     deleteSelected,

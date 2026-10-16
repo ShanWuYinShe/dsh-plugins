@@ -106,7 +106,7 @@ export function useArchiveActions(deps: {
       return item !== undefined && !item.live;
     });
     if (ids.length === 0) {
-      setNotice({ kind: "warn", text: t("noSelection") });
+      setNotice({ kind: "warn", text: selected.size > 0 ? t("allSelectedLiveHint") : t("noSelection") });
       return;
     }
     setBusy(true);
@@ -241,12 +241,30 @@ export function useArchiveActions(deps: {
     runBatch("delete", "deleteDone", "deleteFailed");
   };
 
+  const exportOne = React.useCallback(async (sessionId: string): Promise<void> => {
+    const item = items.find((i: any) => i.sessionId === sessionId);
+    if (item === undefined || item.live) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const detail = await call("detail", sessionId);
+      const md = detailToMarkdown(item ?? { sessionId, title: null, cwd: null }, detail);
+      downloadMarkdown(`archived-session-${shortId(sessionId)}-${new Date().toISOString().slice(0, 10)}.md`, md);
+      setNotice({ kind: "ok", text: t("exportDone").replace("{n}", "1") });
+    } catch (detailError: any) {
+      setNotice({ kind: "error", text: `${t("detailLoadFailed")}: ${detailError?.message || detailError}` });
+    } finally {
+      setBusy(false);
+    }
+  }, [items, call, t]);
+
   return {
     disarmDelete,
     toggleAll,
     toggleOne,
     toggleDetail,
     exportSelected,
+    exportOne,
     restoreSelected,
     restoreOne,
     deleteSelected,

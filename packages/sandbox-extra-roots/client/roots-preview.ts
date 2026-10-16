@@ -32,6 +32,14 @@ function isDirPrefix(prefix: string, path: string): boolean {
   if (prefix === "" || path === "") return false;
   return (path + "/").startsWith(prefix.endsWith("/") ? prefix : prefix + "/");
 }
+export function cleanRootLine(line: string): string {
+  let trimmed = line.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    trimmed = trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
 export function analyzeRootsText(text: string, platform: PreviewPlatform = CURRENT_PLATFORM) {
   const problems: Array<{ line: number; kind: string; value: string }> = [];
   const seen = new Set<string>();
@@ -40,7 +48,7 @@ export function analyzeRootsText(text: string, platform: PreviewPlatform = CURRE
   const homeAncestors = platform.isDarwin ? ["/users"] : platform.isWindows ? ["c:/users"] : ["/home"];
   const systemDirs = platform.isDarwin ? [...SYSTEM_DIRS, ...DARWIN_SYSTEM_REALPATHS] : SYSTEM_DIRS;
   text.split("\n").forEach((rawLine, index) => {
-    const line = rawLine.trim();
+    const line = cleanRootLine(rawLine);
     if (line.length === 0) return;
     // ~/x：host 保存时展开为用户主目录下的子路径，客户端无法解析 home，
     // 视为合法。裸 ~ 是主目录本身——host 按 homedir 判 reject 拒绝保存，
@@ -90,6 +98,7 @@ type RootPresetPlatform = "darwin" | "linux" | "win32";
 interface RootPreset { path: string; platforms: RootPresetPlatform[]; }
 const ROOT_PRESETS: RootPreset[] = [
   { path: "~/.npm", platforms: ["darwin", "linux"] },
+  { path: "~/.bun/install/cache", platforms: ["darwin", "linux"] },
   { path: "~/.cache/pip", platforms: ["linux"] },
   { path: "~/Library/Caches/pip", platforms: ["darwin"] },
   { path: "~/.cargo", platforms: ["darwin", "linux", "win32"] },

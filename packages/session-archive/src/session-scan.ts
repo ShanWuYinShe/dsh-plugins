@@ -127,16 +127,26 @@ export function limitedConcurrency(limit: number, tasks: Array<() => Promise<any
   return Promise.all(workers).then(() => results);
 }
 
-/** 从一条消息提取纯文本（text 块拼接，忽略图片/工具块）。
- * 官方 Message.content 是 ContentBlock[]，这里只取 type:'text' 的块。 */
+/** 从一条消息提取纯文本（text 块拼接；若仅含工具调用则提供占位摘要，忽略图片块）。
+ * 官方 Message.content 是 ContentBlock[]，这里优先取 type:'text' 的块。 */
 export function messageText(content: unknown, maxChars: number): string {
   if (!Array.isArray(content)) return '';
   let text = '';
+  const toolNames: string[] = [];
   for (const block of content) {
-    if (block && typeof block === 'object' && (block as any).type === 'text' && typeof (block as any).text === 'string') {
-      text += (block as any).text;
-      if (text.length > maxChars) break;
+    if (block && typeof block === 'object') {
+      const b = block as Record<string, unknown>;
+      if (b.type === 'text' && typeof b.text === 'string') {
+        text += b.text;
+        if (text.length > maxChars) break;
+      } else if (b.type === 'tool_use' || b.type === 'tool_call') {
+        const name = typeof b.name === 'string' ? b.name : (typeof (b.function as any)?.name === 'string' ? (b.function as any).name : 'tool');
+        toolNames.push(name);
+      }
     }
+  }
+  if (text.length === 0 && toolNames.length > 0) {
+    text = `[${toolNames.join(', ')}]`;
   }
   return text.length > maxChars ? text.slice(0, maxChars) + '…' : text;
 }
