@@ -6,6 +6,7 @@
  * - index.tsx — 浏览器侧入口：注册卡片文案与配置页
  * - WorkBuddyConfigPage.tsx — 配置页入口（解构 + 渲染），对外 API 门面
  * - VariantsPage.tsx useVariantsPage.ts — 变体列表页（渲染）与页面状态/取数
+ * - ModelLabel.tsx — 原生模型名称与费率标签内联渲染组件（conversation.input.model.label）
  * - VariantCard.tsx useVariantCard.ts — 单卡（渲染）与卡片状态/动作
  * - StartPlanClaimBox.tsx ModelRow.tsx SignedOutRow.tsx — 今日待领取提示框、模型行、未登录行
  * - config-types.ts config-styles.ts config-format.ts — 共享类型/常量、内联样式与注入 CSS、展示格式化
@@ -20,6 +21,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import { ModelLabel } from './ModelLabel.js'
 import { WorkBuddyConfigPage } from './WorkBuddyConfigPage.js'
 import type { WorkBuddyConfigPageInjected } from './WorkBuddyConfigPage.js'
 import { en, zh } from './locales.js'
@@ -79,6 +81,15 @@ export function apply(ctx: ClientContext): void {
       key: '@chaoset/dsh-any-connect',
       inject: (): WorkBuddyConfigPageInjected => ({ t }),
     }, WorkBuddyConfigPage))
+
+    // DSH 0.2.1-alpha.5+: conversation.input.model.label slot for custom inline model labels.
+    try {
+      ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({
+        name: 'conversation.input.model.label',
+      }, ModelLabel))
+    } catch {
+      // Degrade silently if host does not have this slot.
+    }
   } catch (error: unknown) {
     // Degrade silently on the page: the host provider still serves models.
     // Developers see the full cause in the browser console; users see no banner.

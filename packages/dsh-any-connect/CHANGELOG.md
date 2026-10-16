@@ -1,3 +1,15 @@
+## 0.4.14-alpha.26 (2026-10-16)
+
+### 新增
+
+* **支持 DSH 0.2.1-alpha.5 原生 `conversation.input.model.label` Slot 呈现自定义内联模型标签**：
+  * 接入官方 `conversation.input.model.label` 内联 slot，在输入框触发器（`trigger`）与下拉菜单（`menu` / `option`）中以原生 Badge 优雅呈现费率和计费属性（如绿色“免费”Chip、小号等宽数字倍率），替代原有纯文本拼接，保持模型名纯净。
+  * 保持向下兼容：在不支持该 slot 的终端或旧版宿主中，继续回退到原有的 `model.name` 费率显示。
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.1-alpha.5` 预发布线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-alpha.5`。
+
 ## 0.4.14-alpha.25 (2026-10-16)
 
 ### 修复
