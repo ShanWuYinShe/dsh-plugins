@@ -7,6 +7,7 @@
  * @module dsh-any-connect/upstream-workbuddy-http
  */
 
+import { randomUUID } from 'node:crypto'
 import type { WorkBuddyCredential } from './auth.js'
 import { classifyUpstreamError, httpStatusLabel, normalizeDeveloperRole, normalizeToolChoice } from './upstream-shared.js'
 import { isObject } from './upstream-workbuddy-parse.js'
@@ -19,7 +20,9 @@ const CN_BILLING_BASE = 'https://www.codebuddy.cn'
 
 const GLOBAL_BASE = 'https://www.workbuddy.ai'
 
-export const CLIENT_UA = 'CLI/2.63.2 CodeBuddy/2.63.2'
+export const CLI_VERSION = '2.63.2'
+
+export const CLIENT_UA = `CLI/${CLI_VERSION} CodeBuddy/${CLI_VERSION}`
 
 export function regionOf(domain: string): WorkBuddyRegion {
   const lowered = domain.trim().toLowerCase()
@@ -53,8 +56,26 @@ function commonHeaders(credential: WorkBuddyCredential): Record<string, string> 
   }
 }
 
-/** Chat request headers, including the X-No-* conventions the official CLI uses. */
-export function chatHeaders(credential: WorkBuddyCredential): Record<string, string> {
+export interface ChatHeaderOptions {
+  conversationId?: string
+  requestId?: string
+}
+
+/**
+ * Chat request headers, including official CLI channel-verification headers
+ * and X-No-* conventions.
+ *
+ * The international gateway (workbuddy.ai) enforces strict channel verification:
+ * missing X-Conversation-ID, X-Conversation-Request-ID, or X-Conversation-Message-ID
+ * fails with HTTP 400 code 11128 ("conversation id missing"). Setting the complete
+ * official header set aligns with official CLI behavior across both cn & global gateways.
+ */
+export function chatHeaders(
+  credential: WorkBuddyCredential,
+  options?: ChatHeaderOptions,
+): Record<string, string> {
+  const conversationId = options?.conversationId || randomUUID()
+  const requestId = options?.requestId || randomUUID().replace(/-/g, '')
   const headers: Record<string, string> = {
     ...commonHeaders(credential),
     'Content-Type': 'application/json',
@@ -65,6 +86,17 @@ export function chatHeaders(credential: WorkBuddyCredential): Record<string, str
       : { 'X-Enterprise-Id': credential.enterpriseId },
     ...credential.domain === '' ? { 'X-No-Department-Info': '1' } : { 'X-Domain': credential.domain },
     'X-Product': 'SaaS',
+    // 官方客户端渠道校验头：国际网关强校验（缺失即 400/11128 conversation id missing），国内线对齐。
+    'X-Conversation-ID': conversationId,
+    'X-Session-ID': conversationId,
+    'X-Request-ID': requestId,
+    'X-Conversation-Request-ID': requestId,
+    'X-Conversation-Message-ID': requestId,
+    'X-Agent-Type': 'chat',
+    'X-Agent-Intent': 'craft',
+    'X-IDE-Type': 'cli',
+    'X-IDE-Name': 'cli',
+    'X-IDE-Version': CLI_VERSION,
   }
   return headers
 }
@@ -162,6 +194,25 @@ export function prepareInternationalChatBody(source: string): string {
   // Unshift, so every caller-supplied message keeps its position and content.
   messages.unshift({ role: 'system', content: INTERNATIONAL_SYSTEM_PROMPT })
   return JSON.stringify(body)
+}
+
+/**
+ * Extract conversation ID from chat completions request body if provided by
+ * caller (`conversation_id` or `conversationId`).
+ */
+export function extractConversationId(source: string): string | undefined {
+  try {
+    const body: unknown = JSON.parse(source)
+    if (isObject(body)) {
+      const conv = body['conversation_id'] ?? body['conversationId']
+      if (typeof conv === 'string' && conv.trim() !== '') {
+        return conv.trim()
+      }
+    }
+  } catch {
+    // Non-JSON source passes through without an ID.
+  }
+  return undefined
 }
 
 /** One JSON-envelope response from the upstream, already unwrapped. */

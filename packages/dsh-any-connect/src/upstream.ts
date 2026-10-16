@@ -12,8 +12,8 @@
  */
 export { normalizeCredits, modelWithCurrentPromotion, classifyUpstreamError } from './upstream-shared.js'
 export type { UpstreamErrorKind, WorkBuddyUpstreamModel, WorkBuddyModelReasoning, WorkBuddyEffort, WorkBuddyModelBilling, WorkBuddyPromotion, WorkBuddyCreditAccount, WorkBuddyCredits, WorkBuddyRefreshOutcome, WorkBuddyChatResult } from './upstream-shared.js'
-export { regionOf, chatBase, prepareChatBody, prepareInternationalChatBody, WorkBuddyUpstreamClient } from './upstream-workbuddy.js'
-export type { WorkBuddyRegion, WorkBuddyUpstreamClientOptions } from './upstream-workbuddy.js'
+export { regionOf, chatBase, prepareChatBody, prepareInternationalChatBody, chatHeaders, extractConversationId, WorkBuddyUpstreamClient } from './upstream-workbuddy.js'
+export type { WorkBuddyRegion, WorkBuddyUpstreamClientOptions, ChatHeaderOptions } from './upstream-workbuddy.js'
 export { prepareAnthropicBody, ZCodeUpstreamClient } from './upstream-zcode.js'
 export type { ZCodeUpstreamClientOptions } from './upstream-zcode.js'
 export { OpenCodeUpstreamClient } from './upstream-opencode.js'

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkBuddyCredential } from '../src/auth.js'
-import { modelWithCurrentPromotion, normalizeCredits, WorkBuddyUpstreamClient } from '../src/upstream.js'
+import { chatHeaders, extractConversationId, modelWithCurrentPromotion, normalizeCredits, WorkBuddyUpstreamClient } from '../src/upstream.js'
 
 /**
  * Offline unit tests for WorkBuddyUpstreamClient, mocking the global `fetch`
@@ -382,6 +382,65 @@ describe('WorkBuddyUpstreamClient.chatStream', () => {
     }) as unknown as Response))
     const result = await new WorkBuddyUpstreamClient().chatStream(CREDENTIAL, '{}')
     expect(!result.ok && result.kind === 'server' && result.message === '(error body unavailable)').toBe(true)
+  })
+
+  it('injects channel verification headers and propagates conversation_id from body', async () => {
+    let capturedHeaders: Record<string, string> = {}
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init: { headers: Record<string, string> }) => {
+      capturedHeaders = init.headers
+      return { ok: true, status: 200, body: 'stream' } as unknown as Response
+    }))
+    const result = await new WorkBuddyUpstreamClient().chatStream(
+      CREDENTIAL,
+      JSON.stringify({ conversation_id: 'conv-body-1', messages: [{ role: 'user', content: 'hi' }] }),
+    )
+    expect(result.ok).toBe(true)
+    expect(capturedHeaders['X-Conversation-ID']).toBe('conv-body-1')
+    expect(capturedHeaders['X-Session-ID']).toBe('conv-body-1')
+    expect(capturedHeaders['X-Conversation-Request-ID']).toMatch(/^[0-9a-f]{32}$/)
+    expect(capturedHeaders['X-Conversation-Message-ID']).toBe(capturedHeaders['X-Conversation-Request-ID'])
+    expect(capturedHeaders['X-Agent-Type']).toBe('chat')
+    expect(capturedHeaders['X-Agent-Intent']).toBe('craft')
+    expect(capturedHeaders['X-IDE-Type']).toBe('cli')
+    expect(capturedHeaders['X-IDE-Name']).toBe('cli')
+    expect(capturedHeaders['X-IDE-Version']).toBe('2.63.2')
+  })
+})
+
+describe('chatHeaders & channel verification', () => {
+  it('generates official CLI headers required by international & domestic gateways', () => {
+    const headers = chatHeaders(CREDENTIAL)
+    expect(headers['X-Conversation-ID']).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    expect(headers['X-Session-ID']).toBe(headers['X-Conversation-ID'])
+    expect(headers['X-Request-ID']).toMatch(/^[0-9a-f]{32}$/)
+    expect(headers['X-Conversation-Request-ID']).toBe(headers['X-Request-ID'])
+    expect(headers['X-Conversation-Message-ID']).toBe(headers['X-Request-ID'])
+    expect(headers['X-Agent-Type']).toBe('chat')
+    expect(headers['X-Agent-Intent']).toBe('craft')
+    expect(headers['X-IDE-Type']).toBe('cli')
+    expect(headers['X-IDE-Name']).toBe('cli')
+    expect(headers['X-IDE-Version']).toBe('2.63.2')
+    expect(headers['User-Agent']).toBe('CLI/2.63.2 CodeBuddy/2.63.2')
+    expect(headers['X-User-Id']).toBe('uid-1')
+  })
+
+  it('respects caller-provided conversationId and requestId overrides', () => {
+    const headers = chatHeaders(CREDENTIAL, {
+      conversationId: 'custom-conv-id-42',
+      requestId: 'custom-req-id-99',
+    })
+    expect(headers['X-Conversation-ID']).toBe('custom-conv-id-42')
+    expect(headers['X-Session-ID']).toBe('custom-conv-id-42')
+    expect(headers['X-Request-ID']).toBe('custom-req-id-99')
+    expect(headers['X-Conversation-Request-ID']).toBe('custom-req-id-99')
+    expect(headers['X-Conversation-Message-ID']).toBe('custom-req-id-99')
+  })
+
+  it('extracts conversation ID from request body when present', () => {
+    expect(extractConversationId('{"conversation_id":"conv-abc"}')).toBe('conv-abc')
+    expect(extractConversationId('{"conversationId":"conv-def"}')).toBe('conv-def')
+    expect(extractConversationId('{"messages":[]}')).toBeUndefined()
+    expect(extractConversationId('not json')).toBeUndefined()
   })
 })
 

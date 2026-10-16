@@ -23,7 +23,7 @@ import {
   type WorkBuddyChatResult,
 } from './upstream-shared.js'
 import { parseModelRow } from './upstream-workbuddy-parse.js'
-import { CLIENT_UA, regionOf, chatBase, billingBase, originReferer, chatHeaders, refreshHeaders, billingHeaders, INTERNATIONAL_SYSTEM_PROMPT, prepareInternationalChatBody, readEnvelope, errorCodeOf, readFirstEvent, envelopeError } from './upstream-workbuddy-http.js'
+import { CLIENT_UA, regionOf, chatBase, billingBase, originReferer, chatHeaders, refreshHeaders, billingHeaders, INTERNATIONAL_SYSTEM_PROMPT, prepareInternationalChatBody, extractConversationId, readEnvelope, errorCodeOf, readFirstEvent, envelopeError } from './upstream-workbuddy-http.js'
 
 const PROBE_PROMPT = 'ping'
 
@@ -59,11 +59,15 @@ export class WorkBuddyUpstreamClient {
     signal?: AbortSignal,
   ): Promise<WorkBuddyChatResult> {
     const international = regionOf(credential.domain) === 'global'
+    const conversationId = extractConversationId(bodyJson)
     // 传输骨架（超时/释放/取消分类）见 settleChatFetch：三处 chat 共用一份，改一处即三处。
     const settled = await settleChatFetch(signal, (fetchSignal) =>
       fetch(`${chatBase(credential)}/v2/chat/completions`, {
         method: 'POST',
-        headers: { ...chatHeaders(credential), 'Authorization': `Bearer ${credential.accessToken}` },
+        headers: {
+          ...chatHeaders(credential, { conversationId }),
+          'Authorization': `Bearer ${credential.accessToken}`,
+        },
         // 国际网关硬性要求首条 system 消息（缺失即 400/11128），国内线不加。
         body: international ? prepareInternationalChatBody(bodyJson) : bodyJson,
         signal: fetchSignal,
@@ -298,5 +302,6 @@ export class WorkBuddyUpstreamClient {
   }
 }
 
-export { regionOf, chatBase, prepareChatBody, prepareInternationalChatBody } from './upstream-workbuddy-http.js'
-export type { WorkBuddyRegion } from './upstream-workbuddy-http.js'
+export { regionOf, chatBase, prepareChatBody, prepareInternationalChatBody, chatHeaders, extractConversationId } from './upstream-workbuddy-http.js'
+export type { WorkBuddyRegion, ChatHeaderOptions } from './upstream-workbuddy-http.js'
+

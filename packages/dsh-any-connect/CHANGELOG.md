@@ -1,3 +1,13 @@
+## 0.4.14-alpha.25 (2026-10-16)
+
+### 修复
+
+* **全面对齐官方客户端会话标头规范，解决海外版 `workbuddy-ai` 渠道校验拦截（400 / 11128）**：
+  * **根因定位**：海外版网关（`https://www.workbuddy.ai/v2/chat/completions`）启用了更严格的渠道风控插件，强校验缺失 `X-Conversation-ID`、`X-Conversation-Request-ID` 或 `X-Conversation-Message-ID` 标头直接拦截并返回 `HTTP 400 (code: 11128, msg: "conversation id missing", displayTips: "这次调用没通过渠道校验，可能不是官方客户端发出的。请用官方版本重新发")`；而国内版网关暂未开启该强制拦截。
+  * **对齐官方客户端规范**：反编译官方客户端 `codebuddy-lite-wb.mjs`，在 `chatHeaders` 中严格注入全套官方客户端标头（包括 `X-Conversation-ID`、`X-Session-ID`、`X-Request-ID`、`X-Conversation-Request-ID`、`X-Conversation-Message-ID`、`X-Agent-Type: chat`、`X-Agent-Intent: craft`、`X-IDE-Type: cli`、`X-IDE-Name: cli`、`X-IDE-Version: 2.63.2`）。
+  * **支持会话上下文复用**：`chatStream` 自动感知请求体中携带的会话标识（`conversation_id` / `conversationId`），优先复用已有会话 ID，无则生成标准唯一 UUID。
+  * **修复推理探针**：同步使 `probeEffort` 探针请求带齐官方标头，解决海外版思考档位探测被拦截报错的问题。
+
 ## 0.4.14-alpha.24 (2026-10-16)
 
 ### 新增
