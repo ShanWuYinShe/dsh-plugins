@@ -31,6 +31,23 @@ export interface DesktopReadContext {
 
 export async function readDesktopCredential(ctx: DesktopReadContext): Promise<WorkBuddyCredential | undefined> {
   if (ctx.variant.kind === 'opencode') {
+    for (const desktopPath of ctx.candidates()) {
+      let text: string
+      try {
+        text = await readFile(desktopPath, 'utf8')
+      } catch (error: unknown) {
+        if (!isENOENT(error)) throw error
+        // 若候选字符串不是已有文件路径，但属于直接填写的 API Key 纯文本，直接作为凭据解析
+        const trimmed = desktopPath.trim()
+        if (trimmed !== '' && !trimmed.includes('/') && !trimmed.includes('\\') && trimmed.length >= 6) {
+          const cred = parseOpenCodeAuth(trimmed)
+          if (cred.accessToken !== 'public') return cred
+        }
+        continue
+      }
+      const cred = parseOpenCodeAuth(text, desktopPath)
+      if (cred.accessToken !== 'public') return cred
+    }
     return defaultOpenCodePublicCredential()
   }
 
@@ -44,21 +61,21 @@ export async function readDesktopCredential(ctx: DesktopReadContext): Promise<Wo
     }
     if (ctx.variant.kind === 'zcode') return parseZCodeAuth(text, desktopPath)
 
-      const classification = classifyDesktopAuthDocument(text)
-      if (classification.format === 'plaintext') return parseWorkBuddyAuth(text)
-      // 空文件(尚未写入/被截断)不构成「凭据在这里」,让下一个候选继续探测。
-      if (classification.format === 'absent') continue
-      if (classification.format === 'unrecognized') {
-        throw new Error(
-          `the desktop auth file at ${desktopPath} exists but is unreadable`
-          + ' (neither a plaintext credential nor a decodable WorkBuddy 5.6 envelope);'
-          + ' fix or remove the file — it outranks the plugin-owned credential copy',
-        )
-      }
-      return await openEncryptedDesktop(ctx, classification)
+    const classification = classifyDesktopAuthDocument(text)
+    if (classification.format === 'plaintext') return parseWorkBuddyAuth(text)
+    // 空文件(尚未写入/被截断)不构成「凭据在这里」,让下一个候选继续探测。
+    if (classification.format === 'absent') continue
+    if (classification.format === 'unrecognized') {
+      throw new Error(
+        `the desktop auth file at ${desktopPath} exists but is unreadable`
+        + ' (neither a plaintext credential nor a decodable WorkBuddy 5.6 envelope);'
+        + ' fix or remove the file — it outranks the plugin-owned credential copy',
+      )
     }
-    return undefined
+    return await openEncryptedDesktop(ctx, classification)
   }
+  return undefined
+}
 
   /** Open a 5.6 encrypted desktop document into the regular credential shape. */
   async function openEncryptedDesktop(
@@ -104,18 +121,35 @@ export function parseOpenCodeAuth(text: string, _path?: string): WorkBuddyCreden
         token = json['token'].trim()
       } else if (typeof json['accessToken'] === 'string' && json['accessToken'].trim() !== '') {
         token = json['accessToken'].trim()
+      } else if (typeof json['provider'] === 'object' && json['provider'] !== null) {
+        const prov = json['provider'] as Record<string, unknown>
+        const oc = prov['opencode'] as Record<string, unknown> | undefined
+        const settings = oc?.['settings'] as Record<string, unknown> | undefined
+        if (typeof settings?.['apiKey'] === 'string' && settings['apiKey'].trim() !== '') {
+          token = settings['apiKey'].trim()
+        }
+      } else if (typeof json['opencode'] === 'object' && json['opencode'] !== null) {
+        const oc = json['opencode'] as Record<string, unknown>
+        if (typeof oc['apiKey'] === 'string' && oc['apiKey'].trim() !== '') {
+          token = oc['apiKey'].trim()
+        }
       }
     }
   } catch {
     // 纯文本 token
   }
+
+  if (token === '' || token === 'public') {
+    return defaultOpenCodePublicCredential()
+  }
+
   return {
     accessToken: token,
     refreshToken: '',
     expiresAtMs: Date.now() + 365 * 24 * 60 * 60 * 1000,
     domain: 'opencode.ai',
     uid: 'opencode-user',
-    nickname: token === 'public' ? 'Free Tier (public)' : 'OpenCode Key',
+    nickname: 'OpenCode API Key',
     source: 'desktop',
   }
 }

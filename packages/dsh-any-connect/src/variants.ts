@@ -230,6 +230,8 @@ export const OPENCODE_VARIANT: WorkBuddyVariant = {
   kind: 'opencode',
   displayName: 'OpenCode Free',
   appName: 'OpenCode',
+  env: 'OPENCODE_API_KEY',
+  desktopFilename: 'auth.json',
   ownFilename: '.opencode-auth.json',
   probeFilename: '.opencode-probe.json',
   catalogFilename: '.opencode-catalog.json',

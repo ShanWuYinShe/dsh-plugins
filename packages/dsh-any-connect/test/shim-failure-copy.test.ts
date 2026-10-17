@@ -67,6 +67,21 @@ describe('upstreamFailureMessage', () => {
     expect(message).toContain('11140')
   })
 
+  it('403 遇到 OpenCode FreeTierError 时给出针对免费通道的专属指引', () => {
+    const freeTierBody = JSON.stringify({
+      type: 'error',
+      error: {
+        type: 'FreeTierError',
+        message: "OpenCode's free tier can only be used from within OpenCode. Download it at https://opencode.ai and keep building.",
+      },
+    })
+    const message = upstreamFailureMessage('opencode-free', 'auth_forbidden', 403, freeTierBody)
+    expect(message).toContain('OpenCode 官方免费通道拦截了匿名请求')
+    expect(message).toContain('authFileOpenCode')
+    expect(message).toContain('OPENCODE_API_KEY')
+    expect(HOST_AUTH_RE.test(message)).toBe(false)
+  })
+
   it('任何状态下都不触发宿主任何一条分类规则（否则文案会被覆盖或误分类）', () => {
     for (const status of [400, 401, 402, 403, 404, 413, 429, 500, 502, 503]) {
       const message = upstreamFailureMessage('workbuddy-ai', 'client', status, REAL_403_BODY)

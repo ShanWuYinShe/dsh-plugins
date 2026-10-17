@@ -1,3 +1,16 @@
+## 0.4.15 (2026-10-17)
+
+### 修复
+
+* **打通 OpenCode 凭据配置与自动探测链路**：
+  * 声明 `OPENCODE_API_KEY` 环境变量并绑定至 `opencode-free` 变体，用户设置该环境变量即可直接生效；
+  * 支持自动探测平台默认的 OpenCode 配置文件（`~/.config/opencode/auth.json`、`opencode.json` 等）并提取 API Key；
+  * 增强凭据解析支持 `opencode.json` 嵌套结构与纯文本 API Key，插件设置项 `authFileOpenCode` 既可填入凭据文件路径也可直接填写 API Key；无配置时保持自动平滑回退至官方免费免密通道（`public`）；
+* **优化 OpenCode 免费通道风控（FreeTierError）诊断引导**：
+  * 当上游网关对匿名免费通道限制（HTTP 403 / `FreeTierError`：提示需在官方认证环境内使用）时，给出清晰准确的针对性指引，提示用户配置 API Key 或环境变量，不再误报“账号权益问题”；
+* **对齐最新官方客户端规范**：
+  * 将 OpenCode 客户端 User-Agent 升级为最新官方 2.0.11 格式（`opencode/latest/2.0.11/cli`）。
+
 ## 0.4.14 (2026-10-17)
 
 ### 新增

@@ -30,7 +30,7 @@ export const OPENCODE_CHAT_COMPLETIONS_URL = 'https://opencode.ai/inference/open
 export const OPENCODE_RESPONSES_URL = 'https://opencode.ai/inference/openai/v1/responses'
 export const OPENCODE_ANTHROPIC_MESSAGES_URL = 'https://opencode.ai/inference/anthropic/v1/messages'
 export const OPENCODE_MODELS_URL = 'https://opencode.ai/inference/v1/models'
-export const OPENCODE_CLI_USER_AGENT = 'opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14'
+export const OPENCODE_CLI_USER_AGENT = 'opencode/latest/2.0.11/cli'
 export const OPENCODE_DEFAULT_PROJECT_ID = '5da9b72c6f3d58f67b560a1dd82e3c067c3fbd18'
 
 /**

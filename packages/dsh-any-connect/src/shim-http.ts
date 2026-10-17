@@ -62,6 +62,10 @@ export function upstreamFailureMessage(
 ): string {
   const suffix = `${variantId} upstream ${kind} (${httpStatusLabel(status)}): ${message.slice(0, 400)}`
   if (status === 403) {
+    if (message.includes('FreeTierError') || message.includes('free tier can only be used from within OpenCode')) {
+      return `OpenCode 官方免费通道拦截了匿名请求（FreeTierError：官方要求在 OpenCode 认证环境内使用免费额度）。`
+        + `若持续受限，请在插件设置中为 OpenCode 配置 API Key（authFileOpenCode）或配置 OPENCODE_API_KEY 环境变量。原文：${suffix}`
+    }
     return `上游拒绝了本次请求（授权未通过 / auth_forbidden，非密钥失效、非内容审核）。`
       + `若同账号在官方客户端也无法对话，属账号权益问题。原文：${suffix}`
   }
