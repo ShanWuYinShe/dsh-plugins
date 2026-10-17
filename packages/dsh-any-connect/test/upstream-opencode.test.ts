@@ -454,14 +454,12 @@ describe('OpenCodeUpstreamClient', () => {
       expect(result.ok).toBe(true)
       expect(capturedUrl).toBe(OPENCODE_CHAT_COMPLETIONS_URL)
       expect(capturedHeaders['Authorization']).toBe('Bearer test-custom-key')
-      expect(capturedHeaders['user-agent']).toBe(OPENCODE_CLI_USER_AGENT)
+      expect(capturedHeaders['User-Agent']).toBe(OPENCODE_CLI_USER_AGENT)
       expect(capturedHeaders['x-opencode-client']).toBe('cli')
       expect(capturedHeaders['x-opencode-project']).toBe('5da9b72c6f3d58f67b560a1dd82e3c067c3fbd18')
       expect(capturedHeaders['x-opencode-session']).toMatch(/^ses_[0-9a-f]{12}[0-9a-zA-Z]{14}$/)
-      expect(capturedHeaders['x-opencode-request']).toMatch(/^msg_[0-9a-f]{12}[0-9a-zA-Z]{14}$/)
-      expect(capturedHeaders['x-opencode-session-id']).toBe(capturedHeaders['x-opencode-session'])
+      expect(capturedHeaders['X-Session-Id']).toBe(capturedHeaders['x-opencode-session'])
       expect(capturedHeaders['x-session-affinity']).toBe(capturedHeaders['x-opencode-session'])
-      expect(capturedHeaders['x-session-id']).toBe(capturedHeaders['x-opencode-session'])
 
       const bodyObj = JSON.parse(capturedBody)
       expect(bodyObj.stream).toBe(true)
@@ -517,6 +515,32 @@ describe('OpenCodeUpstreamClient', () => {
       if (!result.ok) {
         expect(result.status).toBe(403)
         expect(result.kind).toBe('auth_forbidden')
+      }
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('chatStream 遇到 FreeTierError 时归类为 soft_rate 限流而非 auth_forbidden', async () => {
+    const client = new OpenCodeUpstreamClient()
+    const cred = makeCredential()
+
+    const fakeFetch = vi.fn(async () => {
+      return new Response('{"type":"error","error":{"type":"FreeTierError","message":"OpenCode\'s free tier can only be used from within OpenCode."}}', {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = fakeFetch as unknown as typeof fetch
+
+    try {
+      const result = await client.chatStream(cred, '{}')
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.status).toBe(403)
+        expect(result.kind).toBe('soft_rate')
       }
     } finally {
       globalThis.fetch = originalFetch

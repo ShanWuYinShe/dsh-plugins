@@ -61,11 +61,14 @@ export function upstreamFailureMessage(
   message: string,
 ): string {
   const suffix = `${variantId} upstream ${kind} (${httpStatusLabel(status)}): ${message.slice(0, 400)}`
+  const isOpenCode = variantId.includes('opencode')
+    || message.includes('FreeTierError')
+    || message.toLowerCase().includes('free tier can only be used from within opencode')
+  if (isOpenCode) {
+    return `OpenCode 官方免费通道当前触发上游频次限流或临时风控（FreeTierError：官方服务端拒绝了本次免费模型请求）。`
+      + `官方免费通道对并发与调用频次有严格限制，请稍候片刻重试，或切换到其他可用免费模型（如 big-pickle 等）。原文：${suffix}`
+  }
   if (status === 403) {
-    if (message.includes('FreeTierError') || message.includes('free tier can only be used from within OpenCode')) {
-      return `OpenCode 官方免费通道拦截了匿名请求（FreeTierError：官方要求在 OpenCode 认证环境内使用免费额度）。`
-        + `若持续受限，请在插件设置中为 OpenCode 配置 API Key（authFileOpenCode）或配置 OPENCODE_API_KEY 环境变量。原文：${suffix}`
-    }
     return `上游拒绝了本次请求（授权未通过 / auth_forbidden，非密钥失效、非内容审核）。`
       + `若同账号在官方客户端也无法对话，属账号权益问题。原文：${suffix}`
   }

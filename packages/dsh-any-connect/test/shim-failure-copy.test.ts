@@ -75,10 +75,12 @@ describe('upstreamFailureMessage', () => {
         message: "OpenCode's free tier can only be used from within OpenCode. Download it at https://opencode.ai and keep building.",
       },
     })
-    const message = upstreamFailureMessage('opencode-free', 'auth_forbidden', 403, freeTierBody)
-    expect(message).toContain('OpenCode 官方免费通道拦截了匿名请求')
-    expect(message).toContain('authFileOpenCode')
-    expect(message).toContain('OPENCODE_API_KEY')
+    const message = upstreamFailureMessage('opencode-free', 'soft_rate', 403, freeTierBody)
+    expect(message).toContain('OpenCode 官方免费通道当前触发上游频次限流或临时风控')
+    expect(message).toContain('切换到其他可用免费模型')
+    expect(message).not.toContain('authFileOpenCode')
+    expect(message).not.toContain('OPENCODE_API_KEY')
+    expect(message).not.toContain('账号权益问题')
     expect(HOST_AUTH_RE.test(message)).toBe(false)
   })
 

@@ -361,24 +361,7 @@ export const FALLBACK_OPENCODE_MODELS: readonly WorkBuddyModelInfo[] = [
     },
     wireProtocol: 'chat-completions',
   },
-  {
-    id: 'nemotron-3.5-super-vl-free',
-    name: 'Nemotron 3.5 Super VL Free',
-    contextWindow: 262144,
-    maxTokens: 262144,
-    supportsImages: true,
-    reasoning: {
-      supports: true,
-      onlyReasoning: false,
-      canDisableThinking: true,
-    },
-    billing: {
-      credits: 'x0.00',
-      badges: ['免费', '推理'],
-      free: true,
-    },
-    wireProtocol: 'chat-completions',
-  },
+
   {
     id: 'jev-1.13-free',
     name: 'Jev 1.13 Free',

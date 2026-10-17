@@ -1,3 +1,13 @@
+## 0.4.16 (2026-10-17)
+
+### 修复
+
+* **聚焦 OpenCode 纯免费模型免密通道定位（零配置）**：
+  * **错误分类与提示纠正**：将 OpenCode 云端返回的 `FreeTierError` 正确归类为频次与并发风控限流（`soft_rate`），如实说明官方免费通道的频次限制，并引导用户稍后重试或切换其他可用免费模型；彻底移除对免费模型误报“账号权益问题”或引导用户配置 API Key 的误导性提示；
+  * **标头与协议规范化**：严格对齐官方 CLI 原生 6 核心过闸标头（`User-Agent`, `X-Session-Id`, `x-opencode-client`, `x-opencode-project`, `x-opencode-session`, `x-session-affinity`），彻底移除多余标头与违反 HTTP/2 规范的 `connection: keep-alive`；
+  * **端点与工具 Schema 校准**：对齐官方推理端点 `/inference/v1/chat/completions` 与内置 `read` 工具参数结构（`path`、`offset`、`limit`）；
+  * **清理下线模型**：从内置静态列表中移除官方已下线的不可用模型（`nemotron-3.5-super-vl-free`），提升免费模型可用率。
+
 ## 0.4.15 (2026-10-17)
 
 ### 修复

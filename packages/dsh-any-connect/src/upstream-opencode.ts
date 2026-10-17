@@ -26,7 +26,7 @@ import {
 } from './upstream-shared.js'
 
 export const OPENCODE_BASE_URL = 'https://opencode.ai'
-export const OPENCODE_CHAT_COMPLETIONS_URL = 'https://opencode.ai/inference/openai/v1/chat/completions'
+export const OPENCODE_CHAT_COMPLETIONS_URL = 'https://opencode.ai/inference/v1/chat/completions'
 export const OPENCODE_RESPONSES_URL = 'https://opencode.ai/inference/openai/v1/responses'
 export const OPENCODE_ANTHROPIC_MESSAGES_URL = 'https://opencode.ai/inference/anthropic/v1/messages'
 export const OPENCODE_MODELS_URL = 'https://opencode.ai/inference/v1/models'
@@ -57,7 +57,7 @@ export function generateOpenCodeId(descending: boolean, now: number = Date.now()
   return hexPrefix + randomSuffix
 }
 
-/** 网关免费通道强制要求的只读文件工具定义 */
+/** 网关免费通道强制要求的只读文件工具定义（对齐官方 CLI 内置工具 schema） */
 export const OPENCODE_READ_TOOL = {
   type: 'function',
   function: {
@@ -66,9 +66,11 @@ export const OPENCODE_READ_TOOL = {
     parameters: {
       type: 'object',
       properties: {
-        filePath: { type: 'string' },
+        path: { type: 'string' },
+        offset: { type: 'number' },
+        limit: { type: 'number' },
       },
-      required: ['filePath'],
+      required: ['path'],
     },
   },
 } as const
@@ -118,16 +120,18 @@ export function prepareOpenCodeChatBody(bodyJson: string): string {
   }
 }
 
-/** 网关免费通道强制要求的 Anthropic 格式只读文件工具定义 */
+/** 网关免费通道强制要求的 Anthropic 格式只读文件工具定义（对齐官方 CLI 内置工具 schema） */
 export const OPENCODE_ANTHROPIC_READ_TOOL = {
   name: 'read',
   description: 'Read a file',
   input_schema: {
     type: 'object',
     properties: {
-      filePath: { type: 'string' },
+      path: { type: 'string' },
+      offset: { type: 'number' },
+      limit: { type: 'number' },
     },
-    required: ['filePath'],
+    required: ['path'],
   },
 } as const
 
@@ -864,15 +868,12 @@ export class OpenCodeUpstreamClient {
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream, */*',
           'Authorization': auth,
-          'user-agent': OPENCODE_CLI_USER_AGENT,
+          'User-Agent': OPENCODE_CLI_USER_AGENT,
+          'X-Session-Id': sessionId,
           'x-opencode-client': 'cli',
           'x-opencode-project': this.projectId,
-          'x-opencode-request': requestId,
           'x-opencode-session': sessionId,
-          'x-opencode-session-id': sessionId,
           'x-session-affinity': sessionId,
-          'x-session-id': sessionId,
-          'connection': 'keep-alive',
         },
         body: preparedBody,
         signal: fetchSignal,

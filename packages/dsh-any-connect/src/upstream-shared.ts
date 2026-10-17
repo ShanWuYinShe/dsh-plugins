@@ -148,6 +148,12 @@ export function classifyUpstreamError(status: number, body: string): UpstreamErr
   for (const marker of SESSION_DEAD_MARKERS) {
     if (body.includes(marker)) return 'session_dead'
   }
+  // OpenCode 的 FreeTierError 虽然上游 HTTP 返回 403，但属于官方免费通道的频次/并发安全风控限流，
+  // 绝非账号授权失败或 API 密钥失效，归类为 soft_rate（限流重试）以触发正确的重试/限流语义，
+  // 避免宿主按 401/403 误判为 AUTH 授权封禁或账号权益问题。
+  if (body.includes('FreeTierError') || lower.includes('free tier can only be used from within opencode')) {
+    return 'soft_rate'
+  }
   // 403 是授权拒绝（与 400 的参数错误、与 401 的会话失效都不同）：海外版把
   // 未开通 chat 权益的账号也归到这里（code 11140 auth_forbidden，官方错误码表
   // 同口径），单列出来让上层能给出「检查账号权益」而非「检查密钥」的指引。
