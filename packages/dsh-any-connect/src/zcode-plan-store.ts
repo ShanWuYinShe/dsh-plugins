@@ -8,7 +8,7 @@
  * 一个字段。
  *
  * 2026-09-30 用户口径：两个计划的额度绝不混用。Start Plan 走专属通道
- * （`zcode-plan/anthropic` + 账号 JWT），扣其专属额度（一次性、当日有效的
+ * （`zcode-plan/anthropic` + 账号 JWT），扣其专属额度（一次性、有效期以
  * token 包）；Coding Plan 走普通 ZCode 通道（150% 额度）扣订阅。
  *
  * @module dsh-any-connect/zcode-plan-store

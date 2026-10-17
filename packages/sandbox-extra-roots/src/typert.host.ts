@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * typert.host.js — 手写的 Typert host 工件（typert-loader 机制）。
  *
@@ -10,14 +9,14 @@
 // set(partial) 的网关层校验：与 remote.ts 的同形检查语义一致（plain
 // object），畸形输入在方法分发前即被拒绝。结果保持透传（见 session-archive
 // 同名文件的注释：结果由 host 构造，不是不信任边界）。
-const passthrough = (value) => value;
-const parsePartial = (value) => {
+const passthrough = (value: unknown): unknown => value;
+const parsePartial = (value: unknown): Record<string, unknown> => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('set expects a plain config object');
   }
-  return value;
+  return value as Record<string, unknown>;
 };
-const codec = (typeSymbol, parse = passthrough) => ({
+const codec = (typeSymbol: string, parse: (value: unknown) => unknown = passthrough) => ({
   mode: 'strict',
   typeSymbol,
   // TypertCodec 使用惰性 create 工厂（typert-loader 校验 create() 存在，

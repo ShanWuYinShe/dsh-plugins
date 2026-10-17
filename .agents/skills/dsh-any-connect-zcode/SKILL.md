@@ -145,7 +145,7 @@ provider runtime headers（captcha-diagnostics `headersApplied:true`）。
 不带 → **HTTP 405 `{"code":3012,"msg":"request has been blocked due to unusual activity."}`**。
 
 同页多路 relay 也都不通：`/api/v1/ultra/anthropic`、`/api/v1/ultra-zai/anthropic`
-（自造 header 会返回 `401 code 1002`，说明这些端点主要在验收特殊的鉴权形状；`zcode-plan/anthropic` 换 coding-plan api-key 同样 401）；
+（自造 header 会返回 `401 code 1002`，说明这些端点主要在验收特殊的鉴权形状）；
 off-peak 通道**取票可用**（`POST /api/v1/off-peak/ticket` 需
 `X-Coding-Plan-Api-Key`，轮询 `/ticket/status` 能到 `ready`），但
 `POST /api/v1/off-peak/anthropic/v1/messages` 一律 `400 code 3001 parameter error`
@@ -162,6 +162,12 @@ curl 与 undici、stream 与否、阿里云验证码头、阿里云 cookie（`ac
 对照（同刻同域）：不带 JWT → 401；`x-api-key: <jwt>` → 401（本通道只认 Bearer）；
 不存在的路径 → 404；`billing/balance` → 200。
 
+同页多路 relay 都不通：`/api/v1/ultra/anthropic`、`/api/v1/ultra-zai/anthropic`
+返回 `401 code 1002`；`zcode-plan/anthropic` 换 coding-plan api-key → 401。
+off-peak 通道**取票可用**（`POST /api/v1/off-peak/ticket` 需
+`X-Coding-Plan-Api-Key`，轮询 `/ticket/status` 能到 `ready`），但
+`POST /api/v1/off-peak/anthropic/v1/messages` 一律 `400 code 3001 parameter error`
+——参数形状与服务端校验不一致，尚未逆出。
 
 ### 3.1 判定"能用了"的最小探针
 
@@ -223,9 +229,11 @@ curl -sS "http://127.0.0.1:8932/plugins/dsh-any-connect/zcode-sp/status" -H "Hos
 - 想验证"客户端选了 start-plan"的分支：把真实 `credentials.json` 复制到临时目录，旁边放一份
   `setting.json`（`providerFamilyConnectionSelections.bigmodel.kind = start-plan`），用
   `ZCODE_AUTH_FILE` 指过去。**不要改用户真实的 `~/.zcode/v2/setting.json`。**
-- 浏览器侧用 `~/.local/bin/agent-browser`（全路径，PATH 顺序不保证）；若报
-  `SingletonLock: File exists` 先删 `$TMPDIR/agent-browser-sandbox/chrome-profile/Singleton*`
-  再开。**`--no-sandbox` 由包装器按环境自动注入，不要手写。**
+- 浏览器侧用 `/Users/liyou/.local/bin/agent-browser`（全路径，PATH 顺序不保证）。现行方案
+  （2026-10-14 晚起）：受限会话对该命令申请 `danger-full-access` 提权原生启动——
+  wrapper 不再注入 `--no-sandbox`、不再重定向目录（插件有意不放行 `~/.agent-browser`，
+  靠硬失败引导提权）。若报 `SingletonLock: File exists`，按报错里的实际 profile 路径
+  （现行默认 `~/.agent-browser/profiles/main`）删 `Singleton*` 再开。
 - 真客户端的行为可用 `node /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs --help` 观察；
   headless prompt（`-p`）需要先解决模型选择（见下），不是判断通道可用性的可靠手段。
 
@@ -265,9 +273,51 @@ curl -sS "http://127.0.0.1:8932/plugins/dsh-any-connect/zcode-sp/status" -H "Hos
 > 写这类"采用上游名单"的测试时注意：若本地目录恰好等于上游名单，旧实现也能碰巧通过
 > ——用例必须用**与编译期常量不同**的本地目录，并断言顺序与数量，否则是假绿。
 
+**🔴 但并集的来源选错了目录（2026-10-06 取证并已修复）：`/api/paas/v4/models` 是
+BigModel 开放平台 API 的模型目录，不是 Coding Plan 订阅的产品面。** 实测该端点对
+coding-plan key 返回 11 个 id（glm-4.5 / glm-4.5-air / glm-4.6 / glm-4.7 / glm-5 /
+glm-5-turbo / glm-5.1 / glm-5.2 / glm-5.3 / glm-5.3-flash / glm-5.3-flashx），而官方
+客户端 `zcode-builtin.json` 绑定到 coding-plan provider 的只有 `builtinModelIds`
+2 个（GLM-5.3、GLM-5.3-Flash）+ `builtinProviderModelRules` 里的 GLM-5.2、
+GLM-5-Turbo。那 7 个多余模型（glm-4.5/4.5-air/4.6/4.7/5/5.1/5.3-flashx）在客户端
+配置里**完全没有绑定到 coding-plan**；探针实测 glm-4.5 在 `open.bigmodel.cn/api/anthropic`
+也能 200（max_tokens=16），即端点层放行，但订阅内的费率/额度语义未经验证（可能扣
+API 余额而非订阅）——「分组里出现」本身就是一个未经验证的主张，与 Start Plan
+三态纪律（名单必须来自授权真源）同一条红线。
+
+**修复（2026-10-06，`zcode-builtin-catalog.ts`）**：名单真源改为读本机客户端的
+`zcode-builtin.json`（权威来源，随客户端发版更新），`fetchModels` 先取白名单再
+过滤上游并集**和本地保留行**；白名单不可得（客户端未装/文件不可读/结构演进）时
+回退已注册名单且**不发上游请求**（白名单是闸门，不是事后过滤器）。实测收敛
+11 → 2，已验证参数（128K/费率/徽章）不受影响。路径口：macOS 标准安装位置 +
+`ZCODE_BUILTIN_CONFIG` 环境变量覆盖；其余平台未经实测不猜路径，一律降级。
+白名单口径是 `builtinModelIds`（客户端展示面，最严格）；GLM-5.2/5-Turbo 在
+rules 里配了参数但没进 builtinModelIds，探针 200 也不展示——要放宽只需并上
+rules 绑定的模型 id，一行改动。
+
 **🔴 陷阱二：`zcode-start-plan` 空名单的恢复延迟。**
 今日未领取 → 空名单 → 分组隐藏；用户领取后要等**最长 60 分钟**（小时刷新）才恢复，
 因为 60s sweep 只比对凭据身份，领取不改变身份。
+
+**⚠️ 空名单的第二个来源：上游间歇性答空活动清单（2026-10-07 实测）。** 隔离实例
+的 catalog 拉得 `live/empty` 的同一时刻，直调同端点却有 active 活动 +
+entitlements 模型授权，余额也正常（93M/100M）——即插件逻辑无错，是上游偶发
+给出空 plans。后果：分组诚实隐藏，但唯一恢复路径是小时刷新，且卡片同时显示
+「93M tokens 额度」与「今日没有有效的 Start Plan 活动」自相矛盾。修法（commit
+`103097a`）：sweep 里对「目录空 + 领取探测无翻转 + 距上次拉取 ≥ 5 分钟」再拉一拍
+（拉取无论结果都前移 `catalogFetchedAtMs`，不会打环），自愈压到分钟级；文案改
+中性表述不再断言「无活动」。
+
+**排查这类「空名单」的决定性手法：进程内探针。** status 只给聚合结果
+（live/empty/fetchedAt），分不清「上游真的没活动」还是「那次拉取抽风」——在
+`lib/upstream.js`（编译产物）的 `fetchStartPlanModels` 里临时插
+`console.error('[probe] plans=' + JSON.stringify(...))` 后重启实例，stderr 直出
+运行时收到的原始 plans。三个坑：①产物缩进是 8 空格 + 分号，按 TS 源码形状
+replace 会静默不匹配；②kill 旧实例后 `sleep 2` 可能不够，多次「重启后行为没变」
+其实是 curl 一直打在没死的旧进程上，kill 后要轮询端口释放再起；③**变体 id 与
+路由前缀不同**——注册/查询键是 `zcode-start-plan`，status 路由前缀是
+`zcode-sp`，对 provider-usage 的 usage 路由用错键会得到 `queried: false`，
+看似注册失败实为查错名字。
 
 ### 5.2 推送链：选择框实时刷新（宿主侧被动通知）
 
@@ -323,7 +373,52 @@ handle.replace([providerId])           // 同路由替换 = 广播"拓扑变了"
    交付前必须真跑 `bun run test:ci`（它含 build + typecheck + test），
    只跑 `vitest` 会漏掉这一类。
 
-## 六、反编译取证手法（比 grep 全文快得多）
+## 六、宿主线适配（`bun run adapt`）的三个已知缺口（2026-10-04 实测）
+
+适配 DSH 新预发布线时 `adapt` **只改 `@deepseek-ai/dsh-*` 的 range**，以下三处要手工补，
+否则 `bun install` 或 `typecheck` 直接失败。先跑 `adapt --dry-run` 看它打算改什么。
+
+1. **`adapt` 会盲目 bump 宿主线已删除的包**。实测 `@deepseek-ai/dsh-invariants` 被指到
+   `^0.2.1-alpha.1`，但该包最新只到 `0.2.0-rc.2`（新线已不再依赖它）→ `bun install` 报
+   `No version matching ... (but package exists)`。
+   判据：`npm view <pkg>@<新线版本> version` 为空即该包不在新线上。
+   处理：若本仓从未 import（`grep -rn <pkg> src/ client/ test/` 为空）就直接删该依赖，
+   不要 pin 一个不存在的版本。
+2. **基础包 cordis / schemastery 要跟着一起前移**。`adapt` 不碰它们，但新宿主线常同时前移：
+   0.2.1-alpha.1 要求 `cordis ~4.0.5-alpha.1`、`schemastery ~3.18.5-alpha.1`。
+   继续 pin `^4.0.4` 会解析出**另一份 cordis 实例**，而 `dsh-settings` 的 `Context.settings`
+   声明 augment 的是宿主选中的那份 → `typecheck` 报
+   `Property 'settings' does not exist on type 'Context'`（运行时同样是两个容器）。
+   判据：`ls -d node_modules/.bun/@deepseek-ai+cordis@*` 出现多个**不同版本**即重复；
+   同版本多副本是 peer 变体解析，正常。
+3. **版本号形态必须与 `dsh.host` 一致**：alpha 线用 `-alpha.N`（prerelease Release），
+   待命期用纯 semver。发布门禁会校验，待命期发 `-alpha.N` 会被直接拒绝。
+
+> 另：worktree 里跑 `bun run test:ci` 前必须先 `bun install`——worktree 有自己的目录，
+> 缺 `node_modules` 时 build 会报 `spawnSync .../node_modules/.bin/tsc ENOENT`。
+> 沙盒下装包要带 `BUN_INSTALL_CACHE_DIR=<repo>/.workwork/bun-cache`。
+
+### 宿主接口审计结论：三处「已评估、有意不采用」（2026-10-04，防重复报缺口）
+
+对 0.2.1-alpha.1 的接口使用做过完整审计，以下三项**是有意不做**，后续审计不要再当缺口报：
+
+1. **直连 fetch 不加 `attributionHeaders()`**。宿主契约（`LlmAdapter` 类文档）要求 provider
+   HTTP 请求带 attribution——这一跳由 pi-ai 覆盖（chat 路径 `lib/index.js` 的 `requestHeaders()`、
+   探测路径 `attributionHeaders()` 直设，且 attribution 是保留名、优先于部署头）。插件自己直连的
+   14 个 fetch 分两类：模拟官方客户端的（`CLIENT_UA`、App 形 UA、ZCode 指纹）**UA 本身就是网关的
+   产品分流契约**（实测：`WorkBuddyAI/<v>` 无空格才有完整 App 文档，空格形式 400），加 attribution
+   会破坏功能；账号/额度类的（preview/claim/balance）实测容忍额外头，但语义上就是以客户端身份
+   发出（`zcodejwttoken` + `X-Device-Mid`），标 harness 身份自相矛盾，收益为零、风控风险不为零。
+2. **不注册 `registerModelDiscovery`**。它探测的是「用户正在编辑、尚未存储的 draft endpoint」，
+   而本插件是 profile 自带路由（`declared:false`）+ 自有目录刷新链路，用户从不填 endpoint；
+   且网关（copilot.tencent.com / zcode.z.ai）不是标准 OpenAI/Anthropic 列模型端点，
+   会落进 `DISCOVERY_UNSUPPORTED`。不注册是正确行为。
+3. **四变体合在一张 `plugins.bundle.config` 卡内，不拆 `plugins.row.config`**。
+   两种 slot 都合法（slot-contract 明示 bundle 配置归属两者之一），用户拍板保持现形态
+   （一张包卡内四张变体卡，2026-10-04 实测截图确认观感）。
+
+
+## 七、反编译取证手法（比 grep 全文快得多）
 
 `app.asar` 有 300+MB，`grep` 全文会跑到超时。用字节偏移定位：
 
@@ -338,3 +433,233 @@ node -e "const fs=require('fs');const fd=fs.openSync(process.argv[1],'r');const 
 `Contents/Resources/glm/zcode.cjs`（内置 agent）。内置 provider 配置在
 `Contents/Resources/config/provider/zcode-builtin.json`（含每个 provider 的
 `baseUrl` / `access.mode`，是"端点属于哪条通道"的权威来源）。
+
+
+## 八、Coding Plan 窗口额度（pill 的 5 小时 / 7 天来源，2026-10-08 取证）
+
+ZCode 客户端自己显示「5 小时 / 7 天」窗口额度，用的是：
+
+```
+GET https://bigmodel.cn/api/monitor/usage/quota/limit
+    Authorization: Bearer <coding-plan api-key>        # 就是聊天请求用的那把 key
+```
+
+实测（本机 individual-coding-plan key）返回：
+
+```json
+{ "code": 200, "msg": "操作成功", "data": { "level": "pro", "limits": [
+  { "type": "TOKENS_LIMIT", "unit": 3, "number": 5, "percentage": 0,  "nextResetTime": 1791403544725 },
+  { "type": "TOKENS_LIMIT", "unit": 6, "number": 1, "percentage": 24, "nextResetTime": 1791865446983 },
+  { "type": "TIME_LIMIT",   "unit": 5, "number": 1, "usage": 1000, "currentValue": 0,
+    "remaining": 1000, "nextResetTime": 1793026354999 } ] } }
+```
+
+- `unit` 语义（按实测时间差反推）：**3 = 小时、6 = 周、5 = 月**；`number` 是数量。
+- `TOKENS_LIMIT` 只给 `percentage`，且它是**已用**百分比（客户端界面显示的进度就是它）
+  ——窗口要报剩余就 `remain = 100 - percentage`、`limit = 100`、`unit = '%'`。
+- `TIME_LIMIT` 给 `usage/currentValue/remaining`（工具调用次数）。
+- `nextResetTime` 是**毫秒** epoch（与 `billing/balance` 的 `ends_at` 秒级不同，别搞混）。
+- 客户端侧类名是 `BigModelUsageQuotaProvider`；z.ai 系账号走另一支 URL
+  （`ZCODE_BIGMODEL_USAGE_QUOTA_URL` / `BIGMODEL_USAGE_QUOTA_URL` 可覆盖）。
+- 拿 `zcodejwttoken` 当 Bearer 会 `401 令牌已过期或验证不正确`——这条端点只认
+  coding-plan 的 **api-key**（open.bigmodel.cn 同路径也通，两者都返回同样数据）。
+
+实现：`src/zcode-quota.ts`（解析 + 映射）+ `ZCodeUpstreamClient.fetchCodingPlanQuota`；
+端点不可用或形状不符一律 `undefined` → 查询器回退订阅有效性窗口，绝不编数字。
+
+### 8.1 三个 pill / 升级相关的坑（2026-10-08 实测）
+
+1. **saved 目录可能是旧版本写的**：`catalogStore` 存的是「上次成功拉取的名单」，升级前
+   （白名单上线前）写进去的是**上游并集**（实测某升级用户的 saved 里躺着 11 个 Coding Plan
+   模型）。启动时 saved 先于 live 发布 → 用户先看到一整屏越界模型。修法：发布 saved 前用
+   同一份白名单过滤（`filterByCodingPlanWhitelist`，白名单不可得则原样返回）。
+2. **Start Plan 跨天后 accounts 为空**：每日 00:00 后旧池子作废、新池子未发放/未领取时
+   `billing/balance` 的 `balances` 为空。pill 若回落到通用的「该 provider 不上报额度」
+   会让人以为额度功能坏了——`startPlanWindows` 此时如实回「Start Plan: 今日待领取」。
+3. **Plugins 页显示的版本号来自磁盘 package.json，不代表运行中的进程**：`dsh plugin add`
+   只改磁盘与 node_modules；正在跑的 dsh 仍旧用**启动时加载的旧模块**。用户说「已经是新版
+   了」却仍看到旧行为（如 11 个模型、pill 没有新窗口）时，先看 DSH_HOME 下插件写的缓存
+   （`~/.dsh/.zcode-catalog.json`）内容：若是旧行为的特征就说明进程没重启。**重启必须完全
+   退出 dsh 进程**（刷新浏览器页面不算）；`lsof -p <pid>` 可确认进程打开的 DSH_HOME 文件。
+
+## 九、workbuddy-ai（海外版）凭据"能用但 chat 被拒"（2026-10-08 取证）
+
+**症状**：用户报「dsh-any-connect 无法使用 workbuddy.ai 的凭据」。典型误判是「凭据没读到」，
+但实测凭据链路**完全正常**——必须分清「凭据问题」与「chat 授权问题」。
+
+### 9.1 实测：凭据、目录、账单三条全通，只有 chat 被拒
+
+在本机（两个 app 都装了）逐项验证，命令与结果：
+
+| 检查 | 命令 | 结果 |
+|---|---|---|
+| doctor | `node packages/dsh-any-connect/lib/bin.js doctor --provider workbuddy-ai --json` | `present:true, format:"encrypted", signIn:"signed-in"` |
+| status（金额） | `... status --provider workbuddy-ai` | `signed in`，Remaining credit **100** |
+| 凭据解析 | `new WorkBuddyCredentialStore({variant}).current()` | `domain=www.workbuddy.ai`，accessToken 1374 字符 |
+| 模型目录 | `WorkBuddyUpstreamClient.fetchModels(cred)` | **200**，25 个模型（`/v3/config`） |
+| 账单 | `client.fetchCredits(cred)` | **200**，total 100 |
+| **chat** | `client.chatStream(cred, body)` | **403 `{"code":11140,"msg":"request illegal"}`** |
+| 探测 | `client.probeEffort(...)` | 同样 **403/11140** |
+
+对照组：**同 body 走国内变体返回 200**（`copilot.tencent.com/v2/chat/completions`）。
+所以不是代码构造错误，是**区域/账号侧对 chat 的授权判定**。
+
+### 9.2 权威依据：11140 = `auth_forbidden`，不是"内容审核"
+
+提示文案 `displayMsg: "内容未通过安全审核，请调整后重试"` **是误导性兜底**——别照着它去改
+prompt。官方客户端自己的错误码表（反编译取证，见 9.4）写得明确：
+
+```js
+// app.asar.unpacked/cli/dist/codebuddy-headless.js
+new Map([[10105,{category:"quota",subcategory:"quota_active_session"}], ...
+         [11140,{category:"auth",subcategory:"auth_forbidden"}],
+         [11141,{category:"model_service",subcategory:"model_behavior_error"}],
+         [11142,{category:"auth",subcategory:"auth_forbidden"}]])
+
+let t9 = new Set([11140,11141,11142,17271,17272,17273,17274,17275,17276]);
+function isAuthRequiredLikeError(L,ei,ea,es){
+  return !(...) && (... || 401===ea || 403===ea)   // 403 + t9 命中 → authRequired
+}
+```
+
+### 9.3 已穷尽的排除项（别再重复试）
+
+- **请求体**：只带 user → `400 / 11128 "first message is not system prompt"`（证明海外网关
+  **确实**要求首条 system，插件注入 `INTERNATIONAL_SYSTEM_PROMPT` 的处理是对的）；
+  带 system → 403/11140。故与 system 注入无关。
+- **非流式**：`stream:false` → `400 / 11101 "Non-stream chat request is currently not
+  supported"`（走到更后面的校验），说明流式请求正是被前面的授权关卡拦下。
+- **路径**：只有 `/v2/chat/completions` 存在；`/v3/chat/completions`、`/v1/...`、
+  `/v2/messages`、`/v2/plugin/chat/completions` 全 404。
+- **请求头**：逐个/组合试过 `X-Product`、`X-Product-Version`、`X-IDE-Type/Name/Version`、
+  `X-Agent-Type/Intent/Purpose`、`X-Conversation-ID`、`X-Session-ID`、`X-Request-ID`、
+  `X-Trace-ID`、`X-Model-ID`、有无 CLI `User-Agent`、有无 `X-Requested-With` ——**全部 403/11140**。
+  故不是缺某个头。
+- **模型名**：官方静态清单里 `agents[cli].models` 是 `fast-model/balanced-model/primary-model/
+  deep-model`（**不含** `default-model`）；但换模型名同样 403。
+
+### 9.4 官方客户端配置里的权威事实（product.json）
+
+`app.asar.unpacked/cli/product.json`（海外版）：
+
+- `isOversea: true`，`endpoint: "https://www.workbuddy.ai"`
+- `authentication.id: "workbuddy-desktop-ai"`（与插件 variant 的 desktopFilename 同源）、
+  `tokenHeader: "Authorization"`、`tokenType: "bearerToken"`、`usernameHeader: "X-User-Id"`
+- `attributes.prefixPath: "/plugin"`（官方部分端点形如 `/v2/plugin/auth/state`）
+- `externalDomain` 含 `www.workbuddy.ai` / `www.codebuddy.ai` / `staging.workbuddy.ai`
+- 会话相关头常量：`X-Trace-ID` / `X-Request-ID` / `X-Conversation-ID` / `X-Session-ID` /
+  `X-Agent-Type` / `X-Agent-Intent` / `X-IDE-*` / `X-Api-Key` / `X-Product-Version`
+
+### 9.5 反编译取证手法（asar 内嵌 + unpacked）
+
+`app.asar` 头部是 `[8B pickle][4B headerSize][header JSON]`；**文件表里带
+`unpacked:true` 的条目内容不在 asar 里**，要去 `app.asar.unpacked/` 同名路径读
+（本机 `cli/dist/codebuddy-headless.js` 就是 unpacked）。踩坑记录：
+- 顺序累加 offset 定位内嵌文件时，unpacked 条目的 size 会被计入导致偏移全错——
+  先看 `meta.unpacked`，是就去 unpacked 目录按原路径读。
+- macOS 上跑官方 CLI 会因沙盒写 `~/.codebuddy/local_storage` 报 EPERM；用
+  `HOME=$PWD/.workwork/cb-home` 重定向（**但重定向后它读不到真实登录态**，会报
+  "Authentication required"，所以它无法直接充当 chat 对照）。
+
+### 9.6 结论：服务端按会话/权益拦截，**与客户端实现无关**（2026-10-08 定论）
+
+**判定依据（最重要的一条）**：**官方 WorkBuddy AI 客户端在同一账号、同一网络上得到完全相同的
+报错**。官方自己的客户端都被拒 ⇒ 不可能是本插件的请求构造问题。
+
+服务端响应头给出了直接证据：
+
+```
+403 响应头： server: APISIX/3.12.0
+             x-user-id: 4e388551-…                     ← 服务端**正确识别**了账号
+             set-cookie: session=; Max-Age=0; Path=/v2 ← 并**主动清除会话**
+```
+
+同一凭据访问 `/v3/config` 却是 200（同样带正确的 `x-user-id`）⇒ 不是 token 无效，
+而是服务端按业务规则拒绝 chat。
+
+### 9.6.1 ⚠️ 本条曾写错，已更正（留作反面教材）
+
+本节最初写成"**账号是 Free Plan，所以没有 chat 权益**"——**这是错的**，两个反证：
+
+1. 服务端 `/v3/config` 里该模型明写 `credits: "x0.00"`（费率为 0）；
+2. 官方 UI 截图里 **Deepseek-V4.1-Flash 标着 "Free now"，并注明
+   "Sep 11 – Oct 9: Free daily use with unlimited credits"**，还给了 "Use now" 按钮。
+   另有 `deepseek-v4.1-flash-sg` 是 `x0.03`（收费）。
+
+**教训**：不要从 `packageName`（如 "Free Plan Subscription"）这类**间接字段**推断权限结论——
+要去看**权威字段**（模型自身的 `credits` 费率、官方 UI 的明确标识）。我当时的推断越过了证据，
+属于把"额度账户名"当成了"权限判定"。写进 skill 的结论必须是**被直接证据支撑**的。
+
+### 9.6.2 已排除的全部假设（都做过实测，别再重复）
+
+| 假设 | 验证结果 |
+|---|---|
+| 凭据读不到 | ✗ doctor signed-in；token 1374 字符；有效期剩 365 天；官方 app 今天刚刷新 |
+| 密钥无效 | ✗ 伪造 token → **401**，真实 token → **403**（网关认这份 token） |
+| 模型没权限 | ✗ `deepseek-v4.1-flash` 服务端 `credits: "x0.00"`，官方 UI 标 "Free now" |
+| 请求体缺字段 | ✗ 试过 `reasoning_summary` / `reasoning:{effort,summary}` / `max_tokens` / `temperature` |
+| 请求头缺字段 | ✗ 十余个逐个与组合：`X-Product` / `X-Product-Version` / `X-IDE-*` / `X-Agent-*` / `X-Conversation-ID` / `X-Session-ID` / `X-Request-ID` / `X-Model-ID` |
+| UA 不对 | ✗ 四种（CLI/CodeBuddy 组合、`WorkBuddy/…`、浏览器 UA） |
+| 路径不对 | ✗ 只有 `/v2/chat/completions` 存在；`/v3`、`/v1`、`/v2/messages`、`/v2/plugin/…` 全 404 |
+| 是我们的代码坏了 | ✗ CN 变体同机/同网络/同代码 → **200 正常** |
+| 网络或地域被封 | ✗ 同上，CN 通；且 `/v3/config`、credits 都通 |
+| 是插件问题 | ✗ **官方 app 同样失败**（用户实测确认） |
+
+对照实验（同一端点、同一 body，只换凭据）：
+
+| 场景 | 响应 |
+|---|---|
+| 不带 Authorization | **401**（网关拒绝，HTML） |
+| `Bearer not-a-real-token` | **401** |
+| 真实凭据（甚至 body 只有一个 `system: "s"`） | **403 / code 11140** |
+
+再用"完全无害内容"（只有 system、空 user content）复测仍全部 403/11140 ⇒ 与消息内容无关，
+上游那句"内容未通过安全审核"是泛化兜底文案。
+
+### 9.6.3 一处可疑的结构差异（未能从客户端侧证实）
+
+```
+CN 凭据：  scope 字段**不存在**
+AI 凭据：  scope: "openid profile offline_access email"   ← 纯 OIDC scope，无 API 权限声明
+```
+
+海外版可能要求**先激活免费试用/绑定支付方式**才开通 chat。官方前端 bundle 里确实有这套状态机：
+
+```js
+// pricing-*.js
+Kr = { currentPlan: "free", paidActive: false, trialActive: false, trialEligible: true }
+POST /billing/meter/apply-free-trial   // 申请免费试用
+POST /billing/meter/get-user-resource  // 返回 accounts 与 proTrialStatus
+```
+
+`trialEligible: true` + `trialActive: false` = **有资格但未激活**，与截图里的 "Use now" 吻合。
+（这两个接口在 `www.workbuddy.ai` 上试过，均 404——应在官方 usercenter 域下，客户端侧无法代调。）
+
+### 9.6.4 能做什么 / 不能做什么
+
+- **插件侧无解**：判定在服务端；绕过权益等于盗用，不做。
+- **用户侧可做**（按有效性排序）：
+  1. 在官方 app 里点截图那个 **"Use now"**，若弹出绑卡/开通流程就走完它；
+  2. 去官方账号/订阅设置里查"免费试用待激活"；
+  3. 拿错误体的 `requestId` 找官方客服，例如 `d1234151-a05e-4d65-8334-705074d6ec81`、
+     `f331ae4a-3b51-4424-8ea0-e087b60e72b3`，说明"免费期内的 deepseek-v4.1-flash，
+     chat 一律 403/11140，官方客户端同样失败"。
+- **插件的替代路径**：换用别的 provider（`provider-usage` 支持 DeepSeek / OpenAI / Moonshot /
+  MiniMax 等，自备 API key）。
+
+### 9.7 插件侧已做的改进（commit 0589841）
+
+原实现把上游状态码**裸写**进失败文案（`(http 403)`），而宿主 `dsh-llm-pi-ai` 的
+`classifyPiAiError` 用**文本正则**分类：`/\b(?:401|403)\b/` 命中即判 `AUTH`，
+`dsh-client-ui-chat` 随后**丢弃我们的 message** 换成固定文案「API 密钥无效」——
+于是与密钥无关的 11140 被显示成密钥失效，用户被误导去重新登录。修法：
+
+- `upstream-shared.httpStatusLabel()`：状态码渲染为 `HTTP_403`。
+  **`HTTP-403` 无效**（`-` 是非词字符，403 两侧仍是 `\b`，实测照样命中）；
+- `shim-http.upstreamFailureMessage()`：失败文案单一构造点，403 前置如实说明
+  （auth_forbidden、非密钥失效、非内容审核）再附原文，覆盖上游那句误导性的"安全审核"；
+- 回归锁 `test/shim-failure-copy.test.ts`：断言任何状态下文案都不触发宿主全部 7 条分类
+  正则，并含反例证明非空转。
+
+**通用教训**：给宿主写错误文案时，**不要裸写 401/403/429/400/5xx 等状态码数字**——
+宿主会按文本重新分类，轻则分类错误、重则整条文案被替换掉。

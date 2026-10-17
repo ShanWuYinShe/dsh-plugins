@@ -33,8 +33,8 @@ const STATUS_DOC = {
     ],
   },
   models: [
-    { id: 'auto', name: 'Auto', contextWindow: 256000, largerWindows: [] },
-    { id: 'glm-5.3', name: 'GLM-5.3', contextWindow: 1000000, largerWindows: [], credits: 'x0.79' },
+    { id: 'auto', name: 'Auto', contextWindow: 256000, contextWindows: [] },
+    { id: 'glm-5.3', name: 'GLM-5.3', contextWindow: 1000000, contextWindows: [], credits: 'x0.79' },
   ],
 }
 
@@ -175,7 +175,7 @@ describe('WorkBuddy 配置卡片', () => {
     const content = text()
     expect(content).toContain('GLM Coding Pro · 有效')
     expect(content).toContain('150% 专属额度')
-    expect(content).toContain('夜间 23:00~09:00 免费')
+    expect(content).not.toContain('夜间 23:00~09:00 免费')
     expect(content).not.toContain('当前积分 1')
   })
 
@@ -268,6 +268,74 @@ describe('WorkBuddy 配置卡片', () => {
       await mount()
       expect(text()).not.toContain('今日 Start Plan 待领取')
       expect(text()).not.toContain('今日 Start Plan 已领取')
+    })
+  })
+
+  /**
+   * 额度账户的三种展示口径（2026-10-11 修）。
+   *
+   * `remain > 0 ? 有效 : 已过期` 是错的：额度可能在到期前就耗尽——本机实测
+   * Start Plan 额度 0 / 300M、到期在**次日 09:00**，卡片却报「已过期」，
+   * 用户会以为整个额度失效。三态各有真源：有剩余=有效、无剩余未到期=已用完、
+   * 无剩余已到期=已过期。
+   */
+  describe('额度状态的三种口径', () => {
+    /** 让 /zcode-sp/status 返回带指定额度账户的已登录文档。 */
+    function stubSpAccount(account: Record<string, unknown>): void {
+      vi.stubGlobal('fetch', vi.fn(async (input: unknown) => ({
+        ok: true,
+        status: 200,
+        json: async () => String(input).includes('/zcode-sp/status')
+          ? {
+              status: 'signed-in',
+              nickname: 'sp-tester',
+              credits: { total: 0, accounts: [account] },
+              models: [],
+            }
+          : { status: 'signed-out' },
+      })))
+    }
+
+    it('额度耗尽但未到期 → 「已用完」，不是「已过期」', async () => {
+      stubSpAccount({
+        packageName: 'GLM-5.3-Flash (有效)',
+        planName: 'ZCode Weekend Build',
+        remain: 0,
+        size: 300_000_000,
+        unit: 'tokens',
+        expiredAt: new Date(Date.now() + 14 * 3600_000).toISOString(),
+      })
+      await mount()
+      expect(text()).toContain('已用完')
+      expect(text()).not.toContain('已过期')
+    })
+
+    it('额度耗尽且已到期 → 「已过期」', async () => {
+      stubSpAccount({
+        packageName: 'GLM-5.3-Flash (有效)',
+        planName: 'ZCode Weekend Build',
+        remain: 0,
+        size: 300_000_000,
+        unit: 'tokens',
+        expiredAt: new Date(Date.now() - 3600_000).toISOString(),
+      })
+      await mount()
+      expect(text()).toContain('已过期')
+    })
+
+    it('有剩余额度 → 「有效」（不受到期时刻影响）', async () => {
+      stubSpAccount({
+        packageName: 'GLM-5.3-Flash (有效)',
+        planName: 'ZCode Weekend Build',
+        remain: 120_000_000,
+        size: 300_000_000,
+        unit: 'tokens',
+        expiredAt: new Date(Date.now() + 14 * 3600_000).toISOString(),
+      })
+      await mount()
+      expect(text()).toContain('有效')
+      expect(text()).not.toContain('已用完')
+      expect(text()).not.toContain('已过期')
     })
   })
 })

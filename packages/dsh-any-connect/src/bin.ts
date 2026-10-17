@@ -1,17 +1,28 @@
 #!/usr/bin/env node
+/**
+ * bin.ts — dsh-any-connect 的独立诊断 CLI（doctor / status / logout）。
+ *
+ * 与插件本体共用同一份凭据存储与上游客户端，因此 doctor 看到的就是插件运行时
+ * 会看到的状态；密钥类输出经 safeMessage 脱敏。
+ *
+ * @module dsh-any-connect/bin
+ */
 /** Standalone status/diagnostics CLI for the dsh-any-connect bundle. */
 
 import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { WorkBuddyCredentialStore, workbuddyOwnAuthPath, WORKBUDDY_AUTH_FILE_ENV } from './auth.js'
-import { WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
+import { openStandaloneStateStore } from './state-store.js'
+import type { WorkBuddyCreditAccount } from './upstream.js'
 import { FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS } from './catalog.js'
 import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
 import { CN_VARIANT, variantFor, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { ANYCONNECT_VERSION } from './version.js'
+import { currentPlanWindow } from './usage.js'
 import { isHeartbeatProcessAlive, readHostHeartbeat, workbuddyHostHeartbeatPath } from './host-heartbeat.js'
 import { WORKBUDDY_ELECTRON_BIN_ENV } from './desktop-credential-protection.js'
+import { createVariantCredentialStore, upstreamClientFor } from './variant-wiring.js'
 
 type Action = 'doctor' | 'logout' | 'status'
 
@@ -32,7 +43,8 @@ function printHelp(): void {
     '  doctor   secret-free sign-in and environment diagnostics',
     '  status   sign-in state, remaining WorkBuddy credit, and host-bundle health',
     '  logout   remove the plugin-owned credential copy (the desktop app keeps its sign-in)',
-    '  --provider  which product to inspect: workbuddy, workbuddy-ai, or zcode',
+    '  --provider  which product to inspect: workbuddy, workbuddy-ai, zcode,',
+    '              or zcode-start-plan (defaults to workbuddy)',
     '              (defaults to workbuddy)',
     '  --json   emit one secret-free JSON document (doctor/status only)',
     '',
@@ -43,10 +55,33 @@ function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`)
 }
 
+/** 进程内共享的 standalone 状态域句柄；run() 结束时统一释放（见 closeSharedState）。 */
+let sharedStateClose: (() => Promise<void>) | undefined
+
 /** Credential store wired for CLI diagnostics. */
-function makeWorkBuddyStore(variant: WorkBuddyVariant): WorkBuddyCredentialStore {
-  const client = variant.kind === 'zcode' ? new ZCodeUpstreamClient() : new WorkBuddyUpstreamClient()
-  return new WorkBuddyCredentialStore({ variant, refresh: credential => client.refreshToken(credential) })
+async function makeWorkBuddyStore(variant: WorkBuddyVariant): Promise<WorkBuddyCredentialStore> {
+  // 与插件运行时同一份装配（见 variant-wiring.ts）：计划语义 / 刷新通道都由它
+  // 决定，CLI 不再自己拼一遍——历史上正是这里漏掉 transformCredential，把
+  // zcode-start-plan 的额度查询指到了 coding 池子。
+  // 状态域独立打开（与插件运行时同一存储单元，见 state-store.ts）：logout 删的
+  // 域副本与插件运行时所见一致；域打不开时降级文件回落并告警，诊断照常工作。
+  // 句柄进程内只开一份（单命令单次），close 由 run() 的收尾统一调用。
+  let state
+  try {
+    const standalone = await openStandaloneStateStore()
+    state = standalone
+    sharedStateClose = () => standalone.close()
+  } catch (error: unknown) {
+    console.warn(`dsh-any-connect: state domain unavailable (${String(error)}); owned-copy operations use the file fallback`)
+  }
+  return createVariantCredentialStore({ variant, client: upstreamClientFor(variant), ...state === undefined ? {} : { state } })
+}
+
+/** run() 收尾：释放状态域句柄（幂等；未打开过则空操作）。 */
+async function closeSharedState(): Promise<void> {
+  const close = sharedStateClose
+  sharedStateClose = undefined
+  await close?.().catch(() => {})
 }
 
 /** Compiled-in roster size per provider id. */
@@ -62,7 +97,7 @@ function fallbackFor(variant: WorkBuddyVariant): number {
 }
 
 async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
-  const store = makeWorkBuddyStore(variant)
+  const store = await makeWorkBuddyStore(variant)
   const status = await store.status()
   const desktopPresent = await store.desktopFilePresent()
   const desktopPath = await store.resolvedDesktopAuthPath()
@@ -123,8 +158,37 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
   return status.state === 'signed-in' && desktopPresent ? 0 : 1
 }
 
+/**
+ * One human-readable credit line per provider family: WorkBuddy speaks in
+ * credits, while the two ZCode variants speak the same language as the
+ * composer-dock pill (a daily token pool for Start Plan, subscription validity
+ * for Coding Plan) — printing the raw total would read "1" for a healthy
+ * Coding Plan subscription and an unlabelled token count for Start Plan.
+ */
+function humanCredits(
+  variant: WorkBuddyVariant,
+  credits: { total: number; error?: string } | undefined,
+  accounts: readonly WorkBuddyCreditAccount[] | undefined,
+): string {
+  if (credits?.error !== undefined) return `Remaining credit: unavailable (${credits.error})`
+  if (credits === undefined || accounts === undefined) return 'Remaining credit: unknown'
+  if (variant.kind !== 'zcode') return `Remaining credit: ${credits.total}`
+  const windows = currentPlanWindow(accounts)
+  if (windows.length === 0) {
+    return 'Start Plan quota: no active balance today (claim it in the ZCode client)'
+  }
+  const window = windows[0]!
+  if (window.remain !== undefined && window.limit !== undefined) {
+    const reset = window.resetsAt !== undefined
+      ? `, expires ${new Date(window.resetsAt).toLocaleString()}`
+      : ''
+    return `Start Plan quota: ${window.remain.toLocaleString()} / ${window.limit.toLocaleString()} tokens${reset}`
+  }
+  return `${window.label}: active`
+}
+
 async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
-  const store = makeWorkBuddyStore(variant)
+  const store = await makeWorkBuddyStore(variant)
   const authStatus = await store.status()
   const heartbeat = await readHostHeartbeat()
   const hostAlive = heartbeat !== undefined && isHeartbeatProcessAlive(heartbeat)
@@ -139,11 +203,14 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
   }
   const workbuddyStore = store as WorkBuddyCredentialStore
   let credits: { total: number; error?: string } | undefined
+  let creditAccounts: readonly WorkBuddyCreditAccount[] | undefined
   try {
     const credential = await workbuddyStore.current()
     if (credential !== undefined) {
-      const client = variant.kind === 'zcode' ? new ZCodeUpstreamClient() : new WorkBuddyUpstreamClient()
-      credits = { total: (await client.fetchCredits(credential)).total }
+      const client = upstreamClientFor(variant)
+      const answer = await client.fetchCredits(credential)
+      credits = { total: answer.total }
+      creditAccounts = [...answer.accounts]
     }
   } catch (error: unknown) {
     credits = { total: 0, error: safeMessage(error) }
@@ -169,6 +236,12 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
       source: authStatus.source,
       credits: credits?.total,
       ...credits?.error === undefined ? {} : { creditsError: credits.error },
+      // ZCode 的额度语义与 WorkBuddy 点数不同:窗口按 pill 同一口径给出
+      // (Start Plan 是 token 计数池,Coding Plan 是订阅有效性),total 只是
+      // 兼容字段。
+      ...variant.kind === 'zcode' && creditAccounts !== undefined
+        ? { quotaWindows: currentPlanWindow(creditAccounts) }
+        : {},
       hostBundle: hostState,
     })
     return 0
@@ -176,9 +249,7 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
   process.stdout.write([
     `${variant.displayName} Connect: signed in${authStatus.nickname === undefined ? '' : ` as ${authStatus.nickname}`}`,
     ...expiresAt === undefined ? [] : [`Access token expires ${expiresAt} (refresh is automatic)`],
-    credits?.error === undefined
-      ? `Remaining credit: ${credits?.total ?? 'unknown'}`
-      : `Remaining credit: unavailable (${credits.error})`,
+    humanCredits(variant, credits, creditAccounts),
     `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : hostState === 'stale' ? 'stale heartbeat (DSH process exited)' : 'not started in this profile'}`,
     'Client card: load failures are logged to the browser console only; the host provider is unaffected.',
     '',
@@ -245,15 +316,18 @@ export async function run(argv: readonly string[]): Promise<number> {
       case 'status':
         return await status(jsonOutput, variant)
       case 'logout': {
-        const store = makeWorkBuddyStore(variant)
+        const store = await makeWorkBuddyStore(variant)
         await store.logout()
-        process.stdout.write(`${variant.displayName} Connect: removed ${workbuddyOwnAuthPath(variant.ownFilename)}; the desktop app's sign-in is untouched\n`)
+        process.stdout.write(`${variant.displayName} Connect: removed the plugin-owned credential copy (state domain, file fallback ${workbuddyOwnAuthPath(variant.ownFilename)}); the desktop app's sign-in is untouched\n`)
         return 0
       }
     }
   } catch (error: unknown) {
     process.stderr.write(`dsh-any-connect: ${action} failed: ${safeMessage(error)}\n`)
     return 1
+  } finally {
+    // 所有出口（含各分支的 return 与异常路径）之后统一释放状态域句柄。
+    await closeSharedState()
   }
 }
 

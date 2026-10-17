@@ -20,8 +20,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { Readable } from 'node:stream'
 import type { WorkBuddyCredentialStore } from './auth.js'
 import type { WorkBuddyCatalog } from './catalog.js'
+import { applyDefaultEffort, applyDefaultThinking } from './reasoning-default.js'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { prepareChatBody, WorkBuddyUpstreamClient, type UpstreamErrorKind } from './upstream.js'
+import { isJsonContentType, KIND_STATUS, writeJson, writeOpenAIError, writeAnthropicError, RequestBodyTooLarge, readBody, upstreamFailureMessage } from './shim-http.js'
 
 /** Minimal logger surface the plugin context already provides. */
 export interface ShimLogger {
@@ -48,70 +50,14 @@ export interface WorkBuddyShim {
 
 /** Constructor dependencies. */
 export interface WorkBuddyShimOptions {
-  kind: 'workbuddy' | 'zcode'
+  kind: 'workbuddy' | 'zcode' | 'opencode'
   store: Pick<WorkBuddyCredentialStore, 'resolve'>
   client: Pick<WorkBuddyUpstreamClient, 'chatStream'>
   catalog: WorkBuddyCatalog
   logger?: ShimLogger
 }
 
-const REQUEST_BODY_LIMIT = 64 * 1024 * 1024
 
-// 回环守卫统一走 ./loopback.js（本文件此前的局部拷贝已删除：三处分化后
-// shim 版与标准版在 `[::1]garbage` 上语义不一致，单源是唯一的修法）。
-/** Chat-completion POSTs must carry a JSON body type (simple-request CSRF drops here). */
-function isJsonContentType(req: IncomingMessage): boolean {
-  const type = req.headers['content-type']
-  return typeof type === 'string' && type.trim().toLowerCase().startsWith('application/json')
-}
-
-/** HTTP status each upstream failure class surfaces as. */
-const KIND_STATUS: Readonly<Record<UpstreamErrorKind, number>> = {
-  hard_credit: 402,
-  soft_rate: 429,
-  session_dead: 401,
-  not_found: 502,
-  server: 502,
-  client: 400,
-}
-
-function writeJson(res: ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body)
-  res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) })
-  res.end(payload)
-}
-
-function writeOpenAIError(res: ServerResponse, status: number, kind: string, message: string): void {
-  writeJson(res, status, { error: { message, type: kind, code: kind } })
-}
-
-function writeAnthropicError(res: ServerResponse, status: number, kind: string, message: string): void {
-  writeJson(res, status, { type: 'error', error: { type: kind, message } })
-}
-
-/** 请求体超限的专属标记:兜底 catch 据此映射 413,而非落进 500 internal。 */
-class RequestBodyTooLarge extends Error {
-  constructor() { super('request body too large') }
-}
-
-/** Read a request body with a size cap; over-limit bodies fail the request. */
-function readBody(req: IncomingMessage): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let size = 0
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length
-      if (size > REQUEST_BODY_LIMIT) {
-        reject(new RequestBodyTooLarge())
-        req.destroy()
-        return
-      }
-      chunks.push(chunk)
-    })
-    req.on('end', () => resolve(Buffer.concat(chunks)))
-    req.on('error', reject)
-  })
-}
 
 /**
  * Start the loopback endpoint. Requests carry any bearer; the loopback bind
@@ -273,7 +219,13 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     }
 
     const raw = (await readBody(req)).toString('utf8')
-    const prepared = prepareChatBody(raw)
+    // 「默认」档的回落（见 reasoning-default.ts）：模型没有非思考状态时，「不发字段」
+    // 等于让上游按自身默认跑——实测表现为完全不返回思考内容。这里补上 high（没有
+    // high 则可用档位里的最高一档）；请求本来带了显式档位时一个字都不动。
+    const prepared = applyDefaultEffort(
+      prepareChatBody(raw),
+      (id) => catalog.current().find(model => model.id === id),
+    )
 
     const controller = new AbortController()
     // Node ≥16 起 IncomingMessage 的 'close' 是「请求完成」而非「socket 关闭」:
@@ -291,7 +243,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         res,
         KIND_STATUS[result.kind],
         result.kind,
-        `${options.kind} upstream ${result.kind} (http ${result.status}): ${result.message.slice(0, 400)}`,
+        upstreamFailureMessage(options.kind, result.kind, result.status, result.message),
       )
       return
     }
@@ -345,11 +297,17 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     }
 
     const raw = (await readBody(req)).toString('utf8')
+    // Anthropic 通道的「默认」档回落（见 reasoning-default.ts）：与 OpenAI 通道同一
+    // 规则，只是表达成 thinking 预算对象——形状与算式对齐 pi-ai 显式选该档位时的行为。
+    const prepared = applyDefaultThinking(
+      raw,
+      (id) => catalog.current().find(model => model.id === id),
+    )
     const controller = new AbortController()
     // 与 chatCompletions 同口径:res 'close' 才是流式阶段的断开信号(req
     // 'close' 在响应开始后不再触发)。
     res.once('close', () => controller.abort())
-    const result = await client.chatStream(credential, raw, controller.signal)
+    const result = await client.chatStream(credential, prepared, controller.signal)
 
     if (!result.ok) {
       if (controller.signal.aborted || res.destroyed) return
@@ -357,7 +315,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         res,
         KIND_STATUS[result.kind],
         result.kind === 'hard_credit' ? 'billing_error' : 'api_error',
-        `${options.kind} upstream ${result.kind} (http ${result.status}): ${result.message.slice(0, 400)}`,
+        upstreamFailureMessage(options.kind, result.kind, result.status, result.message),
       )
       return
     }

@@ -36,8 +36,8 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
 ## 发布纪律（重要）
 
 **任何插件更新（功能、修复、依赖调整一律适用）：必须先在本地的隔离测试
-环境中全部测试通过，才能更新版本号、提交、推送——推送分支只跑测试，发版
-是另一个显式动作（打 tag 推出），顺序不可颠倒，无例外。**
+环境中全部测试通过，才能更新版本号、提交、推送——推送分支只跑测试，打 tag
+发版永远排在验证之后，顺序不可颠倒，无例外。**
 版本号是发布动作的一部分，不是开发动作——功能有问题就修功能，绝不靠
 "再发一版"解决。一次功能开发的完整顺序：
 
@@ -65,14 +65,42 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    ```
    （2026-09-25 实测：0.1.7-rc.2 验证即用此法；根路径探测返回 401 属正常——服务在跑、只是要 token。）
 
-   **沙盒下 bun 装包要先重定向缓存（2026-09-30 实测）**：新 rc 的包尚未进本机
-   bun 缓存时，`bun install` 需要写工作区外的默认缓存目录，在 `workspace-write`
-   下报 `error: bun is unable to write files to tempdir: EPERM`（重定向 `TMPDIR`
-   无效，报错指的是缓存而非临时目录）。解法是给它一个工作区内的缓存目录：
+   **隔离 home 必须是全新目录，宿主启动后必须核对 URL 行（2026-10-11 实测）**：
+
+   - 复用旧验证 home 会混入用户全局配置的残留（`cordis.patch.yml` 的
+     agent-default-model/welcomeNotice patch、旧 `.credentials.yaml` 等），
+     表象是**宿主正常监听、插件心跳也在写，但 `dsh web:` URL 行永远不打印、
+     页面 401**——极像插件把宿主搞挂。重建全新 home 后同样操作一切正常。
+     判定法：`ls -la <DSH_HOME>`，发现早于本次会话时间戳的文件即为污染，整目录删掉重建。
+   - 宿主**端口被占（EADDRINUSE）时静默退出、无任何输出**——起宿主后必须
+     同时确认 `lsof -iTCP:<port> -sTCP:LISTEN` 有监听**且**日志/终端里出现了
+     `dsh web: http://…token=` 行，二者齐备才算启动成功。
+   - 启动日志里 URL 的 `token=` 每次启动随机变化，重启后旧 token 一律失效；
+     后台起宿主用双重 fork（`( nohup … >log 2>&1 & )`）——普通 `… &` 会让
+     bash 等待整棵进程树直到超时。
+
+   **沙盒下 bun 装包（2026-10-14 起可直接跑）**：`~/.bun/install/cache` 已由
+   sandbox-extra-roots 插件放行并实测，`bun install` 无需任何重定向。历史记录
+   （未配插件的机器，2026-09-30 实测）：`workspace-write` 下报 `error: bun is unable
+   to write files to tempdir: EPERM`——报错有误导，真因是默认缓存目录不可写
+   （重定向 `TMPDIR` 无效），解法是给它一个工作区内的缓存目录：
 
    ```bash
    BUN_INSTALL_CACHE_DIR=<repo>/.workwork/bun-cache bun install
    ```
+
+   **新 alpha 线刚发布时 npmmirror 会同步滞后（2026-10-14 实测，0.2.1-alpha.3）**：
+   在 `.workwork/dsh-host` 装目标宿主时 `bun add` 报个别子包 404（如
+   `@deepseek-ai/dsh-api-remote-access@0.2.1-alpha.3 failed to resolve`，本机
+   npm/bun 默认走 npmmirror），漏的恰是宿主刚新增/刚发版的子包。解法是单次
+   安装显式覆盖官方源（env 前缀即可，不落任何配置）：
+
+   ```bash
+   npm_config_registry=https://registry.npmjs.org bun add @deepseek-ai/dsh@<目标版本>
+   ```
+
+   `bun pm trust` 同样要带 `BUN_INSTALL_CACHE_DIR` 重定向（漏了报同款
+   `unable to write files to tempdir: EPERM`——trust 也要写缓存/临时目录）。
 
    **适配 rc 时务必检查传递依赖的版本漂移**：`adapt-dsh` 只改 `@deepseek-ai/dsh-*`
    的 range，**不会动第三方依赖**。若宿主新增/升级了某个被插件直接依赖的库
@@ -113,6 +141,19 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
 
    多包同发时顺序固定为：**先推分支**（`git push`，只跑测试）→ **再逐个 tag
    推送并逐条确认**（完整循环脚本见 skill dsh-plugin-tag「标准流程」）。
+6. **验证通过即推发（2026-10-10 用户授权的常设约定）**：改动在**独立 dsh 测试
+   实例**（独立 `DSH_HOME`、link 装待发产物、真实宿主版本与适配目标一致）中
+   完成端到端验证且无问题后，**自动继续推送分支并打 tag 发版**，无需每次再向
+   用户确认——第 2 步的实例验证本身就是发版授权。要点：
+   - 「实例验证」的标准：真实宿主跑起来、覆盖本次改动的核心链路（如设置页
+     读写、卡片读回、迁移）、控制台与宿主日志零异常。`test:ci` 全绿只是前置，
+     **不算**实例验证——产物级行为（minify/打包）只有实例能暴露（2026-10-10
+     端到端核查据此抓到 build.mjs 缩进污染 bug）。
+   - 待发产物必须与验证产物同源（第 3 步已约定），验证通过后不再改任何影响
+     产物的代码；若改了，重走第 2 步再发。
+   - 范围边界：本条覆盖本 skill 定义的常规迭代发版（含多包各自 bump 逐个
+     tag）；跨线收敛合 `main`、以及积压多包的批量清账式发版，仍按当次用户
+     指示定范围。
 
 历史反例（先发布再验证连发 6+ 版本、发布产物缺字段多发一版）见
 RELEASING.md「日常发布流程」——工作未完成期间代码可以本地 commit（worktree

@@ -4,7 +4,7 @@
  * dsh-timeout 只在 devDependencies 里（类型与 CI 可解析），不能成为运行时
  * import——正式安装只装 dependencies + optionalDependencies，devDep 会被
  * 裁掉，静态 import 会让插件在生产宿主里加载即炸。因此这里动态 import +
- * 回退（与 remote.ts 的 loadTypert 同一模式）：CI/开发环境走宿主真实语义
+ * 回退（与 typert-loader.ts 的 loadTypert 同一模式）：CI/开发环境走宿主真实语义
  * （可分类的 TimeoutReason code），生产环境走同语义的本地实现。
  *
  * @module dsh-any-connect/timeout
@@ -74,7 +74,7 @@ export function localDeadlineSignal(upstream: AbortSignal | undefined, timeoutMs
 }
 
 /** 融合上游取消与超时的信号（宿主优先，缺席回退本地）。用完必须 dispose，
- * 否则 timer 挂住事件循环（此前手写三件套同类泄漏的注释见 upstream.ts）。 */
+ * 否则 timer 挂住事件循环（此前手写三件套同类泄漏的注释见 upstream-workbuddy.ts）。 */
 export async function deadlineSignal(upstream: AbortSignal | undefined, timeoutMs: number, code: string): Promise<DeadlineHandle> {
   const make = await loadFactory();
   if (make === null) return localDeadlineSignal(upstream, timeoutMs, code);

@@ -35,8 +35,10 @@ dsh plugin --profile web remove @chaoset/sandbox-extra-roots
 1. 插件内置默认（空列表）
 2. bundle patch 中 `cordis.patch.yml` 的 config
 3. 用户 profile/home 的 `cordis.patch.yml` 覆盖
-4. **DSH 设置页 → 插件配置 → 沙盒额外允许目录**（保存到
-   `~/.dsh/plugins/sandbox-extra-roots/config.json`，立即热生效）
+4. **DSH 设置页 → 插件配置 → 沙盒额外允许目录**（经官方 config-editor
+   保存到当前 profile 的 `cordis.patch.yml` 本行 config，立即热生效；
+   0.4.x 及之前的 `~/.dsh/plugins/<name>/config.json` 会在启动时一次性
+   自动迁入，旧文件改名 `*.imported` 保留）
 
 `extraWritableRoots`：绝对路径数组（设置页里每行一个，支持 `~` 表示用户主目录）。
 相对路径/空值会被拒绝并告警；危险根（`/`、盘根、主目录本身及其父目录，如

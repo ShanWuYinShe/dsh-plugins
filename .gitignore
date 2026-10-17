@@ -9,6 +9,9 @@ packages/*/client/client.cjs
 
 # AI 工作目录(会话中间文件与 worktree)
 .workwork/
+# 临时提交消息（-F 文件用）：历史上曾写到根目录并被 add -A 带进提交，
+# 这里显式忽略；规范做法是写进 .workwork/（上一行已忽略整个目录）。
+.workwork-*
 .worktrees/
 .workbuddy-ai/
 .zcode/

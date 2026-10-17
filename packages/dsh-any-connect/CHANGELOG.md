@@ -1,3 +1,287 @@
+## 0.4.14 (2026-10-17)
+
+### 新增
+
+* **适配 DSH 0.2.1-rc.2 正式版（稳定线）**：
+  * 支持官方原生 `conversation.input.model.label` Slot，在输入框触发器与下拉菜单中以原生 Badge 呈现费率和计费属性（如绿色“免费”Chip、小号等宽数字倍率）；
+  * 模型标签采用抗挤压弹性布局与悬停完整模型名/费率感知（`title`），超高倍率/高消耗模型呈现柔和琥珀警告色；
+* **OpenCode 免费模型通道全面增强**：
+  * 依据官方模型文档实现数据驱动的多通信协议动态适配与实时双向转码（支持 OpenAI Responses / Anthropic Messages / OpenAI Chat Completions 协议）；
+  * 支持请求体规范化转换、工具守卫注入与实时 SSE 响应流转码；
+  * 免费模型名单动态感知与元数据实时同步，支持免密零配置直接调用；
+* **ZCode Coding Plan 与 Start Plan 额度与生命周期增强**：
+  * 支持 Coding Plan 5 小时、7 天与工具调用窗口额度实时展示；
+  * 支持 Start Plan 余额查询、名单感知、未领取状态提示与分钟级自愈。
+
+### 修复
+
+* **全面对齐官方客户端会话标头规范**：在请求中注入完整官方客户端标头，解决海外版 WorkBuddy 网关渠道校验拦截（400 / 11128）问题；
+* **架构与模块化重构**：将单体模块拆分重构为清晰的职责单一模块，测试覆盖率全面提升，清理死代码与多余依赖。
+
+## 0.4.14-alpha.27 (2026-10-16)
+
+### 优化
+
+* **模型标签（ModelLabel）UI/UX 体验升级**：
+  * **抗挤压弹性布局**：模型名采用 `flex: 1 1 auto; minWidth: 0; textOverflow: ellipsis`，费率 Badge 锁定 `flex: 0 0 auto`，确保在输入框底栏空间极度受限时 Badge 绝对不被压扁或换行，文字优雅截断；
+  * **悬停完整感知**：外层节点赋予 `title` 属性，鼠标悬停即刻查看完整模型全名与费率数值；
+  * **费率色彩感知分层**：免费模型呈生机绿色 Chip（`#52c41a`），超高倍率/高消耗模型（如 `x2.0+`、`150% 额度`）呈现柔和琥珀警告色（`#faad14`），常规倍率保持低调灰白等宽数字。
+
+## 0.4.14-alpha.26 (2026-10-16)
+
+### 新增
+
+* **支持 DSH 0.2.1-alpha.5 原生 `conversation.input.model.label` Slot 呈现自定义内联模型标签**：
+  * 接入官方 `conversation.input.model.label` 内联 slot，在输入框触发器（`trigger`）与下拉菜单（`menu` / `option`）中以原生 Badge 优雅呈现费率和计费属性（如绿色“免费”Chip、小号等宽数字倍率），替代原有纯文本拼接，保持模型名纯净。
+  * 保持向下兼容：在不支持该 slot 的终端或旧版宿主中，继续回退到原有的 `model.name` 费率显示。
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.1-alpha.5` 预发布线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-alpha.5`。
+
+## 0.4.14-alpha.25 (2026-10-16)
+
+### 修复
+
+* **全面对齐官方客户端会话标头规范，解决海外版 `workbuddy-ai` 渠道校验拦截（400 / 11128）**：
+  * **根因定位**：海外版网关（`https://www.workbuddy.ai/v2/chat/completions`）启用了更严格的渠道风控插件，强校验缺失 `X-Conversation-ID`、`X-Conversation-Request-ID` 或 `X-Conversation-Message-ID` 标头直接拦截并返回 `HTTP 400 (code: 11128, msg: "conversation id missing", displayTips: "这次调用没通过渠道校验，可能不是官方客户端发出的。请用官方版本重新发")`；而国内版网关暂未开启该强制拦截。
+  * **对齐官方客户端规范**：反编译官方客户端 `codebuddy-lite-wb.mjs`，在 `chatHeaders` 中严格注入全套官方客户端标头（包括 `X-Conversation-ID`、`X-Session-ID`、`X-Request-ID`、`X-Conversation-Request-ID`、`X-Conversation-Message-ID`、`X-Agent-Type: chat`、`X-Agent-Intent: craft`、`X-IDE-Type: cli`、`X-IDE-Name: cli`、`X-IDE-Version: 2.63.2`）。
+  * **支持会话上下文复用**：`chatStream` 自动感知请求体中携带的会话标识（`conversation_id` / `conversationId`），优先复用已有会话 ID，无则生成标准唯一 UUID。
+  * **修复推理探针**：同步使 `probeEffort` 探针请求带齐官方标头，解决海外版思考档位探测被拦截报错的问题。
+
+## 0.4.14-alpha.24 (2026-10-16)
+
+### 新增
+
+* **依据官方模型文档实现数据驱动的多通信协议动态适配与实时双向转码**：
+  * 精准对齐 [OpenCode Console Models 官方文档规范](https://opencode.ai/v2/docs/console/models/)，全面支持底层三大主流协议规范：
+    * `OpenAI Responses`（端点 `/inference/openai/v1/responses`）：支持 Muse 全系列、GPT 全系列、Grok 全系列；
+    * `Anthropic Messages`（端点 `/inference/anthropic/v1/messages`）：支持 Claude 全系列与 Qwen 编程/推理模型；
+    * `OpenAI Chat Completions`（端点 `/inference/openai/v1/chat/completions`）：支持全部开源免费模型（`deepseek-v4.1-flash-free`、`cat-jam-free`、`space-bunny-free`、`big-pickle` 等）、MiniMax 全系列、DeepSeek、GLM、Kimi 与 Qwen3.8 Max。
+  * **请求体规范化转换与工具守卫注入**：针对 Anthropic Messages 自动提升顶层 `system` 提示词、转换 OpenAI 格式工具为 `input_schema`、并注入 `read` 工具解除免费通道限制。
+  * **实时 SSE 响应流转码**：自动实时转码非 completions 协议的响应事件流，转为宿主能够消费的标准 `chat.completion.chunk`（完整支持 `reasoning_content` 思考流与正文），宿主体验平滑统一。
+* **OpenCode 免费模型免密公共使用**：移除 OpenCode 免费模型通道不必要的登录拦截与凭据校验，支持零配置直接调用。
+
+### 修复
+
+* **下线智谱 Coding Plan 过期的夜间限时免费活动与徽标**：活动已于官方下线，系统去除夜免标记与 `x0.00` 费率改写，恢复模型自身基准计费，并保留 150% 额度权益。
+
+## 0.4.14-alpha.23 (2026-10-16)
+
+### 新增
+
+* **OpenCode 免费模型目录支持动态感知与元数据实时同步**：
+  * 与 WorkBuddy / ZCode 保持同等动态同步能力：`fetchModels` 实时向 `https://opencode.ai/inference/v1/models` 网关拉取当前在线的全部免费模型名单（自动过滤非免费模型，在线动态覆盖 `Cat Jam Free`、`Muse Spark 1.2/1.3 Free`、`Nemotron 3.5 Super VL Free`、`Jev 1.13 Free`、`Space Bunny Free` 等在线模型）。
+  * 模型规格（上下文窗口 `contextWindow`、最大输出 `maxTokens`、图片多模态 `supportsImages`、推理开关 `reasoning`）按官方元数据（本地 OpenCode CLI 缓存 `~/.cache/opencode/models.json` 及官方规范）动态精准解析。
+  * 稳健兜底与网络抖动自愈：在上游接口离线、网络异常或超时时无缝回退至内置兜底目录，不影响选择器正常渲染与对话调用。
+
+## 0.4.14-alpha.22 (2026-10-16)
+
+### 优化
+
+* **对齐 OpenCode 官方免费模型真实上下文容量与规格**：
+  * 将此前统一采用的 128K（131,072 tokens）兜底数值更新为 OpenCode 官方实际规格：`Space Bunny Free`（1M 上下文 / 512K 最大输出）、`Step 5 Preview Free`（1M 上下文 / 64K 最大输出）、`LongCat 2.5 Preview Free`（1M 上下文 / 128K 最大输出）、`Nemotron 3 Ultra Free`（1M 上下文 / 128K 最大输出）、`Nemotron 3.5 Lightning Free`（256K 上下文 / 256K 最大输出）、`DeepSeek V4.1 Flash Free`（200K 上下文 / 32K 最大输出）、`MiMo-V2.6-Flash Free`（200K 上下文 / 32K 最大输出）、`Big Pickle`（200K 上下文 / 32K 最大输出）。
+  * 补全各模型的图片多模态输入支持（`supportsImages`）与推理档位声明。
+
+## 0.4.14-alpha.21 (2026-10-16)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.1-alpha.4` 预发布线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-alpha.4`。
+
+## 0.4.14-alpha.20 (2026-10-15)
+
+### 新增
+
+* **支持直接使用 OpenCode 官方免费模型通道（`opencode-free`）**：在选择器中提供 OpenCode 官方提供的全量可用免费模型（包含 `deepseek-v4.1-flash-free`、`mimo-v2.6-flash-free`、`step-5-preview-free`、`nemotron-3.5-lightning-free`、`nemotron-3-ultra-free`、`longcat-2.5-preview-free`、`space-bunny-free`、`big-pickle` 等），免登录零门槛直接可用。
+* **逆向攻破 OpenCode 网关 `FreeTierError` 过闸鉴权机制**：
+  * **时间戳补码会话算法**：Session ID（`x-opencode-session` / `x-opencode-session-id`）前 12 字符遵循官方 `~BigInt(now * 4096 + cA)` 的按位取反十六进制补码，后 14 字符遵循 62 进制随机序列；Message ID（`x-opencode-request`）按同规则的升序时间戳生成。
+  * **过闸标头与工具守卫注入**：自动组装 `x-opencode-client: cli`、官方 CLI User-Agent、`x-opencode-project`，并在请求体中注入 `read` 工具与 `tool_choice: auto`、`stream_options.include_usage: true`，规避网关针对非官方客户端的 403 拦截。
+
+### 测试
+
+* 新增 `upstream-opencode.test.ts`（包含会话/请求 ID 生成算法单测、请求体守卫注入、各错误码分类处理、过闸标头校验）。
+* 在独立隔离的 DSH 实例（端口 `8933`，`DSH_HOME` 与宿主隔离）中完成真实端到端流式对话验证（`DeepSeek V4.1 Flash Free` 成功生成并返回）。
+
+## 0.4.14-alpha.19 (2026-10-15)
+
+### 优化
+
+* **模型目录行内刷新按钮视觉层级与交互规范化**：修复 `ModelRow` 中「价格未知」右侧的就地刷新按钮误用绿色 `chipStyle` 的问题，改用紧凑按钮规范（`buttonStyle`，20px 高度、标准边框与交互悬停态），避免交互动作按钮被误读为成功状态标签。
+
+## 0.4.14-alpha.18 (2026-10-15)
+
+### 优化
+
+* **思考档位预算表改引用 pi-ai 公开导出**：`applyDefaultThinking` 的预算表（minimal/low/medium/high = 1024/2048/8192/16384）、`MIN_ANSWER_TOKENS` 与档位收敛改用 `@earendil-works/pi-ai/api/simple-options` 的同名导出（pi-ai 1.2.0 起公开），删除 2026-10-11 抄录的本地副本。当时注释的两个前提均已失效：「pi-ai 非本插件直接依赖」——依赖自 0.3.16 的 adapter 起就已声明；「未导出该表」——1.2.0 已导出。手抄副本最大的风险（pi-ai 升级后数字漂移，「默认」与「显式选高」不再字节等价）随之消除。**有意不整块换用 `adjustMaxTokensForThinking`**：它只在 `max_tokens ≤ 预算` 的退化分支做答案余量夹取，而本插件需要无条件保证 `MIN_ANSWER_TOKENS` 的答案余量，故取其分解式导出（`thinkingBudgetForLevel` + `clampThinkingBudgetToAnswerRoom`）；`max_tokens` 的一行算式因本仓模型目录的 `maxTokens` 为可选项而保留本地。行为与 alpha.17 逐字节等价（既有用例全绿钉住）。
+
+## 0.4.14-alpha.17 (2026-10-14)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.1-alpha.3` 预发布线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-alpha.3`。
+* **对齐 `cordis` 到 `4.0.5-alpha.2`、`schemastery` 到 `3.18.5-alpha.2`、`cordis-plugin-loader` 到 `1.0.6-alpha.2`**：新宿主线把这三个基础包又前移了一档（`dsh-settings` 等 peer 声明 `~4.0.5-alpha.2` / `~3.18.5-alpha.2`）。不同步时 bun 会给宿主包嵌套出另一份副本，`Context.settings` 的服务声明 augment 落在宿主选中的那份上，类型检查报「Property settings does not exist on type Context」。对齐后与宿主共用同一份。
+* **`zod` 精确 pin 到 `4.4.3`**：宿主 alpha.3 把 zod 依赖从 `^4.4.3` 收紧为精确 `4.4.3`，我们的 `^4.4.3` 解析出 4.6.5 与宿主嵌套副本并存，`domainTable` 泛型对两版 zod 的类型宇宙互拼即报 TS2589（Type instantiation is excessively deep）。对齐后单副本。
+
+## 0.4.14-alpha.16 (2026-10-12)
+
+### 修复
+
+* **WSL2 里识别 Windows 侧的 WorkBuddy（5.6+ 加密凭据解密助手跨系统可达）**：此前 WSL 内凭据文件能经 `/mnt` 找到，但 5.6 起字段是 `$wbEncrypted` 信封，解密密钥只在桌面 App 自己的 Electron 里；发现层把 Linux 一律判「无已验证布局」（discovery `none`），整个插件在 WSL2 里恒报未登录（实测 `doctor`：文件 present/format encrypted，助手 "not configured; set WORKBUDDY_ELECTRON_BIN"）。现在：Linux+WSL 时按 Windows 规则发现——默认布局从 `LOCALAPPDATA`/`USERPROFILE`（经 `/mnt` 转换，无环境信号回落 Linux 同名用户目录）推导，找不到再经 interop 用 `/mnt/c/Windows/System32/reg.exe` 查卸载注册表（DisplayIcon 的 `C:\` 路径转回 `/mnt` 后做布局校验，x-bit 校验在 WSL 下放宽为「存在且是文件」——drvfs 权限呈现不可靠）；解密助手经 interop 拉起 Windows 侧 App，`ELECTRON_RUN_AS_NODE=1` 通过 `WSLENV` 的 `/w` 方向注入（interop 只传 WSLENV 点名的变量，漏传会让 App 以完整 GUI 形态启动），子进程 stdin 显式断开（实测继承的 stdin 会让 interop 控制台子进程挂住）。两个产品仍只按各自身份定位，不会互相误选；国内版默认布局已实测，国际版仍只走注册表发现。
+
+### 测试
+
+* 新增 `wsl-electron-discovery.test.ts`：发现路由（linux+WSL → windows-workbuddy，环境纯）、默认布局推导的 env 优先级、注册表候选的 /mnt 转换与可判定排除、x-bit 放宽、WSLENV 注入、stdin 断开；真机端到端用例（Linux 容器 CI 自动跳过）。`electron-discovery.test.ts` 组合根断言改为 WSL 感知（期望值取同源纯函数），`windows-electron-discovery.test.ts` 钉死 `wsl: false` 保持原口径。
+
+## 0.4.14-alpha.15 (2026-10-11)
+
+### 新增
+
+* **Anthropic 形通道（ZCode）按同一规则补齐「默认」档**：`applyDefaultThinking` 在请求**完全没有** `thinking` 字段且模型为 `onlyReasoning` 时，补 `thinking: { type: 'enabled', budget_tokens, display: 'summarized' }`，形状与算式对齐宿主 pi-ai 显式选该档位时的行为（预算表 `minimal/low/medium/high = 1024/2048/8192/16384`、`xhigh`/`max` 的预算等同 `high`、按 `adjustMaxTokensForThinking` 抬高 `max_tokens` 并留出 1024 答案余量）。显式带 `thinking` 的请求一律不动。
+
+### 测试
+
+* `reasoning-default.test.ts` 补 Anthropic 六个用例（开档、封顶与余量夹取、无 `max_tokens` 时用模型上限、显式 `thinking` 不动、推不出上限时不动、非回落模型不动）；`shim.test.ts` 补 `/v1/messages` 端到端用例。
+
+## 0.4.14-alpha.14 (2026-10-11)
+
+### 新增
+
+* **「默认」思考等级对只能思考的模型回落为具体档位**：上游 `onlyReasoning: true` 的模型没有「不思考 / default」状态，实测「不发 `reasoning_effort`」等于**完全不思考**（deepseek-v4.1-flash / glm-5.3 / glm-5.3-flash 三行同为 0 字符思考内容，而显式 low/medium/high/max 都有）。现在这类模型收到「默认」请求时补上 **`high`**；没有 `high` 则取可用档位里的**最高**一档（与选择器展示的档位同源）。有非思考状态（`onlyReasoning: false`）的模型与显式档位请求一律不动。
+
+### 测试
+
+* 新增 `reasoning-default.test.ts`（档位选择 + 请求体改写）；`shim.test.ts` 补「缺省请求补 high」与「目录外模型不改写」两个端到端用例。
+
+## 0.4.14-alpha.13 (2026-10-11)
+
+### 修复
+
+* **默认思考等级不再向上游下发 `reasoning_effort: "off"`（修 HTTP 400 / code 11150）**：`reasoningFields` 原先把 `canDisableThinking: true` 的模型的 `off` 档映射成 wire 拼写 `'off'`。而 pi-ai 的 openai-completions 分发把 `thinkingLevelMap.off` 当作「**未指定档位时要下发的值**」（`!options?.reasoningEffort` 分支），于是**每一条不带 effort 的请求**都会带上它——会话标题生成、auto review、任何省略该字段的调用；上游拒绝该拼写（400 / 11150「the reasoning effort value is not supported by the current model」），实测真正让这类模型不思考的做法是**不发该字段**。现在 `off` 恒为 `null`：默认请求不带字段（上游默认行为），选择器也不再展示做不到的「Off」项。
+* **探针识别上游变更后的拒绝词表**：同一语义的拒绝从 `extError.code: invalid_reasoning_effort` 变为 `extError.code: invalid_request_error` + 顶层 `code: 11150` + 消息「the reasoning effort value is not supported by the current model」。`errorCodeOf` 把两种词表归一化为规范码，避免整轮档位探测退化成 `unknown`——那会让「上游确实会拒绝某些值」这一事实永远学不到。
+
+### 测试
+
+* `reasoning` 补「`off` 永不给 wire 拼写」断言（含 `canDisableThinking: true` 的模型）；`upstream` 补新词表归一化用例。
+
+## 0.4.14-alpha.12 (2026-10-11)
+
+### 修复
+
+* **额度「已用完」不再误报为「已过期」**：卡片状态徽标原按 `remain > 0 ? 有效 : 已过期` 判定，把「额度耗尽」当成了「过期」——实测本机 Start Plan 额度 0 / 3 亿而有效期到次日 09:00，卡片报「已过期」，用户会以为整个额度失效（额度在到期前耗尽与到期失效是两件独立事实）。改为三态：有剩余=有效、无剩余且未到期=**已用完**（新增文案）、无剩余且已到期=已过期；判定读各账户自己的 `expiredAt`，不再用「有无剩余」推断有效期。Coding Plan 卡片同样受益（无剩余但未到期时不再误报过期）。
+
+### 测试
+
+* `config-page` 补三种口径的渲染断言（已用完 / 已过期 / 有效）。
+
+## 0.4.14-alpha.11 (2026-10-11)
+
+### 修复
+
+* **Start Plan 额度的「当日作废」不再硬编码**：`sameDay` 改由 `expires_at` 动态判定——到期时刻落在今天（本地日历日）才说「当日作废，不结转」；多日有效期的额度包如实只报「到期时间」，不再出现「当日作废」与「有效期至三天后」并存的矛盾（此前按 2026-09-30 的单一样本硬编码当日，而官方响应的 `expires_at` 本就是通用有效期字段，多日包实测存在）。卡片与说明文案同步中性化（中英双语去掉「第二天」的绝对化表述），README 的「当日有效」一并修正。
+
+### 变更
+
+* **Start Plan 额度账户新增 `unit: 'tokens'` 声明**：pill/进度条的判据从 `sameDay` 切换到 `unit`——当日与多日有效期的池子都画 remain/size 进度条；WorkBuddy 的积分制账户不带该字段，照旧走「有效」窗口。
+
+## 0.4.14-alpha.10 (2026-10-11)
+
+### 变更
+
+* **自有凭据副本收敛进宿主存储域（storageDomain）**：4 份自有副本（`.workbuddy-auth.json` / `.workbuddy-ai-auth.json` / `.zcode-auth.json` / `.zcode-sp-auth.json`）从 `$DSH_HOME` 根散文件迁入 `<DSH_HOME>/storages/dsh_any_connect/`（`@deepseek-ai/dsh-storage-domain`，与 dsh-workspace / dsh-schedule 同一机制），白拿宿主的 zod schema 校验、每域单写链原子写与损坏记录 `backup-and-skip` 备份；`withFileLock` + `writeFileAtomic` 的自管实现退役为「域不可用时的文件回落」。CLI 经独立 json backend 打开**同一**存储单元，logout / doctor 与插件运行时所见一致。启动时自动迁移旧散文件（先写域成功才删源，损坏文件原样保留并告警），升级无感。
+* **缓存文件归位官方 cache 目录**：4 份模型目录、4 份探测结果、桌面版本记录与 host 心跳从 `$DSH_HOME` 根迁入 `<DSH_HOME>/cache/dsh-any-connect/`（`dshCachePath`，dsh-attachment-local 同款约定），文件名去掉点前缀；心跳写入补目录创建，全新 home 首次写入不再依赖目录已存在。启动迁移例程一并搬运。
+* **ZCode 设备标识文件随状态目录收敛**：`.zcode-device-mid` 迁入 `.dsh-any-connect/`，读取命中旧位置时顺手搬运（先写新成功再删旧）。
+
+`$DSH_HOME` 根目录不再有本包的散文件；桌面端凭据文件（WorkBuddy / ZCode 应用自己的）不在此列，位置由桌面应用决定。
+
+### 测试
+
+* 新增 `test/state-store.test.ts`：standalone 存取的写/读/改/删闭环、schema 拒绝坏记录、迁移的四种边界（旧根搬运、回落副本优先、损坏文件保留、空迁移 no-op）。
+* `host-heartbeat` / `settings-integration` 的路径断言随新布局更新。
+
+## 0.4.14-alpha.9 (2026-10-10)
+
+### 变更
+
+* **错误文案统一走 `httpStatusLabel`**：wire 层 HTTP 状态渲染改用共享助手的 `HTTP_xxx` 形态，常量收敛到共享层。
+* **client 两处 fetch 错误拼装抽取 `fetchJsonOrThrow`**：JSON 响应读取与非 2xx 抛错收敛为一处。
+
+### 修复
+
+* **`probe-store` 状态持久化改走官方原子写**：改用 `dsh-atomic-write`，`set`/`clear` 转为 async，避免自建写入在中断时留下半截文件。
+
+### 测试
+
+* 补根 `test/loopback-parity.test.ts` 的回环守卫一致性锁：改为实测两包公开面的**绝对真值表**（不拿一边当基准，防「两边一起改坏仍相等」），并逐项登记实测的 4 处语义差（provider-usage 委托宿主后的 3 项放宽 + 空串 Origin 那一处收紧）。
+
+## 0.4.14-alpha.8 (2026-10-09)
+
+### 新增
+
+* **模型表标注可选上下文档位**：「窗口」列在多档模型上显示全部可选档位（如 `1M（可选 200k）`），单档维持原样——最大档策略后裸数字分不清「选了最大的」还是「只有一档」，服务端 `largerWindows` 字段此前也无客户端消费，改为 `contextWindows` 全量升序档位。
+* **「价格未知」行就地给刷新入口**：提示说「刷新后更新」，刷新按钮却在表格上方摘要行，距离太远等于没说。
+* **收起态可见目录异常**：目录不 live（拉取失败/回落 saved/内置列表）时卡头摘要追加红色「目录离线」短标记，异常不再只在展开后可见。
+* **刷新失败提示 8 秒自动消退**：一次瞬时网络抖动的红字不再挂到下次手动刷新。
+
+## 0.4.14-alpha.7 (2026-10-09)
+
+### 新增
+
+* **国际版模型优先选用最大上下文档位**：上游 `contextWindow.supportedLengths` 声明多个可选窗口时，插件工作预算此前固定取 `defaultLength`（通常是最小档），现在改取最大档并以 `maxInputTokens` 封顶（请求体不携带长度参数，此值只决定插件本地打包预算）。声明缺失时依次回退 `defaultLength`、输入上限。
+
+## 0.4.14-alpha.6 (2026-10-09)
+
+### 修复
+
+* **依赖对齐宿主 `0.2.1-alpha.2`**：全部 `@deepseek-ai/dsh-*` 依赖 range 升到 `^0.2.1-alpha.2`；宿主该版把 `@earendil-works/pi-ai` 升到 1.1.0（`TranscriptContext` 增加 brand 字段），插件依赖同步提到 `^1.1.0`，消除双版本类型互斥。
+## 0.4.14-alpha.5 (2026-10-08)
+
+### 新增
+
+* **Coding Plan 的 5 小时 / 7 天 / 工具调用额度窗口**：pill 此前只报订阅有效性（「有效」），用户看不到用量窗口。反编译 ZCode 客户端定位到它自己的取数端点 `GET bigmodel.cn/api/monitor/usage/quota/limit`（Authorization 用 coding-plan 的 api-key），实测返回 `TOKENS_LIMIT`（unit=3/number=5 → 5 小时）、`TOKENS_LIMIT`（unit=6/number=1 → 7 天）、`TIME_LIMIT`（工具调用次数），其中 `percentage` 是**已用**百分比。现在 pill 展示这三条窗口（剩余百分比 + 进度条 + 重置时间）；端点不可用或响应形状不符时回退订阅有效性窗口，绝不编数字。
+
+### 修复
+
+* **Start Plan 未领取时不再显示「该 provider 不上报额度」**：每日 00:00 后新池子尚未发放/领取时 `billing/balance` 如实返回空 balances，pill 落到通用文案会让用户以为额度功能坏了。现在如实显示「Start Plan: 今日待领取」；有当日池子时照旧显示真实 token 数。
+* **启动时按白名单过滤 saved 名单**：saved 目录可能由旧版本写入（那时还没有产品面白名单），实测升级用户的 saved 里躺着 11 个 Coding Plan 模型（客户端只提供 2 个），启动时会先于 live 拉取被发布出来，用户先看到一整屏越界模型。现在启动即用同一份白名单过滤，白名单不可得时保持原样。
+
+## 0.4.14-alpha.4 (2026-10-07)
+
+### 修复
+
+* **Start Plan 额度 pill 显示真实剩余 token 数**：composer dock 的额度 pill 在窗口缺 `remain` 时只渲染「套餐名: 有效」，而 Start Plan 的当日 token 池（`billing/balance` 的 `remain` / `size` 是真实数字）被 `currentPlanWindow` 丢弃——卡片显示 93M tokens 额度、聊天框下方却看不到剩余额度（用户报告）。现在 `sameDay` 池带 `remain` / `limit` / `unit: 'tokens'`：pill 显示「X tokens 剩余」并画进度条，当日用完是红色空条（正确语义）；Coding Plan 订阅的 `remain` / `size` 恒为 1（有效性标志而非用量），维持「有效」展示。
+* **CLI 的 ZCode 额度输出按变体口径**：`dsh-any-connect status` 此前打印裸 `total`——Coding Plan 显示「Remaining credit: 1」（订阅有效性计数被当积分），Start Plan 是无单位 token 数；且 CLI 的凭据 store 缺 `transformCredential`（运行时有），会把 `zcode-start-plan` 的额度查询指到 coding 池子（反之亦然）。现在与运行时同口径固定计划语义，人读行按 pill 语义输出（Start Plan 带 token 数字 / 上限 / 到期时间，Coding Plan 报订阅名与有效性），`--json` 新增 `quotaWindows`（`total` 保留兼容）。
+* **Start Plan 空名单分钟级自愈**：上游偶发对 `billing/balance` 答一个空活动清单（实测 catalog 拉得 `live/empty` 的同一时刻，直调同端点却有 active 活动与模型授权，余额也正常），分组诚实隐藏后唯一的恢复路径是小时刷新——最长消失一小时，且卡片同屏出现「93M tokens 额度」与「今日没有有效的 Start Plan 活动」的自相矛盾。现在 sweep 里对「目录空 + 领取探测无翻转 + 距上次拉取 ≥ 5 分钟」再拉一拍（拉取无论结果都前移 `fetchedAtMs`，不会打环）；空名单文案改为中性表述，不再断言「无活动」。
+
+### 文档
+
+* README 的 ZCode 段重写为双变体现状（`zcode` / `zcode-start-plan` 两个独立连接、专属通道已接入且失败如实报错、两变体各自的模型名单口径），并补 `--provider` 列表漏掉的 `zcode-start-plan`。此前还停留在「Start Plan 按普通 ZCode 通道使用」「专属模型通道未接入（被风控拦截）」的旧口径。
+
+## 0.4.14-alpha.3 (2026-10-06)
+
+### 修复
+
+* **Coding Plan 模型名单以客户端内置目录为白名单，不再混入开放平台越界模型**：`/api/paas/v4/models` 是 BigModel 开放平台 API 的模型目录，不是 Coding Plan 订阅的产品面——实测对 coding-plan key 返回 11 个 id，其中 7 个（glm-4.5 / 4.5-air / 4.6 / 4.7 / 5 / 5.1 / 5.3-flashx）在官方客户端配置里完全没有绑定到 coding-plan；端点层放行（实测 glm-4.5 在 anthropic 通道返回 200）≠ 订阅覆盖，其订阅内费率/额度语义未经验证，选中即有按 API 余额计费的风险。名单真源改为本机 ZCode 客户端的 `zcode-builtin.json`（权威来源，随客户端发版更新）：`fetchModels` 先取白名单再过滤上游并集与本地保留行；白名单不可得（客户端未装 / 结构演进）时回退已注册名单且不发上游请求。实测名单由 11 个收敛到官方产品面的 2 个（GLM-5.3、GLM-5.3-Flash），已验证参数（128K / 费率 / 徽章）不受影响。路径口：macOS 标准安装位置 + `ZCODE_BUILTIN_CONFIG` 显式覆盖；其余平台未经实测不猜路径，一律保守降级。
+
+### 测试
+
+* 白名单解析（真实 revision 30 结构 / 大小写空白容忍 / 结构缺失与空名单降级 / Z.AI 系不纳入 / `ZCODE_BUILTIN_CONFIG` 覆盖口）、白名单外的上游 id 拦截、本地保留行同样受白名单约束、白名单不可得时回退且零上游请求等用例全覆盖；另含读本机真实客户端文件的 darwin smoke 用例（未安装则跳过语义）。
+
+## 0.4.14-alpha.2 (2026-10-05)
+
+### 修复
+
+* **依赖树整体对齐宿主 `0.2.1-alpha.1` 线，清除旧基线残留**：`bun.lock` 从零重新解析，清掉上一轮适配遗留的 `0.2.0-rc.2` 旧线子树（`packages` 条目 611 → 362），`@deepseek-ai/*` 不再同名双版本并存；`cordis` 可选 peer 随之修正（`cordis-plugin-include` 1.0.9 → 1.0.10-alpha.1、`cordis-plugin-group` 1.0.4 → 1.0.5-alpha.1）。
+* **工具链依赖升到最新补丁**：`@types/node` `^26.6.3` → `^26.6.4`、`jsdom` `^30.1.1` → `^30.1.2`。
+
+## 0.4.14-alpha.1 (2026-10-04)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.1-alpha.1` 预发布线**：依赖范围与 `dsh.host` 对齐 `~0.2.1-alpha.1`。
+* **对齐 `cordis` 到 `4.0.5-alpha.1`、`schemastery` 到 `3.18.5-alpha.1`**：新宿主线把这两个基础包一起前移了。此前的 `^4.0.4` 会解析出另一份 `cordis` 实例，而 `dsh-settings` 的服务声明（`Context.settings`）声明的是宿主选中的那一份，于是类型检查报「Property settings does not exist on type Context」——运行时同样是两个容器。对齐后与宿主共用同一份。
+* **移除 `@deepseek-ai/dsh-invariants` devDependency**：新宿主线不再提供该包（其最新只到 `0.2.0-rc.2`），且本仓从未 import 过它——它是历史遗留的 peer devDep，继续 pin 会让 `bun install` 直接失败。
+
 ## 0.4.13 (2026-10-04)
 
 ### 修复

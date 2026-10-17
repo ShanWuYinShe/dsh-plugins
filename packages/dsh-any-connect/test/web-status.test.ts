@@ -84,8 +84,8 @@ describe('workBuddyWebStatus', () => {
     // 统一行：每个被服务的模型一行，窗口字段恒在；免费行的倍率被抑制
     //（免费 chip 已说明一切），促销行保留归一化后的倍率。
     expect(status.models).toEqual([
-      { id: 'promo', name: 'Promo', contextWindow: 200000, largerWindows: [], badges: ['夜间折扣'], credits: 'x0.79' },
-      { id: 'free', name: 'Free', contextWindow: 192000, largerWindows: [], badges: ['限时免费'], free: true },
+      { id: 'promo', name: 'Promo', contextWindow: 200000, contextWindows: [], badges: ['夜间折扣'], credits: 'x0.79' },
+      { id: 'free', name: 'Free', contextWindow: 192000, contextWindows: [], badges: ['限时免费'], free: true },
     ])
   })
 
@@ -102,7 +102,7 @@ describe('workBuddyWebStatus', () => {
     }) as WorkBuddySignedInStatus)
     // 统一模型列表是全量行：普通倍率模型同样有一行（倍率裸显）。
     expect(status.models).toEqual([
-      { id: 'plain', name: 'Plain', contextWindow: 256000, largerWindows: [], credits: 'x1.62' },
+      { id: 'plain', name: 'Plain', contextWindow: 256000, contextWindows: [], credits: 'x1.62' },
     ])
     expect(status.credits).toEqual({ total: 1, accounts: [] })
   })
@@ -147,7 +147,7 @@ describe('workBuddyWebStatus', () => {
     }) as WorkBuddySignedInStatus)
     expect(status.creditsError).toBe('boom')
     expect(status.models).toEqual([
-      { id: 'free', name: 'Free', contextWindow: 192000, largerWindows: [], free: true },
+      { id: 'free', name: 'Free', contextWindow: 192000, contextWindows: [], free: true },
     ])
   })
 
@@ -175,12 +175,12 @@ describe('workBuddyWebStatus', () => {
       path: '/workbuddy-status-test',
     }) as WorkBuddySignedInStatus)
     expect(status.models).toEqual([
-      { id: 'plain', name: 'Plain', contextWindow: 200000, largerWindows: [] },
+      { id: 'plain', name: 'Plain', contextWindow: 200000, contextWindows: [] },
       {
         id: 'tiered',
         name: 'Tiered',
         contextWindow: 300000,
-        largerWindows: [1000000],
+        contextWindows: [300000, 1000000],
         efforts: ['low', 'high', 'max'],
       },
     ])
@@ -302,8 +302,8 @@ describe('workBuddyWebStatus context', () => {
     }) as WorkBuddySignedInStatus)
     // 旧 context 区块已并入统一行：窗口与可选更大窗口随每行携带。
     expect(status.models).toEqual([
-      { id: 'plain', name: 'Plain', contextWindow: 200000, largerWindows: [] },
-      { id: 'tiered', name: 'Tiered', contextWindow: 300000, largerWindows: [1000000] },
+      { id: 'plain', name: 'Plain', contextWindow: 200000, contextWindows: [] },
+      { id: 'tiered', name: 'Tiered', contextWindow: 300000, contextWindows: [300000, 1000000] },
     ])
   })
 })

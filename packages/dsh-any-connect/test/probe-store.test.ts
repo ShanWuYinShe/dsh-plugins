@@ -40,7 +40,7 @@ describe('WorkBuddyProbeStore', () => {
     const { path, store } = makeStore()
     expect(store.get('m', 'fp1', 'uid-1:')).toBeUndefined()
     const saved = record()
-    store.set('m', saved)
+    await store.set('m', saved)
     const reopened = new WorkBuddyProbeStore({ path, pluginVersion: '0.0.0-test' })
     expect(reopened.get('m', 'fp1', 'uid-1:')).toEqual(saved)
   })
@@ -48,7 +48,7 @@ describe('WorkBuddyProbeStore', () => {
   it('rejects a fingerprint change, another account, and expiry', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-pstore-'))
     const { store } = makeStore()
-    store.set('m', record())
+    await store.set('m', record())
     expect(store.get('m', 'other-fp', 'uid-1:')).toBeUndefined()
     expect(store.get('m', 'fp1', 'uid-2:')).toBeUndefined()
     expect(store.get('m', 'fp1', '')).toBeUndefined()
@@ -57,7 +57,7 @@ describe('WorkBuddyProbeStore', () => {
   it('expires records past the TTL', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-pstore-'))
     const early = makeStore(1000, 1_000)
-    early.store.set('m', record({ probedAtMs: 1_000 }))
+    await early.store.set('m', record({ probedAtMs: 1_000 }))
     // Same file, later clock: expired.
     const late = new WorkBuddyProbeStore({ path: early.path, ttlMs: 1000, pluginVersion: 'x', now: () => 1_000 + 1001 })
     expect(late.get('m', 'fp1', 'uid-1:')).toBeUndefined()
@@ -66,16 +66,16 @@ describe('WorkBuddyProbeStore', () => {
   it('keeps a decisive record against a later unknown', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-pstore-'))
     const { store } = makeStore()
-    store.set('m', record())
-    store.set('m', record({ validation: 'unknown', efforts: [] }))
+    await store.set('m', record())
+    await store.set('m', record({ validation: 'unknown', efforts: [] }))
     expect(store.get('m', 'fp1', 'uid-1:')?.validation).toBe('validating')
   })
 
   it('clears everything and reads malformed files as empty', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-pstore-'))
     const { path, store } = makeStore()
-    store.set('m', record())
-    store.clear()
+    await store.set('m', record())
+    await store.clear()
     expect(store.get('m', 'fp1', 'uid-1:')).toBeUndefined()
     await writeFile(path, '{ not json', 'utf8')
     expect(new WorkBuddyProbeStore({ path, pluginVersion: 'x' }).get('m', 'fp1', 'uid-1:')).toBeUndefined()

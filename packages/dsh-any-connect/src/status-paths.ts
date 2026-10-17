@@ -30,6 +30,13 @@ export const ZCODE_SP_STATUS_PATH = '/plugins/dsh-any-connect/zcode-sp/status'
 /** ZCode Start Plan variant probe route. */
 export const ZCODE_SP_PROBE_PATH = '/plugins/dsh-any-connect/zcode-sp/probe'
 
+/** OpenCode variant status route. */
+export const OPENCODE_STATUS_PATH = '/plugins/dsh-any-connect/opencode/status'
+
+/** OpenCode variant probe route. */
+export const OPENCODE_PROBE_PATH = '/plugins/dsh-any-connect/opencode/probe'
+
+
 /** One model's recorded probe observation, as the card displays it. */
 export interface WorkBuddyWebProbeModel {
   id: string
@@ -72,8 +79,9 @@ export interface WorkBuddyWebModelRow {
   name: string
   /**
    * Working budget in tokens: the window the plugin actually requests under
-   * (the international document's `contextWindow.defaultLength` where
-   * declared, else the row's input ceiling).
+   * (the international document's largest selectable `supportedLengths`
+   * entry, clamped to the input ceiling; `defaultLength` / input ceiling as
+   * fallbacks).
    */
   contextWindow: number
   /** Whether the model is currently free (`x0.00` credits). */
@@ -102,12 +110,12 @@ export interface WorkBuddyWebModelRow {
    */
   efforts?: readonly string[]
   /**
-   * Selectable larger windows the upstream declares, excluding the working
-   * budget itself. Reported, never chosen: offering the ceiling as though it
-   * were the working window would overstate the budget (the desktop app's
-   * window picker is client-side policy that appears nowhere in the catalog).
+   * Every selectable window the upstream declares, ascending. The working
+   * budget is the largest entry (users asked for maximum context), so the
+   * model table renders the smaller entries as "also available" context.
+   * Empty when the row declares no `supportedLengths`.
    */
-  largerWindows: readonly number[]
+  contextWindows: readonly number[]
 }
 
 /** One billing package and its remaining credit. */
@@ -125,8 +133,14 @@ export interface WorkBuddyWebCreditAccount {
   size: number
   expiredAt?: string
   /**
-   * The pool is granted for one day and does not carry over — the card says so
-   * instead of letting a daily reset read as an accumulating balance.
+   * 这个池子是 token 计数池：pill/进度条据此画 remain/size（WorkBuddy 的
+   * 积分制账户不带它，走「有效」窗口）。Start Plan 的池子恒为 tokens。
+   */
+  unit?: 'tokens'
+  /**
+   * 到期时刻落在今天（本地日历日）：卡片据此说「当日作废，不结转」。
+   * 多日有效期的包不置位——如实只报到期时间，不说「今天清零」。
+   * （2026-10-11 起由 expires_at 动态判定，不再硬编码当日。）
    */
   sameDay?: true
 }

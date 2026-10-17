@@ -32,10 +32,6 @@ afterEach(async () => {
   await Promise.all(CLEANUP.splice(0).map(clean => clean()))
 })
 
-const CREDENTIAL = {
-  accessToken: 'at', refreshToken: 'rt', expiresAtMs: 1234,
-  domain: 'www.codebuddy.cn', uid: 'uid-1', source: 'desktop',
-} as unknown as Parameters<WorkBuddyStatusRouteOptions['models']> extends never ? never : never
 
 /** 直接组装一份 status 文档：只喂 catalog 形状，不挂路由。 */
 async function statusWithCatalog(catalog: WorkBuddyStatusRouteOptions['catalog'] extends () => infer R ? R : never) {

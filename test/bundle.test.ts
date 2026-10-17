@@ -44,6 +44,14 @@ describe("npm bundle metadata", () => {
     it(`${name}: files 包含 cordis.patch.yml`, () => {
       expect(Array.isArray(pkg.files) && pkg.files.includes("cordis.patch.yml")).toBe(true);
     });
+    it(`${name}: files 清单固定且条条在磁盘上有货`, () => {
+      // tarball 缺文件（LICENSE 合规缺失、lib 缺入口）是安装时才炸：只钉“包含谁”
+      // 不够，还要钉清单本身不变 + 每条真实存在。改清单是合法需求，改这里即显式承认。
+      expect(pkg.files).toEqual(["lib", "client", "cordis.patch.yml", "README.md", "CHANGELOG.md", "LICENSE"]);
+      for (const entry of pkg.files as string[]) {
+        expect(existsSync(join(ROOT, "packages", name, entry)), `${name}: files 里的 ${entry} 在磁盘上存在`).toBe(true);
+      }
+    });
     it(`${name}: exports 暴露 cordis.patch.yml`, () => {
       expect(pkg.exports?.["./cordis.patch.yml"]).toBe("./cordis.patch.yml");
     });
@@ -65,14 +73,25 @@ describe("npm bundle metadata", () => {
     it(`${name}: exports 指向 lib/typert.host.js`, () => {
       expect(pkg.exports?.["./typert"]).toBe("./lib/typert.host.js");
     });
+    it(`${name}: 构建产物 lib/index.js 与 lib/typert.host.js 存在`, () => {
+      // 只钉映射字符串不够：构建若静默少产出文件，字符串检查照样绿，
+      // 而 tarball 会缺入口（宿主加载时才炸）。client.cjs 已有冒烟覆盖存在性。
+      for (const file of ["lib/index.js", "lib/typert.host.js"]) {
+        expect(existsSync(join(ROOT, "packages", name, file)), `${name}: ${file} 已构建`).toBe(true);
+      }
+    });
   }
 });
 
 describe("共享实现一致性", () => {
-  it("config-store 两包 src 一致", () => {
+  it("config-store / typert-loader 两包 src 逐字一致", () => {
     const read = (pkg: string, file: string) =>
       readFileSync(join(ROOT, "packages", pkg, "src", file), "utf8");
-    for (const file of ["config-store.ts"]) {
+    // 两包刻意零运行时依赖、可独立安装，机制只能各持一份：这里逐字比较。
+    // config-store.ts：配置存储；typert-loader.ts：typert-protocol 惰性加载
+    // 与 Remote 标记机制（原 remote.ts 的共享上半部分，2026-10-08 提出）。
+    // 任何一侧改动不同步另一侧 = 本用例红灯——这正是它的用途。
+    for (const file of ["config-store.ts", "typert-loader.ts"]) {
       expect(read("sandbox-extra-roots", file)).toBe(read("session-archive", file));
     }
   });

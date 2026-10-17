@@ -42,8 +42,8 @@ describe("detailToMarkdown", () => {
 });
 
 describe("exportFilename", () => {
-  it("有标题用标题并安全化非法字符", () => {
-    expect(exportFilename({ title: "a/b:c*d?", sessionId: "ID" })).toBe("archive-a-b-c-d.md");
+  it("有标题用标题并安全化非法字符与空格", () => {
+    expect(exportFilename({ title: "a/b:c*d? hello world", sessionId: "ID" })).toBe("archive-a-b-c-d-hello-world.md");
   });
   it("无标题回退会话 ID", () => {
     expect(exportFilename({ title: null, sessionId: "XYZ-123" })).toBe("archive-XYZ-123.md");

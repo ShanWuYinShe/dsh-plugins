@@ -24,6 +24,11 @@ DeepSeek-V4.1-Flash、Kimi-K3、MiniMax-M3、Hy3 等，国际版另有 GPT/Gemin
   单档），在 DSH 模型选择器里即可切换，请求以 `reasoning_effort` 转发。未声明
   档位的模型会在后台自动检测（目录刷新后自动补测，每模型仅少量真实请求）：
   测出上游真校验的档位即进入选择器，测出"不校验"的模型不再误给档位。
+  选择器的「默认」档对**只能在思考态工作**的模型（上游 `onlyReasoning`）会补一个
+  具体档位——优先 `high`，没有 `high` 就用可用档位里的最高一档；有非思考状态的模型
+  保持「不发档位」，由上游按自身默认执行。**两个通道同一规则**：OpenAI 形通道
+  （WorkBuddy）补顶层 `reasoning_effort`；Anthropic 形通道（ZCode）补与宿主同形的
+  `thinking` 预算对象（`enabled` + `budget_tokens`，并按同算式抬高 `max_tokens`）。
 
 - **限时免费一目了然**：状态卡片会标注当前免费 / 限时免费 / 夜间折扣的模型
   （跟随上游 `credits` 与 `tags` 实时更新）。
@@ -79,12 +84,13 @@ dsh-any-connect logout     # 移除本插件的凭据副本（不动桌面 App �
 ```
 
 默认操作国内版；`--provider <id>` 切换操作对象（`workbuddy-ai` 国际版、
-`zcode`）：
+`zcode`、`zcode-start-plan`）：
 
 ```bash
 dsh-any-connect status --provider workbuddy-ai
 dsh-any-connect doctor --provider workbuddy-ai
 dsh-any-connect status --provider zcode
+dsh-any-connect status --provider zcode-start-plan
 ```
 
 ## 配置
@@ -104,24 +110,55 @@ profile/home 的 `cordis.patch.yml`（DSH 0.1.7 起第三方 provider 的模型�
   * **WorkBuddy 5.6+ 的加密凭据**：桌面端自 5.6 起把 `accessToken` / `refreshToken` 以 `$wbEncrypted` 信封加密落盘，解密密钥只存在于它自己的 Electron 进程内。插件因此要定位 App 的可执行文件当解密助手：macOS 按各自的 bundle id 检索并校验身份，Windows 先看默认安装目录（`%LOCALAPPDATA%\Programs\WorkBuddy\WorkBuddy.exe`）再查卸载注册表。自动定位不成功时，用 `WORKBUDDY_ELECTRON_BIN`（国内版）或 `WORKBUDDY_AI_ELECTRON_BIN`（国际版）显式指定 App 主程序；插件在构造时读取该变量，**设置后需完全退出并重启 DSH**。两个产品只按各自的 App 身份（bundle id / 注册表名 / 可执行文件名）定位，不会互相误选。
   * **卡片显示未登录、但桌面端明明已登录时**：`dsh-any-connect doctor --json` 给出三件事——`desktopAuthFile.present`（文件在不在）、`desktopAuthFile.format`（`plaintext` / `encrypted` / `unrecognized`）、`atRestHelper`（加密时要去执行哪个二进制）。`format: "encrypted"` 而 `atRestHelper` 为空或不可执行，就是需要按上一条设置环境变量的情形；`signInReason` 里写着可直接照做的修法。
 - **ZCode**：macOS（`~/.zcode/v2/credentials.json` 及 `Library/Application Support`）、Windows（`%USERPROFILE%\.zcode\v2\credentials.json` 及 Local/Roaming AppData）、WSL（优先通过 WSL 挂载探测 Windows 宿主用户目录与 AppData，并自动计算跨系统解密密钥，随后回落 Linux 原生目录）、Linux（`~/.zcode/v2/credentials.json` 及 `~/.config`）；亦可用 `ZCODE_AUTH_FILE` 环境变量显式指定。
-  * **同时支持 Coding Plan 与 Start Plan**：账号下会有多把 key（team /
-    individual），**以桌面端 `setting.json` 里选中的账号计划为准**取用，
-    而不是文件里的排列顺序。选中 Start Plan（或 off-peak）时，该计划在凭据
-    里**没有**自己的 key，插件回落到账户上的 coding-plan key——也就是说
-    Start Plan 账号按**普通 ZCode 通道（150% 额度）**正常使用，模型与额度
-    显示同一口径。
+  * **Coding Plan 与 Start Plan 是两个独立连接**：`zcode`（Coding Plan）与
+    `zcode-start-plan`（Start Plan）各自有模型分组、模型名单、额度池与请求
+    通道，互不掺用；共享同一份桌面凭据文档，各取所需材料（api-key vs 账号
+    JWT + 设备号）。账号下会有多把 key（team / individual），**以桌面端
+    `setting.json` 里选中的账号计划为准**取用，而不是文件里的排列顺序。
+    Start Plan（或 off-peak）在凭据里没有自己的 key，`zcode` 连接回落到
+    账户上的 coding-plan key；`zcode-start-plan` 连接只用账号 JWT 走专属
+    通道，绝不借用 coding-plan 的 key。
+  * **模型名单（Coding Plan）**：以本机 ZCode 客户端内置目录
+    （`zcode-builtin.json` 的 `builtinModelIds`）为白名单，随客户端发版自动
+    更新——实测当前为 GLM-5.3、GLM-5.3-Flash 两个。开放平台 API 的模型目录
+    比 Coding Plan 的产品面大（端点能调通 ≠ 订阅覆盖），越界模型不展示。
+    客户端装在非标准位置或非 macOS 平台时，可用 `ZCODE_BUILTIN_CONFIG`
+    环境变量显式指定该文件路径；白名单不可得时回退内置名单（仍可用，只是
+    不跟随客户端更新）。
+  * **模型名单（Start Plan）**：以当前活动的 entitlements 为准——今日未领取
+    或已过期时分组如实隐藏（而不是展示点选必错的名单），领取后约 60 秒内
+    自动恢复。
+  * **Start Plan 专属通道与每日领取**：`zcode-start-plan` 走
+    `zcode.z.ai/api/v1/zcode-plan/anthropic`（Bearer 账号 JWT + 设备号），
+    额度扣**一次性 token 包**（各有有效期，到期作废不结转），请求失败如实
+    报错、绝不静默回落到 Coding Plan 通道。每日领取必须通过 ZCode 客户端
+    （领取需客户端渲染进程签发的验证码，纯 HTTP 侧无法生成——插件每天自动
+    探测可领活动并在卡片提示，领取动作为手动）。
   * **夜间免费只属于 Coding Plan**：23:00–09:00 免费窗是 Coding Plan 的权益，
-    Start Plan 不享受。选中 Start Plan 时插件不会给模型标「夜间免费」，也不会
-    把费率改写成 `x0.00`，而是保留基准价与 150% 额度标注。
-  * **专属模型通道未接入**：ZCode 为 Start Plan 另开了一条
-    `zcode.z.ai/api/v1/zcode-plan/anthropic`（Bearer 账号 JWT）。该通道被上游
-    风控拦截（HTTP 405 `code 3012`）：真客户端、浏览器内同源页面、HTTP/1.1 与
-    HTTP/2、以及签名/验证码/完整身份头的各种组合实测均被拦，而同刻同域的额度
-    接口返回 200。因此插件不走这条通道，Start Plan 账号统一按普通 ZCode 使用；
-    上游解除限制后，用同一条请求即可探针确认。
+    Start Plan 不享受。Start Plan 的模型不会标「夜间免费」，也不会把费率
+    改写成 `x0.00`，而是保留基准价与 150% 额度标注。
 
 > 关于 ZCode 通道的实测证据与复现脚本，见仓库 `.workwork/zcode-startplan/`
 > （该目录不入库）。
+
+## 数据与文件位置
+
+插件在 DSH home（默认 `~/.dsh`，可被 `$DSH_HOME` 覆盖）内维护三处数据，
+2026-10-11 起不再向 home 根目录平铺散文件：
+
+| 位置 | 内容 | 说明 |
+|---|---|---|
+| `storages/dsh_any_connect/auth/` | 四个变体的自有凭据副本（每变体一个 JSON） | 宿主存储域（storageDomain）：schema 校验、原子写、损坏记录自动备份。桌面端凭据可读时通常为空。 |
+| `.dsh-any-connect/` | `zcode-device-mid` 设备标识；存储域不可用时的凭据副本文件回落 | 正常情况只有设备标识一个文件。 |
+| `cache/dsh-any-connect/` | 模型目录 ×4、档位探测结果、桌面版本记录、host 心跳 | 可再生缓存，删除后自动重建。 |
+
+旧版平铺在 home 根目录的散文件（`.workbuddy-auth.json` 等）在启动时自动
+迁移进上述位置：先写入成功才删除旧文件，损坏文件原样保留并在日志告警。
+
+**不属于本插件**（只读）：WorkBuddy 桌面端的
+`~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/*.info`
+与 ZCode 桌面端的 `~/.zcode/v2/credentials.json`——这两个文件由各自的桌面
+应用管理，插件读取它们以获得登录态，从不写入。
 
 ## 发布线
 

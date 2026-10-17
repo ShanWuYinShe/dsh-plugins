@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkBuddyCredential } from '../src/auth.js'
-import { modelWithCurrentPromotion, normalizeCredits, WorkBuddyUpstreamClient } from '../src/upstream.js'
+import { chatHeaders, extractConversationId, modelWithCurrentPromotion, normalizeCredits, WorkBuddyUpstreamClient } from '../src/upstream.js'
 
 /**
  * Offline unit tests for WorkBuddyUpstreamClient, mocking the global `fetch`
@@ -383,6 +383,65 @@ describe('WorkBuddyUpstreamClient.chatStream', () => {
     const result = await new WorkBuddyUpstreamClient().chatStream(CREDENTIAL, '{}')
     expect(!result.ok && result.kind === 'server' && result.message === '(error body unavailable)').toBe(true)
   })
+
+  it('injects channel verification headers and propagates conversation_id from body', async () => {
+    let capturedHeaders: Record<string, string> = {}
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init: { headers: Record<string, string> }) => {
+      capturedHeaders = init.headers
+      return { ok: true, status: 200, body: 'stream' } as unknown as Response
+    }))
+    const result = await new WorkBuddyUpstreamClient().chatStream(
+      CREDENTIAL,
+      JSON.stringify({ conversation_id: 'conv-body-1', messages: [{ role: 'user', content: 'hi' }] }),
+    )
+    expect(result.ok).toBe(true)
+    expect(capturedHeaders['X-Conversation-ID']).toBe('conv-body-1')
+    expect(capturedHeaders['X-Session-ID']).toBe('conv-body-1')
+    expect(capturedHeaders['X-Conversation-Request-ID']).toMatch(/^[0-9a-f]{32}$/)
+    expect(capturedHeaders['X-Conversation-Message-ID']).toBe(capturedHeaders['X-Conversation-Request-ID'])
+    expect(capturedHeaders['X-Agent-Type']).toBe('chat')
+    expect(capturedHeaders['X-Agent-Intent']).toBe('craft')
+    expect(capturedHeaders['X-IDE-Type']).toBe('cli')
+    expect(capturedHeaders['X-IDE-Name']).toBe('cli')
+    expect(capturedHeaders['X-IDE-Version']).toBe('2.63.2')
+  })
+})
+
+describe('chatHeaders & channel verification', () => {
+  it('generates official CLI headers required by international & domestic gateways', () => {
+    const headers = chatHeaders(CREDENTIAL)
+    expect(headers['X-Conversation-ID']).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    expect(headers['X-Session-ID']).toBe(headers['X-Conversation-ID'])
+    expect(headers['X-Request-ID']).toMatch(/^[0-9a-f]{32}$/)
+    expect(headers['X-Conversation-Request-ID']).toBe(headers['X-Request-ID'])
+    expect(headers['X-Conversation-Message-ID']).toBe(headers['X-Request-ID'])
+    expect(headers['X-Agent-Type']).toBe('chat')
+    expect(headers['X-Agent-Intent']).toBe('craft')
+    expect(headers['X-IDE-Type']).toBe('cli')
+    expect(headers['X-IDE-Name']).toBe('cli')
+    expect(headers['X-IDE-Version']).toBe('2.63.2')
+    expect(headers['User-Agent']).toBe('CLI/2.63.2 CodeBuddy/2.63.2')
+    expect(headers['X-User-Id']).toBe('uid-1')
+  })
+
+  it('respects caller-provided conversationId and requestId overrides', () => {
+    const headers = chatHeaders(CREDENTIAL, {
+      conversationId: 'custom-conv-id-42',
+      requestId: 'custom-req-id-99',
+    })
+    expect(headers['X-Conversation-ID']).toBe('custom-conv-id-42')
+    expect(headers['X-Session-ID']).toBe('custom-conv-id-42')
+    expect(headers['X-Request-ID']).toBe('custom-req-id-99')
+    expect(headers['X-Conversation-Request-ID']).toBe('custom-req-id-99')
+    expect(headers['X-Conversation-Message-ID']).toBe('custom-req-id-99')
+  })
+
+  it('extracts conversation ID from request body when present', () => {
+    expect(extractConversationId('{"conversation_id":"conv-abc"}')).toBe('conv-abc')
+    expect(extractConversationId('{"conversationId":"conv-def"}')).toBe('conv-def')
+    expect(extractConversationId('{"messages":[]}')).toBeUndefined()
+    expect(extractConversationId('not json')).toBeUndefined()
+  })
 })
 
 describe('international catalog and promotions', () => {
@@ -427,12 +486,33 @@ describe('international catalog and promotions', () => {
     expect(seen[0]!.headers['User-Agent']).toBe('WorkBuddyAI/5.5.6')
     expect(seen[0]!.headers['X-Product']).toBe('SaaS')
     const byId = new Map(models.map(model => [model.id, model]))
-    expect(byId.get('ctx-model')?.contextWindow).toBe(200_000)
+    // 工作预算取最大可选档位（用户偏好大上下文），以输入上限封顶。
+    expect(byId.get('ctx-model')?.contextWindow).toBe(1_000_000)
     expect(byId.get('ctx-model')?.maxInputTokens).toBe(1_000_000)
     expect(byId.get('ctx-model')?.supportedContextWindows).toEqual([200_000, 1_000_000])
     // No promotions in the document: rows pass through untouched.
     expect(byId.get('hy3')?.promotions).toEqual([])
     expect(byId.get('hy3')?.billing).toEqual({ free: false })
+  })
+
+  it('clamps the working window to the input ceiling when a declared length exceeds it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeResponse(JSON.stringify({
+      code: 0,
+      msg: 'ok',
+      data: {
+        models: [{
+          id: 'over', name: 'Over', maxInputTokens: 262_144, maxOutputTokens: 32_000,
+          supportsImages: false,
+          contextWindow: { defaultLength: 131_072, supportedLengths: [131_072, 512_000] },
+        }],
+        agents: [{ name: 'cli', models: ['over'] }],
+      },
+    }))))
+    const client = new WorkBuddyUpstreamClient({
+      resolveAppVersion: async () => ({ version: '5.5.6', source: 'installed' }),
+    })
+    const models = await client.fetchModels(AI_CREDENTIAL)
+    expect(models[0]?.contextWindow).toBe(262_144)
   })
 
   it('degrades to the CLI UA when version resolution fails', async () => {
@@ -525,6 +605,26 @@ describe('WorkBuddyUpstreamClient.probeEffort', () => {
     )))
     const attempt = await new WorkBuddyUpstreamClient().probeEffort(CREDENTIAL, 'm', undefined, ctrl.signal)
     expect(attempt).toEqual({ status: 400, streamed: false, errorCode: 'invalid_reasoning_effort', detail: 'invalid_reasoning_effort' })
+  })
+
+  it('normalizes the 2026-10-11 rejection vocabulary to the canonical effort code', async () => {
+    // 实测（deepseek-v4.1-flash，2026-10-11）：同一语义的拒绝换了词表——
+    // extError.code 从 invalid_reasoning_effort 变成 invalid_request_error，顶层
+    // code 11150，msg 明说 "the reasoning effort value is not supported by the
+    // current model"。不归一化的话探针的 isEffortRejection 认不出它，整轮探测
+    // 退化成 unknown，于是「上游确实会拒绝某些档位」这个事实永远学不到。
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({
+        code: 11150,
+        msg: 'the reasoning effort value is not supported by the current model',
+        extError: { code: 'invalid_request_error', message: 'the reasoning effort value is not supported by the current model' },
+      }),
+      { status: 400 },
+    )))
+    const attempt = await new WorkBuddyUpstreamClient().probeEffort(CREDENTIAL, 'm', 'off', ctrl.signal)
+    expect(attempt.status).toBe(400)
+    expect(attempt.errorCode).toBe('invalid_reasoning_effort')
+    expect(attempt.detail).toContain('reasoning effort')
   })
 
   it('uses the international body shape and ceiling on the global region', async () => {

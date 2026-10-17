@@ -21,9 +21,11 @@
  */
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { dshCachePath } from '@deepseek-ai/dsh-home-paths'
+import { CACHE_DIRNAME } from './catalog-store.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import type { WorkBuddyEffort } from './upstream.js'
 
@@ -92,7 +94,8 @@ interface ProbeDocument {
  * observation answer for the other. The paths differ; the format does not.
  */
 export function workbuddyProbePath(filename: string = WORKBUDDY_PROBE_FILENAME): string {
-  return join(resolveDshHome(), filename)
+  // 2026-10-11 起探测缓存进宿主官方 cache 目录（见 catalog-store 的同名改动）。
+  return dshCachePath(CACHE_DIRNAME, filename.replace(/^\./u, ''))
 }
 
 /**
@@ -214,7 +217,7 @@ export class WorkBuddyProbeStore {
    * `non-validating`) replaces an existing decisive record: a transient
    * `unknown` must not erase knowledge the user already paid for.
    */
-  set(modelId: string, record: WorkBuddyProbeRecord): void {
+  async set(modelId: string, record: WorkBuddyProbeRecord): Promise<void> {
     const records = this.load()
     const existing = records[modelId]
     if (
@@ -226,16 +229,16 @@ export class WorkBuddyProbeStore {
       return
     }
     records[modelId] = record
-    this.persist()
+    await this.persist()
   }
 
   /**
    * Drop every record; used when an account leaves (sign-out or switch), so a
    * later account can never inherit its predecessor's observations.
    */
-  clear(): void {
+  async clear(): Promise<void> {
     this.records = {}
-    this.persist()
+    await this.persist()
   }
 
   /** Every record currently held, for status display. */
@@ -263,18 +266,16 @@ export class WorkBuddyProbeStore {
   }
 
   /**
-   * Write through a temporary file and rename, so a crash mid-write cannot
-   * leave a half-parsed document that reads as "no records" and silently drops
-   * every observation.
+   * Write via the official atomic writer (exclusive-create sibling +
+   * rename), so a crash mid-write cannot leave a half-parsed document
+   * that reads as "no records" and silently drops every observation.
    */
-  private persist(): void {
+  private async persist(): Promise<void> {
     const directory = dirname(this.path)
     try {
       if (!existsSync(directory)) mkdirSync(directory, { recursive: true })
       const document: ProbeDocument = { version: PROBE_FORMAT_VERSION, records: this.load() }
-      const temporary = resolve(`${this.path}.tmp`)
-      writeFileSync(temporary, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
-      renameSync(temporary, this.path)
+      await writeFileAtomic(this.path, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600 })
     } catch {
       // A state file that cannot be written must not take the plugin down: the
       // worst case is that the observation is not remembered.

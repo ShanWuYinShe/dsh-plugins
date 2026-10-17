@@ -1,0 +1,338 @@
+/**
+ * desktop-at-rest-key.ts — at-rest 保护密钥解析器（单飞、仅内存缓存、按 key id 重解析）。
+ *
+ * 2026-10-08 从 desktop-credential-protection.ts（1196 行）拆出：信封密码学、
+ * 跨平台发现共享层、Windows 注册表解析与密钥解析器原本混在一个文件里。现在按
+ * 「信封 / 发现共享层 / Windows 发现 / 密钥解析器」四分，
+ * desktop-credential-protection.ts 退化为 re-export 门面，对外 API 不变。
+ *
+ * @module dsh-any-connect/desktop-at-rest-key
+ */
+
+import { execFile } from 'node:child_process'
+import type { ExecFileOptionsWithStringEncoding } from 'node:child_process'
+import { realpathSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { join } from 'node:path'
+import { electronProfileFor, type WorkBuddyElectronProduct, type WorkBuddyVariant } from './variants.js'
+import { discoverMacosApp, discoverWindowsApp, type AppDiscoveryContext } from './desktop-app-discovery.js'
+import { defaultWorkBuddyElectronPath, electronDiscoveryFor, WORKBUDDY_DISCOVERY_BUDGET_MS, workBuddyDiscoveryTools, isExecutable, WorkBuddyElectronPathError, isENOENT, discoveryIncomplete, HELPER_SCRIPT, HELPER_SCRIPT_ARGUMENT_FLAG } from './desktop-discovery.js'
+import type { ResolvedKey, WorkBuddyElectronDiscovery, DiscoveredApp, WorkBuddyDiscoveryTools } from './desktop-discovery.js'
+import { parseAtRestPayload, deriveProtectorKey } from './desktop-auth-envelope.js'
+import { WINDOWS_REGISTRY_ROOTS, workBuddyWindowsDiscoveryTools, parseWindowsRegistryOutput, inspectWindowsElectronCandidate } from './desktop-discovery-windows.js'
+import type { WorkBuddyWindowsDiscoveryTools } from './desktop-discovery-windows.js'
+import { isWsl, helperSpawnEnv } from './wsl.js'
+
+/** The spawned helper. Separated from the provider so tests can stand it in. */
+export type WorkBuddyKeyPayloadSource = () => Promise<string>
+
+/**
+ * The at-rest key provider one variant's store should use. Shared by the
+ * plugin host and the CLI entry so the browser card and `doctor`/`status` can
+ * never disagree about which binary a variant resolves.
+ */
+export function atRestKeyProviderFor(variant: Pick<WorkBuddyVariant, 'id' | 'electron'>): WorkBuddyAtRestKeyProvider {
+  return new WorkBuddyAtRestKeyProvider({
+    product: electronProfileFor(variant),
+    // 组合根唯一嗅探真实环境的位置：WSL2 里 Linux 平台也走 Windows 发现
+    // （/mnt 自动挂载 + interop 拉起桌面 App 取 at-rest key）。
+    discovery: electronDiscoveryFor(process.platform, isWsl()),
+  })
+}
+
+/** Provider options. */
+export interface WorkBuddyAtRestKeyProviderOptions {
+  /**
+   * Which product's Electron this provider resolves. Required and the only
+   * source of product identity: it names the explicit-path env var, the bundle
+   * id / registry name / exe basename discovery must match, and the platform
+   * default. Without it the provider could not even decide which env var to
+   * read — the discovery setting alone cannot carry this (both products are
+   * `none` on Linux, yet each must read its own variable).
+   */
+  product: WorkBuddyElectronProduct
+  /** Explicit Electron binary; overrides the platform default and env. */
+  electronPath?: string
+  /** Helper timeout in milliseconds; default 10s. */
+  timeoutMs?: number
+  /**
+   * Where the payload comes from. Defaults to spawning WorkBuddy's own
+   * Electron with `ELECTRON_RUN_AS_NODE=1`; tests supply a stand-in so no
+   * test ever touches the real binary or a real key. Supplying this replaces
+   * path *resolution* too, so tests about resolution use
+   * {@link spawnHelper} instead.
+   */
+  source?: WorkBuddyKeyPayloadSource
+  /**
+   * Runs the helper at the resolved path. Distinct from {@link source}, which
+   * replaces the whole payload path: this seam keeps resolution — explicit
+   * config, platform default, discovery — real, so tests can exercise it
+   * without spawning anything.
+   */
+  spawnHelper?: (electronPath: string) => Promise<string>
+  /**
+   * Automatic discovery budget; defaults to `'none'` (see
+   * {@link WorkBuddyElectronDiscovery}). Passed explicitly per variant at the
+   * composition root, never inferred from the environment.
+   */
+  discovery?: WorkBuddyElectronDiscovery
+  /**
+   * Platform default binary, consulted only when `discovery` is enabled and no
+   * explicit path is configured. Injectable so tests can force the fallback
+   * branch without moving the real app; `null` means "no default here".
+   */
+  defaultElectronPath?: string | undefined
+  /** Discovery subprocesses; injectable so tests never spawn. */
+  tools?: WorkBuddyDiscoveryTools
+  /** Windows registry discovery subprocess; injectable so tests never spawn. */
+  windowsTools?: WorkBuddyWindowsDiscoveryTools
+  /** Platform override for deterministic discovery tests. */
+  platform?: NodeJS.Platform
+  /**
+   * WSL2 运行环境。默认运行时判定；测试显式传入以保持确定性。影响：平台
+   * 发现门（linux+WSL 走 Windows 搜索）、默认安装路径的 /mnt 推导、注册表
+   * 候选的盘符路径转换、x-bit 校验放宽、助手子进程的 WSLENV 注入。
+   */
+  wsl?: boolean
+  /**
+   * Total budget for one discovery run, covering the search and every
+   * candidate check. Injectable so tests can exercise exhaustion without
+   * waiting out the production 10s.
+   */
+  discoveryBudgetMs?: number
+}
+
+/**
+ * In-memory protector-key resolver: one spawn per key id, single-flight, never
+ * persisted. The cache is keyed by the id envelopes ask for, so an envelope
+ * sealed under a rotated key triggers exactly one fresh resolution.
+ */
+export class WorkBuddyAtRestKeyProvider {
+  /**
+   * The explicit binary, when one was configured. `undefined` here means "the
+   * caller did not name one", which is what lets discovery run — an explicit
+   * path that turns out to be unusable is an error, never a reason to look for
+   * a different app.
+   */
+  private readonly explicitPath: string | undefined
+  private readonly product: WorkBuddyElectronProduct
+  private readonly defaultPath: string | undefined
+  private readonly discovery: WorkBuddyElectronDiscovery
+  private readonly tools: WorkBuddyDiscoveryTools
+  private readonly windowsTools: WorkBuddyWindowsDiscoveryTools
+  private readonly platform: NodeJS.Platform
+  private readonly wsl: boolean
+  private readonly discoveryBudgetMs: number
+  private readonly timeoutMs: number
+  private readonly source: WorkBuddyKeyPayloadSource
+  private readonly spawnHelper: (electronPath: string) => Promise<string>
+  /**
+   * The path discovery settled on, cached only on success. A failure leaves
+   * this unset so the next attempt tries again — the user may install or move
+   * the app without restarting DSH.
+   */
+  private discoveredPath: string | undefined
+  private cache: ResolvedKey | undefined
+  private inflight: Promise<ResolvedKey> | undefined
+
+  constructor(options: WorkBuddyAtRestKeyProviderOptions) {
+    this.product = options.product
+    const fromEnv = process.env[options.product.envVar]?.trim()
+    const envPath = fromEnv === undefined || fromEnv === '' ? undefined : fromEnv
+    // Explicit sources are authoritative and mutually exclusive with
+    // discovery: naming a binary means "use this one", so an unusable one is
+    // an error, not an invitation to go looking for another app.
+    this.explicitPath = options.electronPath ?? envPath
+    this.discovery = options.discovery ?? 'none'
+    this.platform = options.platform ?? process.platform
+    this.wsl = options.wsl ?? isWsl()
+    this.defaultPath = this.discovery === 'none'
+      ? undefined
+      : options.defaultElectronPath === undefined
+        // WSL 的 /mnt 默认布局推导只在 Windows 搜索下有意义；macOS 发现配置
+        // （哪怕配错平台）沿用 macOS 默认路径语义，不被 WSL 分支劫持。
+        ? defaultWorkBuddyElectronPath(options.product, this.platform, this.discovery === 'windows-workbuddy' && this.wsl)
+        : options.defaultElectronPath ?? undefined
+    this.tools = options.tools ?? workBuddyDiscoveryTools(options.product.macOS.bundleId)
+    this.windowsTools = options.windowsTools ?? workBuddyWindowsDiscoveryTools(this.wsl)
+    this.discoveryBudgetMs = options.discoveryBudgetMs ?? WORKBUDDY_DISCOVERY_BUDGET_MS
+    this.timeoutMs = options.timeoutMs ?? 10_000
+    this.spawnHelper = options.spawnHelper ?? (path => this.spawnAt(path))
+    this.source = options.source ?? (() => this.spawnPayload())
+  }
+
+  /**
+   * The binary the default helper would use, for diagnostics.
+   *
+   * Reports a *discovery result* once one exists, so diagnostics describe what
+   * would actually run rather than the default that was bypassed. Discovery
+   * itself stays in {@link resolveElectronPath}: this accessor never triggers a
+   * search (the constructor must remain I/O-free, and callers may ask before
+   * any resolution has happened).
+   */
+  helperPath(): string | undefined {
+    if (this.explicitPath !== undefined) return this.explicitPath
+    if (this.discovery === 'none') return undefined
+    return this.discoveredPath ?? this.defaultPath
+  }
+
+  /**
+   * A protector key matching one of the requested envelope key ids. The first
+   * id the cache answers wins; otherwise one spawn resolves the current key,
+   * which must match a request — a mismatch means the envelopes were sealed by
+   * a different install than the one this machine now runs, and no key we can
+   * reach will open them.
+   */
+  async protectorKeyFor(requested: readonly string[]): Promise<Buffer> {
+    if (requested.length === 0) {
+      throw new WorkBuddyElectronPathError(
+        'encrypted-credential-unreadable',
+        'encrypted desktop credential carries no key ids',
+      )
+    }
+    const cached = this.cache
+    if (cached !== undefined && requested.includes(cached.keyId)) return cached.key
+    this.inflight ??= this.source().then(text => this.ingest(text))
+      .finally(() => {
+        this.inflight = undefined
+      })
+    const resolved = await this.inflight
+    if (!requested.includes(resolved.keyId)) {
+      throw new WorkBuddyElectronPathError(
+        'encrypted-credential-unreadable',
+        `WorkBuddy's current at-rest key (id ${resolved.keyId}) does not match the credential's envelope (id ${requested.join(' or ')});`
+        + ' the desktop credential was sealed by a different WorkBuddy installation',
+      )
+    }
+    return resolved.key
+  }
+
+  private ingest(text: string): ResolvedKey {
+    const payload = parseAtRestPayload(text)
+    if (payload === undefined) {
+      throw new WorkBuddyElectronPathError(
+        'encrypted-credential-unreadable',
+        'WorkBuddy key helper returned an unusable at-rest payload (expected {version:1, atRestSecretKey})',
+      )
+    }
+    const key = deriveProtectorKey(payload.atRestSecretKey)
+    const resolved: ResolvedKey = {
+      key,
+      keyId: createHash('sha256').update(key).digest('hex').slice(0, 16),
+    }
+    this.cache = resolved
+    return resolved
+  }
+
+  /**
+   * The binary to spawn, or a diagnosable error saying why there is none.
+   *
+   * Order is the contract: an explicit path is used as-is and never falls back;
+   * discovery runs only for a provider that was configured for it, and only
+   * after the platform default has been tried and found unusable.
+   */
+  private discoverMacosApp(): Promise<string> {
+    return discoverMacosApp(this.discoveryContext())
+  }
+
+  private discoverWindowsApp(): Promise<string> {
+    return discoverWindowsApp(this.discoveryContext())
+  }
+
+  /** 发现流程的入参（类字段打包）。 */
+  private discoveryContext(): AppDiscoveryContext {
+    return {
+      product: this.product,
+      tools: this.tools,
+      windowsTools: this.windowsTools,
+      platform: this.platform,
+      discoveryBudgetMs: this.discoveryBudgetMs,
+      wsl: this.wsl,
+    }
+  }
+
+  private async resolveElectronPath(): Promise<string> {
+    if (this.explicitPath !== undefined) {
+      if (!isExecutable(this.explicitPath, { wsl: this.wsl })) {
+        throw new WorkBuddyElectronPathError(
+          'electron-path-invalid',
+          `the configured ${this.product.productName} Electron binary is not available at ${this.explicitPath};`
+          + ` check ${this.product.envVar} or unset it to let the plugin look for the app itself`,
+        )
+      }
+      return this.explicitPath
+    }
+    if (this.discovery === 'none') {
+      // A platform without a verified layout: "not configured", never "we
+      // searched and failed".
+      throw new WorkBuddyElectronPathError(
+        'electron-binary-unavailable',
+        `no ${this.product.productName} Electron binary is configured for this platform;`
+        + ` set ${this.product.envVar} to the app's Electron binary`,
+      )
+    }
+    // The default path is the ordinary case and costs one stat; discovery is
+    // reserved for the installations the default misses.
+    if (this.defaultPath !== undefined && isExecutable(this.defaultPath, { wsl: this.wsl })) return this.defaultPath
+    // A previously discovered path is re-checked rather than trusted: the app
+    // may have been moved or removed since, and a stale path must not win.
+    if (this.discoveredPath !== undefined) {
+      if (isExecutable(this.discoveredPath, { wsl: this.wsl })) return this.discoveredPath
+      this.discoveredPath = undefined
+    }
+    const found = this.discovery === 'macos-workbuddy'
+      ? await this.discoverMacosApp()
+      : await this.discoverWindowsApp()
+    this.discoveredPath = found
+    return found
+  }
+
+
+
+  private async spawnPayload(): Promise<string> {
+    return await this.spawnHelper(await this.resolveElectronPath())
+  }
+
+  private async spawnAt(electronPath: string): Promise<string> {
+    return await new Promise<string>((resolve, reject) => {
+      execFile(electronPath, [HELPER_SCRIPT_ARGUMENT_FLAG, HELPER_SCRIPT], {
+        timeout: this.timeoutMs,
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+        encoding: 'utf8',
+        // WSL 下 ELECTRON_RUN_AS_NODE 还要经 WSLENV 的 /w 方向送进 Windows
+        // 侧进程（interop 只传 WSLENV 点名的变量），否则助手会以完整 GUI
+        // 形态启动。env 组装在 wsl.ts（helperSpawnEnv，纯函数可测）。
+        env: helperSpawnEnv(process.env, this.wsl),
+        // stdin 显式断开：interop 的控制台子进程挂在继承的 stdin 上会阻塞
+        // （WSL2 实测；守护进程给子进程的任何 stdin 同理）。
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // 运行时 execFile 接受 stdio，@types 未声明——断言收口在此。
+      } as ExecFileOptionsWithStringEncoding, (error, stdout) => {
+        if (error !== null && error !== undefined) {
+          // Code and reason only: stdout/stderr can carry paths or crash dumps,
+          // and the payload must never appear in a message.
+          const reason = error.killed === true
+            ? `timed out or was killed after ${String(this.timeoutMs)}ms`
+            : error.code !== undefined
+              ? `exited with code ${String(error.code)}`
+              : 'could not be started'
+          reject(new WorkBuddyElectronPathError(
+            'encrypted-credential-unreadable',
+            `the WorkBuddy key helper (${electronPath}) ${reason}`,
+          ))
+          return
+        }
+        const output = stdout.trim()
+        if (output === '') {
+          reject(new WorkBuddyElectronPathError(
+            'encrypted-credential-unreadable',
+            `the WorkBuddy key helper (${electronPath}) produced no payload`,
+          ))
+          return
+        }
+        resolve(output)
+      })
+    })
+  }
+}

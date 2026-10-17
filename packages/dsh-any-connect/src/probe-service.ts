@@ -151,7 +151,7 @@ export class WorkBuddyProbeService {
           outcome.efforts,
           account,
         )
-        this.options.store.set(modelId, record)
+        await this.options.store.set(modelId, record)
         if (outcome.validation === 'unknown') {
           return { state: 'unavailable', reason: outcome.reason }
         }

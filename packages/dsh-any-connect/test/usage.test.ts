@@ -124,15 +124,19 @@ describe('WorkBuddy usage querier', () => {
   it('registers a querier for each variant it serves', async () => {
     const { registry } = await boot({ signedIn: false })
     await vi.waitFor(() => {
-      expect(registry.registered.map(entry => entry.provider).sort()).toEqual(['workbuddy', 'workbuddy-ai', 'zcode', 'zcode-start-plan'])
-    })
+      expect(registry.registered.map(entry => entry.provider).sort()).toEqual(['opencode-free', 'workbuddy', 'workbuddy-ai', 'zcode', 'zcode-start-plan'])
+    }, { timeout: 5000 })
     expect(registry.registered.find(entry => entry.provider === 'workbuddy')?.displayName).toBe('WorkBuddy')
     expect(registry.registered.find(entry => entry.provider === 'zcode')?.displayName).toBe('ZCode')
+    expect(registry.registered.find(entry => entry.provider === 'opencode-free')?.displayName).toBe('OpenCode Free')
   })
+
 
   it('reports a single total window summing live packages', async () => {
     const { registry } = await boot({ signedIn: true })
-    await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })
+    // 等**这个** provider 注册好：只看 length>0 可能被另一个 provider 先满足，
+    // 随后的 find(...)! 就会在未注册时炸（曾出现偶发失败）。
+    await vi.waitFor(() => { expect(registry.registered.some(candidate => candidate.provider === 'workbuddy')).toBe(true) }, { timeout: 5000 })
 
     vi.stubGlobal('fetch', vi.fn(async () => billingBody([
       { PackageName: 'Monthly', CycleCapacitySize: 100, CycleCapacityRemain: 24, CapacityRemain: 24, RemainCycles: 0, Status: 0 },
@@ -153,7 +157,9 @@ describe('WorkBuddy usage querier', () => {
 
   it('reports an empty window list when every package is drained', async () => {
     const { registry } = await boot({ signedIn: true })
-    await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })
+    // 等**这个** provider 注册好：只看 length>0 可能被另一个 provider 先满足，
+    // 随后的 find(...)! 就会在未注册时炸（曾出现偶发失败）。
+    await vi.waitFor(() => { expect(registry.registered.some(candidate => candidate.provider === 'workbuddy')).toBe(true) }, { timeout: 5000 })
     vi.stubGlobal('fetch', vi.fn(async () => billingBody([
       { PackageName: 'Spent', CycleCapacitySize: 10, CycleCapacityRemain: 0, CapacityRemain: 0, RemainCycles: 0, Status: 0 },
     ])))
@@ -164,7 +170,9 @@ describe('WorkBuddy usage querier', () => {
 
   it('propagates a billing failure so the registry records it', async () => {
     const { registry } = await boot({ signedIn: true })
-    await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })
+    // 等**这个** provider 注册好：只看 length>0 可能被另一个 provider 先满足，
+    // 随后的 find(...)! 就会在未注册时炸（曾出现偶发失败）。
+    await vi.waitFor(() => { expect(registry.registered.some(candidate => candidate.provider === 'workbuddy')).toBe(true) }, { timeout: 5000 })
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })))
 
     const entry = registry.registered.find(candidate => candidate.provider === 'workbuddy')!
@@ -177,7 +185,9 @@ describe('WorkBuddy usage querier', () => {
 
   it('omits the limit when no package reports a size', async () => {
     const { registry } = await boot({ signedIn: true })
-    await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })
+    // 等**这个** provider 注册好：只看 length>0 可能被另一个 provider 先满足，
+    // 随后的 find(...)! 就会在未注册时炸（曾出现偶发失败）。
+    await vi.waitFor(() => { expect(registry.registered.some(candidate => candidate.provider === 'workbuddy')).toBe(true) }, { timeout: 5000 })
     vi.stubGlobal('fetch', vi.fn(async () => billingBody([
       { PackageName: 'NoSize', CycleCapacityRemain: 3, CapacityRemain: 3, RemainCycles: 0, Status: 0 },
     ])))
@@ -212,6 +222,53 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
       { packageName: 'Only (VALID)', remain: 0, size: 1 },
     ])).toEqual([{ id: 'plan', label: 'Only', unit: '有效' }])
   })
+
+  it('Start Plan 的当日 token 池带真实数字,pill 才有剩余额度可显示', () => {
+    // billing/balance 的实测形状(2026-10-06):remain/size 是真实 token 数,
+    // unit: 'tokens'（2026-10-11 起进度条判据是 unit，sameDay 只管文案口径）。
+    // 窗口缺 remain 时 pill 只渲染「套餐名: 有效」——数字被
+    // 丢掉等于用户在聊天框下方看不到剩余额度。
+    expect(WorkBuddy.currentPlanWindow([
+      { packageName: 'GLM-5.3-Flash (有效)', planName: 'ZCode Trust Build', remain: 91_464_568, size: 100_000_000, sameDay: true, unit: 'tokens', expiredAt: '2026-10-06T16:00:00.000Z' },
+    ])).toEqual([{
+      id: 'plan',
+      label: 'GLM-5.3-Flash',
+      remain: 91_464_568,
+      limit: 100_000_000,
+      unit: 'tokens',
+      resetsAt: '2026-10-06T16:00:00.000Z',
+    }])
+    // 当日用完(remain=0):照样带数字——红色空条正是「今天用完了」的语义。
+    expect(WorkBuddy.currentPlanWindow([
+      { packageName: 'GLM-5.3-Flash (有效)', remain: 0, size: 100_000_000, sameDay: true, unit: 'tokens' },
+    ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 0, limit: 100_000_000, unit: 'tokens' }])
+    // size = 0(理论不应出现)防御:退回「有效」展示,避免 limit 0 的除零与无意义进度条。
+    expect(WorkBuddy.currentPlanWindow([
+      { packageName: 'Odd (有效)', remain: 5, size: 0, sameDay: true, unit: 'tokens' },
+    ])).toEqual([{ id: 'plan', label: 'Odd', unit: '有效' }])
+    // Coding Plan 订阅(无 sameDay,remain/size=1 的有效性标志)维持原样。
+    expect(WorkBuddy.currentPlanWindow([
+      { packageName: 'GLM Coding Pro (有效)', planName: 'GLM Coding Pro', remain: 1, size: 1 },
+    ])).toEqual([{ id: 'plan', label: 'GLM Coding Pro', unit: '有效' }])
+  })
+
+  it('Start Plan 未领取时报「今日待领取」，而不是「不上报额度」', () => {
+    // 每日 00:00 后新池子还没发放/领取：accounts 为空（billing/balance 如实返回
+    // 空 balances）。pill 若落到通用的「该 provider 不上报额度」，用户会以为额度
+    // 功能坏了——额度接口其实是通的，只是今天还没有池子。
+    expect(WorkBuddy.startPlanWindows([])).toEqual([{ id: 'plan', label: 'Start Plan', unit: '今日待领取' }])
+    // 有池子时仍然报真实 token 数（unit: 'tokens' 声明 token 计数池）。
+    expect(WorkBuddy.startPlanWindows([
+      { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, sameDay: true, unit: 'tokens' },
+    ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens' }])
+    // 多日有效期的池子同样画进度条（sameDay 只管文案口径，不再决定进度条
+    // 的有无）——unit: 'tokens' 在就能画。过期时刻先算成常量再两侧共用：
+    // 断言两边各取一次 Date.now() 会偶发跨毫秒边界，toISOString 差 1ms 导致 flaky。
+    const expiry = new Date(Date.now() + 3 * 86_400_000).toISOString()
+    expect(WorkBuddy.startPlanWindows([
+      { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, unit: 'tokens', expiredAt: expiry },
+    ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens', resetsAt: expiry }])
+  })
 })
 
 it('reports the upstream plan name for ZCode instead of a hardcoded label', async () => {
@@ -237,9 +294,69 @@ it('reports the upstream plan name for ZCode instead of a hardcoded label', asyn
     expect(snapshot.windows[0]?.label).toBe('ZCode Trust Build')
   })
 
+  it('Coding Plan 的 pill 报 5 小时 / 7 天窗口（客户端同款 monitor 端点）', async () => {
+    const { registry } = await boot({ signedIn: false })
+    const credPath = join(root!, 'zcode-credentials.json')
+    await writeFile(credPath, JSON.stringify({
+      'account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:57271768622479063:api-key': 'id.secret',
+    }))
+    vi.stubEnv('ZCODE_AUTH_FILE', credPath)
+    const quotaBody = {
+      code: 200,
+      data: {
+        level: 'pro',
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10, nextResetTime: 1_791_403_544_725 },
+          { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 24, nextResetTime: 1_791_865_446_983 },
+        ],
+      },
+    }
+    const subscriptionBody = {
+      code: 200,
+      data: [{ productName: 'GLM Coding Pro', status: 'VALID', expireTime: 1_790_697_600 }],
+    }
+    // 按 URL 分流：额度端点与订阅端点返回不同形状，避免「谁都能解析」的假绿。
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => new Response(JSON.stringify(
+      String(url).includes('/api/monitor/usage/quota/limit') ? quotaBody : subscriptionBody,
+    ), { status: 200, headers: { 'content-type': 'application/json' } })))
+
+    const entry = registry.registered.find(candidate => candidate.provider === 'zcode')!
+    const snapshot = await entry.query({ provider: 'zcode' })
+    expect(snapshot.windows.map(window => window.label)).toEqual(['5 小时', '7 天'])
+    // percentage 是已用：10% → 剩 90%；24% → 剩 76%。
+    expect(snapshot.windows[0]).toMatchObject({ remain: 90, limit: 100, unit: '%' })
+    expect(snapshot.windows[1]).toMatchObject({ remain: 76, limit: 100, unit: '%' })
+    expect((snapshot as { plan?: string }).plan).toBe('GLM Coding Pro')
+  })
+
+  it('额度端点不可用 / 形状不符时回退订阅有效性窗口', async () => {
+    const { registry } = await boot({ signedIn: false })
+    const credPath = join(root!, 'zcode-credentials.json')
+    await writeFile(credPath, JSON.stringify({
+      'account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:57271768622479063:api-key': 'id.secret',
+    }))
+    vi.stubEnv('ZCODE_AUTH_FILE', credPath)
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+      if (String(url).includes('/api/monitor/usage/quota/limit')) {
+        return new Response('{"code":200,"data":{}}', { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        code: 200,
+        data: [{ productName: 'GLM Coding Pro', status: 'VALID', expireTime: 1_790_697_600 }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }))
+
+    const entry = registry.registered.find(candidate => candidate.provider === 'zcode')!
+    const snapshot = await entry.query({ provider: 'zcode' })
+    expect(snapshot.windows.map(window => window.label)).toEqual(['GLM Coding Pro'])
+    expect(snapshot.windows[0]?.remain).toBeUndefined()
+  })
+
   it('carries the variant display name through to the snapshot', async () => {
     const { registry } = await boot({ signedIn: true })
-    await vi.waitFor(() => { expect(registry.registered.length).toBeGreaterThan(0) })
+    // 等**这个** provider 注册好：只看 length>0 可能被另一个 provider 先满足，
+    // 随后的 find(...)! 就会在未注册时炸（曾出现偶发失败）。
+    await vi.waitFor(() => { expect(registry.registered.some(candidate => candidate.provider === 'workbuddy-ai')).toBe(true) }, { timeout: 5000 })
     vi.stubGlobal('fetch', vi.fn(async () => billingBody([
       { PackageName: 'AI pack', CapacityRemain: 8, CapacitySize: 30, Status: 0 },
     ])))

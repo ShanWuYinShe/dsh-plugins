@@ -1,3 +1,80 @@
+## 0.4.22 (2026-10-17)
+
+### 新增与优化
+
+* **适配 DSH 0.2.1-rc.2 正式版（稳定线）**：依赖基线与 `dsh.host` 对齐 `^0.2.1-rc.2`；
+* **UI 交互与暗色模式对比度优化**：按钮文字颜色对齐官方 token（对比度 18.9:1），优化卡片与警告提示块对比度，增加保存旋转指示器；
+* **路径问题国际化文案与提示增强**：补齐危险根、相对路径等异常的容错与本地化提示；
+* **架构模块化重构**：客户端逻辑与配置校验拆分为单一职责模块，补充测试回归。
+
+## 0.4.22-alpha.10 (2026-10-16)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.1-alpha.5` 预发布线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-alpha.5`。
+
+## 0.4.22-alpha.9 (2026-10-16)
+
+### 优化
+
+* **根目录概览预览文案优化**：优化单根目录与多根目录预览逻辑，提供直观路径描述，防止单根目录时文案混淆。
+
+## 0.4.22-alpha.8 (2026-10-16)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.1-alpha.4` 预发布线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-alpha.4`。
+
+## 0.4.22-alpha.7 (2026-10-15)
+
+### 修复
+
+* **主保存按钮与警告条暗色模式对比度修复**：在深色主题下主按钮背景解析为 near-white，此前文本色使用了同样为 near-white 的 token 导致白底白字无法辨识；现将按钮文字对齐官方按钮规范 `var(--dsw-alias-label-primary-foreground, #fff)`，深色下对比度达到 18.9:1。同步为保存中的按钮补充旋转指示器。
+* **恢复路径问题提示的本地化文案**：补充此前误删的 5 种问题类型（`rootDanger`、`rootHomeAncestor`、`rootInvalid`、`rootDuplicate`、`rootSystem`）在中英文字典中的定义与 `{n}`、`{v}` 占位符，并在卡片组件中添加兜底容错，避免输入危险根或相对路径时文案异常。
+* **标签与警告提示块对比度优化**：`.ser_card` 显式声明主文本色，`.ser_badge` 与 `.ser_problem--warn` 改用专用标签色 token 并调谐警告背景浓度，彻底解决亮暗主题下黄底黄字可读性不足的问题。
+
+## 0.4.22-alpha.6 (2026-10-14)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.1-alpha.3` 预发布线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-alpha.3`。
+
+## 0.4.22-alpha.5 (2026-10-10)
+
+### 修复
+
+* **macOS 上配了额外可写根的会话，每条受限 bash 命令都执行不了**：`confine-runners.ts` 的 `seatbeltArgv` 重建 argv 时用 `a.slice(sbSep + 1)` 取 `--` 之后的 inner 命令，却没把 `"--"` 本身补回去——`sandbox-exec` 收到 `[-p, <profile>, bash, -c, …]` 会把 `bash` 当 profile/参数解析，命令无法执行。触发条件是三条同时成立（macOS + 配了 `extraWritableRoots` + profile 文本通过漂移自检），Linux 侧走 bwrap/Landlock 不受影响。**该缺陷自 0.4.11 起的所有已发布版本都存在**（引入于 `修复: 全仓审查问题集中修复`），本轮补测时发现：既有用例只覆盖「拒绝重建」的 fail-closed 分支，成功路径零覆盖，故长期未被发现。修复为补回 `"--"`，并补成功路径回归（断言分隔符保留且位置为 3、inner 命令原样、额外根进 profile）。
+
+## 0.4.22-alpha.4 (2026-10-10)
+
+### 修复
+
+* **设置页保存的目录列表整体失效**：client 打包脚本（`scripts/build.mjs`）对 bundle 按行加缩进时，会把 esbuild minify 产出的跨行模板字面量（`split("\n")` 被 minify 成含真换行的模板字面量）内部注入缩进空格，分隔符变成 `split("\n    ")`——多行文本不再被拆分成数组，整段文本作为单元素落库后被 `normalizeRoots` 拒绝，保存静默失效。打包改为 body 直接嵌入不做按行缩进（该缺陷影响所有 client 源码含 `\n` 字面量的包，单测直跑源码不经 minify+缩进故未覆盖，端到端核查发现）。
+
+### 变更
+
+* **配置持久化切换官方 configEditor**：设置页保存经 `ctx.configEditor.edit()` 写入当前 profile 的 `cordis.patch.yml` 本行 config（与 Web 设置编辑器同一途径，dsh-base 内置），由 Loader 对账后 reload 生效。退役自建的 `~/.dsh/plugins/<name>/config.json` 目录（harness 官方目录布局中不存在该目录，清理时会连带丢配置；且 `$DSH_HOME` 只读环境变量、未走宿主完整解析链）。
+* **配置作用域从全局一份变为 per-profile**（官方 patch 模型即如此）：desktop 与 web profile 各自保存各自的插件配置。
+* **旧配置自动迁移**：0.4.x 的 `~/.dsh/plugins/sandbox-extra-roots/config.json` 在启动时一次性并入 profile patch，旧文件改名 `*.imported` 保留（官方 settings.yaml.imported 同款模式）。
+
+## 0.4.22-alpha.3 (2026-10-09)
+
+### 修复
+
+* **依赖对齐宿主 `0.2.1-alpha.2`**：`@deepseek-ai/dsh-sandbox`、`dsh-typert-protocol` range 升到 `^0.2.1-alpha.2`。
+## 0.4.22-alpha.2 (2026-10-05)
+
+### 修复
+
+* **依赖树整体对齐宿主 `0.2.1-alpha.1` 线，清除旧基线残留**：`bun.lock` 从零重新解析，清掉上一轮适配遗留的 `0.2.0-rc.2` 旧线子树（`packages` 条目 611 → 362），`@deepseek-ai/*` 不再同名双版本并存；`cordis` 可选 peer 随之修正（`cordis-plugin-include` 1.0.9 → 1.0.10-alpha.1、`cordis-plugin-group` 1.0.4 → 1.0.5-alpha.1）。
+* **工具链依赖升到最新补丁**：`@types/node` `^26.6.3` → `^26.6.4`、`jsdom` `^30.1.1` → `^30.1.2`。
+
+## 0.4.22-alpha.1 (2026-10-04)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.1-alpha.1` 预发布线**：依赖范围与 `dsh.host` 对齐 `~0.2.1-alpha.1`。
+
 ## 0.4.21 (2026-09-29)
 
 ### 优化

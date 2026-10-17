@@ -63,15 +63,16 @@ async function buildClient(pkgDir, pkgName, pkgId) {
   if (body.includes("window.__ModuleLoader__.load")) {
     throw new Error(`client bundle for ${pkgName} is double-wrapped`);
   }
+  // body 直接嵌入、不做按行缩进：minify 会把 "\n" 这类字符串字面量优化成
+  // 跨行的模板字面量（真换行更短），按行加缩进会把空格注进模板字面量内部、
+  // 改变字符串值——曾把设置卡片的 split("\n") 变成 split("\n    ")，保存的
+  // 目录列表整体失效。缩进只是美观，正确性优先。
   const wrapped = `window.__ModuleLoader__.load({
   id: ${JSON.stringify(pkgId)},
   factory: (require) => {
     var module = { exports: {} };
     var exports = module.exports;
-${body
-  .split("\n")
-  .map((line) => (line === "" ? line : "    " + line))
-  .join("\n")}
+${body}
     return module.exports;
   }
 });

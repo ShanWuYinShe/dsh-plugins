@@ -72,6 +72,9 @@ function provider(tools: WorkBuddyWindowsDiscoveryTools, defaultElectronPath = j
     product: electronProfileFor(CN_VARIANT),
     discovery: 'windows-workbuddy',
     platform: 'win32',
+    // 钉死非 WSL：WSL 的路径转换与 x-bit 放宽在 wsl-electron-discovery.test.ts
+    // 专测；不钉的话在 WSL 宿主上跑会因 ambient isWsl() 漂移出本用例的口径。
+    wsl: false,
     defaultElectronPath,
     windowsTools: tools,
     spawnHelper: async () => PAYLOAD_TEXT,

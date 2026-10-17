@@ -191,6 +191,16 @@ describe('moonshotUsage', () => {
     ])
   })
 
+  it('baseURL 已带 /v1 时不重复追加（否则必然 404）', async () => {
+    stubFetch({
+      'https://gw.example/api/v1/users/me/balance': {
+        body: { data: { available_balance: 1, cash_balance: 1, voucher_balance: 0 } },
+      },
+    })
+    const snapshot = await moonshotUsage({ provider: 'moonshot', baseURL: 'https://gw.example/api/v1', apiKey: 'k' })
+    expect(snapshot.windows[0]?.remain).toBe(1)
+  })
+
   it('omits a zero voucher and a cash row that duplicates the total', async () => {
     stubFetch({
       'https://api.moonshot.cn/v1/users/me/balance': {
@@ -320,6 +330,25 @@ describe('bigmodelUsage', () => {
       },
     ])
   })
+
+  it('falls back to subscription list under the configured baseURL first（代理/专线不直连公网）', async () => {
+    stubFetch({
+      'https://proxy.example/api/monitor/usage/quota/limit': { status: 404, body: {} },
+      'https://proxy.example/api/biz/subscription/list': {
+        body: {
+          code: 200,
+          data: {
+            list: [
+              { productName: 'GLM Coding Pro', status: 'VALID', expireTime: '2026-10-01 00:00:00' },
+            ],
+          },
+        },
+      },
+    })
+    const snapshot = await bigmodelUsage({ provider: 'bigmodel', baseURL: 'https://proxy.example', apiKey: 'sk-glm' })
+    expect(snapshot.plan).toBe('GLM Coding Pro')
+    expect(snapshot.windows).toHaveLength(1)
+  })
 })
 
 describe('minimaxUsage', () => {
@@ -412,6 +441,22 @@ describe('openaiUsage', () => {
       },
     ])
   })
+
+  it('falls back to /v1/dashboard paths when the bare paths 404', async () => {
+    stubFetch({
+      'https://api.openai.com/dashboard/billing/subscription': { status: 404, body: {} },
+      'https://api.openai.com/v1/dashboard/billing/subscription': {
+        body: {
+          total_available: 7,
+          hard_limit_usd: 10,
+        },
+      },
+    })
+    const snapshot = await openaiUsage({ provider: 'openai', apiKey: 'sk-test' })
+    expect(snapshot.windows).toEqual([
+      { id: 'balance', label: 'Balance', remain: 7, limit: 10, unit: 'usd' },
+    ])
+  })
 })
 
 describe('opencodeUsage', () => {
@@ -466,5 +511,27 @@ describe('opencodeUsage', () => {
     const snapshot = await opencodeUsage({ provider: 'opencode-go', apiKey: 'sk-test' })
     expect(snapshot.windows).toEqual([])
     expect(snapshot.error).toBe('the usage endpoint reported no quota windows')
+  })
+
+  it('echoes the queried route instead of hardcoding opencode-go', async () => {
+    stubFetch({
+      'https://opencode.ai/zen/go/v1/usage': {
+        body: { usage: { rolling: { percent: 8 } } },
+      },
+    })
+    const snapshot = await opencodeUsage({ provider: 'opencode', apiKey: 'sk-test' })
+    expect(snapshot.provider).toBe('opencode')
+    expect(snapshot.plan).toBe('OpenCode')
+  })
+
+  it('appends /v1 for a custom baseURL without it（回退路径非死代码）', async () => {
+    stubFetch({
+      'https://gw.example/usage': { status: 404, body: {} },
+      'https://gw.example/v1/usage': {
+        body: { usage: { rolling: { percent: 10 } } },
+      },
+    })
+    const snapshot = await opencodeUsage({ provider: 'opencode-go', baseURL: 'https://gw.example', apiKey: 'sk-test' })
+    expect(snapshot.windows[0]?.remain).toBe(90)
   })
 })

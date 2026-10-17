@@ -12,9 +12,10 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { readFile, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { dshCachePath } from '@deepseek-ai/dsh-home-paths'
+import { CACHE_DIRNAME } from './catalog-store.js'
 import { ANYCONNECT_VERSION } from './version.js'
 
 /** Basename of the host heartbeat file inside the Harness home. */
@@ -36,7 +37,8 @@ export interface WorkBuddyHostHeartbeat {
 
 /** Absolute path of the host heartbeat file. */
 export function workbuddyHostHeartbeatPath(): string {
-  return join(resolveDshHome(), WORKBUDDY_HOST_HEARTBEAT_FILENAME)
+  // 2026-10-11 起进宿主官方 cache 目录（见 catalog-store 的同名改动）。
+  return dshCachePath(CACHE_DIRNAME, WORKBUDDY_HOST_HEARTBEAT_FILENAME.replace(/^\./u, ''))
 }
 
 /**
@@ -53,6 +55,8 @@ export async function writeHostHeartbeat(): Promise<void> {
     pid: process.pid,
   }
   try {
+    // 2026-10-11 起落点在 cache 子目录：全新 home 首次写入时目录尚不存在。
+    await mkdir(dirname(workbuddyHostHeartbeatPath()), { recursive: true })
     await writeFile(workbuddyHostHeartbeatPath(), JSON.stringify(document), 'utf8')
   } catch {
     // Non-fatal: the CLI status will show "heartbeat missing".

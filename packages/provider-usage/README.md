@@ -116,6 +116,10 @@ interface UsageWindow {
 
 ## 已知边界
 
+- 无 key 的 `deepseek` 路由读宿主 `deepseekAccount` 服务（`@deepseek-ai/dsh-deepseek-account`，
+  同本包 optionalDependencies 的版本基线）：`getBalance(AccountClientMetadata)` 返回
+  `{status:'ready', value, bonusWallets} | {status:'failed'} | null`。该服务由宿主挂载，
+  非本包提供；宿主改形状时 typecheck 直接红灯（不手写影子类型）。
 - 额度口径完全取决于 provider 是否提供只读余额接口。**没有该接口的 provider
   （如部分网关/自建服务）就是没有**——本包显示「未提供额度查询」或「不上报额度」，
   不会伪造数据。用户提到的「5 小时额度 / 周额度」在 WorkBuddy 上游并不存在：

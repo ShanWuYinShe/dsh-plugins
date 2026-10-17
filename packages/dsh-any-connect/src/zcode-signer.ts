@@ -12,6 +12,7 @@
 import crypto from 'node:crypto'
 import os from 'node:os'
 import { withTimeout } from './timeout.js'
+import { httpStatusLabel } from './upstream-shared.js'
 
 const KDF_SALT = 'WD_CLIENT_SIGN_KDF_SALT'
 const INFO_HMAC = 'getSignKey_hmac'
@@ -145,7 +146,7 @@ export class ZCodeClientSigner {
     )
 
     if (!res.ok) {
-      throw new Error(`ZCode signing handshake HTTP failed: ${res.status}`)
+      throw new Error(`ZCode signing handshake HTTP failed: ${httpStatusLabel(res.status)}`)
     }
 
     const json = (await res.json()) as { code?: number; msg?: string; data?: { privateCipher?: string } }

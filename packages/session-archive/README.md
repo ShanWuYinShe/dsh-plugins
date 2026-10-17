@@ -77,7 +77,7 @@ dsh plugin --profile web remove @chaoset/session-archive
 
 ## 配置
 
-config 字段（`cordis.patch.yml` 或 `~/.dsh/plugins/session-archive/config.json`）：
+config 字段（`cordis.patch.yml`；0.3.x 的 `~/.dsh/plugins/session-archive/config.json` 会在启动时一次性自动迁入）：
 
 - `detailMaxMessages`（默认 200）：查看时返回的最大消息条数。
 - `messagePreviewChars`（默认 2000）：单条消息预览的最大字符数。

@@ -37,4 +37,18 @@ describe("typert 参数校验", () => {
     const value = { items: [] };
     expect(invocation.result.create().parse(value)).toBe(value);
   });
+
+  it("codec 声明的方法集合与 remote.ts markRemoteMethod 对称（单侧增减即红灯）", async () => {
+    // 静态对称（仿 dsh-any-connect 文案锁）：运行时标记经 loader 私有
+    // WeakMap，不可枚举；源码是唯一的双方可见面。
+    const { readFileSync } = await import("node:fs");
+    const { join, dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const src = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+    const remote = readFileSync(join(src, "remote.ts"), "utf8");
+    const marked = [...remote.matchAll(/markRemoteMethod\([^,]+,\s*"([^"]+)"\)/g)].map((m) => m[1]).sort();
+    const declared = (TYPERT.invocations as any[]).map((item) => item.method).sort();
+    expect(marked.length).toBeGreaterThan(0);
+    expect(declared).toEqual(marked);
+  });
 });

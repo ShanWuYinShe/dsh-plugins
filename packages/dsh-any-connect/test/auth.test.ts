@@ -17,6 +17,29 @@ import {
   defaultWorkBuddyElectronPath,
   WORKBUDDY_ELECTRON_BIN_ENV,
 } from '../src/desktop-credential-protection.js'
+import { openStandaloneStateStore } from '../src/state-store.js'
+import { isWsl } from '../src/wsl.js'
+import type { WorkBuddyStoreOptions } from '../src/auth-types.js'
+
+function baseCredential(): WorkBuddyCredential {
+  return {
+    accessToken: 'base-at',
+    refreshToken: 'base-rt',
+    expiresAtMs: Date.now() + 3600_000,
+    domain: 'www.workbuddy.cn',
+    uid: 'uid-domain',
+    source: 'dsh',
+  }
+}
+
+async function existsAny(path: string): Promise<boolean> {
+  try {
+    await readFile(path, 'utf8')
+    return true
+  } catch {
+    return false
+  }
+}
 
 // node:os's ESM namespace rejects vi.spyOn (non-configurable), so homedir is
 // mocked at the module level; unset state falls through to the real one.
@@ -82,16 +105,6 @@ describe('parseWorkBuddyAuth', () => {
   })
 })
 
-function credentialWith(expiresAtMs: number): WorkBuddyCredential {
-  return {
-    accessToken: 'at',
-    refreshToken: 'rt',
-    expiresAtMs,
-    domain: 'www.codebuddy.cn',
-    uid: 'uid-1',
-    source: 'desktop',
-  }
-}
 
 describe('WorkBuddyCredentialStore', () => {
   it('serves a fresh desktop credential without refreshing', async () => {
@@ -255,7 +268,7 @@ describe('WorkBuddyCredentialStore', () => {
       },
     })
     const resolvePromise = store.resolve()
-    await vi.waitFor(() => { expect(refreshStarted).toBe(true) })
+    await vi.waitFor(() => { expect(refreshStarted).toBe(true) }, { timeout: 5000 })
     const logoutPromise = store.logout()
     // logout 必须挂在在途刷新上:刷新未完成前它不该返回。
     let logoutSettled = false
@@ -820,7 +833,10 @@ describe('WorkBuddy 5.6 at-rest key helper wiring', () => {
         variant: CN_VARIANT,
         refresh: async credential => ({ accessToken: credential.accessToken }),
       })
-      expect(workbuddy.atRestHelperPath()).toBe(defaultWorkBuddyElectronPath(electronProfileFor(CN_VARIANT)))
+      // 组合根在 Linux+WSL 下按 Windows 规则发现（/mnt 默认布局推导），
+      // 期望值与 store 同源：同样的平台与 WSL 旗标。
+      expect(workbuddy.atRestHelperPath())
+        .toBe(defaultWorkBuddyElectronPath(electronProfileFor(CN_VARIANT), process.platform, isWsl()))
       const zcode = new WorkBuddyCredentialStore({
         variant: ZCODE_VARIANT,
         refresh: async credential => ({ accessToken: credential.accessToken }),
@@ -896,6 +912,89 @@ describe('WorkBuddy 5.6 at-rest key helper wiring', () => {
       refresh: async credential => ({ accessToken: credential.accessToken }),
     })
     await expect(store.current()).resolves.toMatchObject({ accessToken: 'new-account-access', uid: 'uid-new', source: 'desktop' })
+  })
+
+  // 域分支（2026-10-11 起）：state 注入后自有副本的读写/logout 全部走
+  // WorkBuddyStateStore（storageDomain 的 standalone 实现），文件回落只在
+  // 域不可用时兜底——这三个用例钉住「域是唯一可写副本」的契约。
+  describe('with a state store (storageDomain branch)', () => {
+    function makeStateBackedStore(options: {
+      dir: string
+      desktop: string | undefined
+      refresh: WorkBuddyStoreOptions['refresh']
+    }): Promise<{ store: WorkBuddyCredentialStore; state: Awaited<ReturnType<typeof openStandaloneStateStore>> }> {
+      return (async () => {
+        vi.stubEnv('DSH_HOME', options.dir)
+        const state = await openStandaloneStateStore()
+        const store = new WorkBuddyCredentialStore({
+          variant: CN_VARIANT,
+          ...options.desktop === undefined ? {} : { desktopPath: options.desktop },
+          ownPath: join(options.dir, 'own-fallback.json'),
+          refresh: options.refresh,
+          state,
+        })
+        return { store, state }
+      })()
+    }
+
+    it('reads the owned copy from the state domain when the desktop file is absent', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'wb-state-branch-'))
+      CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+      const { store, state } = await makeStateBackedStore({
+        dir,
+        desktop: join(dir, 'absent-desktop.info'),
+        refresh: async () => { throw new Error('no refresh in this test') },
+      })
+      try {
+        expect(await store.current()).toBeUndefined()
+        await state.write(CN_VARIANT.id, { ...baseCredential(), accessToken: 'domain-at' })
+        await expect(store.current()).resolves.toMatchObject({ accessToken: 'domain-at', source: 'dsh' })
+        // 域是可写副本，文件回落目录不应被写入。
+        expect(await existsAny(join(dir, 'own-fallback.json'))).toBe(false)
+      } finally {
+        await state.close()
+      }
+    })
+
+    it('persists refreshed tokens into the state domain', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'wb-state-refresh-'))
+      CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+      const desktop = join(dir, 'workbuddy-desktop.info')
+      // 已过期 → resolve() 触发刷新；刷新结果必须落域而不是文件。
+      await writeFile(desktop, nestedDoc(Date.now() - 3600_000))
+      const { store, state } = await makeStateBackedStore({
+        dir,
+        desktop,
+        refresh: async () => ({ accessToken: 'refreshed-at', refreshToken: 'refreshed-rt', expiresInSec: 3600 }),
+      })
+      try {
+        await expect(store.resolve()).resolves.toMatchObject({ accessToken: 'refreshed-at' })
+        const stored = await state.read(CN_VARIANT.id)
+        expect(stored?.accessToken).toBe('refreshed-at')
+        expect(stored?.refreshToken).toBe('refreshed-rt')
+        expect(await existsAny(join(dir, 'own-fallback.json'))).toBe(false)
+      } finally {
+        await state.close()
+      }
+    })
+
+    it('logout clears the state-domain copy (and stays idempotent)', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'wb-state-logout-'))
+      CLEANUP.push(() => rm(dir, { recursive: true, force: true }))
+      const { store, state } = await makeStateBackedStore({
+        dir,
+        desktop: join(dir, 'absent-desktop.info'),
+        refresh: async () => { throw new Error('no refresh in this test') },
+      })
+      try {
+        await state.write(CN_VARIANT.id, baseCredential())
+        await store.logout()
+        expect(await state.read(CN_VARIANT.id)).toBeUndefined()
+        await store.logout() // 幂等：再删一次不抛。
+      } finally {
+        await state.close()
+      }
+    })
   })
 })
 

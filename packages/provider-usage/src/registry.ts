@@ -36,6 +36,12 @@ declare module '@deepseek-ai/cordis' {
 /** How long one provider's answer is reused before the next read refetches. */
 export const DEFAULT_CACHE_TTL_MS = 60_000
 
+/** 失败答案的复用时长:错误没有成功答案的保质期,按更短负缓存处理。 */
+export const DEFAULT_ERROR_CACHE_TTL_MS = 10_000
+
+/** 无推断结果(`snapshot` 为 undefined)的负缓存时长,过期后才再次尝试推断。 */
+export const DEFAULT_UNRESOLVED_TTL_MS = 60_000
+
 /** How long one query may run before it is abandoned. */
 export const DEFAULT_QUERY_TIMEOUT_MS = 15_000
 
@@ -43,10 +49,26 @@ export const DEFAULT_QUERY_TIMEOUT_MS = 15_000
 export interface ProviderUsageRegistryOptions {
   /** Cache lifetime in milliseconds; tests pin this to drive refetches. */
   cacheTtlMs?: number
+  /** 失败快照的负缓存时长;过期后第一次读取即重试上游。 */
+  errorCacheTtlMs?: number
+  /** 无推断结果(未注册且 baseURL 推断不出 querier)的负缓存时长。 */
+  unresolvedTtlMs?: number
   /** Per-query deadline in milliseconds. */
   queryTimeoutMs?: number
   /** Clock, injectable so tests never sleep. */
   now?: () => number
+}
+
+/**
+ * {@link ProviderUsageRegistry.snapshot} 的读取选项。
+ */
+export interface ProviderUsageSnapshotOptions {
+  /**
+   * 绕过缓存读(在途合并照常生效):面板手动刷新用,自动轮询不带。
+   * 命中在途查询时返回该查询的结果——它至多早于点击一个查询时长,
+   * 不为连点按钮放大账单接口压力。
+   */
+  force?: boolean
 }
 
 /** One registered querier plus its registration-time metadata. */
@@ -84,12 +106,18 @@ export class ProviderUsageRegistry extends Service {
   /** In-flight queries keyed by provider, so concurrent readers share one request. */
   private readonly inflight = new Map<string, Promise<UsageSnapshot>>()
   private readonly cacheTtlMs: number
+  private readonly errorCacheTtlMs: number
+  private readonly unresolvedTtlMs: number
   private readonly queryTimeoutMs: number
   private readonly now: () => number
+  /** 推断无果的 provider → 负缓存到期时刻;直接/别名注册查表不受它影响。 */
+  private readonly unresolved = new Map<string, number>()
 
   constructor(ctx: Context, options: ProviderUsageRegistryOptions = {}) {
     super(ctx, 'providerUsage')
     this.cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS
+    this.errorCacheTtlMs = options.errorCacheTtlMs ?? DEFAULT_ERROR_CACHE_TTL_MS
+    this.unresolvedTtlMs = options.unresolvedTtlMs ?? DEFAULT_UNRESOLVED_TTL_MS
     this.queryTimeoutMs = options.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS
     this.now = options.now ?? Date.now
   }
@@ -114,12 +142,28 @@ export class ProviderUsageRegistry extends Service {
     this.registrations.set(provider, registration)
     // A replaced querier invalidates whatever the last one said: the answer on
     // screen describes a query that no longer exists.
-    this.cache.delete(provider)
+    this.clearCacheFor(provider)
+    // 新注册可能让此前推断无果的 provider 变得可推断,负缓存一并让路。
+    this.unresolved.clear()
     return () => {
       // Only withdraw our own registration: a reload may have replaced it
       // already, and dropping the newer querier would leave the provider dark.
       if (this.registrations.get(provider) === registration) this.registrations.delete(provider)
-      this.cache.delete(provider)
+      this.clearCacheFor(provider)
+    }
+  }
+
+  /**
+   * 清掉解析到同一规范 provider 的所有缓存键(含别名键)。
+   *
+   * 缓存按「请求键」存(kimi、Moonshot 各一条),注册键往往只有规范形式
+   * (moonshot);注册替换/失效若只删注册键,别名键里的旧答案会在下一个
+   * TTL 内继续供应已被替换的 querier 的结果。
+   */
+  private clearCacheFor(provider: string): void {
+    const normalized = normalizeProviderKey(provider)
+    for (const key of [...this.cache.keys()]) {
+      if (key === provider || normalizeProviderKey(key) === normalized) this.cache.delete(key)
     }
   }
 
@@ -145,12 +189,27 @@ export class ProviderUsageRegistry extends Service {
    * @param provider - provider route key to resolve.
    * @returns the snapshot, or `undefined` when no querier is registered.
    */
-  async snapshot(provider: string): Promise<UsageSnapshot | undefined> {
-    const registration = this.registrations.get(provider)
-      ?? this.registrations.get(normalizeProviderKey(provider))
-    if (registration !== undefined) {
-      return this.snapshotWithRegistration(provider, registration)
+  async snapshot(provider: string, options: ProviderUsageSnapshotOptions = {}): Promise<UsageSnapshot | undefined> {
+    // 缓存/在途合并按「请求键」走:端点与凭据按请求键解析,同一注册的
+    // 两个别名路由可能配了不同账号,答案不得互串;注册身份校验按
+    // 「注册键」走(见 snapshotWithRegistration 的回写核对)。
+    const normalized = normalizeProviderKey(provider)
+    let lookupKey = provider
+    let registration = this.registrations.get(provider)
+    if (registration === undefined) {
+      lookupKey = normalized
+      registration = this.registrations.get(normalized)
     }
+    if (registration !== undefined) {
+      return this.snapshotWithRegistration(provider, lookupKey, registration, options.force === true)
+    }
+
+    // 推断无果的负缓存:未注册且推断不出 querier 的 provider,每次轮询
+    // 都会白跑一遍 settings/credentials 解析;负缓存窗口内直接回答
+    // 「无 querier」。直接/别名注册查表在上方,不受它影响。
+    const now = this.now()
+    const unresolvedUntil = this.unresolved.get(provider)
+    if (unresolvedUntil !== undefined && unresolvedUntil > now) return undefined
 
     // Heuristic fallback: if provider has no direct or alias registration,
     // resolve its baseURL and infer the querier (e.g. for custom providers like "my-silicon").
@@ -164,13 +223,14 @@ export class ProviderUsageRegistry extends Service {
       if (inferred !== undefined) {
         const inferredReg = this.registrations.get(inferred)
         if (inferredReg !== undefined) {
-          return this.snapshotWithRegistration(provider, inferredReg)
+          return this.snapshotWithRegistration(provider, inferred, inferredReg, options.force === true)
         }
       }
     } catch {
       // Resolution failed
     }
 
+    this.unresolved.set(provider, this.now() + this.unresolvedTtlMs)
     return undefined
   }
 
@@ -202,28 +262,41 @@ export class ProviderUsageRegistry extends Service {
     }
   }
 
-  private async snapshotWithRegistration(provider: string, registration: Registration): Promise<UsageSnapshot> {
-    const cached = this.cache.get(provider)
+  private async snapshotWithRegistration(cacheKey: string, lookupKey: string, registration: Registration, force: boolean): Promise<UsageSnapshot> {
     const now = this.now()
-    if (cached !== undefined && cached.expiresAt > now) return cached.snapshot
+    if (!force) {
+      const cached = this.cache.get(cacheKey)
+      if (cached !== undefined && cached.expiresAt > now) return cached.snapshot
+    }
 
-    const pending = this.inflight.get(provider)
+    const pending = this.inflight.get(cacheKey)
     if (pending !== undefined) return pending
 
-    const query = this.run(provider, registration).then(snapshot => {
-      this.cache.set(provider, { snapshot, expiresAt: this.now() + this.cacheTtlMs })
+    const query = this.run(cacheKey, registration).then(snapshot => {
+      // 回写前核对注册身份:热替换/注销后结算的旧查询仍要把结果交还给
+      // 发起它的调用方,但不得把它描述的已不存在的行为写进缓存——否则
+      // 下一个 TTL 内每次读取都在供应旧 querier 的答案。
+      if (this.registrations.get(lookupKey) === registration) {
+        this.cache.set(cacheKey, {
+          snapshot,
+          // 失败按更短负缓存:账单接口恢复后第一次读取即重试,不必等满
+          // 一个成功 TTL。自动轮询间隔等于成功 TTL,失败态的重试频率
+          // 上界不变(每读者每分钟一次),只把恢复时延从分钟级降到秒级。
+          expiresAt: this.now() + (snapshot.error === undefined ? this.cacheTtlMs : this.errorCacheTtlMs),
+        })
+      }
       return snapshot
     }).finally(() => {
-      this.inflight.delete(provider)
+      this.inflight.delete(cacheKey)
     })
-    this.inflight.set(provider, query)
+    this.inflight.set(cacheKey, query)
     return query
   }
 
   /** Drop one provider's cached answer, or every answer when no provider is named. */
   invalidate(provider?: string): void {
     if (provider === undefined) this.cache.clear()
-    else this.cache.delete(provider)
+    else this.clearCacheFor(provider)
   }
 
   /** Run one query under a deadline, folding every failure into the snapshot. */
@@ -248,6 +321,9 @@ export class ProviderUsageRegistry extends Service {
         fetchedAt,
       }
     } catch (error: unknown) {
+      // 承接旧答案时带上 degraded:客户端据此调暗展示,不把旧数字当作
+      // 新鲜值呈现——没有这个标记,圆点照绿、文案照常,过期无从感知。
+      const degraded = previous !== undefined
       return {
         ...base,
         // A failed refetch keeps the last good windows: the previous answer is
@@ -257,6 +333,7 @@ export class ProviderUsageRegistry extends Service {
         windows: previous?.windows ?? [],
         fetchedAt,
         error: safeMessage(error),
+        ...degraded ? { degraded: true } : {},
       }
     }
   }

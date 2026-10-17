@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import * as WorkBuddy from '../src/index.js'
+import { catalogRow } from './catalog-harness.js'
 import type { WorkBuddyModelInfo } from '../src/index.js'
 
 /**
@@ -33,12 +34,17 @@ afterEach(async () => {
   await Promise.all(CLEANUP.splice(0).map(clean => clean()))
 })
 
-function row(id: string): WorkBuddyModelInfo {
-  return { id, name: id, contextWindow: 1000, maxTokens: 100, supportsImages: false }
-}
 
-/** 真实 I/O（凭据文件读取、shim 就绪）在假时钟下不会前进，用真实小睡等它收敛。 */
-async function drain(until: () => boolean, budget = 400): Promise<void> {
+/**
+ * 真实 I/O（凭据文件读取、shim 就绪）在假时钟下不会前进，用真实小睡等它收敛。
+ *
+ * 预算默认 1500ms：**等条件成立**的调用在条件满足时立刻返回，所以调大不增加正常耗时；
+ * 它只在条件迟迟不成立时多等（那本来就意味着用例要失败）。原先的 400ms 在并行 / 机器繁忙时
+ * 偏紧——2026-10-08 实测到过一次 drain 后 previewCalls() 仍为 0 的失败（随后连续复跑与
+ * 4 路并发加压都无法复现，属环境性的时间脆弱点）。
+ * **故意沉降**（等一段固定时间后断言「什么都没发生」）的调用仍显式传小预算，语义不变。
+ */
+async function drain(until: () => boolean, budget = 1500): Promise<void> {
   for (let waited = 0; waited < budget && !until(); waited += 10) await realSleep(10)
 }
 
@@ -75,7 +81,7 @@ async function install(home: string): Promise<Harness> {
   let previewCalls = 0
   let modelsCalls = 0
   vi.spyOn(WorkBuddy.ZCodeUpstreamClient.prototype, 'fetchModels')
-    .mockImplementation(async () => { modelsCalls += 1; return claimed ? [row('claimed-model')] : [] })
+    .mockImplementation(async () => { modelsCalls += 1; return claimed ? [catalogRow('claimed-model')] : [] })
   vi.spyOn(WorkBuddy.ZCodeUpstreamClient.prototype, 'fetchStartPlanClaimPreview')
     .mockImplementation(async () => {
       previewCalls += 1
@@ -95,7 +101,8 @@ async function install(home: string): Promise<Harness> {
     authFileAI: join(home, 'no-such-ai-file.info'),
     authFileZCode: credentials,
   })
-  await vi.waitFor(() => { expect(ctx.llm.listProviders().length).toBe(4) }, { timeout: 5000 })
+  await vi.waitFor(() => { expect(ctx.llm.listProviders().length).toBe(WorkBuddy.PROVIDER_VARIANTS.length) }, { timeout: 5000 })
+
   await drain(() => false, 300)
   return {
     ctx,
@@ -131,6 +138,42 @@ describe('Start Plan 空名单快通道（领取后 ≤60s 恢复）', () => {
       }, { timeout: 5000 })
       // 快通道确实触发了重拉（而不是恰好撞上小时刷新——这里只推进了 2 分钟）。
       expect(h.modelsCalls()).toBeGreaterThan(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  }, 30000)
+
+  it('空名单 + 探测一直 none（非领取）→ 超过 5 分钟自愈重拉', async () => {
+    // 间歇空响应自愈（2026-10-07 实测）：上游偶尔对 billing/balance 答一个空
+    // 活动清单（同刻直调却有 active 活动 + 模型授权），目录被诚实地置空后，
+    // 唯一的恢复路径是小时刷新——分组最长消失一小时。现在 sweep 里对「目录
+    // 空 + 无翻转 + 距上次拉取 ≥ 5 分钟」再试一拍，把自愈压到分钟级。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-selfheal-'))
+    const h = await install(root)
+    try {
+      // 从头就是「探测不到可领项」：preview 恒 none，上游一直答空名单。
+      h.setPreview('none')
+      await vi.waitFor(async () => { expect(await h.ctx.llm.listModels('zcode-start-plan')).toEqual([]) }, { timeout: 5000 })
+
+      // 第一拍：探测一次（none，无翻转）。距启动拉取 1 分钟，不到阈值，不重拉。
+      await vi.advanceTimersByTimeAsync(60_000)
+      await drain(() => h.previewCalls() >= 1)
+      const pullsBefore = h.modelsCalls()
+      await vi.advanceTimersByTimeAsync(60_000)
+      await drain(() => false, 300)
+      expect(h.modelsCalls()).toBe(pullsBefore)
+
+      // 跨过 5 分钟阈值：自愈分支重拉一次（上游仍空，fetchedAtMs 前移）。
+      await vi.advanceTimersByTimeAsync(3 * 60_000)
+      await drain(() => h.modelsCalls() > pullsBefore, 1500)
+      expect(h.modelsCalls()).toBeGreaterThan(pullsBefore)
+
+      // 上游恢复正常：下一拍自愈把名单带回来。
+      h.serveClaimed()
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+      await vi.waitFor(async () => {
+        expect((await h.ctx.llm.listModels('zcode-start-plan')).map(m => m.id)).toEqual(['claimed-model'])
+      }, { timeout: 5000 })
     } finally {
       vi.useRealTimers()
     }
