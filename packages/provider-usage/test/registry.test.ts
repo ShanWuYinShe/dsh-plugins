@@ -3,6 +3,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { ProviderUsageRegistry, safeMessage } from '../src/registry.js'
+import { BUILTIN_USAGE_QUERIERS } from '../src/providers.js'
 import type { UsageSnapshot } from '../src/types.js'
 
 /** Build a registry with a pinned clock so no test ever sleeps. */
@@ -18,6 +19,29 @@ function makeRegistry(options: { ttlMs?: number; errorTtlMs?: number; unresolved
   })
   return { registry, advance: (ms: number) => { now += ms } }
 }
+
+/** 按 index.ts 的 apply 口径把内置注册表装进注册表；给了 keys 就只装其中一部分。 */
+function makeBuiltinRegistry(keys?: readonly string[]): ProviderUsageRegistry {
+  const { registry } = makeRegistry()
+  for (const [provider, entry] of BUILTIN_USAGE_QUERIERS) {
+    if (keys !== undefined && !keys.includes(provider)) continue
+    registry.register(provider, entry.querier, entry.displayName)
+  }
+  return registry
+}
+
+/** 本次改动前的内置注册表原貌：9 条键，没有两条官方 DeepSeek 路由。 */
+const PRE_FIX_BUILTIN_KEYS: readonly string[] = [
+  'deepseek',
+  'openrouter',
+  'moonshot',
+  'siliconflow',
+  'bigmodel',
+  'minimax',
+  'openai',
+  'opencode',
+  'opencode-go',
+]
 
 /** A querier answering a fixed snapshot. */
 function fixedQuerier(windows: { id: string; label: string; remain?: number; unit: string }[], plan?: string) {
@@ -470,6 +494,75 @@ describe('ProviderUsageRegistry', () => {
     expect(snapshot).toBeUndefined()
     expect(aborted).toBe(true)
     expect(sfQuerier).not.toHaveBeenCalled()
+  })
+
+  it('官方 DeepSeek 两条路由都给出已查询快照，provider 是请求键', async () => {
+    const registry = makeBuiltinRegistry()
+    for (const key of ['deepseek-account', 'deepseek-official']) {
+      const snapshot = await registry.snapshot(key)
+      // undefined 正是 route 层写成 {provider, queried:false} 的东西，
+      // 也就是界面上「不支持」的来源：非 undefined 即已查询。
+      expect(snapshot).toBeDefined()
+      expect(snapshot?.provider).toBe(key)
+      expect(snapshot?.displayName).toBe('DeepSeek')
+      expect(snapshot?.windows).toEqual([])
+      expect(snapshot?.error).toBeUndefined()
+    }
+  })
+
+  it('别名让两条官方路由在只注册 canonical deepseek 时也可查（修复的另一半）', async () => {
+    // 只装 canonical 键:官方路由靠别名归一到它,缓存键仍是请求键本身,
+    // 两个官方路由的答案不会与 deepseek 的互相串。
+    const registry = makeBuiltinRegistry(['deepseek'])
+    for (const key of ['deepseek-account', 'deepseek-official']) {
+      expect(registry.has(key)).toBe(true)
+      const snapshot = await registry.snapshot(key)
+      expect(snapshot?.provider).toBe(key)
+    }
+  })
+
+  it('对照：只装修复前的 9 条内置键时，两条官方路由的可见性完全由别名决定（修复前 undefined）', async () => {
+    // 缺陷（界面显示「不支持」）由两个条件同时成立造成：内置注册表里没有这两个
+    // 键，baseURL 推断也认不出官方路由（官方 provider 的 baseURL 在适配器默认值
+    // 里、不落 profile，resolver 只能给出空答案 → 负缓存 → undefined）。
+    // 先用替换后的归一化复现修复前行为（无官方别名），拿到当时的答案；再用
+    // 真实归一化跑同一份注册表配置，答案相反——这个反差就是缺陷与修复的分界点，
+    // 也说明「只注册旧 9 键却期望 undefined」只有在别名同时缺席时才成立。
+    vi.resetModules()
+    vi.doMock('../src/resolve.js', async importOriginal => {
+      const actual = await importOriginal<typeof import('../src/resolve.js')>()
+      return { ...actual, normalizeProviderKey: (key: string) => key.toLowerCase().replace(/[-_\s]/gu, '') }
+    })
+    try {
+      const { ProviderUsageRegistry: PreFixRegistry } = await import('../src/registry.js')
+      const preFix = new PreFixRegistry(new Context(), {
+        cacheTtlMs: 60_000,
+        errorCacheTtlMs: 10_000,
+        unresolvedTtlMs: 60_000,
+        queryTimeoutMs: 15_000,
+        now: () => 1_000,
+      })
+      for (const key of PRE_FIX_BUILTIN_KEYS) {
+        const entry = BUILTIN_USAGE_QUERIERS.get(key)
+        if (entry === undefined) throw new Error(`内置注册表缺少 ${key}`)
+        preFix.register(key, entry.querier, entry.displayName)
+      }
+      for (const key of ['deepseek-account', 'deepseek-official']) {
+        // route 层把 undefined 写成 {provider, queried:false}，即界面上的「不支持」。
+        expect(await preFix.snapshot(key)).toBeUndefined()
+      }
+    } finally {
+      vi.doUnmock('../src/resolve.js')
+      vi.resetModules()
+    }
+
+    // 修复后：同一份「旧 9 键」配置，别名把两条官方路由归一到 deepseek 注册，
+    // 于是它们已可查——若有人拿掉别名，本断言立刻变红。
+    const live = makeBuiltinRegistry(PRE_FIX_BUILTIN_KEYS)
+    for (const key of ['deepseek-account', 'deepseek-official']) {
+      expect(live.has(key)).toBe(true)
+      expect((await live.snapshot(key))?.provider).toBe(key)
+    }
   })
 })
 

@@ -229,6 +229,10 @@ describe("client bundles", () => {
           effect: (fn: () => void) => { fn(); },
           remote: { $mount: async () => {} },
           get: () => ({}),
+          // provider-usage 用 ctx.inject 等可选服务（模型目录）就绪后再注册
+          // entry（宿主的 props 缓存按 entry × 会话绑定永久存活，过早解析的
+          // 失败结果会固化）。此处桩成"依赖已就绪"：直接交付调用方 context。
+          inject: (_deps: string[], callback: (scope: any) => unknown) => { callback(ctx); return () => {}; },
         };
         // 同步包抛在调用栈、异步包（session-archive/sandbox-extra-roots）
         // 拒在微任务：包一层 async IIFE 统一成 Promise 断言，兜底后必须
@@ -257,6 +261,7 @@ describe("client bundles", () => {
     // 客户端包全是 type-only 导入），可在此直接 import 真实源码做挂载冒烟。
     const mod = await import("../packages/provider-usage/client/index.tsx");
     const registrations: Array<{ options: any; component?: any }> = [];
+    let injectDeps: string[] = [];
     // modelDirectories 桩：验证有 session 时 inject 解析出的目录与 lazy load 接线。
     const directoryStub = { subscribe: () => () => {}, getSnapshot: () => ({}) };
     const directoryLoad = vi.fn(() => Promise.resolve());
@@ -272,8 +277,19 @@ describe("client bundles", () => {
         svc === "modelDirectories"
           ? { directoryFor: () => ({ store: directoryStub, load: directoryLoad }) }
           : {},
+      // 同上：provider-usage 在模型目录服务就绪后才注册 dock entry。桩成
+      // "依赖已就绪"，并记录它等的是哪两个依赖，供下方断言接线意图。
+      inject: (deps: string[], callback: (scope: any) => unknown) => {
+        injectDeps = deps;
+        callback(ctx);
+        return () => {};
+      },
     };
     await mod.apply(ctx as any);
+    // entry 注册必须挂在"等模型目录服务"的子 fiber 下：宿主对 entry props 的
+    // 缓存按 entry × 会话绑定永久存活，注册前解析出的 undefined 会固化成一
+    // 整页空白（旧实现缺陷）。这条断言锁住"先等服务、再注册"的顺序。
+    expect(injectDeps).toContain("modelDirectories");
     const dock = registrations.find((r) => r.options.name === "conversation.composer.dock");
     expect(dock !== undefined && dock.options.id === "provider-usage").toBe(true);
     expect(dock!.options.order).toBe(10);

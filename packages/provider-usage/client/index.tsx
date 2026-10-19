@@ -9,6 +9,16 @@
  * The guarded boundary itself is covered by the real-entry regression in
  * `test/bundle.test.ts` ("client apply() 的兜底边界对真实入口成立").
  *
+ * 注册时序（勿把解析结果固化进 slot props）：宿主 renderer 把一个 entry 的
+ * `inject` 结果按 (entry × 会话绑定) **永久缓存**（dsh-client-ui-renderer 的
+ * cachedSessionInject / sessionInjectCache，没有失效路径）。所以「注册 entry
+ * 的那一刻目录服务是否就绪」直接决定该会话整页有没有 pill：在服务就绪前注册
+ * 并解析，缺 directory 的那份 props 会被永久缓存，组件只能一直 return null，
+ * 直到 entry 被重新注册——用户看到的「刷新页面 / 重开插件才行」就是这个动作。
+ * 因此这里先用 `ctx.inject(['slots', 'modelDirectories'], …)` 等目录服务就绪，
+ * 再在子 fiber 里注册 entry：服务消失/重启时 cordis 会销毁并重跑该子 fiber，
+ * entry 随之重新注册、props 缓存重建（等价于用户手工重开插件，且自动完成）。
+ *
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * - index.tsx — 浏览器侧入口：注册 composer dock 的用量 pill
@@ -48,9 +58,12 @@ export const name = 'provider-usage-client'
  *
  * `providerUsage` is the locale namespace this package owns, not a service;
  * `slots` and `locale` are the contribution registry and the dictionary
- * service. The model directory is read through `ctx.get` rather than declared
- * here on purpose: a deployment without the model-selection UI still gets a
- * mounted, harmless pill instead of a plugin that refuses to load.
+ * service. The model directory is deliberately NOT declared here: it is an
+ * optional dependency, and a deployment without the model-selection UI must
+ * still load this plugin (getting the copy registered and a harmless no-op)
+ * instead of a plugin that refuses to load. It is awaited on the registration
+ * sub-fiber instead, so the dock entry only exists once the directory service
+ * is live — see the module comment for why that order is load-bearing.
  */
 export const inject = ['slots', 'locale']
 
@@ -76,21 +89,36 @@ export function apply(ctx: ClientContext): void {
       }
     }, 'provider-usage: pill copy')
     const t = ctx.locale.bind(namespace) as ProviderUsagePillInjected['t']
-    // order 10 keeps this pill after the harness's own `stats` entry (order 0),
-    // so the readout reads as an addition to the built-in stats rather than
-    // displacing them.
-    ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
-      name: 'conversation.composer.dock',
-      id: 'provider-usage',
-      order: 10,
-      inject: (sessionId?: unknown): ProviderUsagePillInjected => {
-        // The dock is session-scoped, so the renderer hands the owning session
-        // here; the directory it resolves is the same one the composer's model
-        // seat renders from, which is what keeps the two in agreement.
-        const seat = sessionId === undefined ? undefined : modelSeat(ctx, sessionId)
-        return seat === undefined ? { t } : { t, ...seat }
-      },
-    }, ProviderUsagePill))
+    // 等目录服务就绪再注册 dock entry（照抄宿主 ui-model-selection 的既有写法）。
+    // 子 fiber 只负责这一件事：服务未就绪时不产出任何 props，服务重启时被销毁
+    // 重跑 → entry 重新注册，从而绕开渲染器对 inject 结果的永久缓存。
+    ctx.inject(['slots', 'modelDirectories'], (scope) => {
+      // 兜底边界因此分两层：外层 catch 管 `ctx.inject` 自身的同步抛错（含宿主
+      // 没有 inject 的旧版本）；内层 catch 管子 fiber body 的抛错——body 跑在
+      // cordis 的微任务边界里，调用栈已经不在 apply 的 try 内，不在这里兜住就
+      // 只会落进 cordis logger，本包那句 "client pill failed to load" 就再也
+      // 不会出现（兜底文案与实际行为漂移）。两层用同一句文案。
+      try {
+        // order 10 keeps this pill after the harness's own `stats` entry (order 0),
+        // so the readout reads as an addition to the built-in stats rather than
+        // displacing them.
+        scope.slots.inject('conversation.composer.dock', () => scope.slots.register({
+          name: 'conversation.composer.dock',
+          id: 'provider-usage',
+          order: 10,
+          inject: (sessionId?: unknown): ProviderUsagePillInjected => {
+            // The dock is session-scoped, so the renderer hands the owning session
+            // here; the directory it resolves is the same one the composer's model
+            // seat renders from, which is what keeps the two in agreement.
+            const seat = sessionId === undefined ? undefined : modelSeat(scope, sessionId)
+            return seat === undefined ? { t } : { t, ...seat }
+          },
+        }, ProviderUsagePill))
+      } catch (error: unknown) {
+        // Degrade silently on the page: the host provider registry is unaffected.
+        console.error('[provider-usage] client pill failed to load (host registry unaffected):', error)
+      }
+    })
   } catch (error: unknown) {
     // Degrade silently on the page: the host provider registry is unaffected.
     console.error('[provider-usage] client pill failed to load (host registry unaffected):', error)
@@ -111,7 +139,13 @@ interface ModelDirectoryLike {
  * load effect (and the host request behind it, if the host never dedupes). */
 const loadCache = new WeakMap<object, () => void>()
 
-/** Resolve one session's model seat, or nothing when the harness omits it. */
+/**
+ * Resolve one session's model seat, or nothing when the harness omits it.
+ *
+ * @param ctx - the registration sub-fiber's context (the one that declared the
+ * `modelDirectories` dependency), so the lookup stays inside that fiber's scope.
+ * @param sessionId - the session whose directory the dock belongs to.
+ */
 function modelSeat(
   ctx: ClientContext,
   sessionId: unknown,

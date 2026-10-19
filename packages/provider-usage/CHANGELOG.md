@@ -1,3 +1,20 @@
+## 0.1.8 (2026-10-19)
+
+### 修复
+
+* **官方 DeepSeek 路由不再显示「不支持额度」**：DSH 0.2.1-rc.2 官方 DeepSeek 的两条路由是
+  `deepseek-account`（OAuth 登录）与 `deepseek-official`（API key），而内置查询器此前只认
+  `deepseek`——两条官方路由既没有注册，又因 baseURL 只存在于适配器默认值而推断不出查询器，
+  pill 只能显示「未提供额度查询」。现三条路由键归一化到同一个 DeepSeek 查询器：配了
+  `DEEPSEEK_API_KEY`（或 `llm-deepseek` 段落里的 `apiKeyEnv`）走 `/user/balance`，
+  无 key 退到 OAuth 账户钱包（充值 + 赠送，按币种分列）。
+* **额度 pill 偶发整页不显示（刷新页面 / 重开插件才恢复）**：browser 半侧在注册 composer dock
+  entry 之前同步解析模型目录服务，而宿主 `ctx.get(name)` 在服务提供方 fiber 尚未激活时静默返回
+  `undefined`；宿主又把 entry 的 `inject` 结果按「entry × 会话绑定」永久缓存，于是**一次时序不利
+  的解析结果会被固化**，该会话整页再也见不到 pill。现改为在
+  `ctx.inject(['slots','modelDirectories'])` 子 fiber 内注册 entry：服务就绪才注册，服务重启
+  自动重注册（等价于此前手工「重开插件」，但不再需要用户干预）。
+
 ## 0.1.7 (2026-10-17)
 
 ### 新增与优化

@@ -295,6 +295,76 @@ describe('createProviderResolver', () => {
     expect(normalizeProviderKey('MoonShot')).toBe('moonshot')
   })
 
+  it.each(['deepseek-account', 'deepseek-official'])(
+    '%s 归一到 canonical deepseek（这是兜底引用与钱包回退生效的前提）',
+    key => { expect(normalizeProviderKey(key)).toBe('deepseek') },
+  )
+
+  it('deepseek-official：settings 段落（ns=llm-deepseek）的 apiKeyEnv 经 credentials 解析出 apiKey', async () => {
+    const ctx = fakeCtx({
+      entries: [entry('deepseek-official', 'llm-deepseek')],
+      sections: { 'llm-deepseek': { apiKeyEnv: 'DEEPSEEK_API_KEY' } },
+      credentials: { DEEPSEEK_API_KEY: 'sk-official' },
+    })
+    expect(await createProviderResolver(ctx)('deepseek-official', signal)).toEqual({ apiKey: 'sk-official' })
+  })
+
+  it('deepseek-official：段落里没落到 apiKeyEnv（schema 默认值不落 profile）时仍认 DEEPSEEK_API_KEY 兜底', async () => {
+    const ctx = fakeCtx({
+      entries: [entry('deepseek-official', 'llm-deepseek')],
+      sections: { 'llm-deepseek': {} },
+      credentials: { DEEPSEEK_API_KEY: 'sk-ambient' },
+    })
+    expect(await createProviderResolver(ctx)('deepseek-official', signal)).toEqual({ apiKey: 'sk-ambient' })
+  })
+
+  it('deepseek-official：有 key 时不再读钱包（单一来源，不重复计数）', async () => {
+    let queried = false
+    const ctx = fakeCtx({
+      entries: [entry('deepseek-official', 'llm-deepseek')],
+      sections: { 'llm-deepseek': { apiKeyEnv: 'DEEPSEEK_API_KEY' } },
+      credentials: { DEEPSEEK_API_KEY: 'sk-official' },
+      accountBalance: { status: 'ready', value: [], bonusWallets: [] },
+      onAccountQuery: () => { queried = true },
+    })
+    expect(await createProviderResolver(ctx)('deepseek-official', signal)).toEqual({ apiKey: 'sk-official' })
+    expect(queried).toBe(false)
+  })
+
+  it('deepseek-official：无 key 时回落到 OAuth 钱包', async () => {
+    const ctx = fakeCtx({
+      entries: [entry('deepseek-official', 'llm-deepseek')],
+      sections: { 'llm-deepseek': {} },
+      accountBalance: { status: 'ready', value: [{ currency: 'CNY', balance: '3.00' }], bonusWallets: [] },
+    })
+    expect(await createProviderResolver(ctx)('deepseek-official', signal)).toEqual({
+      accountWallets: [{ currency: 'CNY', recharge: 3, bonus: 0 }],
+    })
+  })
+
+  it('deepseek-account：段落没有 apiKeyEnv（钱包路由）→ 不因「有 entry」跳过 OAuth 钱包回退', async () => {
+    let queried = false
+    const ctx = fakeCtx({
+      entries: [entry('deepseek-account', 'llm-deepseek-account')],
+      sections: { 'llm-deepseek-account': {} },
+      accountBalance: {
+        status: 'ready',
+        value: [{ currency: 'CNY', balance: '10.00' }],
+        bonusWallets: [{ currency: 'USD', balance: '2.50' }],
+      },
+      onAccountQuery: () => { queried = true },
+    })
+    const resolved = await createProviderResolver(ctx)('deepseek-account', signal)
+    // 命中 entry 不等于「已解析到凭据」：官方钱包路由的段落里没有 apiKeyEnv，
+    // 若在这里提前收工，界面只会看到一个空窗口而不是钱包余额。
+    expect(queried).toBe(true)
+    expect(resolved.apiKey).toBeUndefined()
+    expect(resolved.accountWallets).toEqual([
+      { currency: 'CNY', recharge: 10, bonus: 0 },
+      { currency: 'USD', recharge: 0, bonus: 2.5 },
+    ])
+  })
+
   it.each([
     ['https://api.deepseek.com', 'deepseek'],
     ['https://api.siliconflow.cn/v1', 'siliconflow'],

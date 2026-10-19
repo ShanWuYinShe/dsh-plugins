@@ -38,6 +38,10 @@ describe('BUILTIN_USAGE_QUERIERS', () => {
   it('registers the documented providers with display names', () => {
     expect([...BUILTIN_USAGE_QUERIERS.keys()]).toEqual([
       'deepseek',
+      // 宿主官方 DeepSeek 的两条路由键（宿主 0.2.1-rc.2）：钱包与 API key 各一条，
+      // 界面上的 provider 就是这两个 id，缺任一都会让官方 DeepSeek 显示「不支持」。
+      'deepseek-account',
+      'deepseek-official',
       'openrouter',
       'moonshot',
       'siliconflow',
@@ -48,6 +52,12 @@ describe('BUILTIN_USAGE_QUERIERS', () => {
       'opencode-go',
     ])
     expect(BUILTIN_USAGE_QUERIERS.get('deepseek')?.displayName).toBe('DeepSeek')
+    // 两条官方路由共用 deepseekUsage：该查询器自己按「有 apiKey 走 API、无 key 走
+    // OAuth 钱包」分流，不需要各写一份。
+    expect(BUILTIN_USAGE_QUERIERS.get('deepseek-account')?.querier).toBe(deepseekUsage)
+    expect(BUILTIN_USAGE_QUERIERS.get('deepseek-account')?.displayName).toBe('DeepSeek')
+    expect(BUILTIN_USAGE_QUERIERS.get('deepseek-official')?.querier).toBe(deepseekUsage)
+    expect(BUILTIN_USAGE_QUERIERS.get('deepseek-official')?.displayName).toBe('DeepSeek')
     expect(BUILTIN_USAGE_QUERIERS.get('siliconflow')?.displayName).toBe('SiliconFlow')
     expect(BUILTIN_USAGE_QUERIERS.get('bigmodel')?.displayName).toBe('BigModel')
     expect(BUILTIN_USAGE_QUERIERS.get('minimax')?.displayName).toBe('MiniMax')

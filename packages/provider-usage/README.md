@@ -42,7 +42,7 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 
 | provider | 接口 | 说明 |
 |---|---|---|
-| `deepseek` | `GET {base}/user/balance`（无 API key 时退到 OAuth 账户充值+赠送钱包） | 按币种各一行；有 key 永远走接口，不重复计数 |
+| `deepseek` / `deepseek-account` / `deepseek-official` | `GET {base}/user/balance`（无 API key 时退到 OAuth 账户充值+赠送钱包） | 按币种各一行；有 key 永远走接口，不重复计数。DSH 0.2.1-rc.2 官方的两条路由是 `deepseek-account`（OAuth 登录）与 `deepseek-official`（API key），`deepseek` 供自定义 profile 沿用 |
 | `openrouter` | `/api/v1/key` + `/api/v1/credits` | 优先 key 自身限额，回落到账户额度 |
 | `moonshot` | `GET {base}/v1/users/me/balance` | 可用/现金/代金券 |
 | `siliconflow` | `GET {base}/v1/user/info` | 总额/可用/充值分列 |
@@ -110,13 +110,18 @@ interface UsageWindow {
   `/plugins/provider-usage/usage` 暴露同域只读路由（仅回环 Origin，与
   dsh-any-connect 的状态路由同一姿态）。
 - browser 半侧把 pill 注册进 `conversation.composer.dock`（list slot，
-  `order: 10`，排在宿主自带 `stats` 之后），按当前 provider 轮询路由。
+  `order: 10`，排在宿主自带 `stats` 之后），按当前 provider 轮询路由。注册
+  挂在 `ctx.inject(['slots','modelDirectories'])` 子 fiber 下——**必须等模型目录
+  服务就绪再注册**：宿主对 entry props 的缓存按「entry × 会话绑定」永久存活，
+  过早解析出的 `undefined` 会固化，让该会话整页看不到 pill（只能靠刷新页面或
+  重开插件恢复）。
 - 缓存 60s、查询超时 15s、并发读取单飞；失败保留上次数据并脱敏（JWT / `sk-`
   / 查询参数里的 token）。
 
 ## 已知边界
 
-- 无 key 的 `deepseek` 路由读宿主 `deepseekAccount` 服务（`@deepseek-ai/dsh-deepseek-account`，
+- 无 key 的 DeepSeek 路由（`deepseek` / `deepseek-account` / `deepseek-official`，
+  三者归一化到同一 provider）读宿主 `deepseekAccount` 服务（`@deepseek-ai/dsh-deepseek-account`，
   同本包 optionalDependencies 的版本基线）：`getBalance(AccountClientMetadata)` 返回
   `{status:'ready', value, bonusWallets} | {status:'failed'} | null`。该服务由宿主挂载，
   非本包提供；宿主改形状时 typecheck 直接红灯（不手写影子类型）。
