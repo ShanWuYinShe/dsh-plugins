@@ -214,6 +214,9 @@ function toPiModel(
     cost: NO_COST,
     contextWindow: info.contextWindow,
     maxTokens: info.maxTokens,
+    compat: {
+      supportsDeveloperRole: false,
+    },
   } as unknown as Model<Api>
 }
 

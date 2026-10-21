@@ -60,6 +60,7 @@ export function VariantCard(props: {
     busy, notice, modelsOpen, setModelsOpen, copiedPlanId,
     probe, startPlanClaim, copyPlanId, refresh,
     refreshWithCatalog, title, label, isZCode, isStartPlanCard, isOpenCode, zcodePlan, isPlanActive, planStateLabel, displayPlanName, headerSummary, catalogOffline, effortsOf,
+    deleteModel, restoreModels,
   } = useVariantCard(props)
 
   return (
@@ -197,53 +198,79 @@ export function VariantCard(props: {
                 {isStartPlanCard ? t('catalogEmptyRosterStartPlan') : t('catalogEmptyRoster')}
               </p>
             ) : null}
-          {status.models !== undefined && status.models.length > 0 ? (
+          {status.models !== undefined && (status.models.length > 0 || (status.excludedCount ?? 0) > 0) ? (
             <>
               <hr style={dividerStyle} />
               <div style={summaryHeadStyle}>
-                <button
-                  type="button"
-                  style={summaryToggleStyle}
-                  aria-expanded={modelsOpen}
-                  onClick={() => { setModelsOpen(!modelsOpen) }}
-                >
-                  <span aria-hidden="true" style={{ ...chevronStyle, fontSize: 14, transform: modelsOpen ? 'rotate(180deg)' : 'none' }}>⌄</span>
-                  <span>{t('modelsCount', { n: status.models.length })}</span>
-                </button>
-                {probe?.running === true ? <span style={summaryNoteStyle}>{t('detectingShort')}</span> : null}
-                {/* 目录来源与拉取失败对用户可见:stale 与离线是不同处境,
-                    不能只作内部判据(status-paths 的契约声明)。 */}
-                <span style={summaryNoteStyle}>{t(catalogSourceKey(status.catalog))}</span>
-                {status.catalog?.error !== undefined
-                  ? <span style={{ ...summaryNoteStyle, color: 'var(--dsw-alias-state-error-primary, #ff4d4f)' }}>{t('catalogSourceError', { message: status.catalog.error })}</span>
-                  : null}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    style={summaryToggleStyle}
+                    aria-expanded={modelsOpen}
+                    onClick={() => { setModelsOpen(!modelsOpen) }}
+                  >
+                    <span aria-hidden="true" style={{ ...chevronStyle, fontSize: 14, transform: modelsOpen ? 'rotate(180deg)' : 'none' }}>⌄</span>
+                    <span>{t('modelsCount', { n: status.models.length })}</span>
+                  </button>
+                  {(status.excludedCount ?? 0) > 0 ? (
+                    <>
+                      <span style={{ ...summaryNoteStyle, color: 'var(--dsw-alias-label-secondary)' }}>
+                        ({t('excludedModelsCount', { n: status.excludedCount })})
+                      </span>
+                      <button
+                        type="button"
+                        className="wb-btn"
+                        style={{ ...buttonStyle, minHeight: 20, padding: '1px 8px', fontSize: 11, lineHeight: '16px' }}
+                        disabled={busy}
+                        onClick={() => { void restoreModels() }}
+                      >
+                        {t('restoreDefaults')}
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {probe?.running === true ? <span style={summaryNoteStyle}>{t('detectingShort')}</span> : null}
+                  {/* 目录来源与拉取失败对用户可见:stale 与离线是不同处境,
+                      不能只作内部判据(status-paths 的契约声明)。 */}
+                  <span style={summaryNoteStyle}>{t(catalogSourceKey(status.catalog))}</span>
+                  {status.catalog?.error !== undefined
+                    ? <span style={{ ...summaryNoteStyle, color: 'var(--dsw-alias-state-error-primary, #ff4d4f)' }}>{t('catalogSourceError', { message: status.catalog.error })}</span>
+                    : null}
+                </div>
               </div>
               {modelsOpen ? (
-                <div style={{ width: '100%', overflowX: 'auto' }}>
-                  <table style={modelTableStyle}>
-                    <thead>
-                      <tr>
-                        <th style={{ ...modelThStyle, textAlign: 'left' }}>{t('colName')}</th>
-                        <th style={modelThStyle} aria-label={t('colTags')} />
-                        <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colRate')}</th>
-                        <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colContext')}</th>
-                        <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colEfforts')}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {status.models.map((row, i) => (
-                        <ModelRow
-                          key={row.id}
-                          row={row}
-                          t={t}
-                          efforts={effortsOf(row)}
-                          even={i % 2 === 1}
-                          onRefresh={() => { void refreshWithCatalog() }}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                status.models.length === 0 ? (
+                  <p style={{ ...summaryNoteStyle, padding: '12px 8px' }}>{t('allModelsExcluded')}</p>
+                ) : (
+                  <div style={{ width: '100%', overflowX: 'auto' }}>
+                    <table style={modelTableStyle}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...modelThStyle, textAlign: 'left' }}>{t('colName')}</th>
+                          <th style={modelThStyle} aria-label={t('colTags')} />
+                          <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colRate')}</th>
+                          <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colContext')}</th>
+                          <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colEfforts')}</th>
+                          <th style={{ ...modelThStyle, textAlign: 'center', width: 60 }}>{t('colAction')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {status.models.map((row, i) => (
+                          <ModelRow
+                            key={row.id}
+                            row={row}
+                            t={t}
+                            efforts={effortsOf(row)}
+                            even={i % 2 === 1}
+                            onRefresh={() => { void refreshWithCatalog() }}
+                            onDelete={modelId => { void deleteModel(modelId) }}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
               ) : null}
             </>
           ) : null}

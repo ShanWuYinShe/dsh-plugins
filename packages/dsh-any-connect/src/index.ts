@@ -14,7 +14,7 @@
  * - catalog-lifecycle.ts catalog-refresh.ts catalog-adopt.ts catalog-timers.ts
  *   catalog-fingerprint.ts — 生命周期组合入口、刷新/发布/领取快通道、账号切换的目录采用、
  *   身份 sweep 与小时定时器、内容指纹
- * - catalog.ts catalog-store.ts — 目录模型与静态兜底、每账号落盘
+ * - catalog.ts catalog-store.ts model-filter-store.ts — 目录模型与静态兜底、每账号落盘、排除模型持久化
  * - usage.ts zcode-quota.ts zcode-builtin-catalog.ts zcode-signer.ts — provider-usage 注册与
  *   dock 窗口助手、Coding Plan 窗口额度、ZCode 内置白名单、请求签名 V4
  * - zcode-plan-claim.ts zcode-plan-claim-wire.ts — Start Plan 领取（网络 I/O）与线上格式层（纯函数）

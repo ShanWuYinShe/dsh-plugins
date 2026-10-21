@@ -152,4 +152,30 @@ describe('Provider model parameter & billing isolation', () => {
     expect(flash?.billing?.credits).toBe('x0.06')
     expect(flash?.billing?.badges ?? []).not.toContain('夜间免费')
   })
+
+  it('filters out excluded models from current() while keeping rawModels() intact', () => {
+    const catalog = new WorkBuddyCatalog(FALLBACK_WORKBUDDY_MODELS, 'workbuddy')
+    expect(catalog.excludedCount()).toBe(0)
+    expect(catalog.getExcludedModelIds()).toEqual([])
+
+    // Exclude two models
+    catalog.setExcludedModelIds(['hy4-preview', 'kimi-k3-1'])
+    expect(catalog.getExcludedModelIds()).toEqual(['hy4-preview', 'kimi-k3-1'])
+    expect(catalog.excludedCount()).toBe(2)
+
+    const currentIds = catalog.current().map(m => m.id)
+    expect(currentIds).not.toContain('hy4-preview')
+    expect(currentIds).not.toContain('kimi-k3-1')
+    expect(currentIds).toContain('hy3')
+    expect(catalog.current().length).toBe(FALLBACK_WORKBUDDY_MODELS.length - 2)
+
+    // rawModels() remains un-filtered
+    expect(catalog.rawModels().length).toBe(FALLBACK_WORKBUDDY_MODELS.length)
+    expect(catalog.rawModels().map(m => m.id)).toContain('hy4-preview')
+
+    // Restore
+    catalog.setExcludedModelIds([])
+    expect(catalog.excludedCount()).toBe(0)
+    expect(catalog.current().length).toBe(FALLBACK_WORKBUDDY_MODELS.length)
+  })
 })

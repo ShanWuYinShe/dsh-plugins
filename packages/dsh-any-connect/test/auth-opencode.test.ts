@@ -72,6 +72,42 @@ describe('OpenCode Auth and Credential Resolution', () => {
       const cred = parseOpenCodeAuth(JSON.stringify({ opencode: { apiKey: 'simple_nested_key' } }))
       expect(cred.accessToken).toBe('simple_nested_key')
     })
+
+    it('解析 OpenCode CLI auth.json 中的 { opencode: { type: "api", key: "..." } } 结构', () => {
+      const authJson = {
+        opencode: {
+          type: 'api',
+          key: 'sk_from_cli_auth_json',
+        },
+      }
+      const cred = parseOpenCodeAuth(JSON.stringify(authJson))
+      expect(cred.accessToken).toBe('sk_from_cli_auth_json')
+    })
+
+    it('无 API Key 的 opencode.json 配置（如仅配置 plugins/mcp）安全回退至 public', () => {
+      const opencodeConfig = {
+        $schema: 'https://opencode.ai/config.json',
+        plugin: ['superpowers@git+https://github.com/obra/superpowers.git'],
+        mcp: {},
+      }
+      const cred = parseOpenCodeAuth(JSON.stringify(opencodeConfig, null, 2))
+      expect(cred.accessToken).toBe('public')
+      expect(cred.nickname).toBe('Free Tier (public)')
+    })
+
+    it('仅包含其他 Provider 的 auth.json 安全回退至 public', () => {
+      const otherAuth = {
+        'zhipuai-coding-plan': { type: 'api', key: '123456' },
+        'deepseek': { type: 'api', key: 'sk-999999' },
+      }
+      const cred = parseOpenCodeAuth(JSON.stringify(otherAuth))
+      expect(cred.accessToken).toBe('public')
+    })
+
+    it('含换行符或花括号的非法文本不被当作 Bearer Token，安全回退至 public', () => {
+      expect(parseOpenCodeAuth('sk_invalid\nkey').accessToken).toBe('public')
+      expect(parseOpenCodeAuth('{\n "broken": json\n}').accessToken).toBe('public')
+    })
   })
 
   describe('WorkBuddyCredentialStore 针对 OPENCODE_VARIANT 的行为', () => {
@@ -129,6 +165,25 @@ describe('OpenCode Auth and Credential Resolution', () => {
       const cred = await store.current()
       expect(cred).toBeDefined()
       expect(cred?.accessToken).toBe('file_configured_key_123')
+    })
+
+    it('显式配置 desktopPath 为无 apiKey 的 opencode.json 时，安全回退到 public 免费通道', async () => {
+      const configFile = join(tempDir, 'opencode.json')
+      await writeFile(configFile, JSON.stringify({
+        $schema: 'https://opencode.ai/config.json',
+        plugin: ['superpowers@git+https://github.com/obra/superpowers.git'],
+        mcp: {},
+      }), 'utf8')
+      const store = new WorkBuddyCredentialStore({
+        variant: OPENCODE_VARIANT,
+        refresh: mockRefresh,
+        ownPath: join(tempDir, 'own.json'),
+        desktopPath: configFile,
+      })
+      const cred = await store.current()
+      expect(cred).toBeDefined()
+      expect(cred?.accessToken).toBe('public')
+      expect(cred?.nickname).toBe('Free Tier (public)')
     })
   })
 })

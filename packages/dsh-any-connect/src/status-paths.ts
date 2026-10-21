@@ -56,16 +56,26 @@ export interface WorkBuddyWebProbeSection {
 }
 
 /** Action requested from the probe control route. */
-export interface WorkBuddyProbeAction {
-  /**
-   * `refresh` re-reads the credential and re-fetches the model catalog.
-   * Detection itself is automatic (every catalog refresh sweeps the missing
-   * candidates), so this is the route's only action — still a write that
-   * spends a request against the upstream, which is why it keeps this route's
-   * in-process key and loopback guards rather than the read-only status GET.
-   */
-  action: 'refresh'
-}
+export type WorkBuddyProbeAction =
+  | {
+    /**
+     * `refresh` re-reads the credential and re-fetches the model catalog.
+     */
+    action: 'refresh'
+  }
+  | {
+    /**
+     * `delete-model` adds a model ID to the variant's excluded models list.
+     */
+    action: 'delete-model'
+    modelId: string
+  }
+  | {
+    /**
+     * `restore-models` clears the excluded models list, restoring all defaults.
+     */
+    action: 'restore-models'
+  }
 
 /**
  * One served model, as the card's unified model list renders it: one row
@@ -228,6 +238,8 @@ export type WorkBuddyWebStatus =
      * 变体整个字段不出现——卡片据此区分"不该有这回事"与"探测没成功"。
      */
     startPlanClaim?: WorkBuddyWebStartPlanClaim
+    /** 处于排除状态（已在设置页删除）的模型总数。 */
+    excludedCount?: number
   }
   | { status: 'error'; message: string }
 

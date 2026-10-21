@@ -40,6 +40,8 @@ export interface WorkBuddyStatusRouteOptions {
   models: () => readonly WorkBuddyModelInfo[]
   /** Resolve where the served models came from, for the card's catalog line. */
   catalog: () => WorkBuddyWebCatalog
+  /** Resolve the count of excluded models for this variant. */
+  excludedCount?: () => number
   /** Resolve the probe section, for the card's detection controls. Omitted hides it. */
   probe?: () => WorkBuddyWebProbeSection
   /**
@@ -92,6 +94,7 @@ export async function workBuddyWebStatus(
     ...authStatus.source === undefined ? {} : { source: authStatus.source },
     ...authStatus.expiresAtMs === undefined ? {} : { expiresAt: authStatus.expiresAtMs },
     catalog: deps.catalog(),
+    ...deps.excludedCount !== undefined ? { excludedCount: deps.excludedCount() } : {},
     ...deps.probe === undefined ? {} : { probe: deps.probe() },
     probeKey: deps.probeKey,
   }

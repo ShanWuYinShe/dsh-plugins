@@ -24,6 +24,7 @@ import { WorkBuddyUpstreamClient } from './upstream.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { PROVIDER_VARIANTS } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
+import { ModelFilterStore } from './model-filter-store.js'
 import { WorkBuddyProbeService } from './probe-service.js'
 import { workbuddyProbePath, WorkBuddyProbeStore } from './probe-store.js'
 import { createProbeKey, registerWorkBuddyProbeRoute } from './probe-route.js'
@@ -62,7 +63,9 @@ export function createVariantRuntimeSet(deps: {
   let stopped = false
 
   function createRuntime(variant: WorkBuddyVariant): VariantRuntime {
+    const filterStore = new ModelFilterStore(variant.id)
     const catalog = new WorkBuddyCatalog(fallbackFor(variant), variant.kind)
+    catalog.setExcludedModelIds(filterStore.getExcluded())
     // Start hidden: a variant must serve no models until an account has actually
     // been adopted, so a signed-out variant is empty rather than showing a roster
     // whose models could only fail.
@@ -90,6 +93,7 @@ export function createVariantRuntimeSet(deps: {
         client: zcodeClient, credentialStore, catalogStore,
         probeStore: undefined,
         probeService: undefined,
+        filterStore,
         catalogSource: 'fallback',
         catalogFetchedAtMs: undefined,
         catalogError: undefined,
@@ -120,6 +124,7 @@ export function createVariantRuntimeSet(deps: {
         client: opencodeClient, credentialStore, catalogStore,
         probeStore: undefined,
         probeService: undefined,
+        filterStore,
         catalogSource: 'fallback',
         catalogFetchedAtMs: undefined,
         catalogError: undefined,
@@ -147,6 +152,7 @@ export function createVariantRuntimeSet(deps: {
       variant, store: credentialStore, catalog, shim,
       client, credentialStore, catalogStore, probeStore,
       probeService: undefined as unknown as WorkBuddyProbeService,
+      filterStore,
       catalogSource: 'fallback',
       catalogFetchedAtMs: undefined,
       catalogError: undefined,
@@ -213,6 +219,7 @@ export function createVariantRuntimeSet(deps: {
         // 「今日 Start Plan 待领取」只对 Start Plan 变体探测：Coding Plan 变体
         // 没有账号计划可领，报一个恒为 none 的字段只会误导。
         ...variantIsStartPlan(runtime.variant) ? { fetchStartPlanClaim: lifecycle.claimPreviewFor(runtime) } : {},
+        excludedCount: () => runtime.catalog.excludedCount(),
         probeKey,
       })
       registerWorkBuddyProbeRoute(webCtx, {
@@ -237,6 +244,20 @@ export function createVariantRuntimeSet(deps: {
           }
           lifecycle.refreshCatalog(runtime, 'manual refresh')
           return { state: 'ok' as const }
+        },
+        deleteModel: async (modelId: string) => {
+          if (stopped) return { state: 'failed', excludedCount: runtime.catalog.excludedCount() }
+          await runtime.filterStore?.exclude(modelId)
+          runtime.catalog.setExcludedModelIds(runtime.filterStore?.getExcluded() ?? [])
+          lifecycle.publishCatalog(runtime)
+          return { state: 'ok', excludedCount: runtime.catalog.excludedCount() }
+        },
+        restoreModels: async () => {
+          if (stopped) return { state: 'failed', excludedCount: runtime.catalog.excludedCount() }
+          await runtime.filterStore?.restore()
+          runtime.catalog.setExcludedModelIds([])
+          lifecycle.publishCatalog(runtime)
+          return { state: 'ok', excludedCount: 0 }
         },
       }, probeKey)
     }

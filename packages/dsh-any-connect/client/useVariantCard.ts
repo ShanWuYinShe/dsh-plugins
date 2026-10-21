@@ -26,8 +26,11 @@ import {
 } from './config-types.js'
 import { formatNumber } from './config-format.js'
 
-/** 探测动作：目前只有「重拉一次」。 */
-type ProbeAction = { action: 'refresh' }
+/** 探测动作：刷新或模型排除/恢复操作。 */
+type ProbeAction =
+  | { action: 'refresh' }
+  | { action: 'delete-model'; modelId: string }
+  | { action: 'restore-models' }
 
 export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus, applyStatus }: {
   t: WorkBuddyConfigPageInjected['t']
@@ -148,6 +151,32 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     }
   }, [control, refresh, status, t, waitCatalogLive])
 
+  const deleteModel = useCallback(async (modelId: string): Promise<void> => {
+    setBusy(true)
+    setNotice(undefined)
+    try {
+      await control({ action: 'delete-model', modelId })
+    } catch (error: unknown) {
+      if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
+    } finally {
+      await refresh()
+      if (mounted.current) setBusy(false)
+    }
+  }, [control, refresh, t])
+
+  const restoreModels = useCallback(async (): Promise<void> => {
+    setBusy(true)
+    setNotice(undefined)
+    try {
+      await control({ action: 'restore-models' })
+    } catch (error: unknown) {
+      if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
+    } finally {
+      await refresh()
+      if (mounted.current) setBusy(false)
+    }
+  }, [control, refresh, t])
+
   // Stale 目录自动刷新一次：saved/fallback 或上次失败时，后台重拉目录，
   // 用户不用按刷新。once per mount；失败只进 notice，不打扰不循环。
   const autoRefreshTried = useRef(false)
@@ -257,5 +286,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     headerSummary,
     catalogOffline,
     effortsOf,
+    deleteModel,
+    restoreModels,
   }
 }

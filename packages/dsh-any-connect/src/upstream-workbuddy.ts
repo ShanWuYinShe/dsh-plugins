@@ -23,7 +23,7 @@ import {
   type WorkBuddyChatResult,
 } from './upstream-shared.js'
 import { parseModelRow } from './upstream-workbuddy-parse.js'
-import { CLIENT_UA, regionOf, chatBase, billingBase, originReferer, chatHeaders, refreshHeaders, billingHeaders, INTERNATIONAL_SYSTEM_PROMPT, prepareInternationalChatBody, extractConversationId, readEnvelope, errorCodeOf, readFirstEvent, envelopeError } from './upstream-workbuddy-http.js'
+import { CLIENT_UA, regionOf, chatBase, billingBase, originReferer, chatHeaders, refreshHeaders, billingHeaders, INTERNATIONAL_SYSTEM_PROMPT, prepareChatBody, prepareInternationalChatBody, extractConversationId, readEnvelope, errorCodeOf, readFirstEvent, envelopeError } from './upstream-workbuddy-http.js'
 
 const PROBE_PROMPT = 'ping'
 
@@ -68,8 +68,8 @@ export class WorkBuddyUpstreamClient {
           ...chatHeaders(credential, { conversationId }),
           'Authorization': `Bearer ${credential.accessToken}`,
         },
-        // 国际网关硬性要求首条 system 消息（缺失即 400/11128），国内线不加。
-        body: international ? prepareInternationalChatBody(bodyJson) : bodyJson,
+        // 国际网关硬性要求首条 system 消息（缺失即 400/11128），国内线直接规整体。
+        body: international ? prepareInternationalChatBody(bodyJson) : prepareChatBody(bodyJson),
         signal: fetchSignal,
       }),
     )

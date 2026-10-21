@@ -105,41 +105,69 @@ export async function readDesktopCredential(ctx: DesktopReadContext): Promise<Wo
     return parseWorkBuddyAuth(text)
   }
 
+function extractValidOpenCodeKey(val: unknown): string | undefined {
+  if (typeof val === 'string') {
+    const s = val.trim()
+    if (s !== '' && s !== 'public' && !s.includes('\n') && !s.includes('\r') && !s.startsWith('{') && !s.startsWith('[')) {
+      return s
+    }
+  }
+  return undefined
+}
+
 /** Parse an OpenCode auth document (json with apiKey/token or plain text). */
 export function parseOpenCodeAuth(text: string, _path?: string): WorkBuddyCredential {
   const trimmed = text.trim()
-  if (trimmed === '') {
+  if (trimmed === '' || trimmed === 'public') {
     return defaultOpenCodePublicCredential()
   }
-  let token = trimmed
+
+  let token: string | undefined
   try {
-    const json = JSON.parse(trimmed) as Record<string, unknown>
-    if (typeof json === 'object' && json !== null) {
-      if (typeof json['apiKey'] === 'string' && json['apiKey'].trim() !== '') {
-        token = json['apiKey'].trim()
-      } else if (typeof json['token'] === 'string' && json['token'].trim() !== '') {
-        token = json['token'].trim()
-      } else if (typeof json['accessToken'] === 'string' && json['accessToken'].trim() !== '') {
-        token = json['accessToken'].trim()
-      } else if (typeof json['provider'] === 'object' && json['provider'] !== null) {
-        const prov = json['provider'] as Record<string, unknown>
-        const oc = prov['opencode'] as Record<string, unknown> | undefined
-        const settings = oc?.['settings'] as Record<string, unknown> | undefined
-        if (typeof settings?.['apiKey'] === 'string' && settings['apiKey'].trim() !== '') {
-          token = settings['apiKey'].trim()
+    const json = JSON.parse(trimmed) as unknown
+    if (typeof json === 'string') {
+      token = extractValidOpenCodeKey(json)
+    } else if (typeof json === 'object' && json !== null && !Array.isArray(json)) {
+      const rec = json as Record<string, unknown>
+      token = extractValidOpenCodeKey(rec['apiKey'])
+        ?? extractValidOpenCodeKey(rec['token'])
+        ?? extractValidOpenCodeKey(rec['accessToken'])
+        ?? extractValidOpenCodeKey(rec['key'])
+
+      if (token === undefined && typeof rec['provider'] === 'object' && rec['provider'] !== null) {
+        const prov = rec['provider'] as Record<string, unknown>
+        const oc = (prov['opencode'] ?? prov['opencode.ai']) as Record<string, unknown> | undefined
+        if (typeof oc === 'object' && oc !== null) {
+          const settings = (oc['settings'] ?? oc['options']) as Record<string, unknown> | undefined
+          token = extractValidOpenCodeKey(settings?.['apiKey'])
+            ?? extractValidOpenCodeKey(settings?.['key'])
+            ?? extractValidOpenCodeKey(oc['apiKey'])
+            ?? extractValidOpenCodeKey(oc['key'])
+        } else if (typeof oc === 'string') {
+          token = extractValidOpenCodeKey(oc)
         }
-      } else if (typeof json['opencode'] === 'object' && json['opencode'] !== null) {
-        const oc = json['opencode'] as Record<string, unknown>
-        if (typeof oc['apiKey'] === 'string' && oc['apiKey'].trim() !== '') {
-          token = oc['apiKey'].trim()
+      }
+
+      if (token === undefined && (typeof rec['opencode'] !== 'undefined' || typeof rec['opencode.ai'] !== 'undefined')) {
+        const oc = (rec['opencode'] ?? rec['opencode.ai']) as Record<string, unknown> | string | undefined
+        if (typeof oc === 'object' && oc !== null) {
+          token = extractValidOpenCodeKey(oc['apiKey'])
+            ?? extractValidOpenCodeKey(oc['key'])
+            ?? extractValidOpenCodeKey(oc['token'])
+            ?? extractValidOpenCodeKey(oc['accessToken'])
+        } else if (typeof oc === 'string') {
+          token = extractValidOpenCodeKey(oc)
         }
       }
     }
   } catch {
-    // 纯文本 token
+    // 纯文本 token：必须满足非 JSON 结构、无换行、且非 public
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+      token = extractValidOpenCodeKey(trimmed)
+    }
   }
 
-  if (token === '' || token === 'public') {
+  if (token === undefined || token === 'public') {
     return defaultOpenCodePublicCredential()
   }
 

@@ -836,9 +836,16 @@ export class OpenCodeUpstreamClient {
   ): Promise<WorkBuddyChatResult> {
     const sessionId = `ses_${generateOpenCodeId(true)}`
     const requestId = `msg_${generateOpenCodeId(false)}`
-    const auth = credential.accessToken && credential.accessToken.trim() !== ''
-      ? `Bearer ${credential.accessToken.trim()}`
-      : 'Bearer public'
+    const rawToken = credential.accessToken?.trim() ?? ''
+    const token = rawToken !== ''
+      && rawToken !== 'public'
+      && !rawToken.includes('\n')
+      && !rawToken.includes('\r')
+      && !rawToken.startsWith('{')
+      && !rawToken.startsWith('[')
+      ? rawToken
+      : 'public'
+    const auth = `Bearer ${token}`
 
     let targetModel = ''
     try {

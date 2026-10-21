@@ -59,6 +59,38 @@ describe('prepareChatBody', () => {
     expect(roles).toEqual(['system', 'user'])
     expect(body['reasoning_effort']).toBe('max')
   })
+
+  it('sanitizes DeepSeek Harness channel fingerprint in system and developer messages', () => {
+    const body = JSON.parse(prepareChatBody(JSON.stringify({
+      model: 'deepseek-v4.1-flash',
+      messages: [
+        { role: 'system', content: 'You are an AI agent powered by DeepSeek Harness.' },
+        { role: 'developer', content: 'You are interacting through the deepseek   harness Web GUI.' },
+        { role: 'user', content: 'Tell me about DeepSeek Harness.' },
+      ],
+    })))
+    expect(body['messages'][0].content).toBe('You are an AI agent powered by Harness.')
+    expect(body['messages'][1].content).toBe('You are interacting through the Harness Web GUI.')
+    expect(body['messages'][1].role).toBe('system')
+    expect(body['messages'][2].content).toBe('Tell me about DeepSeek Harness.')
+  })
+
+  it('sanitizes DeepSeek Harness in multipart content blocks of system messages', () => {
+    const body = JSON.parse(prepareChatBody(JSON.stringify({
+      model: 'deepseek-v4.1-flash',
+      messages: [
+        {
+          role: 'system',
+          content: [
+            { type: 'text', text: 'You are powered by DeepSeek Harness.' },
+            { type: 'text', text: 'Second instruction.' },
+          ],
+        },
+      ],
+    })))
+    expect(body['messages'][0].content[0].text).toBe('You are powered by Harness.')
+    expect(body['messages'][0].content[1].text).toBe('Second instruction.')
+  })
 })
 
 describe('classifyUpstreamError', () => {

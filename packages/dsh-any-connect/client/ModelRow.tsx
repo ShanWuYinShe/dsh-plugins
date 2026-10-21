@@ -13,6 +13,7 @@ import type { WorkBuddyConfigPageInjected } from './config-types.js'
 import {
   buttonStyle,
   chipStyle,
+  deleteButtonStyle,
   modelBadgesStyle,
   modelRowBaseStyle,
   modelRowEvenStyle,
@@ -28,7 +29,7 @@ import { formatTokens, modelBadgeLabel } from './config-format.js'
  * `<table>`, so tabular figures line up perfectly. Even-indexed rows get a
  * subtle background for visual grouping.
  */
-export function ModelRow({ row, efforts, t, even, onRefresh }: {
+export function ModelRow({ row, efforts, t, even, onRefresh, onDelete }: {
   row: WorkBuddyWebModelRow
   /** The effort levels the model accepts: declared, or automatically detected. */
   efforts: readonly string[] | undefined
@@ -37,6 +38,8 @@ export function ModelRow({ row, efforts, t, even, onRefresh }: {
   even: boolean
   /** 卡片级刷新动作：「价格未知」行就地给一个刷新入口，提示与动作不脱节。 */
   onRefresh?: () => void
+  /** 删除/排除模型动作。 */
+  onDelete?: (modelId: string) => void
 }): React.ReactNode {
   return (
     <tr style={even ? modelRowEvenStyle : modelRowBaseStyle}>
@@ -67,6 +70,19 @@ export function ModelRow({ row, efforts, t, even, onRefresh }: {
       </td>
       <td style={{ ...metaCellStyle, color: 'var(--dsw-alias-label-secondary)' }}>
         {efforts !== undefined && efforts.length > 0 ? efforts.join('/') : null}
+      </td>
+      <td style={{ ...metaCellStyle, textAlign: 'center' }}>
+        {onDelete !== undefined ? (
+          <button
+            type="button"
+            className="wb-btn"
+            style={deleteButtonStyle}
+            title={t('deleteModel')}
+            onClick={() => onDelete(row.id)}
+          >
+            {t('deleteModel')}
+          </button>
+        ) : null}
       </td>
     </tr>
   )

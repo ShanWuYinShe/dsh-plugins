@@ -27,6 +27,7 @@ import type { WorkBuddyShim } from './shim.js'
 import type { WorkBuddyWebCatalog } from './status-paths.js'
 import type { OpenCodeUpstreamClient, WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
 import type { Options } from './config.js'
+import type { ModelFilterStore } from './model-filter-store.js'
 
 
 /**
@@ -76,6 +77,7 @@ export interface VariantRuntime {
   catalogStore?: WorkBuddyCatalogStore
   probeStore?: WorkBuddyProbeStore
   probeService?: WorkBuddyProbeService
+  filterStore?: ModelFilterStore
 }
 
 /** The static catalog a variant serves before its first successful fetch. */

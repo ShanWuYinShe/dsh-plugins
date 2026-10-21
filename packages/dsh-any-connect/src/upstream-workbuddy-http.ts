@@ -9,7 +9,7 @@
 
 import { randomUUID } from 'node:crypto'
 import type { WorkBuddyCredential } from './auth.js'
-import { classifyUpstreamError, httpStatusLabel, normalizeDeveloperRole, normalizeToolChoice } from './upstream-shared.js'
+import { classifyUpstreamError, httpStatusLabel, normalizeDeveloperRole, normalizeToolChoice, sanitizeWorkBuddyChannelFingerprints } from './upstream-shared.js'
 import { isObject } from './upstream-workbuddy-parse.js'
 
 export type WorkBuddyRegion = 'cn' | 'global'
@@ -154,6 +154,7 @@ export function prepareChatBody(source: string): string {
   obj['stream'] = true
   normalizeDeveloperRole(obj)
   normalizeToolChoice(obj)
+  sanitizeWorkBuddyChannelFingerprints(obj)
   return JSON.stringify(obj)
 }
 

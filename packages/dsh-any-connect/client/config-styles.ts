@@ -105,6 +105,20 @@ export const descriptionStyle: CSSProperties = { fontSize: 12, lineHeight: '18px
 
 export const buttonStyle: CSSProperties = { boxSizing: 'border-box', minHeight: 28, padding: '4px 12px', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8, background: 'transparent', color: 'var(--dsw-alias-label-primary)', font: 'inherit', fontSize: 12, fontWeight: 500, lineHeight: '18px', cursor: 'pointer' }
 
+export const deleteButtonStyle: CSSProperties = {
+  boxSizing: 'border-box',
+  minHeight: 20,
+  padding: '1px 8px',
+  border: '1px solid var(--dsw-alias-border-l1)',
+  borderRadius: 6,
+  background: 'transparent',
+  color: 'var(--dsw-alias-state-error-primary, #ff4d4f)',
+  font: 'inherit',
+  fontSize: 11,
+  lineHeight: '16px',
+  cursor: 'pointer',
+}
+
 export const errorStyle: CSSProperties = { ...bodyStyle, color: 'var(--dsw-alias-state-error-primary)' }
 
 export const hintStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }

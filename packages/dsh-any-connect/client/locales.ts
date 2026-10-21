@@ -75,6 +75,11 @@ export const en = {
   cardLoadFailed: 'WorkBuddy configuration failed to load; models still work.',
   recheck: 'Check again',
   openCodeFreeBadge: 'Free Public Tier',
+  colAction: 'Action',
+  deleteModel: 'Delete',
+  restoreDefaults: 'Restore Defaults',
+  excludedModelsCount: '{n} hidden',
+  allModelsExcluded: 'All models in this provider are hidden. Click "Restore Defaults" above to restore.',
 } as const
 
 export type WorkBuddySettingsKey = keyof typeof en
@@ -154,4 +159,9 @@ export const zh: Record<WorkBuddySettingsKey, string> = {
   cardLoadFailed: 'WorkBuddy 配置面板加载失败，模型不受影响。',
   recheck: '重新检测',
   openCodeFreeBadge: '免密公共通道 · 官方免费',
+  colAction: '操作',
+  deleteModel: '删除',
+  restoreDefaults: '一键恢复默认',
+  excludedModelsCount: '已隐藏 {n} 个模型',
+  allModelsExcluded: '该渠道的所有模型均已删除隐藏。可点击上方「一键恢复默认」恢复。',
 }

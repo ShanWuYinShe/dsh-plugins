@@ -424,6 +424,7 @@ export class WorkBuddyCatalog {
    * and the historical one.
    */
   private nightFreeEligible = true
+  private excludedModelIds: ReadonlySet<string> = new Set()
 
   constructor(
     initial: readonly WorkBuddyModelInfo[] = FALLBACK_WORKBUDDY_MODELS,
@@ -438,15 +439,38 @@ export class WorkBuddyCatalog {
     this.nightFreeEligible = eligible
   }
 
+  /** Set the excluded model ids (filtered out from current()). */
+  setExcludedModelIds(ids: Iterable<string>): void {
+    this.excludedModelIds = new Set(ids)
+  }
+
+  /** Get the currently excluded model ids. */
+  getExcludedModelIds(): readonly string[] {
+    return Array.from(this.excludedModelIds)
+  }
+
+  /** Get the count of excluded models among available models. */
+  excludedCount(): number {
+    return this.models.filter(model => this.excludedModelIds.has(model.id)).length
+  }
+
+  /** Raw un-filtered models list. */
+  rawModels(): readonly WorkBuddyModelInfo[] {
+    return this.models
+  }
+
   /**
    * Current entries; empty while the variant has no usable credential.
+   * Models in excludedModelIds are filtered out.
    * Promotion-bearing rows resolve to their currently-effective billing here,
    * so every consumer (adapter, shim, card) agrees on one price without each
    * reimplementing expiry.
    */
   current(): readonly WorkBuddyModelInfo[] {
     if (!this.visible) return []
-    return this.models.map(model => modelWithCurrentPromotion(model, Date.now(), this.kind, this.nightFreeEligible))
+    return this.models
+      .filter(model => !this.excludedModelIds.has(model.id))
+      .map(model => modelWithCurrentPromotion(model, Date.now(), this.kind, this.nightFreeEligible))
   }
 
   /** Replace the list; the adapter's `getModels` reads the live catalog, so

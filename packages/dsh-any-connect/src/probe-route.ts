@@ -46,6 +46,10 @@ export interface WorkBuddyProbeRouteOptions {
    * as authorizing an action. Requires the in-process key.
    */
   refresh?: () => Promise<{ state: string; reason?: string }>
+  /** Exclude a model from the active roster. */
+  deleteModel?: (modelId: string) => Promise<{ state: string; excludedCount?: number }>
+  /** Restore all excluded models back to default. */
+  restoreModels?: () => Promise<{ state: string; excludedCount?: number }>
   /**
    * Route path to mount. Defaults to the CN variant's path so existing callers
    * and tests keep their behaviour; the international variant passes its own.
@@ -97,9 +101,15 @@ function parseAction(text: string): WorkBuddyProbeAction | undefined {
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
   const wrapped = parsed as Record<string, unknown>
-  // No payload: the variant is already known from the route the request arrived
-  // on, so the browser cannot ask this route to refresh a different provider.
   if (wrapped['action'] === 'refresh') return { action: 'refresh' }
+  if (wrapped['action'] === 'delete-model') {
+    const modelId = wrapped['modelId']
+    if (typeof modelId === 'string' && modelId.trim().length > 0) {
+      return { action: 'delete-model', modelId: modelId.trim() }
+    }
+    return undefined
+  }
+  if (wrapped['action'] === 'restore-models') return { action: 'restore-models' }
   return undefined
 }
 
@@ -135,11 +145,30 @@ export function workBuddyProbeHandler(
       return
     }
     try {
-      if (deps.refresh === undefined) {
-        json(res, 404, { error: 'refresh-not-supported' })
+      if (action.action === 'refresh') {
+        if (deps.refresh === undefined) {
+          json(res, 404, { error: 'refresh-not-supported' })
+          return
+        }
+        json(res, 200, await deps.refresh())
         return
       }
-      json(res, 200, await deps.refresh())
+      if (action.action === 'delete-model') {
+        if (deps.deleteModel === undefined) {
+          json(res, 404, { error: 'delete-model-not-supported' })
+          return
+        }
+        json(res, 200, await deps.deleteModel(action.modelId))
+        return
+      }
+      if (action.action === 'restore-models') {
+        if (deps.restoreModels === undefined) {
+          json(res, 404, { error: 'restore-models-not-supported' })
+          return
+        }
+        json(res, 200, await deps.restoreModels())
+        return
+      }
     } catch (error: unknown) {
       // 与 web-status 的 500 兜底同一脱敏口径:refresh 是注入点,自定义实
       // 现抛出的错误可能携带凭据材料,不能裸透传到浏览器。

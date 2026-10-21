@@ -6,6 +6,8 @@ const KEY = 'k'.repeat(48)
 
 async function mount(deps?: {
   refresh?: () => Promise<{ state: string; reason?: string }>
+  deleteModel?: (modelId: string) => Promise<{ state: string; excludedCount?: number }>
+  restoreModels?: () => Promise<{ state: string; excludedCount?: number }>
 }): Promise<{ server: Server; port: number; calls: string[] }> {
   const calls: string[] = []
   const handler = workBuddyProbeHandler({
@@ -14,6 +16,18 @@ async function mount(deps?: {
       : async () => {
         calls.push('refresh')
         return deps.refresh!()
+      },
+    deleteModel: deps?.deleteModel === undefined
+      ? undefined
+      : async (modelId: string) => {
+        calls.push(`delete-model:${modelId}`)
+        return deps.deleteModel!(modelId)
+      },
+    restoreModels: deps?.restoreModels === undefined
+      ? undefined
+      : async () => {
+        calls.push('restore-models')
+        return deps.restoreModels!()
       },
   }, KEY)
   const server = createServer((req, res) => { void handler(req, res) })
@@ -106,5 +120,52 @@ describe('workBuddyProbeHandler', () => {
     const m = await mount()
     mounted = m
     expect((await post(m.port, { action: 'refresh' }, AUTH)).status).toBe(404)
+  })
+
+  it('dispatches delete-model and validates modelId', async () => {
+    const m = await mount({
+      deleteModel: async (modelId: string) => ({ state: 'ok', excludedCount: 1 }),
+    })
+    mounted = m
+
+    // Valid delete-model
+    const res = await post(m.port, { action: 'delete-model', modelId: 'deepseek-flash' }, AUTH)
+    expect(res).toEqual({
+      status: 200,
+      json: { state: 'ok', excludedCount: 1 },
+    })
+    expect(m.calls).toEqual(['delete-model:deepseek-flash'])
+
+    // Missing modelId
+    expect((await post(m.port, { action: 'delete-model' }, AUTH)).status).toBe(400)
+    // Empty modelId
+    expect((await post(m.port, { action: 'delete-model', modelId: '' }, AUTH)).status).toBe(400)
+    expect((await post(m.port, { action: 'delete-model', modelId: '   ' }, AUTH)).status).toBe(400)
+  })
+
+  it('answers 404 for delete-model when deleteModel hook is absent', async () => {
+    const m = await mount()
+    mounted = m
+    expect((await post(m.port, { action: 'delete-model', modelId: 'm1' }, AUTH)).status).toBe(404)
+  })
+
+  it('dispatches restore-models', async () => {
+    const m = await mount({
+      restoreModels: async () => ({ state: 'ok', excludedCount: 0 }),
+    })
+    mounted = m
+
+    const res = await post(m.port, { action: 'restore-models' }, AUTH)
+    expect(res).toEqual({
+      status: 200,
+      json: { state: 'ok', excludedCount: 0 },
+    })
+    expect(m.calls).toEqual(['restore-models'])
+  })
+
+  it('answers 404 for restore-models when restoreModels hook is absent', async () => {
+    const m = await mount()
+    mounted = m
+    expect((await post(m.port, { action: 'restore-models' }, AUTH)).status).toBe(404)
   })
 })
