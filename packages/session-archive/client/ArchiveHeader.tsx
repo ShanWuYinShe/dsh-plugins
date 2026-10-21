@@ -20,6 +20,7 @@ export function ArchiveHeader(props: {
   sortedItems: any
 }): React.ReactNode {
   const { t, closePanel, items, loading, busy, load, filter, sortedItems } = props
+  const isRefreshing = Boolean(busy || loading)
 
   return (
 React.createElement(
@@ -32,7 +33,32 @@ React.createElement(
   React.createElement(
     "span",
     { className: "sa_headerActions" },
-    React.createElement("button", { className: "sa_refresh", type: "button", title: t("refresh"), disabled: busy || loading, onClick: load }, t("refresh")),
+    React.createElement("button", {
+      className: "sa_refresh",
+      type: "button",
+      title: isRefreshing ? t("loading") : t("refresh"),
+      "aria-label": isRefreshing ? t("loading") : t("refresh"),
+      disabled: isRefreshing,
+      onClick: load
+    },
+      React.createElement("svg", {
+        className: isRefreshing ? "sa-spin-icon" : undefined,
+        viewBox: "0 0 24 24",
+        width: 12,
+        height: 12,
+        fill: "none",
+        stroke: "currentColor",
+        strokeWidth: 2.5,
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+        style: { display: "inline-block", flexShrink: 0 },
+        "aria-hidden": true
+      },
+        React.createElement("path", { d: "M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" }),
+        React.createElement("polyline", { points: "21 3 21 8 16 8" })
+      ),
+      React.createElement("span", null, t("refresh"))
+    ),
     React.createElement("button", { className: "sa_iconBtn", type: "button", title: t("close"), "aria-label": t("close"), disabled: busy, onClick: closePanel },
       React.createElement("svg", { viewBox: "0 0 24 24", width: 14, height: 14, fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", "aria-hidden": true },
         React.createElement("path", { d: "M6 6l12 12M18 6L6 18" })))

@@ -28,8 +28,12 @@ if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin
 @keyframes wb-dot-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--dsw-alias-state-success-primary, #22a06b) 35%, transparent); } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--dsw-alias-state-success-primary, #22a06b) 0%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .wb-dot-pulse { animation: none; } }
 .wb-spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--dsw-alias-border-l2); border-top-color: var(--dsw-alias-label-secondary); border-radius: 50%; animation: wb-spin .8s linear infinite; vertical-align: middle; margin-right: 4px; }
+.wb-spin-icon {
+  animation: wb-spin .8s linear infinite;
+  transform-origin: center center;
+}
 @keyframes wb-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .wb-spin { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .wb-spin, .wb-spin-icon { animation: none; } }
 `
   document.head.appendChild(styleEl)
 }
@@ -104,6 +108,16 @@ const bodyStyle: CSSProperties = { margin: 0, fontSize: 13, lineHeight: '20px', 
 export const descriptionStyle: CSSProperties = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' }
 
 export const buttonStyle: CSSProperties = { boxSizing: 'border-box', minHeight: 28, padding: '4px 12px', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8, background: 'transparent', color: 'var(--dsw-alias-label-primary)', font: 'inherit', fontSize: 12, fontWeight: 500, lineHeight: '18px', cursor: 'pointer' }
+
+export const refreshButtonStyle: CSSProperties = {
+  ...buttonStyle,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 5,
+  flexShrink: 0,
+  transition: 'background-color .15s ease, border-color .15s ease, opacity .15s ease',
+}
 
 export const deleteButtonStyle: CSSProperties = {
   boxSizing: 'border-box',

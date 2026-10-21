@@ -113,8 +113,9 @@ export var css = [
   // spinner 停止旋转（保持静态圆环，提示语义仍在）。
   ".sa_loading{color:var(--dsw-alias-label-tertiary);margin:8px 0;font-size:12px;line-height:18px;display:flex;align-items:center;gap:6px}",
   ".sa_spin{flex:none;width:12px;height:12px;border:2px solid var(--dsw-alias-border-l2);border-top-color:var(--dsw-alias-label-secondary);border-radius:50%;animation:sa-spin .8s linear infinite}",
+  ".sa-spin-icon{animation:sa-spin .8s linear infinite;transform-origin:center center}",
   "@keyframes sa-spin{to{transform:rotate(360deg)}}",
-  "@media (prefers-reduced-motion:reduce){.sa_spin{animation:none}}",
+  "@media (prefers-reduced-motion:reduce){.sa_spin,.sa-spin-icon{animation:none}}",
   ".sa_badge:focus-visible,.sa_action:focus-visible,.sa_refresh:focus-visible,.sa_iconBtn:focus-visible,.sa_rowTitle:focus-visible,.sa_filterInput:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#1677ff);outline-offset:2px}",
   ".sa_refresh{min-height:32px;padding:4px 12px;border-radius:8px;font-weight:500}",
   ".sa_iconBtn{width:32px;height:32px;border-radius:8px}",

@@ -70,6 +70,10 @@ if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin
   margin-right: 4px;
 }
 @keyframes pu-spin { to { transform: rotate(360deg); } }
+.pu-spin-icon {
+  animation: pu-spin .8s linear infinite;
+  transform-origin: center center;
+}
 @keyframes pu-dot-pulse {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.35); opacity: 0.55; }
@@ -77,7 +81,7 @@ if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin
 .pu-dot-pulse {
   animation: pu-dot-pulse 1.2s ease-in-out infinite;
 }
-@media (prefers-reduced-motion: reduce) { .pu-spin, .pu-dot-pulse { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .pu-spin, .pu-spin-icon, .pu-dot-pulse { animation: none; } }
 `
   document.head.appendChild(styleEl)
 }
@@ -124,9 +128,10 @@ export const panelStyle: CSSProperties = {
   bottom: 'calc(100% + 8px)',
   left: 0,
   zIndex: 30,
-  minWidth: 268,
-  maxWidth: 320,
+  width: 310,
+  maxWidth: 'calc(100vw - 16px)',
   maxHeight: 'min(380px, calc(100vh - 120px))',
+  boxSizing: 'border-box',
   overflowY: 'auto',
   padding: '12px 14px',
   border: '1px solid var(--dsw-alias-border-l1)',
@@ -136,6 +141,22 @@ export const panelStyle: CSSProperties = {
   color: 'var(--dsw-alias-label-primary)',
   backdropFilter: 'blur(16px)',
   WebkitBackdropFilter: 'blur(16px)',
+}
+export const refreshButtonStyle: CSSProperties = {
+  ...pillStyle,
+  border: '1px solid var(--dsw-alias-border-l2)',
+  borderRadius: 8,
+  padding: '2px 8px',
+  fontSize: 11,
+  fontWeight: 500,
+  lineHeight: '18px',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 5,
+  flexShrink: 0,
+  color: 'var(--dsw-alias-label-secondary)',
+  background: 'var(--dsw-alias-bg-layer-2, transparent)',
+  transition: 'opacity 0.15s ease, background-color 0.15s ease, border-color 0.15s ease',
 }
 export const panelTitleStyle: CSSProperties = { margin: '0 0 8px', fontSize: 13, fontWeight: 600, lineHeight: '20px' }
 export const windowRowStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 0' }

@@ -16,7 +16,7 @@
  * @module provider-usage/pill
  */
 
-import { rootStyle, pillStyle, labelStyle, dotStyle, panelStyle, panelTitleStyle, noteStyle, errorStyle } from './pill-styles.js'
+import { rootStyle, pillStyle, labelStyle, dotStyle, panelStyle, panelTitleStyle, refreshButtonStyle, noteStyle, errorStyle } from './pill-styles.js'
 import { getDotColor } from './pill-format.js'
 import { WindowRow } from './WindowRow.js'
 import { useProviderUsage } from './useProviderUsage.js'
@@ -70,7 +70,18 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
       {open ? (
         <div ref={panelRef} tabIndex={-1} className="pu-pill-panel" style={{ ...panelStyle, outline: 'none', ...(alignRight ? { right: 0, left: 'auto' } : { left: 0 }) }} role="dialog" aria-label={t('providerUsageTitle')}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 0 10px' }}>
-            <p style={{ ...panelTitleStyle, margin: 0 }}>
+            <p
+              style={{
+                ...panelTitleStyle,
+                margin: 0,
+                minWidth: 0,
+                flex: 1,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={`${provider}${snapshot?.plan !== undefined ? ` · ${t('plan')} ${snapshot.plan}` : ''}`}
+            >
               {provider}
               {snapshot?.plan === undefined ? null : <span style={{ fontWeight: 400, color: 'var(--dsw-alias-label-tertiary)', marginLeft: 6 }}>· {t('plan')} {snapshot.plan}</span>}
             </p>
@@ -78,33 +89,44 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
               type="button"
               className="pu-pill-btn"
               style={{
-                ...pillStyle,
-                border: '1px solid var(--dsw-alias-border-l2)',
-                borderRadius: 8,
-                padding: '2px 8px',
-                fontSize: 11,
-                fontWeight: 500,
-                lineHeight: '18px',
-                color: 'var(--dsw-alias-label-secondary)',
-                background: 'var(--dsw-alias-bg-layer-2, transparent)',
+                ...refreshButtonStyle,
+                opacity: busy ? 0.65 : 1,
+                cursor: busy ? 'default' : 'pointer',
               }}
               disabled={busy}
-              title={t('refresh')}
-              aria-label={t('refresh')}
+              title={busy ? t('refreshing') : t('refresh')}
+              aria-label={busy ? t('refreshing') : t('refresh')}
               // 手动刷新要真刷新:force 让宿主绕过缓存读——否则轮询间隔与
               // 宿主 TTL 同为 60s,缓存恒新鲜,按钮永远拿回上一轮轮询的数。
               onClick={() => { void refresh(undefined, { force: true }) }}
             >
-              {busy ? <><span className="pu-spin" aria-hidden="true" />{t('refreshing')}</> : t('refresh')}
+              <svg
+                className={busy ? 'pu-spin-icon' : undefined}
+                aria-hidden="true"
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ display: 'inline-block', flexShrink: 0 }}
+              >
+                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                <polyline points="21 3 21 8 16 8" />
+              </svg>
+              <span>{t('refresh')}</span>
             </button>
           </div>
-          {busy ? <p style={noteStyle}>{t('refreshing')}</p> : null}
-          {!queried
-            ? <p style={noteStyle}>{t('noQuerierHint')}</p>
-            : snapshot!.windows.length === 0
-              ? <p style={noteStyle}>{snapshot!.error === undefined ? t('noWindows') : t('failed')}</p>
-              : snapshot!.windows.map(window => <WindowRow key={window.id} window={window} t={t} />)}
-          {queried && snapshot!.error !== undefined ? <p style={errorStyle}>{snapshot!.error}</p> : null}
+          <div style={{ opacity: busy ? 0.65 : 1, transition: 'opacity 0.2s ease', pointerEvents: busy ? 'none' : 'auto' }}>
+            {!queried
+              ? <p style={noteStyle}>{t('noQuerierHint')}</p>
+              : snapshot!.windows.length === 0
+                ? <p style={noteStyle}>{snapshot!.error === undefined ? t('noWindows') : t('failed')}</p>
+                : snapshot!.windows.map(window => <WindowRow key={window.id} window={window} t={t} />)}
+            {queried && snapshot!.error !== undefined ? <p style={errorStyle}>{snapshot!.error}</p> : null}
+          </div>
         </div>
       ) : null}
     </span>

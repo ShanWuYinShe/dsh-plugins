@@ -25,6 +25,7 @@ import {
   summaryToggleStyle,
   summaryNoteStyle,
   buttonStyle,
+  refreshButtonStyle,
   errorStyle,
   chipStyle,
   modelTableStyle,
@@ -44,6 +45,42 @@ import type { CardStatus, WorkBuddyCardVariant, WorkBuddyConfigPageInjected } fr
 import type { WorkBuddyWebStatus } from '../src/status-paths.js'
 import { useVariantCard } from './useVariantCard.js'
 import { StartPlanClaimBox } from './StartPlanClaimBox.js'
+
+function CardRefreshButton({ busy, onClick, t }: { busy: boolean; onClick: () => void; t: WorkBuddyConfigPageInjected['t'] }) {
+  return (
+    <button
+      type="button"
+      className="wb-btn"
+      style={{
+        ...refreshButtonStyle,
+        opacity: busy ? 0.65 : 1,
+        cursor: busy ? 'default' : 'pointer',
+      }}
+      disabled={busy}
+      title={busy ? t('refreshing') : t('refresh')}
+      aria-label={busy ? t('refreshing') : t('refresh')}
+      onClick={onClick}
+    >
+      <svg
+        className={busy ? 'wb-spin-icon' : undefined}
+        aria-hidden="true"
+        width="12"
+        height="12"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ display: 'inline-block', flexShrink: 0 }}
+      >
+        <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+        <polyline points="21 3 21 8 16 8" />
+      </svg>
+      <span>{t('refresh')}</span>
+    </button>
+  )
+}
 
 export function VariantCard(props: {
   t: WorkBuddyConfigPageInjected['t']
@@ -95,15 +132,7 @@ export function VariantCard(props: {
                       {planStateLabel ?? t('codingPlanActive')}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="wb-btn"
-                    style={buttonStyle}
-                    disabled={busy}
-                    onClick={() => { void refreshWithCatalog() }}
-                  >
-                    {busy ? <><span className="wb-spin" aria-hidden="true" />{t('refreshing')}</> : t('refresh')}
-                  </button>
+                  <CardRefreshButton busy={busy} onClick={() => { void refreshWithCatalog() }} t={t} />
                 </div>
                 <div style={planBadgeRowStyle}>
                   {/* 不用 emoji 当图标：渲染随系统字体漂移，宿主卡片也以纯文字
@@ -148,15 +177,7 @@ export function VariantCard(props: {
                   <span style={summaryValueStyle} title={status.domain}>
                     {t('openCodeFreeBadge')}
                   </span>
-                  <button
-                    type="button"
-                    className="wb-btn"
-                    style={buttonStyle}
-                    disabled={busy}
-                    onClick={() => { void refreshWithCatalog() }}
-                  >
-                    {busy ? <><span className="wb-spin" aria-hidden="true" />{t('refreshing')}</> : t('refresh')}
-                  </button>
+                  <CardRefreshButton busy={busy} onClick={() => { void refreshWithCatalog() }} t={t} />
                 </span>
               </div>
             </>
@@ -171,15 +192,7 @@ export function VariantCard(props: {
                       ? formatNumber(status.credits.total)
                       : (status.creditsError !== undefined ? '—' : t('creditsUnavailable'))}
                   </span>
-                  <button
-                    type="button"
-                    className="wb-btn"
-                    style={buttonStyle}
-                    disabled={busy}
-                    onClick={() => { void refreshWithCatalog() }}
-                  >
-                    {busy ? <><span className="wb-spin" aria-hidden="true" />{t('refreshing')}</> : t('refresh')}
-                  </button>
+                  <CardRefreshButton busy={busy} onClick={() => { void refreshWithCatalog() }} t={t} />
                 </span>
               </div>
             </>

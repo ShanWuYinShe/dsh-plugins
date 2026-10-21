@@ -137,6 +137,42 @@ describe('ProviderUsagePill 刷新与过期', () => {
     expect(button.textContent).toContain('3')
   })
 
+  it('点击刷新时按钮文案保持稳定且无突兀插行，弹窗尺寸稳定零抖动', async () => {
+    let finishFetch: (() => void) | null = null
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => {
+      finishFetch = () => resolve({ ok: true, json: async () => ({ snapshots: [goodSnapshot] }) } as unknown as Response)
+    })))
+    await openPanel()
+    const panel = container.querySelector('[role="dialog"]') as HTMLElement
+    expect(panel).not.toBeNull()
+    expect(panel.style.width).toBe('310px')
+
+    const btn = refreshButton()
+    expect(btn.textContent).toBe('refresh')
+    expect(btn.querySelector('svg')).not.toBeNull()
+
+    // 触发刷新（异步挂起进入 busy 态）
+    await act(async () => {
+      btn.click()
+    })
+
+    // busy 状态下：
+    // 1. 按钮文字仍然是 refresh，防止替换成 refreshing 导致按钮拉伸变形
+    expect(btn.textContent).toBe('refresh')
+    // 2. 按钮处于禁用态且 svg 带有旋转动画类名
+    expect(btn.disabled).toBe(true)
+    expect(btn.querySelector('svg')?.getAttribute('class')).toContain('pu-spin-icon')
+    // 3. 正文区域没有插入独立的 refreshing 段落导致高度突然撑大跳动
+    const paragraphs = [...panel.querySelectorAll('p')].map(p => p.textContent)
+    expect(paragraphs).not.toContain('refreshing')
+
+    // 结束 fetch
+    await act(async () => {
+      finishFetch?.()
+    })
+    expect(btn.disabled).toBe(false)
+  })
+
   it('触发按钮靠右缘时面板右对齐（防溢出视口）', async () => {
     Object.defineProperty(window, 'innerWidth', { value: 300, configurable: true })
     try {
