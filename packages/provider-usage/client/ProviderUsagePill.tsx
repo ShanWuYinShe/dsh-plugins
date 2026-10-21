@@ -48,7 +48,7 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
         className="pu-pill-btn"
         style={{
           ...pillStyle,
-          background: open ? 'var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.05))' : 'transparent',
+          background: open ? 'var(--dsw-alias-interactive-bg-hover)' : 'transparent',
         }}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -65,16 +65,29 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
       >
         <span aria-hidden="true" className={busy ? 'pu-dot-pulse' : undefined} style={{ ...dotStyle, background: getDotColor(snapshot, queried), opacity: stale ? 0.45 : 1 }} />
         <span style={labelStyle}>{provider}</span>
-        <span style={labelStyle}>{answer === undefined ? <><span className="pu-spin" aria-hidden="true" />{headlineText}</> : headlineText}</span>
+        <span style={{ ...labelStyle, fontVariantNumeric: 'tabular-nums' }}>{answer === undefined ? <><span className="pu-spin" aria-hidden="true" />{headlineText}</> : headlineText}</span>
       </button>
       {open ? (
         <div ref={panelRef} tabIndex={-1} className="pu-pill-panel" style={{ ...panelStyle, outline: 'none', ...(alignRight ? { right: 0, left: 'auto' } : { left: 0 }) }} role="dialog" aria-label={t('providerUsageTitle')}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 0 8px' }}>
-            <p style={{ ...panelTitleStyle, margin: 0 }}>{provider}{snapshot?.plan === undefined ? null : ` · ${t('plan')} ${snapshot.plan}`}</p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '0 0 10px' }}>
+            <p style={{ ...panelTitleStyle, margin: 0 }}>
+              {provider}
+              {snapshot?.plan === undefined ? null : <span style={{ fontWeight: 400, color: 'var(--dsw-alias-label-tertiary)', marginLeft: 6 }}>· {t('plan')} {snapshot.plan}</span>}
+            </p>
             <button
               type="button"
               className="pu-pill-btn"
-              style={{ ...pillStyle, border: '1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1))', borderRadius: 8, padding: '2px 8px', fontSize: 12, lineHeight: '18px' }}
+              style={{
+                ...pillStyle,
+                border: '1px solid var(--dsw-alias-border-l2)',
+                borderRadius: 8,
+                padding: '2px 8px',
+                fontSize: 11,
+                fontWeight: 500,
+                lineHeight: '18px',
+                color: 'var(--dsw-alias-label-secondary)',
+                background: 'var(--dsw-alias-bg-layer-2, transparent)',
+              }}
               disabled={busy}
               title={t('refresh')}
               aria-label={t('refresh')}

@@ -28,7 +28,7 @@ export function WindowRow({ window, t }: { window: UsageWindow; t: ProviderUsage
     <div style={windowRowStyle}>
       <div style={windowHeadStyle}>
         <span id={`pu-window-${window.id}`} style={labelStyle}>{window.label}</span>
-        <span style={{ fontWeight: 500 }}>
+        <span style={{ fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
           {window.remain === undefined ? window.unit : `${formatAmount(remain)} ${window.unit}`}
         </span>
       </div>

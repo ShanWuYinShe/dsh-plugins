@@ -14,17 +14,26 @@ if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin
   styleEl.dataset.pluginCss = PU_STYLE_ID
   styleEl.textContent = `
 @keyframes pu-panel-in {
-  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .pu-pill-btn {
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .pu-pill-btn:hover {
-  background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.04)) !important;
+  background: var(--dsw-alias-interactive-bg-hover) !important;
+}
+.pu-pill-btn:active {
+  background: var(--dsw-alias-interactive-bg-active) !important;
+}
+.pu-pill-btn:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, #1677ff);
+  outline-offset: 1px;
 }
 .pu-pill-panel {
-  animation: pu-panel-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: pu-panel-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 @media (prefers-reduced-motion: reduce) {
   .pu-pill-panel { animation: none; }
@@ -53,8 +62,8 @@ if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin
   display: inline-block;
   width: 12px;
   height: 12px;
-  border: 2px solid var(--dsw-alias-border-l2, rgba(0,0,0,0.08));
-  border-top-color: var(--dsw-alias-label-secondary, #666);
+  border: 2px solid var(--dsw-alias-border-l2);
+  border-top-color: var(--dsw-alias-label-secondary);
   border-radius: 50%;
   animation: pu-spin .8s linear infinite;
   vertical-align: middle;
@@ -88,11 +97,13 @@ export const pillStyle: CSSProperties = {
   gap: 6,
   maxWidth: '100%',
   padding: '2px 8px',
-  border: 0,
+  border: '1px solid transparent',
   borderRadius: 999,
   background: 'transparent',
   color: 'inherit',
   font: 'inherit',
+  fontSize: 12,
+  lineHeight: '18px',
   cursor: 'pointer',
 }
 export const labelStyle: CSSProperties = {
@@ -106,30 +117,31 @@ export const dotStyle: CSSProperties = {
   flex: '0 0 auto',
   borderRadius: '50%',
   background: 'var(--dsw-alias-label-dimmed, #9aa0a6)',
-  transition: 'background-color 0.2s ease',
+  transition: 'background-color 0.2s ease, opacity 0.2s ease',
 }
 export const panelStyle: CSSProperties = {
   position: 'absolute',
   bottom: 'calc(100% + 8px)',
   left: 0,
   zIndex: 30,
-  minWidth: 260,
+  minWidth: 268,
   maxWidth: 320,
   maxHeight: 'min(380px, calc(100vh - 120px))',
   overflowY: 'auto',
   padding: '12px 14px',
-  border: '1px solid var(--dsw-alias-border-l1, rgba(0, 0, 0, 0.1))',
-  borderRadius: 12,
-  background: 'var(--dsw-specific-tip, var(--dsw-alias-bg-layer-1, #ffffff))',
-  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.06)',
+  border: '1px solid var(--dsw-alias-border-l1)',
+  borderRadius: 14,
+  background: 'var(--dsw-alias-bg-layer-1)',
+  boxShadow: 'var(--dsw-shadow-lv3, 0 16px 40px rgba(0, 0, 0, 0.2)), 0 2px 8px rgba(0, 0, 0, 0.06)',
   color: 'var(--dsw-alias-label-primary)',
-  backdropFilter: 'blur(10px)',
+  backdropFilter: 'blur(16px)',
+  WebkitBackdropFilter: 'blur(16px)',
 }
 export const panelTitleStyle: CSSProperties = { margin: '0 0 8px', fontSize: 13, fontWeight: 600, lineHeight: '20px' }
 export const windowRowStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 0' }
-export const windowHeadStyle: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12, lineHeight: '18px' }
+export const windowHeadStyle: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, fontSize: 12, lineHeight: '18px' }
 export const windowMetaStyle: CSSProperties = { fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)' }
-export const trackStyle: CSSProperties = { height: 6, overflow: 'hidden', borderRadius: 999, background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.08))' }
+export const trackStyle: CSSProperties = { height: 6, overflow: 'hidden', borderRadius: 999, background: 'var(--dsw-alias-bg-layer-2)' }
 export const noteStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
 export const errorStyle: CSSProperties = { ...noteStyle, color: 'var(--dsw-alias-state-error-primary)' }
 

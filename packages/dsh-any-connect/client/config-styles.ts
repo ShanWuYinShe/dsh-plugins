@@ -19,12 +19,13 @@ if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin
 .wb-card { transition: border-color .15s ease, box-shadow .15s ease; }
 .wb-card:hover { border-color: var(--dsw-alias-border-l1); box-shadow: var(--dsw-shadow-lv1); }
 .wb-header:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.wb-header { transition: background-color .15s ease; border-radius: 10px; }
-.wb-btn { transition: background-color .15s ease, border-color .15s ease; }
-.wb-btn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover) !important; }
+.wb-header { transition: background-color .15s ease; border-radius: 12px; }
+.wb-header:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #1677ff); outline-offset: -2px; }
+.wb-btn { transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease; }
+.wb-btn:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover) !important; border-color: var(--dsw-alias-border-l1) !important; }
 .wb-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #1677ff); outline-offset: 1px; }
 .wb-dot-pulse { animation: wb-dot-pulse 2s ease-in-out infinite; }
-@keyframes wb-dot-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 160, 107, 0.3); } 50% { box-shadow: 0 0 0 4px rgba(34, 160, 107, 0); } }
+@keyframes wb-dot-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--dsw-alias-state-success-primary, #22a06b) 35%, transparent); } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--dsw-alias-state-success-primary, #22a06b) 0%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .wb-dot-pulse { animation: none; } }
 .wb-spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--dsw-alias-border-l2); border-top-color: var(--dsw-alias-label-secondary); border-radius: 50%; animation: wb-spin .8s linear infinite; vertical-align: middle; margin-right: 4px; }
 @keyframes wb-spin { to { transform: rotate(360deg); } }
@@ -36,7 +37,7 @@ if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin
 export const cardStyle: CSSProperties = {
   overflow: 'hidden',
   border: '1px solid var(--dsw-alias-border-l2)',
-  borderRadius: 10,
+  borderRadius: 12,
   background: 'var(--dsw-alias-bg-module-platform)',
 }
 
@@ -48,7 +49,7 @@ export const headerStyle: CSSProperties = {
   justifyContent: 'space-between',
   gap: 16,
   border: 0,
-  padding: '12px 14px',
+  padding: '12px 16px',
   background: 'transparent',
   color: 'var(--dsw-alias-label-primary)',
   font: 'inherit',
@@ -56,22 +57,22 @@ export const headerStyle: CSSProperties = {
   cursor: 'pointer',
 }
 
-export const headTextStyle: CSSProperties = { display: 'flex', minWidth: 0, flexDirection: 'column', gap: 2 }
+export const headTextStyle: CSSProperties = { display: 'flex', minWidth: 0, flexDirection: 'column', gap: 3 }
 
 export const nameRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }
 
-export const nameStyle: CSSProperties = { fontSize: 14, lineHeight: '20px', fontWeight: 600 }
+export const nameStyle: CSSProperties = { fontSize: 14, lineHeight: '20px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }
 
-export const summaryStyle: CSSProperties = { paddingLeft: 16, fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' }
+export const summaryStyle: CSSProperties = { paddingLeft: 16, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' }
 
-export const chevronStyle: CSSProperties = { flex: '0 0 auto', fontSize: 18, lineHeight: 1, transition: 'transform 120ms ease' }
+export const chevronStyle: CSSProperties = { flex: '0 0 auto', fontSize: 16, lineHeight: 1, color: 'var(--dsw-alias-label-tertiary)', transition: 'transform 160ms cubic-bezier(0.16, 1, 0.3, 1)' }
 
-export const cardBodyStyle: CSSProperties = { borderTop: '1px solid var(--dsw-alias-border-l2)', padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }
+export const cardBodyStyle: CSSProperties = { borderTop: '1px solid var(--dsw-alias-border-l2)', padding: '14px 16px 16px', display: 'flex', flexDirection: 'column', gap: 12 }
 
 export const dividerStyle: CSSProperties = { border: 0, borderTop: '1px solid var(--dsw-alias-border-l2)', margin: 0 }
 
 /** 卡体摘要行：左标签右数值，一行讲完当前积分（刷新按钮同行）。 */
-export const summaryRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }
+export const summaryRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }
 
 export const summaryLabelStyle: CSSProperties = { fontSize: 13, lineHeight: '20px', fontWeight: 500, color: 'var(--dsw-alias-label-secondary)' }
 
@@ -85,7 +86,7 @@ export const summaryToggleStyle: CSSProperties = {
   alignItems: 'center',
   gap: 6,
   border: 0,
-  padding: 0,
+  padding: '2px 0',
   background: 'transparent',
   font: 'inherit',
   fontSize: 12,
@@ -98,20 +99,22 @@ export const summaryToggleStyle: CSSProperties = {
 
 export const summaryNoteStyle: CSSProperties = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums' }
 
-const bodyStyle: CSSProperties = { margin: 0, fontSize: 14, lineHeight: '22px', color: 'var(--dsw-alias-label-secondary)' }
+const bodyStyle: CSSProperties = { margin: 0, fontSize: 13, lineHeight: '20px', color: 'var(--dsw-alias-label-secondary)' }
 
-export const descriptionStyle: CSSProperties = { fontSize: 12, lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' }
+export const descriptionStyle: CSSProperties = { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' }
 
-export const buttonStyle: CSSProperties = { boxSizing: 'border-box', minHeight: 26, padding: '3px 10px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 8, background: 'transparent', color: 'var(--dsw-alias-label-primary)', font: 'inherit', fontSize: 12, lineHeight: '18px', cursor: 'pointer' }
+export const buttonStyle: CSSProperties = { boxSizing: 'border-box', minHeight: 28, padding: '4px 12px', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8, background: 'transparent', color: 'var(--dsw-alias-label-primary)', font: 'inherit', fontSize: 12, fontWeight: 500, lineHeight: '18px', cursor: 'pointer' }
 
 export const errorStyle: CSSProperties = { ...bodyStyle, color: 'var(--dsw-alias-state-error-primary)' }
 
 export const hintStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
 
 export const chipStyle: CSSProperties = {
-  padding: '1px 8px', borderRadius: 999, fontSize: 11, lineHeight: '16px',
+  padding: '2px 8px', borderRadius: 999, fontSize: 11, lineHeight: '16px', fontWeight: 500,
   background: 'color-mix(in srgb, var(--dsw-alias-state-success-primary, #22a06b) 12%, transparent)',
   color: 'var(--dsw-alias-state-success-primary, #22a06b)',
+  border: '1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary, #22a06b) 22%, transparent)',
+  fontVariantNumeric: 'tabular-nums',
 }
 
 export const modelBadgesStyle: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, verticalAlign: 'middle' }
@@ -119,11 +122,11 @@ export const modelBadgesStyle: CSSProperties = { display: 'inline-flex', alignIt
 export const modelTableStyle: CSSProperties = { width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }
 
 export const modelThStyle: CSSProperties = {
-  padding: '4px 6px 6px',
+  padding: '6px 8px 8px',
   fontSize: 11,
   lineHeight: '16px',
   fontWeight: 600,
-  letterSpacing: '0.02em',
+  letterSpacing: '0.04em',
   color: 'var(--dsw-alias-label-tertiary)',
   whiteSpace: 'nowrap',
   borderBottom: '1px solid var(--dsw-alias-border-l2)',
@@ -133,18 +136,18 @@ export const modelRowBaseStyle: CSSProperties = { borderRadius: 6 }
 
 export const modelRowEvenStyle: CSSProperties = { ...modelRowBaseStyle, background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.025))' }
 
-export const modelTdStyle: CSSProperties = { padding: '5px 6px' }
+export const modelTdStyle: CSSProperties = { padding: '6px 8px' }
 
-export const modelNameStyle: CSSProperties = { ...modelTdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, lineHeight: '22px', color: 'var(--dsw-alias-label-primary)' }
+export const modelNameStyle: CSSProperties = { ...modelTdStyle, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, lineHeight: '20px', fontWeight: 500, fontFamily: 'var(--ds-font-family-code, monospace)', color: 'var(--dsw-alias-label-primary)' }
 
-export const metaCellStyle: CSSProperties = { ...modelTdStyle, fontSize: 12, lineHeight: '20px', color: 'var(--dsw-alias-label-tertiary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+export const metaCellStyle: CSSProperties = { ...modelTdStyle, fontSize: 12, lineHeight: '20px', color: 'var(--dsw-alias-label-secondary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
 
 export const planCardStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 8,
+  gap: 10,
   padding: '12px 14px',
-  borderRadius: 8,
+  borderRadius: 10,
   background: 'var(--dsw-alias-bg-layer-2, rgba(0, 0, 0, 0.03))',
   border: '1px solid var(--dsw-alias-border-l2)',
 }
@@ -164,23 +167,23 @@ export const privilegeChipStyle: CSSProperties = {
   fontSize: 11,
   lineHeight: '16px',
   fontWeight: 500,
-  background: 'color-mix(in srgb, var(--dsw-alias-brand-primary, #1677ff) 12%, transparent)',
+  background: 'color-mix(in srgb, var(--dsw-alias-brand-primary, #1677ff) 10%, transparent)',
   color: 'var(--dsw-alias-brand-primary, #1677ff)',
   border: '1px solid color-mix(in srgb, var(--dsw-alias-brand-primary, #1677ff) 20%, transparent)',
 }
 
-export const planMetaStyle: CSSProperties = { fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)' }
+export const planMetaStyle: CSSProperties = { fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums' }
 
 /** 今日待领取：唯一需要用户动作的状态，给一块带边框的提示区。 */
 export const claimBoxStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 6,
-  marginTop: 10,
-  padding: '10px 12px',
+  gap: 8,
+  marginTop: 8,
+  padding: '12px 14px',
   borderRadius: 8,
-  border: '1px solid var(--dsw-alias-state-warn-primary)',
-  background: 'var(--dsw-alias-bg-layer-2)',
+  border: '1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary, #faad14) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary, #faad14) 8%, var(--dsw-alias-bg-layer-2))',
 }
 
 /**
@@ -198,8 +201,12 @@ export const claimTitleStyle: CSSProperties = { fontSize: 13, lineHeight: '20px'
 export const claimIdRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }
 
 export const claimCodeStyle: CSSProperties = {
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontFamily: 'var(--ds-font-family-code, monospace)',
   fontSize: 11,
+  padding: '2px 6px',
+  borderRadius: 4,
+  background: 'var(--dsw-alias-bg-base)',
+  border: '1px solid var(--dsw-alias-border-l2)',
   wordBreak: 'break-all',
 }
 
@@ -218,7 +225,7 @@ export const signedOutRowHeadStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 10,
-  padding: '10px 14px',
+  padding: '12px 16px',
   width: '100%',
   border: 0,
   background: 'transparent',
@@ -228,7 +235,7 @@ export const signedOutRowHeadStyle: CSSProperties = {
   cursor: 'pointer',
 }
 
-export const signedOutBodyStyle: CSSProperties = { borderTop: '1px solid var(--dsw-alias-border-l2)', padding: '10px 14px 12px' }
+export const signedOutBodyStyle: CSSProperties = { borderTop: '1px solid var(--dsw-alias-border-l2)', padding: '12px 16px 14px' }
 
 export function dotStyle(status: CardStatus['status']): CSSProperties {
   const color = status === 'signed-in'
@@ -236,5 +243,5 @@ export function dotStyle(status: CardStatus['status']): CSSProperties {
     : status === 'error'
       ? 'var(--dsw-alias-state-error-primary, #d92d20)'
       : 'var(--dsw-alias-label-dimmed, #9aa0a6)'
-  return { width: 9, height: 9, borderRadius: '50%', flex: '0 0 auto', background: color }
+  return { width: 8, height: 8, borderRadius: '50%', flex: '0 0 auto', background: color }
 }
