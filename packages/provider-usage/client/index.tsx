@@ -110,8 +110,16 @@ export function apply(ctx: ClientContext): void {
             // The dock is session-scoped, so the renderer hands the owning session
             // here; the directory it resolves is the same one the composer's model
             // seat renders from, which is what keeps the two in agreement.
-            const seat = sessionId === undefined ? undefined : modelSeat(scope, sessionId)
-            return seat === undefined ? { t } : { t, ...seat }
+            //
+            // 注意：sessionId 为 undefined 时返回仅含 { t } 的空壳；
+            // 一旦有 sessionId，必须解析会话目录。若此时目录解析抛错（如会话
+            // 重连期 sessions.scope 尚未就绪），绝不可吞成 { t }——因为宿主
+            // cachedSessionInject 会把 inject 结果按 (entry × 会话绑定) 永久
+            // 缓存在 sessionInjectCache 里；吞成 { t } 会导致缺 directory 的
+            // 残缺 props 被永久固化，整页再也长不出 pill。向外抛错能阻止坏缓存，
+            // 下一帧重试即可正常拿到目录。
+            if (sessionId === undefined) return { t }
+            return { t, ...modelSeat(scope, sessionId) }
           },
         }, ProviderUsagePill))
       } catch (error: unknown) {
@@ -140,7 +148,7 @@ interface ModelDirectoryLike {
 const loadCache = new WeakMap<object, () => void>()
 
 /**
- * Resolve one session's model seat, or nothing when the harness omits it.
+ * Resolve one session's model seat.
  *
  * @param ctx - the registration sub-fiber's context (the one that declared the
  * `modelDirectories` dependency), so the lookup stays inside that fiber's scope.
@@ -149,7 +157,7 @@ const loadCache = new WeakMap<object, () => void>()
 function modelSeat(
   ctx: ClientContext,
   sessionId: unknown,
-): { directory: DirectoryStore; load: () => void } | undefined {
+): { directory: DirectoryStore; load: () => void } {
   // The model directory is a lazy service: `current` stays null until someone
   // calls `load()`, which the composer's own model seat does on mount. A pill
   // that only reads the snapshot would sit blank forever on a fresh session,
@@ -157,22 +165,17 @@ function modelSeat(
   const directories = ctx.get('modelDirectories') as
     | { directoryFor: (id: never) => ModelDirectoryLike }
     | undefined
-  if (directories === undefined) return undefined
-  try {
-    const directory = directories.directoryFor(sessionId as never)
-    let load = loadCache.get(directory)
-    if (load === undefined) {
-      load = () => { void directory.load().catch(() => {}) }
-      loadCache.set(directory, load)
-    }
-    return {
-      directory: directory.store,
-      load,
-    }
-  } catch {
-    // `directoryFor` is typed to the branded SessionId and rejects unknown
-    // sessions; failing to resolve is a reason to render nothing, not to throw
-    // into the React tree.
-    return undefined
+  if (directories === undefined) {
+    throw new Error('provider-usage: modelDirectories service unavailable during session inject')
+  }
+  const directory = directories.directoryFor(sessionId as never)
+  let load = loadCache.get(directory)
+  if (load === undefined) {
+    load = () => { void directory.load().catch(() => {}) }
+    loadCache.set(directory, load)
+  }
+  return {
+    directory: directory.store,
+    load,
   }
 }

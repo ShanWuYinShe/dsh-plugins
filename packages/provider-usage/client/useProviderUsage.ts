@@ -41,11 +41,24 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
     directory === undefined ? (() => () => {}) : (fn => directory.subscribe(fn)),
     directory === undefined ? (() => ABSENT_DIRECTORY) : (() => directory.getSnapshot()),
   )
-  // The directory is lazy: `current` stays null until someone loads it, which
-  // the composer's own model seat does on mount. A pill that only read the
-  // snapshot would sit blank forever on a fresh session.
-  useEffect(() => { load?.() }, [load])
-  const provider = state.current?.provider
+  // The directory is lazy: `current` stays null until someone loads it.
+  // 此外，会话长期搁置或宿主重连（connection/reset）时目录可能被重置为 null；
+  // 此时若只在 mount 调一次 load，pill 会因为 provider 为空而永久消失。
+  // 因此只要 current 为 null 且目录不在 loading 或 error 中，就主动触发 load()。
+  useEffect(() => {
+    if (state.current === null && state.status !== 'loading' && state.status !== 'error') {
+      load?.()
+    }
+  }, [state.current, state.status, load])
+
+  const currentProvider = state.current?.provider
+  const lastProviderRef = useRef<string | undefined>(undefined)
+  if (currentProvider !== undefined && currentProvider !== '') {
+    lastProviderRef.current = currentProvider
+  }
+  // 保持旧 provider 避免宿主重连或目录重载瞬间 pill 整块 DOM 卸载消失
+  const provider = currentProvider ?? lastProviderRef.current
+
   const [answer, setAnswer] = useState<RouteAnswer | undefined>(undefined)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -94,13 +107,35 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
     prevOpenRef.current = open
   }, [open])
 
+  // 面板打开期间窗口尺寸变化（resize、侧栏收展）也要重判翻转：对齐只在
+  // 打开瞬间决定的话，打开后收窄视口会让 320px 面板溢出屏幕右缘。
+  useEffect(() => {
+    if (!open) return
+    const realign = () => {
+      if (!buttonRef.current) return
+      setAlignRight(buttonRef.current.getBoundingClientRect().left + 320 > window.innerWidth - 8)
+    }
+    window.addEventListener('resize', realign)
+    return () => window.removeEventListener('resize', realign)
+  }, [open])
+
   // 跨闭包跟踪当前 provider:手动刷新(面板内按钮)不带 AbortSignal,provider
   // 切换时无法取消在途的旧请求——写回前必须核对响应的 provider 是否仍是
   // 当前值,否则 A 的旧余额会顶着 B 的名字显示到下一轮轮询。
   const providerRef = useRef(provider)
   useEffect(() => { providerRef.current = provider }, [provider])
+
+  const loadRef = useRef(load)
+  useEffect(() => { loadRef.current = load }, [load])
+
+  const stateCurrentRef = useRef(state.current)
+  useEffect(() => { stateCurrentRef.current = state.current }, [state.current])
+
   const refresh = useCallback(async (signal?: AbortSignal, options?: { force?: boolean }): Promise<void> => {
     if (provider === undefined || provider === '') return
+    if (stateCurrentRef.current === null) {
+      loadRef.current?.()
+    }
     setBusy(true)
     try {
       const snapshot = await fetchSnapshot(provider, signal, options)
@@ -129,45 +164,94 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
     }
   }, [provider])
 
+  // Provider 切换或初次挂载时发起拉取；若只是网络抖动导致 current 短暂置空、但
+  // 最终恢复为同一 provider，则不清空旧答案与过期标记，避免不必要的数字闪烁与白屏。
+  const activeProviderRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (provider === undefined || provider === '') return
+    if (activeProviderRef.current !== provider) {
+      activeProviderRef.current = provider
+      answerRef.current = undefined
+      setAnswer(undefined)
+      setStale(false)
+    }
     const controller = new AbortController()
-    // Reset first so a provider switch never shows the previous provider's
-    // balance while the new answer is in flight.
-    answerRef.current = undefined
-    setAnswer(undefined)
-    setStale(false)
     void refresh(controller.signal)
     return () => { controller.abort() }
   }, [provider, refresh])
 
+  // 目录重连恢复：从 current === null 恢复到有值时，立即重拉一次额度
+  const prevCurrentRef = useRef(state.current)
   useEffect(() => {
-    if (provider === undefined || provider === '') return
+    const wasNull = prevCurrentRef.current === null
+    prevCurrentRef.current = state.current
+    if (wasNull && state.current !== null && provider !== undefined && provider !== '') {
+      void refresh()
+    }
+  }, [state.current, provider, refresh])
+
+  // 60s 轮询 + 唤醒恢复（可见性 / focus / online）
+  // 无论当前 provider 是否已经解析出，都要维持轮询与唤醒监听：
+  // 1. 若 current 为 null（如夜间长期搁置导致会话断开），轮询与唤醒负责重试 load()；
+  // 2. 若 provider 正常，负责刷新用量快照。
+  useEffect(() => {
     const controller = new AbortController()
     let timer: number | undefined
-    const start = () => { timer = window.setInterval(() => { void refresh(controller.signal) }, POLL_INTERVAL_MS) }
-    const stop = () => { if (timer !== undefined) { window.clearInterval(timer); timer = undefined } }
-    const onVisibility = () => {
-      // 先 stop 再 start:visible 事件可能在 interval 仍在跑时到达,
-      // 直接 start 会覆盖 timer 引用,旧 interval 泄漏、轮询翻倍。
-      if (document.visibilityState === 'visible') { stop(); void refresh(controller.signal); start() }
-      else stop()
+    const trigger = () => {
+      if (state.current === null) {
+        load?.()
+      } else if (provider !== undefined && provider !== '') {
+        void refresh(controller.signal)
+      }
     }
-    if (document.visibilityState === 'visible') start()
-    document.addEventListener('visibilitychange', onVisibility)
+    const start = () => {
+      timer = window.setInterval(trigger, POLL_INTERVAL_MS)
+    }
+    const stop = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer)
+        timer = undefined
+      }
+    }
+    let lastWake = 0
+    const onWake = () => {
+      if (document.visibilityState === 'visible') {
+        stop()
+        const now = Date.now()
+        // 1 秒内防抖，避免 visibilitychange / focus / online 连发造成并发重刷
+        if (now - lastWake > 1000) {
+          lastWake = now
+          trigger()
+        }
+        start()
+      } else {
+        stop()
+      }
+    }
+
+    if (document.visibilityState === 'visible') {
+      start()
+    }
+    document.addEventListener('visibilitychange', onWake)
+    window.addEventListener('focus', onWake)
+    window.addEventListener('online', onWake)
+
     return () => {
       stop()
       controller.abort()
-      document.removeEventListener('visibilitychange', onVisibility)
+      document.removeEventListener('visibilitychange', onWake)
+      window.removeEventListener('focus', onWake)
+      window.removeEventListener('online', onWake)
     }
-  }, [provider, refresh])
+  }, [state.current, provider, load, refresh])
 
   if (provider === undefined || provider === '') return null
 
   const queried = answer !== undefined && !('queried' in answer)
   const snapshot = queried ? answer as UsageSnapshot : undefined
-  // 宿主折叠旧答案（degraded）与客户端请求失败同视为「数据可能过期」。
-  const displayStale = isStaleDisplay(stale, snapshot)
+  const isDisconnected = state.current === null && lastProviderRef.current !== undefined
+  // 宿主折叠旧答案（degraded）、客户端请求失败、或目录重连中（current 为 null）均视为「数据可能过期」。
+  const displayStale = isStaleDisplay(stale || isDisconnected, snapshot)
   const headline = headlineText(answer, provider, displayStale, t)
 
 

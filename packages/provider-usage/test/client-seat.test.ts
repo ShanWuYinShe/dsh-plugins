@@ -183,4 +183,21 @@ describe('provider-usage dock entry 注册时序', () => {
       spy.mockRestore()
     }
   })
+
+  it('会话目录未就绪抛错时不吞成空 props（防止 cachedSessionInject 永久固化缺 directory 的坏缓存）', async () => {
+    const { ctx, registrations } = await mountEntryWithoutDirectory()
+    ctx.provide('modelDirectories', {
+      directoryFor: (sessionId: unknown) => {
+        if (sessionId === 'session-unready') throw new Error('session resolved no scope')
+        return { store: {}, load: () => Promise.resolve() }
+      },
+    } as never)
+    await settle()
+    expect(registrations).toHaveLength(1)
+    const [dock] = registrations
+    // 无 sessionId 正常返回 { t }
+    expect(dock!.options.inject().directory).toBeUndefined()
+    // 有 sessionId 但目录服务抛错：绝不能返回 { t }，必须抛出以阻止 sessionInjectCache 固化
+    expect(() => dock!.options.inject('session-unready')).toThrow('session resolved no scope')
+  })
 })
