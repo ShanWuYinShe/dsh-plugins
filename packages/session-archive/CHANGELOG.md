@@ -1,3 +1,13 @@
+## 0.3.27 (2026-10-21)
+
+### 优化
+
+* **会话归档面板 UI 全面对齐 DSH 原生视觉规范**：
+  * 弹窗容器升级为 16px 圆角，外层遮罩引入 6px 虚化效果（`backdrop-filter: blur(6px)`），投影使用宿主标准大浮层阴影 `var(--dsw-shadow-lv3)`；
+  * 搜索输入框聚焦时采用 `var(--dsw-alias-brand-primary)` 品牌色光圈（`box-shadow: 0 0 0 2px color-mix(...)`）；
+  * 会话项卡片圆角规整为 12px，悬停采用 `var(--dsw-alias-bg-layer-2)` 微升动效，选中态采用品牌色柔和底色与边框高亮；
+  * 危险与确认操作按钮的文本色改用 `var(--dsw-alias-label-primary-foreground, #fff)` 规范 token，确保深色模式对比度；各处计数器与时间启用等宽数值。
+
 ## 0.3.26 (2026-10-17)
 
 ### 新增与优化

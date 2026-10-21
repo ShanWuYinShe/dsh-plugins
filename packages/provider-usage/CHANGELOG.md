@@ -1,3 +1,13 @@
+## 0.1.9 (2026-10-21)
+
+### 修复
+
+* **会话长期搁置后重连自愈与唤醒恢复**：修复因挂机过夜或长时间闲置后，输入框下方额度 pill 消失的问题。将窗口大小监听与刷新触发抽离至独立 hook 并由组件无条件挂载，修复 Rules of Hooks 条件调用；增强宿主事件总线重连与页面可见性（`visibilitychange`）自愈监听；修复 `sessionInjectCache` 缓存污染，在会话切换与挂起唤醒时安全获取模型用量。
+
+### 优化
+
+* **UI 质感美化与 DSH 原生规范对齐**：浮层面板采用 14px 规范圆角，叠加 `var(--dsw-shadow-lv3)` 与 16px 毛玻璃背景模糊；滚动条绑定宿主主题 token（`--dsh-scrollbar-thumb` / `--dsh-scrollbar-thumb-hover`）；Pill 胶囊按钮补充完整的 hover、active 与 focus-visible 焦点环；用量与剩余百分比全部启用 `tabular-nums` 避免界面字符抖动。
+
 ## 0.1.8 (2026-10-19)
 
 ### 修复

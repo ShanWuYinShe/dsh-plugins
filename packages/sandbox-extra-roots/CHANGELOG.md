@@ -1,3 +1,13 @@
+## 0.4.23 (2026-10-21)
+
+### 优化
+
+* **设置页授权根卡片视觉美化与细节调优**：
+  * 卡片容器规范化为 12px 圆角，展开状态支持 `var(--dsw-shadow-lv1)` 轻量阴影；
+  * 多行路径编辑 Textarea 增加薄滚动条（`scrollbar-color: var(--dsw-alias-scrollbar-bg-l2) transparent`）与品牌色聚焦高亮外圈；
+  * 预设路径 Chips 采用等宽代码字体 `var(--ds-font-family-code, monospace)` 与微胶囊样式，悬停呈现柔和品牌色背景；
+  * 路径冲突与警告提示框采用 `color-mix` 柔和对比度背景，保存按钮对齐 Primary Button 规范及微投影。
+
 ## 0.4.22 (2026-10-17)
 
 ### 新增与优化
