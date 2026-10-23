@@ -84,8 +84,12 @@ GET https://zcode.z.ai/api/v1/zcode-plan/billing/balance[?app_version=<ver>]
   ①任何"取第一个有余额的池"的展示逻辑会吞掉其余池子；②把多池求和成一个
   "哪个模型都能用"的总额度是错误语义。上面 Trust Build 的"单池"只是当年活动
   恰好只有一个 entitlement。插件已改为每池一条窗口（`startPlanWindows`，
-  id `plan:<池名小写>`，撞名追加序号）+ CLI 每池一行（commit `6f87d51`，
-  0.4.19 后）。
+  id `plan:<池名小写>`，撞名追加序号）+ CLI 每池一行 + 配置卡片逐池额度行
+  （commit `6f87d51` 0.4.20 / `ec696db` 0.4.21）。
+  **教训（0.4.20 栽过）**：额度展示面有三处——额度 pill、配置页变体卡片、
+  CLI——修展示层 bug 时必须三处一起排查改齐。0.4.20 只修了 pill 与 CLI，
+  卡片仍「取第一个有余额的池」，用户在页面上看到 GLM-5.3 的 200M 像不存在，
+  被迫多发一版（0.4.21 补齐）。
 - **额度是每日一次性池子，不结转**：entitlement 的 `period: "one_time"`，
   `used_units` 只增不减，响应里没有结转字段。所以卡片/pill 报的是"这个池子
   此刻还剩多少"，并显式声明没用完就作废（`WorkBuddyCreditAccount.sameDay`）
