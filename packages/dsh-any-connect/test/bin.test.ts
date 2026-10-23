@@ -139,4 +139,51 @@ printf '%s' '${JSON.stringify({ version: 1, atRestSecretKey: secret })}'
       vi.unstubAllGlobals()
     }
   })
+
+  // 2026-10-24 实测（"ZCode 1024 Dev Day"）：上游把一个活动按模型分池，
+  // balances 里每个模型一个 bucket 且互不通用。CLI 的 --json 与人读输出都要
+  // 每池一条，只报第一个池会丢掉另一个模型整整一份额度。
+  it.skipIf(process.platform === 'win32')('reports one window per Start Plan model pool', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-bin-'))
+    vi.stubEnv('DSH_HOME', root)
+    const credPath = join(root, 'zcode-credentials.json')
+    await writeFile(credPath, JSON.stringify({
+      'account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:57271768622479063:api-key': 'id.secret',
+      zcodejwttoken: 'cli-jwt',
+    }))
+    vi.stubEnv('ZCODE_AUTH_FILE', credPath)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: {
+        plans: [{ name: 'ZCode 1024 Dev Day', plan_id: 'p1', ends_at: Math.floor(Date.now() / 1000) + 3600 }],
+        balances: [
+          { show_name: 'GLM-5.3-Flash', plan_id: 'p1', total_units: 300000000, remaining_units: 299141650, expires_at: Math.floor(Date.now() / 1000) + 7200 },
+          { show_name: 'GLM-5.3', plan_id: 'p1', total_units: 200000000, remaining_units: 200000000, expires_at: Math.floor(Date.now() / 1000) + 7200 },
+        ],
+      },
+    }), { status: 200 })))
+    const out: string[] = []
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      out.push(String(chunk))
+      return true
+    })
+    try {
+      expect(await run(['status', '--json', '--provider', 'zcode-start-plan'])).toBe(0)
+      const report = JSON.parse(out.join('')) as { quotaWindows?: Array<{ id?: string; label?: string; remain?: number; limit?: number; resetsAt?: string }> }
+      // expires_at 相对当前时刻，窗口必然带动态 resetsAt——按项匹配数字与标识。
+      expect(report.quotaWindows).toHaveLength(2)
+      expect(report.quotaWindows?.[0]).toMatchObject({ id: 'plan:glm-5.3-flash', label: 'GLM-5.3-Flash', remain: 299141650, limit: 300000000, unit: 'tokens' })
+      expect(report.quotaWindows?.[1]).toMatchObject({ id: 'plan:glm-5.3', label: 'GLM-5.3', remain: 200000000, limit: 200000000, unit: 'tokens' })
+      expect(typeof report.quotaWindows?.[0]?.resetsAt).toBe('string')
+      // 人读模式:每池一行,各自带模型名与上限。
+      out.length = 0
+      expect(await run(['status', '--provider', 'zcode-start-plan'])).toBe(0)
+      const lines = out.join('').split('\n').filter(line => line.includes('Start Plan quota:'))
+      expect(lines).toHaveLength(2)
+      expect(lines[0]).toMatch(/Start Plan quota: 299,141,650 \/ 300,000,000 tokens \(GLM-5\.3-Flash\)/)
+      expect(lines[1]).toMatch(/Start Plan quota: 200,000,000 \/ 200,000,000 tokens \(GLM-5\.3\)/)
+    } finally {
+      spy.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
 })

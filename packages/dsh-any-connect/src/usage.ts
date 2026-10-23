@@ -124,10 +124,11 @@ export function currentPlanWindow(accounts: readonly WorkBuddyCreditAccount[]): 
 }
 
 /**
- * Start Plan 的 pill 窗口：池子存在时报真实 token 数（remain/limit，当日与
- * 多日有效期都画进度条）；今天还没领取或尚未发放时**如实说「今日待领取」**，
- * 而不是让 pill 落到通用的「该 provider 不上报额度」——那会让用户以为额度功能坏了，
- * 而且额度接口本身是通的（billing/balance 返回空 balances 才是事实）。
+ * Start Plan 的 pill 窗口：**每个 token 池一条**（2026-10-24 起上游按模型分池，
+ * 池子互不通用，每条带真实 remain/limit，当日与多日有效期都画进度条）；今天还没
+ * 领取或尚未发放时**如实说「今日待领取」**，而不是让 pill 落到通用的「该 provider
+ * 不上报额度」——那会让用户以为额度功能坏了，而且额度接口本身是通的
+ * （billing/balance 返回空 balances 才是事实）。
  *
  * Exported for tests: counted directly without booting the plugin.
  */
@@ -139,6 +140,33 @@ export function startPlanWindows(accounts: readonly WorkBuddyCreditAccount[]): A
   unit: string
   resetsAt?: string
 }> {
+  // 2026-10-24 实测（"ZCode 1024 Dev Day" 活动）：上游把一个活动按模型拆成多份
+  // entitlement，balances 里每个模型一个 bucket（capabilities 绑定各自模型，池子
+  // 互不通用）。每个 token 池一条窗口——currentPlanWindow 的"只取第一个有余额
+  // 的池"会把其余池子整个吞掉，而把互不通用的池求和又谎报了一个"哪个模型都能用"
+  // 的总额度，两者都让用户按不存在的额度做决定。remain=0 的池照样显示（红色空条
+  // 正是"这个模型用完了"的正确语义）。id 用池名派生保证窗口内唯一（UsageWindow.id
+  // 是 React 列表 key）；上游理论上不该出现重名池，撞名时追加序号兜底。
+  const pools = accounts.filter(account => account.unit === 'tokens' && account.size > 0)
+  if (pools.length > 0) {
+    const seen = new Map<string, number>()
+    return pools.map(account => {
+      const label = account.packageName.replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, '')
+      const base = `plan:${label.toLowerCase()}`
+      const nth = (seen.get(base) ?? 0) + 1
+      seen.set(base, nth)
+      return {
+        id: nth === 1 ? base : `${base}:${nth}`,
+        label,
+        remain: account.remain,
+        limit: account.size,
+        unit: 'tokens',
+        ...account.expiredAt === undefined ? {} : { resetsAt: account.expiredAt },
+      }
+    })
+  }
+  // 拿不到可解析的 token 池：维持旧口径（畸形池走 currentPlanWindow 的防御分支；
+  // 什么都没有时报「今日待领取」——billing/balance 通着但今天还没发池子）。
   const windows = currentPlanWindow(accounts)
   if (windows.length > 0) return windows
   return [{ id: 'plan', label: 'Start Plan', unit: '今日待领取' }]

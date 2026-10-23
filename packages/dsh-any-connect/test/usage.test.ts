@@ -260,14 +260,48 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
     // 有池子时仍然报真实 token 数（unit: 'tokens' 声明 token 计数池）。
     expect(WorkBuddy.startPlanWindows([
       { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, sameDay: true, unit: 'tokens' },
-    ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens' }])
+    ])).toEqual([{ id: 'plan:glm-5.3-flash', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens' }])
     // 多日有效期的池子同样画进度条（sameDay 只管文案口径，不再决定进度条
     // 的有无）——unit: 'tokens' 在就能画。过期时刻先算成常量再两侧共用：
     // 断言两边各取一次 Date.now() 会偶发跨毫秒边界，toISOString 差 1ms 导致 flaky。
     const expiry = new Date(Date.now() + 3 * 86_400_000).toISOString()
     expect(WorkBuddy.startPlanWindows([
       { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, unit: 'tokens', expiredAt: expiry },
-    ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens', resetsAt: expiry }])
+    ])).toEqual([{ id: 'plan:glm-5.3-flash', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens', resetsAt: expiry }])
+  })
+
+  it('Start Plan 按模型分池时每池一条窗口，不吞池也不求和', () => {
+    // 2026-10-24 实测（"ZCode 1024 Dev Day"）：一个活动两个 entitlement，balances
+    // 每个模型一个 bucket，capabilities 绑定各自模型（池子互不通用）。旧实现取
+    // "第一个 remain>0 的池"，GLM-5.3 的 200M 整个不可见；求和又谎报"哪个模型
+    // 都能用"的总额度。每池一条才与真实消费口径一致。
+    const expiry = new Date(Date.now() + 86_400_000).toISOString()
+    expect(WorkBuddy.startPlanWindows([
+      { packageName: 'GLM-5.3-Flash (有效)', planName: 'ZCode 1024 Dev Day', remain: 299_141_650, size: 300_000_000, unit: 'tokens', expiredAt: expiry },
+      { packageName: 'GLM-5.3 (有效)', planName: 'ZCode 1024 Dev Day', remain: 200_000_000, size: 200_000_000, unit: 'tokens', expiredAt: expiry },
+    ])).toEqual([
+      { id: 'plan:glm-5.3-flash', label: 'GLM-5.3-Flash', remain: 299_141_650, limit: 300_000_000, unit: 'tokens', resetsAt: expiry },
+      { id: 'plan:glm-5.3', label: 'GLM-5.3', remain: 200_000_000, limit: 200_000_000, unit: 'tokens', resetsAt: expiry },
+    ])
+    // remain=0 的池不丢：用完的池显示红色空条，恰是"这个模型用完了"的语义；
+    // 其余池子的数字不受影响。
+    expect(WorkBuddy.startPlanWindows([
+      { packageName: 'GLM-5.3-Flash (有效)', remain: 0, size: 300_000_000, unit: 'tokens' },
+      { packageName: 'GLM-5.3 (有效)', remain: 200_000_000, size: 200_000_000, unit: 'tokens' },
+    ])).toEqual([
+      { id: 'plan:glm-5.3-flash', label: 'GLM-5.3-Flash', remain: 0, limit: 300_000_000, unit: 'tokens' },
+      { id: 'plan:glm-5.3', label: 'GLM-5.3', remain: 200_000_000, limit: 200_000_000, unit: 'tokens' },
+    ])
+    // 非池子条目（畸形 size=0）不进窗口；id 是 React 列表 key，重名池撞名时
+    // 追加序号保证窗口内唯一。
+    expect(WorkBuddy.startPlanWindows([
+      { packageName: 'Odd (有效)', remain: 5, size: 0, unit: 'tokens' },
+      { packageName: 'GLM-5.3 (有效)', remain: 1, size: 2, unit: 'tokens' },
+      { packageName: 'GLM-5.3 (有效)', remain: 3, size: 4, unit: 'tokens' },
+    ])).toEqual([
+      { id: 'plan:glm-5.3', label: 'GLM-5.3', remain: 1, limit: 2, unit: 'tokens' },
+      { id: 'plan:glm-5.3:2', label: 'GLM-5.3', remain: 3, limit: 4, unit: 'tokens' },
+    ])
   })
 })
 

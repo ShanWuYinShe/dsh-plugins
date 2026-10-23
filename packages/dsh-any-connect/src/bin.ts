@@ -19,10 +19,11 @@ import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
 import { CN_VARIANT, variantFor, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { ANYCONNECT_VERSION } from './version.js'
-import { currentPlanWindow } from './usage.js'
+import { currentPlanWindow, startPlanWindows } from './usage.js'
 import { isHeartbeatProcessAlive, readHostHeartbeat, workbuddyHostHeartbeatPath } from './host-heartbeat.js'
 import { WORKBUDDY_ELECTRON_BIN_ENV } from './desktop-credential-protection.js'
 import { createVariantCredentialStore, upstreamClientFor } from './variant-wiring.js'
+import { variantIsStartPlan } from './variant-runtime.js'
 
 type Action = 'doctor' | 'logout' | 'status'
 
@@ -161,9 +162,11 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
 /**
  * One human-readable credit line per provider family: WorkBuddy speaks in
  * credits, while the two ZCode variants speak the same language as the
- * composer-dock pill (a daily token pool for Start Plan, subscription validity
- * for Coding Plan) — printing the raw total would read "1" for a healthy
- * Coding Plan subscription and an unlabelled token count for Start Plan.
+ * composer-dock pill (per-model token pools for Start Plan, subscription
+ * validity for Coding Plan) — printing the raw total would read "1" for a
+ * healthy Coding Plan subscription and an unlabelled token count for Start
+ * Plan. Start Plan 上游按模型分池且池子互不通用（2026-10-24 实测），每池一行；
+ * Coding Plan 维持订阅有效性单行。
  */
 function humanCredits(
   variant: WorkBuddyVariant,
@@ -173,18 +176,17 @@ function humanCredits(
   if (credits?.error !== undefined) return `Remaining credit: unavailable (${credits.error})`
   if (credits === undefined || accounts === undefined) return 'Remaining credit: unknown'
   if (variant.kind !== 'zcode') return `Remaining credit: ${credits.total}`
-  const windows = currentPlanWindow(accounts)
+  const windows = variantIsStartPlan(variant) ? startPlanWindows(accounts) : currentPlanWindow(accounts)
   if (windows.length === 0) {
     return 'Start Plan quota: no active balance today (claim it in the ZCode client)'
   }
-  const window = windows[0]!
-  if (window.remain !== undefined && window.limit !== undefined) {
+  return windows.map(window => {
+    if (window.remain === undefined || window.limit === undefined) return `${window.label}: active`
     const reset = window.resetsAt !== undefined
       ? `, expires ${new Date(window.resetsAt).toLocaleString()}`
       : ''
-    return `Start Plan quota: ${window.remain.toLocaleString()} / ${window.limit.toLocaleString()} tokens${reset}`
-  }
-  return `${window.label}: active`
+    return `Start Plan quota: ${window.remain.toLocaleString()} / ${window.limit.toLocaleString()} tokens (${window.label})${reset}`
+  }).join('\n')
 }
 
 async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
@@ -237,10 +239,10 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
       credits: credits?.total,
       ...credits?.error === undefined ? {} : { creditsError: credits.error },
       // ZCode 的额度语义与 WorkBuddy 点数不同:窗口按 pill 同一口径给出
-      // (Start Plan 是 token 计数池,Coding Plan 是订阅有效性),total 只是
-      // 兼容字段。
+      // (Start Plan 是按模型分池的 token 计数池、每池一条,Coding Plan 是
+      // 订阅有效性),total 只是兼容字段。
       ...variant.kind === 'zcode' && creditAccounts !== undefined
-        ? { quotaWindows: currentPlanWindow(creditAccounts) }
+        ? { quotaWindows: variantIsStartPlan(variant) ? startPlanWindows(creditAccounts) : currentPlanWindow(creditAccounts) }
         : {},
       hostBundle: hostState,
     })
