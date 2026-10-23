@@ -76,11 +76,23 @@ GET https://zcode.z.ai/api/v1/zcode-plan/billing/balance[?app_version=<ver>]
   `remaining_units` / `expires_at` / `period_start` / `period_end`，单位是
   **token**，不是积分）。本机实测：`ZCode Trust Build`，GLM-5.3-Flash
   100,000,000 tokens。
+- **2026-10-24 结构修正：一个活动按模型拆多份 entitlement，额度按模型分池**。
+  实测 `ZCode 1024 Dev Day`（`plan_id: zcode-v3-start-plan-1024`）：两个
+  entitlements（GLM-5.3-Flash 300M / GLM-5.3 200M），`balances[]` 每个模型一个
+  bucket，`capabilities` 绑定各自模型（`model:glm-5.3-flash` /
+  `model:glm-5.3`）——**池子互不通用，消费哪个模型只扣它的池**。推论：
+  ①任何"取第一个有余额的池"的展示逻辑会吞掉其余池子；②把多池求和成一个
+  "哪个模型都能用"的总额度是错误语义。上面 Trust Build 的"单池"只是当年活动
+  恰好只有一个 entitlement。插件已改为每池一条窗口（`startPlanWindows`，
+  id `plan:<池名小写>`，撞名追加序号）+ CLI 每池一行（commit `6f87d51`，
+  0.4.19 后）。
 - **额度是每日一次性池子，不结转**：entitlement 的 `period: "one_time"`，
-  `expires_at` 固定当日 16:00Z（= 次日 00:00 +08:00），`used_units` 只增不减，
-  响应里没有结转字段。所以卡片/pill 报的是"这个池子此刻还剩多少"，并显式声明
-  当天没用完就作废（`WorkBuddyCreditAccount.sameDay`）——把它显示成可累积余额
-  会让用户按不存在的额度做计划。
+  `used_units` 只增不减，响应里没有结转字段。所以卡片/pill 报的是"这个池子
+  此刻还剩多少"，并显式声明没用完就作废（`WorkBuddyCreditAccount.sameDay`）
+  ——把它显示成可累积余额会让用户按不存在的额度做计划。
+  `expires_at` **不是"当日"硬规则**：2026-09-30 样本恰为当日 16:00Z，但
+  2026-10-24 的 1024 活动是三天后（10-26 01:00Z）——`sameDay` 按到期时刻是否
+  落在本地今日动态判定，不硬编码（插件自 0.4.10 前后已如此实现）。
 - **`X-Device-Mid` 是硬要求**：不给 / 每请求随机 → `400 code 3001` 或 `429`。
   取值优先级：`~/.zcode/v2/telemetry-state.json` 的 `deviceMid` →
   `$DSH_HOME/.zcode-device-mid`（自生成并持久化）。
