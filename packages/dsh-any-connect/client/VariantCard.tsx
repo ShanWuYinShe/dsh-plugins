@@ -96,7 +96,7 @@ export function VariantCard(props: {
     t, variant, status, open, onToggle,
     busy, notice, modelsOpen, setModelsOpen, copiedPlanId,
     probe, startPlanClaim, copyPlanId, refresh,
-    refreshWithCatalog, title, label, isZCode, isStartPlanCard, isOpenCode, zcodePlan, isPlanActive, planStateLabel, displayPlanName, headerSummary, catalogOffline, effortsOf,
+    refreshWithCatalog, title, label, isZCode, isStartPlanCard, isOpenCode, zcodePlan, zcodePools, isPlanActive, planStateLabel, displayPlanName, headerSummary, catalogOffline, effortsOf,
     deleteModel, restoreModels,
   } = useVariantCard(props)
 
@@ -143,7 +143,15 @@ export function VariantCard(props: {
                     <span style={privilegeChipStyle}>{t('codingPlanExtraQuota')}</span>
                   )}
                 </div>
-                {isStartPlanCard && zcodePlan !== undefined && zcodePlan.size > 0 ? (
+                {isStartPlanCard && zcodePools.length > 1 ? (
+                  // 多池：每个模型一份额度，池子互不通用——逐池列出（带模型名），
+                  // 只显示第一个池会让其余模型的额度整个不可见。
+                  zcodePools.map(pool => (
+                    <span key={pool.label} style={planMetaStyle}>
+                      {t('planPoolQuotaLine', { pool: pool.label, remain: formatNumber(pool.remain), size: formatNumber(pool.size) })}
+                    </span>
+                  ))
+                ) : isStartPlanCard && zcodePlan !== undefined && zcodePlan.size > 0 ? (
                   <span style={planMetaStyle}>
                     {t('planQuotaLine', { remain: formatNumber(zcodePlan.remain), size: formatNumber(zcodePlan.size) })}
                   </span>

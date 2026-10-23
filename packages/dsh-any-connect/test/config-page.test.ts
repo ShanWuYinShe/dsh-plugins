@@ -338,4 +338,39 @@ describe('WorkBuddy 配置卡片', () => {
       expect(text()).not.toContain('已过期')
     })
   })
+
+  /**
+   * Start Plan 的额度按模型分池（2026-10-24 实测 "ZCode 1024 Dev Day"）：上游把一个
+   * 活动拆成多份 entitlement，每池的 capabilities 绑定各自模型，池子互不通用。
+   * 卡片此前只取"第一个有余额的池"，第二个模型的额度整个不可见——GLM-5.3 的
+   * 200M 就像不存在，用户会以为那个模型没有额度。
+   */
+  it('Start Plan 按模型分池时逐池列出额度，不吞掉第二个池', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => ({
+      ok: true,
+      status: 200,
+      json: async () => String(input).includes('/zcode-sp/status')
+        ? {
+            status: 'signed-in',
+            nickname: 'sp-tester',
+            credits: {
+              total: 0,
+              accounts: [
+                { packageName: 'GLM-5.3-Flash (有效)', planName: 'ZCode 1024 Dev Day', remain: 288_538_407, size: 300_000_000, unit: 'tokens' },
+                { packageName: 'GLM-5.3 (有效)', planName: 'ZCode 1024 Dev Day', remain: 199_813_505, size: 200_000_000, unit: 'tokens' },
+              ],
+            },
+            models: [],
+          }
+        : { status: 'signed-out' },
+    })))
+    await mount()
+    const content = text()
+    // 数字格式跟卡片同源（Intl），避免不同 locale 下断言值漂移。
+    const n = (value: number): string => new Intl.NumberFormat(undefined).format(value)
+    expect(content).toContain(`GLM-5.3-Flash：${n(288_538_407)} / ${n(300_000_000)} tokens`)
+    expect(content).toContain(`GLM-5.3：${n(199_813_505)} / ${n(200_000_000)} tokens`)
+    // 两池互不通用，绝不求和成一个"哪个模型都能用"的总额度。
+    expect(content).not.toContain(n(288_538_407 + 199_813_505))
+  })
 })

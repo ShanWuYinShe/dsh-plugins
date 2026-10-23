@@ -208,6 +208,20 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
   const zcodePlan = isZCode && status.credits?.accounts !== undefined
     ? (status.credits.accounts.find(a => a.remain > 0) ?? status.credits.accounts[0])
     : undefined
+  // Start Plan 的额度按模型分池（2026-10-24 实测 "ZCode 1024 Dev Day"：一个活动
+  // 拆成多份 entitlement，每池的 capabilities 绑定各自模型，池子互不通用）。
+  // 卡片必须逐池列出——只渲染"第一个有余额的池"会让其余模型的额度整个不可见，
+  // 用户会以为那些模型根本没有额度。Coding Plan 的订阅额度只是有效性标志，
+  // 维持单池展示。
+  const zcodePools = isStartPlanCard && status.credits?.accounts !== undefined
+    ? status.credits.accounts
+        .filter(account => account.unit === 'tokens' && account.size > 0)
+        .map(account => ({
+          label: account.packageName.replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, ''),
+          remain: account.remain,
+          size: account.size,
+        }))
+    : []
   // 名称口径：Start Plan 卡报活动名（如 "ZCode Trust Build"），Coding Plan 卡
   // 报订阅名（如 "GLM Coding Pro"）。都是上游给的真实名字，谁有就用谁。
   const zcodePlanName = zcodePlan
@@ -280,6 +294,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     isStartPlanCard,
     isOpenCode,
     zcodePlan,
+    zcodePools,
     isPlanActive,
     planStateLabel,
     displayPlanName,
