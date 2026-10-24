@@ -163,6 +163,15 @@ dsh plugin --profile web remove @chaoset/session-archive
   4. **重新执行一次 `dsh plugin add` 命令**（首次失败时 bundle 对账未完成，必须重跑以完成注册）。
   > ⚠️ 不要直接用 `pnpm add` 或手动写 profile 的 `package.json`：这样跳过了 bundle 对账，web 启动时会报 `pending (waiting for service: remote.xxx)`。
 
+- **pnpm store 漂移（宿主升级后安装报错）**：宿主升级若更换了内置 pnpm 的大版本，旧 profile 的 `node_modules` 是上一版 pnpm 安装的，`dsh plugin add` 会报「use the new store location … installed with a different major version of pnpm」。修复（在目标 profile 目录重装依赖，配置文件不动）：
+
+  ```bash
+  cd $DSH_HOME/profiles/<name>
+  CI=true '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness' --expose-internals '/Applications/DeepSeek Harness.app/Contents/Resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.mjs' install
+  ```
+
+  `CI=true` 跳过「清空 modules 目录」的 TTY 确认（node_modules 是可重建产物，已加载模块在内存不受影响）。重装完成后**重跑一次 `dsh plugin add`** 即可。（2026-10-24 实测：宿主 0.2.1-rc.3 内置 pnpm v11.28.5 对旧 profile 安装四包。）
+
 ### 给 AI Agent
 
 若由 AI Agent 代为在环境中安装，请直接执行 `dsh plugin ...` 命令，**严禁手动编辑 `cordis.patch.yml`**：
