@@ -1,3 +1,9 @@
+## 0.4.23 (2026-10-24)
+
+### 重构
+
+* **宿主依赖解耦移入 devDependencies**：将 `@deepseek-ai/dsh-*` 宿主依赖全部移入 `devDependencies`，切断 pnpm 在 profile 目录落地宿主旧副本的渠道，根治 DSH 宿主升级导致的兼容性误报与服务缺失崩溃；`dependencies` 仅保留纯第三方库 `zod`，`optionalDependencies` 仅保留 `@earendil-works/pi-ai`。
+
 ## 0.4.22 (2026-10-24)
 
 ### 优化

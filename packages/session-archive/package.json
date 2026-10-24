@@ -1,6 +1,6 @@
 {
   "name": "@chaoset/session-archive",
-  "version": "0.3.29",
+  "version": "0.3.30",
   "description": "DSH plugin: browse archived sessions, inspect their content, batch-restore or permanently delete them with multi-select",
   "engines": {
     "node": ">=22.19.0"
@@ -36,14 +36,12 @@
       ]
     }
   },
-  "optionalDependencies": {
-    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.3"
-  },
   "devDependencies": {
     "@deepseek-ai/dsh-session": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-session-persistence": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-session-query": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-session-title": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.3",
     "@deepseek-ai/dsh-workspace": "^0.2.1-rc.3"
   },
   "scripts": {

@@ -41,6 +41,13 @@ describe("npm bundle metadata", () => {
     it(`${name}: 声明 dsh.bundle.patch`, () => {
       expect(pkg.dsh?.bundle?.patch).toBe("./cordis.patch.yml");
     });
+    it(`${name}: 不得将宿主 @deepseek-ai/dsh-* 声明为 dependencies 或 optionalDependencies（防止污染 profile node_modules）`, () => {
+      const forbidden = [
+        ...Object.keys(pkg.dependencies || {}),
+        ...Object.keys(pkg.optionalDependencies || {}),
+      ].filter((dep) => dep.startsWith("@deepseek-ai/dsh-"));
+      expect(forbidden).toEqual([]);
+    });
     it(`${name}: files 包含 cordis.patch.yml`, () => {
       expect(Array.isArray(pkg.files) && pkg.files.includes("cordis.patch.yml")).toBe(true);
     });

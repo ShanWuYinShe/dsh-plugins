@@ -1,3 +1,9 @@
+## 0.4.26 (2026-10-24)
+
+### 重构
+
+* **宿主依赖解耦移入 devDependencies**：将 `@deepseek-ai/dsh-sandbox` 和 `@deepseek-ai/dsh-typert-protocol` 移入 `devDependencies`，切断宿主包在用户 profile 目录的本地落盘；`optionalDependencies` 仅保留原生二进制可选包 `@deepseek-ai/node-addon-landlock-run`。
+
 ## 0.4.25 (2026-10-24)
 
 ### 优化

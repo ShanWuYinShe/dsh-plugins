@@ -1,3 +1,9 @@
+## 0.3.30 (2026-10-24)
+
+### 重构
+
+* **宿主协议依赖移入 devDependencies**：将 `@deepseek-ai/dsh-typert-protocol` 移入 `devDependencies`，全包保持零运行时依赖声明，运行时通过宿主环境解析，防止本地 profile 产生旧版本副本。
+
 ## 0.3.29 (2026-10-24)
 
 ### 优化

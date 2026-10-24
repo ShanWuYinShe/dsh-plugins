@@ -1,3 +1,9 @@
+## 0.1.12 (2026-10-24)
+
+### 重构
+
+* **宿主依赖解耦移入 devDependencies 并移除未引用的 agent 依赖**：彻底移除从未使用的 `@deepseek-ai/dsh-agent`，将 `@deepseek-ai/dsh-credentials`、`dsh-host-webserver`、`dsh-deepseek-account`、`dsh-llm`、`dsh-settings` 全部移入 `devDependencies`，消除安装时在 profile 落地宿主旧副本引起的启动兼容性崩溃。
+
 ## 0.1.11 (2026-10-24)
 
 ### 优化
