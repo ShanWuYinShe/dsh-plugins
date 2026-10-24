@@ -23,12 +23,14 @@
  * - provider-deepseek.ts provider-openrouter.ts provider-moonshot.ts provider-siliconflow.ts
  *   provider-bigmodel.ts provider-minimax.ts provider-openai.ts provider-opencode.ts — 各 provider 查询器
  * - registry.ts resolve.ts route.ts — 查询器注册表与缓存、端点/凭据解析、同源路由
+ * - command.ts — /usage 斜杠命令（宿主 handler 直接返回额度文本报告）
  * - types.ts typert.host.ts — 宿主与浏览器共享的类型、typert 服务面声明
  *
  * @module provider-usage
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { registerUsageCommand } from './command.js'
 import { BUILTIN_USAGE_QUERIERS } from './providers.js'
 import { ProviderUsageRegistry } from './registry.js'
 import { createProviderResolver } from './resolve.js'
@@ -109,4 +111,7 @@ export function apply(ctx: Context): void {
   }
 
   registerProviderUsageRoute(ctx, { registry, path: PROVIDER_USAGE_PATH })
+  registerUsageCommand(ctx, registry)
 }
+
+export { usageCommand, formatUsageLine, formatUsageReport } from './command.js'
