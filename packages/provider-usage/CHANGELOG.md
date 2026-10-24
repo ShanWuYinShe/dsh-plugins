@@ -1,3 +1,9 @@
+## 0.2.0 (2026-10-24)
+
+- 新增: `/usage` 斜杠命令——在会话里直接返回各 provider 额度文本报告（`/usage <provider>` 点名单个，`/usage refresh` 绕过缓存）；查询顺序执行走既有缓存与在途合并，不把多币种额度相加。
+- 新增: 额度数据改走宿主 resource 订阅面（dsh-client-resources）：pill 由组件内轮询改为统一 live 流（首帧立即、值变才推、最后订阅者释放自动收流）；未装配 resources 的部署自动回退原轮询，行为不劣于改造前。手动强刷后短窗内压制流内旧帧，强值不倒退。
+- 维护: 依赖分层——react/jsdom/dsh-commands/dsh-client-resources/dsh-typert-protocol 等按实际 import 声明至本包 devDependencies。
+
 ## 0.1.12 (2026-10-24)
 
 ### 重构

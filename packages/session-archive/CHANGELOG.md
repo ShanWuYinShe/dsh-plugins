@@ -1,3 +1,7 @@
+## 0.3.31 (2026-10-24)
+
+- 维护: 依赖分层——react/@types/react/@deepseek-ai/cordis/vitest 按实际 import 声明至本包 devDependencies;无功能变化。
+
 ## 0.3.30 (2026-10-24)
 
 ### 重构

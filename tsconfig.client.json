@@ -8,7 +8,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "jsxImportSource": "react",
-    "types": ["react"],
+    "types": [],
     "typeRoots": ["./node_modules/@types"]
   },
   "include": ["packages/*/client/**/*.tsx", "packages/*/client/**/*.ts"]

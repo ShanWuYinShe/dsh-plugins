@@ -1,3 +1,9 @@
+## 0.4.27 (2026-10-24)
+
+- 修复: Landlock 授权片段改走官方 node-addon-landlock-run grantArgs 产出（apply 侧经 getLandlockRuntime 注入），消除对 launcher flag 拼写的硬编码；bwrap 无官方 API 维持现状。
+- 修复: 删除 dsh.d.ts 对 dsh-sandbox 与 node-addon-landlock-run 的手写模块声明——两包类型已在依赖树内，官方 .d.ts 是唯一契约源，宿主漂移从运行时提前到 typecheck。
+- 维护: 依赖分层——react/@types/react/@deepseek-ai/cordis/vitest 按实际 import 声明至本包 devDependencies。
+
 ## 0.4.26 (2026-10-24)
 
 ### 重构

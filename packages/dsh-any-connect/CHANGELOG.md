@@ -1,3 +1,9 @@
+## 0.4.24 (2026-10-24)
+
+- 修复: Landlock 授权片段改走官方 node-addon-landlock-run grantArgs 产出，不再自拼 launcher flag（对齐官方「消费者不得自拼 flag」契约）；bwrap 无官方 API，拼写留在插件侧。
+- 修复: 超时回退原因结构化——本地 deadline 回退的 abort 原因携带与宿主 TimeoutReason 同形状的 code/timeoutMs 字段，消费方可程序化分类；消息文本不变。
+- 维护: 依赖分层——react/@types/react/jsdom/@deepseek-ai/schemastery 按实际 import 声明至本包 devDependencies。
+
 ## 0.4.23 (2026-10-24)
 
 ### 重构
