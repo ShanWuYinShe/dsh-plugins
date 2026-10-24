@@ -40,8 +40,12 @@
     "@deepseek-ai/node-addon-landlock-run": "^0.1.1"
   },
   "devDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
     "@deepseek-ai/dsh-sandbox": "^0.2.1-rc.3",
-    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.3"
+    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.3",
+    "@types/react": "^19.3.0",
+    "react": "^19.3.1",
+    "vitest": "^4.1.12"
   },
   "scripts": {
     "build": "node ../../scripts/build.mjs",
