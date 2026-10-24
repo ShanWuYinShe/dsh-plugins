@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   test-and-publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       # 创建 GitHub Release（含 tarball 资产）。注意：CI 只消费用户已推的
       # tag，从不创建 tag——发版与否完全由用户手里的 tag 决定。
