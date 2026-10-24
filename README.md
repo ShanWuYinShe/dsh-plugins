@@ -170,7 +170,7 @@ dsh plugin --profile web remove @chaoset/session-archive
   CI=true '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness' --expose-internals '/Applications/DeepSeek Harness.app/Contents/Resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.mjs' install
   ```
 
-  `CI=true` 跳过「清空 modules 目录」的 TTY 确认（node_modules 是可重建产物，已加载模块在内存不受影响）。重装完成后**重跑一次 `dsh plugin add`** 即可。（2026-10-24 实测：宿主 0.2.1-rc.3 内置 pnpm v11.28.5 对旧 profile 安装四包。）
+  `CI=true` 跳过「清空 modules 目录」的 TTY 确认（node_modules 是可重建产物，已加载模块在内存不受影响）。**若 install 显示 `Already up to date`，store 记录并未重写——加 `--force` 强制重链**，然后核对 `node_modules/.modules.yaml` 的 `storeDir` 已指向 `$DSH_HOME` 内的新 store，再重跑一次 `dsh plugin add`。（2026-10-24 实测：宿主 0.2.1-rc.3 内置 pnpm v11.28.5，web 与 desktop 两个旧 profile 均以此修复后安装四包。）
 
 ### 给 AI Agent
 
