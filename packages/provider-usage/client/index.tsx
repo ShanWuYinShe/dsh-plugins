@@ -22,6 +22,7 @@
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * - index.tsx — 浏览器侧入口：注册 composer dock 的用量 pill
+ * - resource-provider.ts — usage 的 resource 订阅面（协议注册 + live 流）
  * - ProviderUsagePill.tsx — pill 组件（只剩渲染：早退 + 展开面板）
  * - useProviderUsage.ts — 状态与取数（订阅目录、60s 轮询、交互状态）
  * - WindowRow.tsx pill-types.ts — 展开面板的一行窗口、注入面与 props 类型
@@ -38,6 +39,8 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
+import type { SnapshotAnswer } from './fetch-snapshot.js'
+import { registerProviderUsageResources, USAGE_RESOURCE_PROTOCOL } from './resource-provider.js'
 import { ProviderUsagePill } from './ProviderUsagePill.js'
 import type { ProviderUsagePillInjected } from './ProviderUsagePill.js'
 import { en, zh } from './locales.js'
@@ -47,6 +50,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** Provider-usage pill copy. */
     'providerUsage': ProviderUsageLocaleKey
+  }
+  /** usage 订阅面的值类型：与 route 序列化形状一致（snapshot 或未查询标记）。 */
+  interface ResourceProtocolMap {
+    [USAGE_RESOURCE_PROTOCOL]: SnapshotAnswer
   }
 }
 
@@ -89,6 +96,10 @@ export function apply(ctx: ClientContext): void {
       }
     }, 'provider-usage: pill copy')
     const t = ctx.locale.bind(namespace) as ProviderUsagePillInjected['t']
+    // usage 订阅面：resources 是可选服务（GUI 装配；独立 dsh-web 部署可能
+    // 没有），registerProviderUsageResources 内部探测，缺席即 no-op，pill
+    // 回退 useProviderUsage 的内置轮询。
+    registerProviderUsageResources(ctx)
     // 等目录服务就绪再注册 dock entry（照抄宿主 ui-model-selection 的既有写法）。
     // 子 fiber 只负责这一件事：服务未就绪时不产出任何 props，服务重启时被销毁
     // 重跑 → entry 重新注册，从而绕开渲染器对 inject 结果的永久缓存。

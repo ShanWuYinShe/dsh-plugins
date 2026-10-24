@@ -7,6 +7,7 @@
  */
 
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { UseResource } from '@deepseek-ai/dsh-client-resources/client'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { ProviderUsageLocaleKey } from './locales.js'
 
@@ -24,6 +25,11 @@ export interface ProviderUsagePillInjected {
   }
   /** Asks the directory to load its catalog; the seat is lazy until asked. */
   load?: () => void
+  /**
+   * resource 订阅面（dsh-client-resources 的 GlobalStandardProps,renderer 注入）。
+   * 缺席（未装配 resources 的部署）时 useProviderUsage 回退内置轮询。
+   */
+  useResource?: UseResource
 }
 
 /** Props delivered by the composer dock's list slot. */

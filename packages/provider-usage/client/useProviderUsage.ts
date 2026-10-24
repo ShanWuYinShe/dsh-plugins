@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { UsageSnapshot } from '../src/types.js'
 import { fetchSnapshot } from './fetch-snapshot.js'
+import { RESOURCE_POLL_INTERVAL_MS, usageResourceAddress } from './resource-provider.js'
 import { isStaleDisplay } from './pill-format.js'
 import { headlineText } from './pill-headline.js'
 import type { ProviderUsagePillProps } from './pill-types.js'
@@ -31,7 +32,7 @@ const ABSENT_DIRECTORY: ModelDirectoryState = {
   error: null,
 }
 
-export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps) {
+export function useProviderUsage({ t, directory, load, useResource }: ProviderUsagePillProps) {
   if (t === undefined) throw new Error('provider-usage: the pill requires its translation function')
   // Subscribe to the same per-session directory the composer's model seat
   // renders from, so a model switch moves the pill with no coordination and a
@@ -58,6 +59,17 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
   }
   // 保持旧 provider 避免宿主重连或目录重载瞬间 pill 整块 DOM 卸载消失
   const provider = currentProvider ?? lastProviderRef.current
+
+  // resource 订阅面:renderer 注入 useResource(GUI 装配 resources)时启用,
+  // 轮询/唤醒逻辑整体让位给 resource-provider 的统一流;缺席(独立 dsh-web
+  // 部署)时为 undefined,下方全部既有轮询逻辑原样生效。
+  // useResource 是 hook,必须无条件调用——provider 未解析时用空地址占位
+  // (该地址产空流),反正此形态下组件在函数尾部 return null 不渲染。
+  const resource = useResource?.(usageResourceAddress(provider ?? ''))
+  const liveAnswer = resource?.status === 'live' ? resource.value : undefined
+  // 手动强刷的抑制窗:force 结果写回本地 answer 并压住流里的旧帧,直到
+  // 流下一帧(≤60s+余量)带着宿主强刷后的新缓存值接管,强值永不倒退。
+  const manualUntilRef = useRef(0)
 
   const [answer, setAnswer] = useState<RouteAnswer | undefined>(undefined)
   const [open, setOpen] = useState(false)
@@ -143,6 +155,10 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
         answerRef.current = snapshot
         setAnswer(snapshot)
         setStale(false)
+        // 强刷更新宿主 registry 缓存(resource 模式)——流下一帧带新值;在
+        // 那之前由抑制窗压住流里的旧帧,强值不倒退。仅 force 生效:自动
+        // 轮询(缓存读)不设窗,流帧与轮询答案本就同源同值。
+        if (options?.force === true) manualUntilRef.current = Date.now() + RESOURCE_POLL_INTERVAL_MS + 5_000
       }
     } catch (error: unknown) {
       // Keep the last good answer: a transient failure must not blank the
@@ -174,11 +190,15 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
       answerRef.current = undefined
       setAnswer(undefined)
       setStale(false)
+      // 切 provider 换地址,流自动重开;抑制窗一并作废。
+      manualUntilRef.current = 0
     }
+    // resource 模式:首帧由流的 open 立即给出,这里不再手动拉。
+    if (useResource !== undefined) return
     const controller = new AbortController()
     void refresh(controller.signal)
     return () => { controller.abort() }
-  }, [provider, refresh])
+  }, [provider, refresh, useResource])
 
   // 目录重连恢复：从 current === null 恢复到有值时，立即重拉一次额度
   const prevCurrentRef = useRef(state.current)
@@ -186,15 +206,17 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
     const wasNull = prevCurrentRef.current === null
     prevCurrentRef.current = state.current
     if (wasNull && state.current !== null && provider !== undefined && provider !== '') {
-      void refresh()
+      if (useResource === undefined) void refresh()
     }
-  }, [state.current, provider, refresh])
+  }, [state.current, provider, refresh, useResource])
 
   // 60s 轮询 + 唤醒恢复（可见性 / focus / online）
   // 无论当前 provider 是否已经解析出，都要维持轮询与唤醒监听：
   // 1. 若 current 为 null（如夜间长期搁置导致会话断开），轮询与唤醒负责重试 load()；
   // 2. 若 provider 正常，负责刷新用量快照。
   useEffect(() => {
+    // resource 模式:轮询/唤醒由 resource-provider 的统一流承担,这里退出。
+    if (useResource !== undefined) return
     const controller = new AbortController()
     let timer: number | undefined
     const trigger = () => {
@@ -243,22 +265,25 @@ export function useProviderUsage({ t, directory, load }: ProviderUsagePillProps)
       window.removeEventListener('focus', onWake)
       window.removeEventListener('online', onWake)
     }
-  }, [state.current, provider, load, refresh])
+  }, [state.current, provider, load, refresh, useResource])
 
   if (provider === undefined || provider === '') return null
 
-  const queried = answer !== undefined && !('queried' in answer)
-  const snapshot = queried ? answer as UsageSnapshot : undefined
+  // 合成答案:resource 模式优先流值,抑制窗内手动强刷值优先;回退模式
+  // liveAnswer 恒 undefined,effective 即轮询答案,行为与改造前一致。
+  const effectiveAnswer = Date.now() < manualUntilRef.current ? answer : (liveAnswer ?? answer)
+  const queried = effectiveAnswer !== undefined && !('queried' in effectiveAnswer)
+  const snapshot = queried ? effectiveAnswer as UsageSnapshot : undefined
   const isDisconnected = state.current === null && lastProviderRef.current !== undefined
   // 宿主折叠旧答案（degraded）、客户端请求失败、或目录重连中（current 为 null）均视为「数据可能过期」。
   const displayStale = isStaleDisplay(stale || isDisconnected, snapshot)
-  const headline = headlineText(answer, provider, displayStale, t)
+  const headline = headlineText(effectiveAnswer, provider, displayStale, t)
 
 
   return {
     t,
     provider,
-    answer,
+    answer: effectiveAnswer,
     open,
     setOpen,
     busy,
