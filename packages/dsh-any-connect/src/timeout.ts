@@ -44,9 +44,28 @@ async function loadFactory(): Promise<DeadlineFactory | null> {
 }
 
 /**
+ * 与宿主 TimeoutReason 同形状的本地超时原因：abort reason 携带结构化的
+ * code / timeoutMs 字段，消费方按 reason.code 分类而无需解析消息文本。
+ * 刻意不 import 宿主 TimeoutReason（devDep 生产被裁，静态 import 会炸），
+ * 也不追求 instanceof 同一性——跨包双实例下它本来就不可靠，字段才是契约。
+ * 消息文本保持既有格式（"<code>: timed out after <ms>ms"）：消费方与测试
+ * 均按 code 前缀匹配，格式变更会破坏它们。
+ */
+class LocalTimeoutReason extends Error {
+  readonly code: string;
+  readonly timeoutMs: number;
+  constructor(code: string, timeoutMs: number) {
+    super(`${code}: timed out after ${timeoutMs}ms`);
+    this.name = "TimeoutReason";
+    this.code = code;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
  * 本地回退：与宿主 deadline 同语义（融合上游取消 + 可分类超时原因），
- * reason 是普通 Error 而非 TimeoutReason。导出供单测（host 路径在装有
- * 该包的环境走真实实现，这里只钉回退语义）。
+ * reason 是本地 LocalTimeoutReason（形状同宿主 TimeoutReason）。导出供
+ * 单测（host 路径在装有该包的环境走真实实现，这里只钉回退语义）。
  */
 export function localDeadlineSignal(upstream: AbortSignal | undefined, timeoutMs: number, code: string): DeadlineHandle {
   if (!(timeoutMs > 0)) {
@@ -63,7 +82,7 @@ export function localDeadlineSignal(upstream: AbortSignal | undefined, timeoutMs
     if (upstream.aborted) controller.abort(upstream.reason);
     else upstream.addEventListener('abort', onUpstreamAbort, { once: true });
   }
-  const timer = setTimeout(() => controller.abort(new Error(`${code}: timed out after ${timeoutMs}ms`)), timeoutMs);
+  const timer = setTimeout(() => controller.abort(new LocalTimeoutReason(code, timeoutMs)), timeoutMs);
   return {
     signal: controller.signal,
     dispose: () => {

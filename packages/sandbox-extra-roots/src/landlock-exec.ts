@@ -9,20 +9,27 @@
 
 import { loadLandlock } from './common.js'
 
-/** Landlock runner 可执行路径，惰性加载（仅 Linux 且真正进入 apply 时解析）。成功永久缓存；失败不缓存——launcher 稍后安装/修复后下一次 apply 重新探测。 */
-let landlockExecPromise: Promise<string | null> | null = null;
+/** landlock runner 的运行时授权面：可执行路径 + 官方 grantArgs
+ * （launcher flag 拼写的唯一权威来源，插件不得自拼 --ro/--rw）。 */
+export interface LandlockRuntime {
+  exec: string;
+  grantArgs: (grants: { readOnly?: readonly string[]; readWrite?: readonly string[] }) => string[];
+}
 
-export function getLandlockExec(): Promise<string | null> | null {
+/** landlock runner 运行时，惰性加载（仅 Linux 且真正进入 apply 时解析）。成功永久缓存；失败不缓存——launcher 稍后安装/修复后下一次 apply 重新探测。 */
+let landlockRuntimePromise: Promise<LandlockRuntime | null> | null = null;
+
+export function getLandlockRuntime(): Promise<LandlockRuntime | null> | null {
   if (process.platform !== "linux") return null;
-  if (landlockExecPromise === null) {
-    landlockExecPromise = loadLandlock()
-      .then((landlock) => landlock.launcherPath())
+  if (landlockRuntimePromise === null) {
+    landlockRuntimePromise = loadLandlock()
+      .then((landlock) => ({ exec: landlock.launcherPath(), grantArgs: landlock.grantArgs }))
       .catch(() => null)
       .then((resolved) => {
         // 失败不清、成功才留：null 结果下次调用重新探测。
-        if (resolved === null) landlockExecPromise = null;
+        if (resolved === null) landlockRuntimePromise = null;
         return resolved;
       });
   }
-  return landlockExecPromise;
+  return landlockRuntimePromise;
 }

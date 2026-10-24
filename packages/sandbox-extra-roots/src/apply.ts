@@ -9,11 +9,11 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { isPathUnder, sandboxAvailable, seatbeltProfileArgs } from './common.js'
-import { bindMountArgv, safeRuntimeRoots, seatbeltArgv, type ConfineRunnerDeps } from './confine-runners.js'
+import { bindMountArgv, bindMountGrant, safeRuntimeRoots, seatbeltArgv, type ConfineRunnerDeps } from './confine-runners.js'
 import { PluginConfigGateway } from './gateway.js'
 import { name, DEFAULT_CONFIG } from './plugin-config.js'
 import { STATE, ORIGINAL, canon } from './roots.js'
-import { getLandlockExec } from './landlock-exec.js'
+import { getLandlockRuntime } from './landlock-exec.js'
 import { migrateLegacyConfig } from './legacy-migrate.js'
 import { clearDirExistCache, existingDirectoryRoots } from './roots-filter.js'
 import { normalizeRoots } from './config-validate.js'
@@ -25,7 +25,7 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
     const patchConfig = config || {};
     const rawSandbox = ctx.sandbox[ORIGINAL] ?? ctx.sandbox;
     const rawFs = ctx.fs[ORIGINAL] ?? ctx.fs;
-    const landlockExec = await getLandlockExec();
+    const landlockRuntime = await getLandlockRuntime();
 
     // 共享状态(跨挂载点):计数 + 包装句柄 + 当前生效的额外目录。
     const sandboxState = rawSandbox[STATE] ?? (rawSandbox[STATE] = {
@@ -167,15 +167,15 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
           // 插入集合与 Seatbelt 对齐:官方根 ∪ 额外根去重后减去官方已授予的
           // 部分;且只授予当前真实存在的目录,缺失 root 会让 bwrap 启动失败。
           if (a[0] === "bwrap") {
-            const rebuilt = bindMountArgv(a, roots, policy, sandboxState.warned, warn, warnOnce, "--bind", "bwrap");
+            const rebuilt = bindMountArgv(a, roots, policy, sandboxState.warned, warn, warnOnce, bindMountGrant, "bwrap");
             if (rebuilt !== null) wrapped.argv = rebuilt;
             return wrapped;
           }
-          // Landlock:在 -- 前插入 --rw <root>(runner 原生参数)。
+          // Landlock:在 -- 前插入官方 grantArgs 产出的授权片段（--rw <root>）。
           // 与 bwrap 同一插入集合;同样只授予存在的目录（launcher 把
           // unopenable grant root 视为失败）。
-          if (landlockExec !== null && a[0] === landlockExec) {
-            const rebuilt = bindMountArgv(a, roots, policy, sandboxState.warned, warn, warnOnce, "--rw", "landlock");
+          if (landlockRuntime !== null && a[0] === landlockRuntime.exec) {
+            const rebuilt = bindMountArgv(a, roots, policy, sandboxState.warned, warn, warnOnce, (root) => landlockRuntime.grantArgs({ readWrite: [root] }), "landlock");
             if (rebuilt !== null) wrapped.argv = rebuilt;
             return wrapped;
           }

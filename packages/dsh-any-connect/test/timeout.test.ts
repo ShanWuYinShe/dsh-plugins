@@ -39,6 +39,12 @@ describe('localDeadlineSignal（回退路径）', () => {
     await sleep(60)
     expect(handle.signal.aborted).toBe(true)
     expect(String(handle.signal.reason)).toContain('TEST_CODE')
+    // 回退原因与宿主 TimeoutReason 同形状:code/timeoutMs 结构化字段
+    // 可程序化分类(消费方按字段匹配,不解析消息文本)。
+    const reason = handle.signal.reason as { code?: string; timeoutMs?: number; name?: string }
+    expect(reason.code).toBe('TEST_CODE')
+    expect(reason.timeoutMs).toBe(15)
+    expect(reason.name).toBe('TimeoutReason')
     handle.dispose()
   })
 

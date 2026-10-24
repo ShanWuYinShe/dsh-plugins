@@ -90,9 +90,20 @@ export function seatbeltArgv(a: string[], roots: string[], policy: any, deps: Co
 }
 
 /**
- * bwrap (`--bind <root> <root>`) / Landlock (`--rw <root>`)：在 -- 前插入
- * 授予（后挂载覆盖 --ro-bind / /）。只授予当前真实存在的目录，缺失 root
- * 会让 bwrap 启动失败。返回插入后的完整 argv；null = 保持官方原样。
+ * 每 root 产出一段 runner 授权 argv 片段。bwrap 无官方 grant API，
+ * \`--bind <root> <root>\` 拼写留在插件侧（bindMountGrant）；Landlock 必须走
+ * 官方 grantArgs（apply 侧注入）——node-addon-landlock-run 的 README 契约
+ * 明文要求消费者不得自拼 launcher flag。
+ */
+export type GrantFragmentBuilder = (root: string) => string[];
+
+/** bwrap 授权片段（后挂载覆盖 --ro-bind / /）。 */
+export const bindMountGrant: GrantFragmentBuilder = (root) => ["--bind", root, root];
+
+/**
+ * bwrap / Landlock 通用插入：在 -- 前插入 buildGrant 产出的授权片段。
+ * 只授予当前真实存在的目录，缺失 root 会让 bwrap 启动失败。
+ * 返回插入后的完整 argv；null = 保持官方原样。
  */
 export function bindMountArgv(
   a: string[],
@@ -101,7 +112,7 @@ export function bindMountArgv(
   warned: Set<string>,
   warn: (message: string) => void,
   warnOnce: (key: string, message: string) => void,
-  flag: "--bind" | "--rw",
+  buildGrant: GrantFragmentBuilder,
   runnerName: string,
 ): string[] | null {
   const dashDash = a.indexOf("--");
@@ -111,8 +122,7 @@ export function bindMountArgv(
   }
   const extra: string[] = [];
   for (const root of existingDirectoryRoots(extraGrantRoots(policy, roots), warned, "bwrap/Landlock", warn)) {
-    if (flag === "--bind") extra.push("--bind", root, root);
-    else extra.push("--rw", root);
+    extra.push(...buildGrant(root));
   }
   return [...a.slice(0, dashDash), ...extra, ...a.slice(dashDash)];
 }

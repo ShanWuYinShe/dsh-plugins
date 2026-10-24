@@ -37,7 +37,7 @@ async function importModule() {
   return { mod, loadLandlock: vi.mocked(common.loadLandlock) }
 }
 
-describe('getLandlockExec', () => {
+describe('getLandlockRuntime', () => {
   // 合成一个用例：模块级缓存的生命周期贯穿整个文件，拆成多个 it 会因
   // vi.mock 工厂在每个 it 重新求值而让「只解析一次」的断言失真（实测报 2/3 次）。
   // 顺序也重要：先测同步 null（不触发解析），再测 Linux 缓存与失败缓存。
@@ -45,16 +45,22 @@ describe('getLandlockExec', () => {
     // --- 非 Linux：同步 null，且不触发 loadLandlock ---
     stubPlatform('darwin')
     let { mod, loadLandlock } = await importModule()
-    expect(mod.getLandlockExec()).toBeNull()
+    expect(mod.getLandlockRuntime()).toBeNull()
     expect(loadLandlock).not.toHaveBeenCalled()
 
     // --- Linux：解析成功，连续调用共享同一个 Promise ---
     stubPlatform('linux')
     ;({ mod, loadLandlock } = await importModule())
-    loadLandlock.mockResolvedValue({ launcherPath: () => '/usr/lib/landlock-exec' })
-    await expect(mod.getLandlockExec()).resolves.toBe('/usr/lib/landlock-exec')
-    const first = mod.getLandlockExec()
-    const second = mod.getLandlockExec()
+    loadLandlock.mockResolvedValue({
+      launcherPath: () => '/usr/lib/landlock-exec',
+      grantArgs: ({ readWrite }: { readWrite?: readonly string[] }) => (readWrite ?? []).flatMap((r) => ['--rw', r]),
+    })
+    await expect(mod.getLandlockRuntime()).resolves.toEqual({
+      exec: '/usr/lib/landlock-exec',
+      grantArgs: expect.any(Function),
+    })
+    const first = mod.getLandlockRuntime()
+    const second = mod.getLandlockRuntime()
     expect(second).toBe(first)
     expect(loadLandlock).toHaveBeenCalledTimes(1)
 
@@ -63,8 +69,8 @@ describe('getLandlockExec', () => {
     loadLandlock.mockClear() // 新实例的计数从 0 起算（vi.fn 是工厂闭包的同一个，不随 resetModules 重置）
     ;({ mod, loadLandlock } = await importModule())
     loadLandlock.mockRejectedValue(new Error('not found'))
-    await expect(mod.getLandlockExec()).resolves.toBeNull()
-    await expect(mod.getLandlockExec()).resolves.toBeNull()
+    await expect(mod.getLandlockRuntime()).resolves.toBeNull()
+    await expect(mod.getLandlockRuntime()).resolves.toBeNull()
     expect(loadLandlock).toHaveBeenCalledTimes(2)
   })
 })

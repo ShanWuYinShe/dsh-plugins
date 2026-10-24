@@ -29,11 +29,7 @@ declare module "@deepseek-ai/cordis" {
   }
 }
 
-declare module "@deepseek-ai/dsh-sandbox" {
-  export const canonicalPath: (p: string) => string;
-  export const writableRoots: (policy: any) => string[];
-}
+// dsh-sandbox 与 node-addon-landlock-run 的类型不再手写声明：两包类型均在
+// 依赖树内可解析（devDependencies / optionalDependencies），官方 .d.ts 是唯一
+// 契约源——手写副本曾在官方漂移时把偏差藏过 typecheck（2026-10-24 审计结论）。
 
-declare module "@deepseek-ai/node-addon-landlock-run" {
-  export function launcherPath(): string;
-}

@@ -19,7 +19,12 @@ vi.mock('../src/common.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/common.js')>()
   return {
     ...actual,
-    loadLandlock: async () => ({ launcherPath: () => '/fake/landlock-runner' }),
+    loadLandlock: async () => ({
+      launcherPath: () => '/fake/landlock-runner',
+      // 官方 grantArgs({readWrite:[root]}) === ["--rw", root](CLI 契约);
+      // mock 按同形状产出,断言继续钉 "--rw" 字面量即钉住了授权片段本身。
+      grantArgs: ({ readWrite }: { readWrite?: readonly string[] }) => (readWrite ?? []).flatMap((r) => ['--rw', r]),
+    }),
   }
 })
 
