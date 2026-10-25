@@ -157,8 +157,15 @@ provider runtime headers（captcha-diagnostics `headersApplied:true`）。
 实现见 `packages/dsh-any-connect/src/zcode-plan-prompt.ts`（常量 + `prepareStartPlanBody`），
 边界与结构由 `test/zcode-plan-prompt.test.ts` 钉住。
 
-`POST https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`：带上述前缀 → **200**；
+`POST https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`：带上述前缀 → **200**（2026-09-30 记录）；
 不带 → **HTTP 405 `{"code":3012,"msg":"request has been blocked due to unusual activity."}`**。
+
+**2026-10-25 现状更新：上游网关对高额突发消耗账号实施风控拦截（官方客户端实测亦被阻断）**。
+实测与用户在 ZCode 官方客户端（3.16.3）内交叉验证确认：
+- 用户在 1024 开发者日活动期间消耗了超 1.77 亿 tokens（`used_units: 177937068`），触发了智谱上游网关针对活动套餐的异常突发用量风控（Abuse / Burst Detection）。
+- 上游针对该账号直接返回 `HTTP 405 {"code":3012,"msg":"request has been blocked due to unusual activity."}`。
+- **用户在官方 ZCode 客户端实机测试，同样确定性报错无法使用 Start Plan**；官方客户端源码逆向亦证实 `start-plan` 走的是 unsigned fetch，客户端内并未对 3012 做特殊处理（仅对 3007 处理了阿里云无感验证码重试）。
+- 该拦截不消耗任何额度，且完全隔离于 Coding Plan 订阅。用户应使用 Coding Plan（`zcode` 变体）继续日常工作。
 
 同页多路 relay 也都不通：`/api/v1/ultra/anthropic`、`/api/v1/ultra-zai/anthropic`
 （自造 header 会返回 `401 code 1002`，说明这些端点主要在验收特殊的鉴权形状）；
