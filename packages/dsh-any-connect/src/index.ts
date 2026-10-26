@@ -15,8 +15,9 @@
  *   catalog-fingerprint.ts — 生命周期组合入口、刷新/发布/领取快通道、账号切换的目录采用、
  *   身份 sweep 与小时定时器、内容指纹
  * - catalog.ts catalog-store.ts model-filter-store.ts — 目录模型与静态兜底、每账号落盘、排除模型持久化
- * - usage.ts zcode-quota.ts zcode-builtin-catalog.ts zcode-signer.ts — provider-usage 注册与
- *   dock 窗口助手、Coding Plan 窗口额度、ZCode 内置白名单、请求签名 V4
+ * - usage.ts zcode-quota.ts zcode-builtin-catalog.ts zcode-signer.ts credit-ledger.ts — provider-usage 注册与
+ *   dock 窗口助手、Coding Plan 窗口额度、ZCode 内置白名单、请求签名 V4、WorkBuddy 积分消耗台账
+ *   （裂变包制的今日已用/发放/峰值，采样差分口径）
  * - zcode-plan-claim.ts zcode-plan-claim-wire.ts — Start Plan 领取（网络 I/O）与线上格式层（纯函数）
  * - zcode-plan-models.ts zcode-plan-prompt.ts zcode-plan-store.ts — 名单、请求体指纹、计划语义
  * 凭据
@@ -55,7 +56,8 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-settings'
 import { legacyOwnAuthPath, workbuddyOwnAuthPath } from './auth-paths.js'
-import { anyConnectDomain, domainStateStore, migrateLegacyCredentialFiles } from './state-store.js'
+import { CreditLedger } from './credit-ledger.js'
+import { anyConnectDomain, domainCreditLedgerPersistence, domainStateStore, migrateLegacyCredentialFiles } from './state-store.js'
 import { WorkBuddyUpstreamClient } from './upstream.js'
 
 export {
@@ -304,6 +306,9 @@ export function apply(ctx: Context, config: Config): void {
       const warn = (message: string) => ctx.logger?.warn?.(message)
       await migrateLegacyCredentialFiles(state, legacyOwnAuthPath, workbuddyOwnAuthPath, warn)
       variants.setState(state)
+      // 今日消耗台账（credit-ledger.ts）与凭据副本同域（ledger 表）：域就绪即
+      // 注入；open 失败时整个域走下面的统一 error 路径，台账随域一起缺席。
+      variants.setLedger(new CreditLedger(domainCreditLedgerPersistence(domain)))
       ctx.effect(() => async () => {
         await domain.close()
       })

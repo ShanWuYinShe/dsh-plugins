@@ -155,10 +155,40 @@ export interface WorkBuddyWebCreditAccount {
   sameDay?: true
 }
 
+/**
+ * 今日消耗统计（credit-ledger.ts 的采样差分口径）。WorkBuddy 的裂变包每天发放
+ * 新包、旧包到期整包消失，「剩余」每天都在双向跳动，单看一个时刻读不出今天
+ * 花了多少——这三个数字给用户一个稳定的今日基准：今日已用 ≈ 峰值 − 当前剩余。
+ * 只有宿主侧台账可读（域就绪且已有今日样本）才携带；**估算口径**：样本间
+ * 「发放+消耗」抵消的量会被低估，samples 供判断可信度。
+ */
+export interface WorkBuddyWebCreditToday {
+  /** 当日累计消耗（相邻观测的负差分之和）。 */
+  consumed: number
+  /** 当日累计发放（正差分之和：裂变包发放、套餐续期）。 */
+  granted: number
+  /** 当日观测到的最大剩余——稳定的「今天的总额度基准」。 */
+  peak: number
+  /** 当日样本数。 */
+  samples: number
+}
+
+/** 历史一天一条（卡片「近 7 日」行）。 */
+export interface WorkBuddyWebCreditDay {
+  /** 本地日历日 YYYY-MM-DD。 */
+  date: string
+  consumed: number
+  granted: number
+}
+
 /** Aggregated credit answer rendered by the plugin card. */
 export interface WorkBuddyWebCredits {
   total: number
   accounts: readonly WorkBuddyWebCreditAccount[]
+  /** 今日消耗统计；台账缺席（老宿主/域不可用/今日无样本）时省略。 */
+  today?: WorkBuddyWebCreditToday
+  /** 今天之前的最近 7 天，时间正序；不足 7 天就有多少。 */
+  history?: readonly WorkBuddyWebCreditDay[]
 }
 
 /**

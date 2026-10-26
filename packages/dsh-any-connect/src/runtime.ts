@@ -37,6 +37,7 @@ import { clearHostHeartbeat, writeHostHeartbeat } from './host-heartbeat.js'
 import type { Options } from './config.js'
 import { createVariantCredentialStore, upstreamClientFor } from './variant-wiring.js'
 import type { WorkBuddyStateStore } from './state-store.js'
+import type { CreditLedger } from './credit-ledger.js'
 
 /** apply() 拿到的运行时集合句柄。 */
 export interface VariantRuntimeSet {
@@ -45,6 +46,8 @@ export interface VariantRuntimeSet {
   applyConfiguredAuthFiles(): void
   /** 状态域就绪后注入自有副本的域存取（见 index.ts 的 inject 时序）。 */
   setState(state: WorkBuddyStateStore): void
+  /** 状态域就绪后注入今日消耗台账（credit-ledger；与 setState 同时序）。 */
+  setLedger(ledger: CreditLedger): void
   /** 启动两条定时器与适配器注册（shim 就绪后逐个注册）。 */
   start(): void
   /** 卸载：停定时器、关 shim、清心跳。返回 Promise，宿主会等它落定。 */
@@ -212,6 +215,16 @@ export function createVariantRuntimeSet(deps: {
         path: runtime.variant.statusPath,
         store: runtime.store,
         fetchCredits: credential => runtime.client!.fetchCredits(credential as Parameters<WorkBuddyUpstreamClient['fetchCredits']>[0]),
+        // 今日消耗台账只属于积分制变体（credit-ledger 的口径说明见该模块头）。
+        // ledger 是域就绪后的后补注入，闭包取值即可拿到。
+        ...runtime.variant.kind === 'workbuddy'
+          ? {
+              recordCredits: async total => {
+                await runtime.ledger?.record(runtime.variant.id, total)
+              },
+              creditSummary: () => runtime.ledger?.summary(runtime.variant.id) ?? Promise.resolve(undefined),
+            }
+          : {},
         models: () => runtime.catalog.current(),
         catalog: () => catalogSection(runtime),
         // 探针区与档位检测只属于 WorkBuddy 变体。
@@ -383,5 +396,11 @@ export function createVariantRuntimeSet(deps: {
     for (const runtime of runtimes) runtime.credentialStore?.setState(state)
   }
 
-  return { runtimes, applyConfiguredAuthFiles, setState, start, dispose }
+  /** 状态域就绪后把台账推进每个变体（runtimes 一次性构建，赋一遍即全覆盖）。 */
+  function setLedger(ledger: CreditLedger): void {
+    if (stopped) return
+    for (const runtime of runtimes) runtime.ledger = ledger
+  }
+
+  return { runtimes, applyConfiguredAuthFiles, setState, setLedger, start, dispose }
 }

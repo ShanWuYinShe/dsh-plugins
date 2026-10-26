@@ -307,3 +307,62 @@ describe('workBuddyWebStatus context', () => {
     ])
   })
 })
+
+describe('workBuddyWebStatus credits ledger', () => {
+  it('fetchCredits 成功后记台账并附今日统计；台账缺席时省略字段', async () => {
+    const recordCredits = vi.fn(async () => {})
+    const creditSummary = vi.fn(async () => ({
+      today: { date: '2026-10-26', peak: 793, last: 693, consumed: 45, granted: 100, samples: 9, updatedAtMs: 0 },
+      history: [{ date: '2026-10-25', peak: 700, last: 580, consumed: 120, granted: 100, samples: 12, updatedAtMs: 0 }],
+    }))
+    const status = (await workBuddyWebStatus({
+      store: storeWith(CREDENTIAL),
+      fetchCredits: clientWith(Promise.resolve({ total: 693, accounts: [] })),
+      recordCredits,
+      creditSummary,
+      models: () => [],
+      catalog: () => ({ source: 'fallback' }),
+      probeKey: 'test-key',
+      path: '/workbuddy-status-test',
+    }) as WorkBuddySignedInStatus)
+    // 先记本次观测再回读：total 作为观测值进入台账。
+    expect(recordCredits).toHaveBeenCalledWith(693)
+    expect(creditSummary).toHaveBeenCalledTimes(1)
+    expect(status.credits).toMatchObject({
+      total: 693,
+      today: { consumed: 45, granted: 100, peak: 793, samples: 9 },
+      history: [{ date: '2026-10-25', consumed: 120, granted: 100 }],
+    })
+  })
+
+  it('未提供台账依赖时不带 today/history（降级不占位）', async () => {
+    const status = (await workBuddyWebStatus({
+      store: storeWith(CREDENTIAL),
+      fetchCredits: clientWith(Promise.resolve({ total: 693, accounts: [] })),
+      models: () => [],
+      catalog: () => ({ source: 'fallback' }),
+      probeKey: 'test-key',
+      path: '/workbuddy-status-test',
+    }) as WorkBuddySignedInStatus)
+    expect(status.credits).toEqual({ total: 693, accounts: [] })
+  })
+
+  it('台账故障不拖垮 status 文档（统计降级为省略字段）', async () => {
+    const status = (await workBuddyWebStatus({
+      store: storeWith(CREDENTIAL),
+      fetchCredits: clientWith(Promise.resolve({ total: 693, accounts: [] })),
+      recordCredits: async () => {
+        throw new Error('disk gone')
+      },
+      creditSummary: async () => {
+        throw new Error('disk gone')
+      },
+      models: () => [],
+      catalog: () => ({ source: 'fallback' }),
+      probeKey: 'test-key',
+      path: '/workbuddy-status-test',
+    }) as WorkBuddySignedInStatus)
+    expect(status.credits).toEqual({ total: 693, accounts: [] })
+    expect(status.creditsError).toBeUndefined()
+  })
+})

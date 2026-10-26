@@ -258,6 +258,11 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
         : [
             label,
             status.credits !== undefined ? t('creditsTotal', { total: formatNumber(status.credits.total) }) : undefined,
+            // 裂变包每天发新包/旧包到期，「当前积分」每天双向跳动；卡头带上
+            // 「今日已用」，收起态也能一眼读出今天的消耗（台账有样本才显示）。
+            status.credits?.today !== undefined
+              ? t('creditsTodayShort', { used: formatNumber(status.credits.today.consumed) })
+              : undefined,
           ].filter(part => part !== undefined).join(' · '),
     ...(catalogOffline ? [t('catalogOfflineShort')] : []),
   ].filter(part => part !== '').join(' · ')

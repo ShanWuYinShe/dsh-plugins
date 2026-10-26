@@ -13,9 +13,10 @@ import type { WorkBuddyAuthStatus, WorkBuddyCredential } from './auth.js'
 import type { WorkBuddyCredits } from './upstream.js'
 import { normalizeCredits } from './upstream.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
+import type { CreditLedgerSummary } from './credit-ledger.js'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { WORKBUDDY_STATUS_PATH } from './status-paths.js'
-import type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStartPlanClaim, WorkBuddyWebStatus } from './status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebCreditDay, WorkBuddyWebCreditToday, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStartPlanClaim, WorkBuddyWebStatus } from './status-paths.js'
 import type { StartPlanPreviewResult } from './zcode-plan-claim.js'
 
 // `WorkBuddyWebStartPlanClaim` 的形状定义在 status-paths.ts（客户端与宿主共用同一
@@ -36,6 +37,14 @@ export interface WorkBuddyStatusRouteOptions {
   }
   /** Live billing answer for the card's credit section. */
   fetchCredits?: (credential: WorkBuddyCredential) => Promise<WorkBuddyCredits>
+  /**
+   * 今日消耗台账（credit-ledger.ts，仅积分制变体提供）：fetchCredits 成功后记
+   * 一次观测。契约上从不 reject（内部吞错），调用侧仍兜一层——统计故障绝不
+   * 拖垮 status 文档。
+   */
+  recordCredits?: (total: number) => Promise<void>
+  /** 回读今日统计 + 近 7 天历史；台账缺席或今日无样本时返回 undefined。 */
+  creditSummary?: () => Promise<CreditLedgerSummary | undefined>
   /** Resolve the current model catalog for the card's unified model list. */
   models: () => readonly WorkBuddyModelInfo[]
   /** Resolve where the served models came from, for the card's catalog line. */
@@ -124,7 +133,43 @@ export async function workBuddyWebStatus(
       const credential = await deps.store.current()
       if (credential !== undefined) {
         const credits = await deps.fetchCredits(credential as WorkBuddyCredential)
-        return { ...statusWithClaim, credits }
+        // 今日统计（credit-ledger）：先记本次观测再回读，读到的一定含刚记的样本。
+        // record/summary 按契约从不 reject，这里仍兜一层——统计故障只降级为
+        // 「没有今日统计」，绝不把 status 文档变成 500。
+        if (deps.recordCredits !== undefined) {
+          try {
+            await deps.recordCredits(credits.total)
+          } catch {
+            // 台账写失败不影响积分展示。
+          }
+        }
+        let todayFrame: WorkBuddyWebCreditToday | undefined
+        let history: readonly WorkBuddyWebCreditDay[] | undefined
+        if (deps.creditSummary !== undefined) {
+          try {
+            const summary = await deps.creditSummary()
+            if (summary !== undefined) {
+              const { today } = summary
+              todayFrame = {
+                consumed: today.consumed,
+                granted: today.granted,
+                peak: today.peak,
+                samples: today.samples,
+              }
+              history = summary.history.map(day => ({ date: day.date, consumed: day.consumed, granted: day.granted }))
+            }
+          } catch {
+            // 台账读失败同上：省略 today/history 字段。
+          }
+        }
+        return {
+          ...statusWithClaim,
+          credits: {
+            ...credits,
+            ...todayFrame === undefined ? {} : { today: todayFrame },
+            ...history === undefined ? {} : { history },
+          },
+        }
       }
     }
   } catch (error: unknown) {

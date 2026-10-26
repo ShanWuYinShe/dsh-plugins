@@ -686,3 +686,31 @@ POST /billing/meter/get-user-resource  // 返回 accounts 与 proTrialStatus
 
 **通用教训**：给宿主写错误文案时，**不要裸写 401/403/429/400/5xx 等状态码数字**——
 宿主会按文本重新分类，轻则分类错误、重则整条文案被替换掉。
+
+## 十、WorkBuddy 积分与消耗台账（2026-10-26 取证与实现）
+
+**WorkBuddy 积分是「裂变包」制，这是「总额/剩余天天跳动」的根因**。实测 `get-user-resource`
+返回 33 个包：主体系 `CodeBuddy个人版国内运营裂变包`，**上游每天发一个新包**（每个 100 积分、
+`CycleEndTime` = 发放时刻 +30 天，发放时刻每天不同：00:xx / 09:xx / 12:xx / 20:02 都出现过），
+旧包到期**整包消失**。因此「剩余总额」每天双向跳动（新包 +100、消耗 −N、到期 −整包），
+单看任何时刻的数字读不出「今天花了多少」——用户 2026-10-26 报的「总额度总是刷新」即此。
+
+- **上游没有按日消耗明细**：`get-user-resource` 只有包级快照（`CycleCapacityRemain`/
+  `CycleCapacityUsed` 是包整个生命周期 30 天的口径，不是今日）。消耗统计只能插件侧**采样差分**：
+  每次成功拉到积分记 `{时刻, 剩余}`，负差分计消耗、正差分计发放、当日最大剩余即「今日峰值」
+  （= 用户要的稳定基准，今日已用 ≈ 峰值 − 当前剩余）。实现 `src/credit-ledger.ts`（0.4.25）。
+- **口径必须诚实标注**：①估算——只有 DSH 运行且轮询（pill 60s + 卡片 status 60s）到查询才有
+  样本，两次采样间「发放+消耗」抵消会被低估，samples 随数据透出；②**跨天首观测不计差分**
+  （跨夜窗口的消耗无法归属到哪一天，宁少不虚记）；③只统计积分制变体（kind `workbuddy`），
+  ZCode 的 token 池/订阅有效性不是这个语义，绝不混进台账。
+- **展示面三处齐改**（与 0.4.20 教训同一条红线）：额度 pill（`totalCreditsWindows` 追加
+  「今日已用」窗口，折叠态仍只渲染 windows[0] 总计）、配置页卡片（`credits.today`/`history`，
+  卡头摘要带「今日已用 N」）、CLI（`Today:` 行 + `creditsToday` JSON 字段）。0.4.25 端到端
+  隔离实例三处全部验证过。
+- **持久化**：`dsh_any_connect` 域新增 `ledger` 表（per-record 布局版本检查按记录进行，
+  **加表不用 bump version、不用迁移**——新表只是新记录）。域不可用时台账整体缺席，
+  status/pill 降级为「无今日统计」，绝不拖垮读路径（`CreditLedger.record` 契约上从不 reject）。
+- **台账 seed/验证技巧**：隔离实例的台账可以用公开 API 预置样本——
+  `new JsonStorageBackend(<H>/storages)` → `kv.open(descriptorOf(anyConnectDomain))` →
+  `unit.putRecord('ledger', 'workbuddy', doc)`，起实例前写入即可验证差分展示。
+- 实测消耗粒度：两次相隔 4 分钟的查询 698→693（消耗 5 积分），pill 60s 轮询足以捕捉日常消耗。

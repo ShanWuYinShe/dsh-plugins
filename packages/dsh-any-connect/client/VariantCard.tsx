@@ -203,6 +203,30 @@ export function VariantCard(props: {
                   <CardRefreshButton busy={busy} onClick={() => { void refreshWithCatalog() }} t={t} />
                 </span>
               </div>
+              {/* 今日消耗统计（credit-ledger 采样差分）：裂变包每天发新包、旧包到期
+                  整包消失，「当前积分」每天双向跳动读不出今天花多少；这三行给一个
+                  稳定的今日基准。台账缺席或今日无样本时 status 不带 today，整段
+                  静默不渲染——降级不占位。*/}
+              {status.credits?.today !== undefined ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={planMetaStyle} title={t('creditTodayEstimate', { samples: status.credits.today.samples })}>
+                    {t('creditTodayLine', {
+                      used: formatNumber(status.credits.today.consumed),
+                      granted: formatNumber(status.credits.today.granted),
+                      peak: formatNumber(status.credits.today.peak),
+                    })}
+                  </span>
+                  {status.credits.history !== undefined && status.credits.history.length > 0 ? (
+                    <span style={planMetaStyle}>
+                      {t('creditHistoryLine', {
+                        days: status.credits.history
+                          .map(day => t('creditHistoryDay', { date: day.date, used: formatNumber(day.consumed) }))
+                          .join(' · '),
+                      })}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </>
           )}
           {notice !== undefined ? <p style={{ ...errorStyle, fontSize: 12 }} role="alert">{t('refreshFailed', { message: notice })}</p> : null}

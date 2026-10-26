@@ -20,6 +20,8 @@ import { CN_VARIANT, variantFor, PROVIDER_VARIANTS, WORKBUDDY_VARIANTS, ZCODE_ST
 import type { WorkBuddyVariant } from './variants.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { currentPlanWindow, startPlanWindows } from './usage.js'
+import { summarize } from './credit-ledger.js'
+import type { CreditLedgerState } from './credit-ledger.js'
 import { isHeartbeatProcessAlive, readHostHeartbeat, workbuddyHostHeartbeatPath } from './host-heartbeat.js'
 import { WORKBUDDY_ELECTRON_BIN_ENV } from './desktop-credential-protection.js'
 import { createVariantCredentialStore, upstreamClientFor } from './variant-wiring.js'
@@ -59,6 +61,12 @@ function printJson(value: unknown): void {
 /** 进程内共享的 standalone 状态域句柄；run() 结束时统一释放（见 closeSharedState）。 */
 let sharedStateClose: (() => Promise<void>) | undefined
 
+/**
+ * CLI 侧的台账只读（standalone 单元里的 ledger 表）：status 命令展示「今日已用」。
+ * 只读不写——宿主进程是唯一的记账者，短命 CLI 写域有跨进程窗口。
+ */
+let sharedLedgerReader: ((variantId: string) => Promise<CreditLedgerState | undefined>) | undefined
+
 /** Credential store wired for CLI diagnostics. */
 async function makeWorkBuddyStore(variant: WorkBuddyVariant): Promise<WorkBuddyCredentialStore> {
   // 与插件运行时同一份装配（见 variant-wiring.ts）：计划语义 / 刷新通道都由它
@@ -72,6 +80,7 @@ async function makeWorkBuddyStore(variant: WorkBuddyVariant): Promise<WorkBuddyC
     const standalone = await openStandaloneStateStore()
     state = standalone
     sharedStateClose = () => standalone.close()
+    sharedLedgerReader = variantId => standalone.readLedger(variantId)
   } catch (error: unknown) {
     console.warn(`dsh-any-connect: state domain unavailable (${String(error)}); owned-copy operations use the file fallback`)
   }
@@ -82,6 +91,7 @@ async function makeWorkBuddyStore(variant: WorkBuddyVariant): Promise<WorkBuddyC
 async function closeSharedState(): Promise<void> {
   const close = sharedStateClose
   sharedStateClose = undefined
+  sharedLedgerReader = undefined
   await close?.().catch(() => {})
 }
 
@@ -225,6 +235,17 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
       expiresAt = undefined
     }
   }
+  // 今日消耗统计（credit-ledger）：宿主进程记账、CLI 只读展示；台账缺席
+  // （域打不开/今天还没有样本）时省略字段，不编数字。
+  let creditsToday: ReturnType<typeof summarize> | undefined
+  if (variant.kind === 'workbuddy' && sharedLedgerReader !== undefined) {
+    try {
+      const ledgerState = await sharedLedgerReader(variant.id)
+      creditsToday = ledgerState === undefined ? undefined : summarize(ledgerState.days)
+    } catch {
+      creditsToday = undefined
+    }
+  }
   if (jsonOutput) {
     printJson({
       schemaVersion: JSON_SCHEMA_VERSION,
@@ -238,6 +259,14 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
       source: authStatus.source,
       credits: credits?.total,
       ...credits?.error === undefined ? {} : { creditsError: credits.error },
+      ...creditsToday === undefined ? {} : {
+        creditsToday: {
+          consumed: creditsToday.today.consumed,
+          granted: creditsToday.today.granted,
+          peak: creditsToday.today.peak,
+          samples: creditsToday.today.samples,
+        },
+      },
       // ZCode 的额度语义与 WorkBuddy 点数不同:窗口按 pill 同一口径给出
       // (Start Plan 是按模型分池的 token 计数池、每池一条,Coding Plan 是
       // 订阅有效性),total 只是兼容字段。
@@ -252,6 +281,12 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
     `${variant.displayName} Connect: signed in${authStatus.nickname === undefined ? '' : ` as ${authStatus.nickname}`}`,
     ...expiresAt === undefined ? [] : [`Access token expires ${expiresAt} (refresh is automatic)`],
     humanCredits(variant, credits, creditAccounts),
+    // 今日消耗（估算口径：宿主进程运行期间的采样差分，样本间「发放+消耗」
+    // 抵消的量会被低估；今天还没有样本时不输出这一行）。
+    ...(creditsToday === undefined ? [] : [
+      `Today: used ${creditsToday.today.consumed}, granted +${creditsToday.today.granted}, peak ${creditsToday.today.peak}`
+        + ` (${creditsToday.today.samples} samples, estimated)`,
+    ]),
     `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : hostState === 'stale' ? 'stale heartbeat (DSH process exited)' : 'not started in this profile'}`,
     'Client card: load failures are logged to the browser console only; the host provider is unaffected.',
     '',

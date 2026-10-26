@@ -30,6 +30,7 @@ import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { parseOwnDocument } from './auth-document.js'
 import type { WorkBuddyCredential } from './auth-types.js'
+import type { CreditLedgerPersistence, CreditLedgerState } from './credit-ledger.js'
 
 /** 域内单条凭据记录：即插件统一的凭据形态（WorkBuddy 与 ZCode 共用）。 */
 const credentialSchema = z.object({
@@ -48,6 +49,25 @@ const credentialSchema = z.object({
 }).strict()
 
 /**
+ * 台账（credit-ledger.ts）一天的聚合记录。与凭据同域不同表：都是「按变体一条」
+ * 的数据，域保持 version 1——per-record 布局的版本检查按记录进行，新表只是
+ * 新记录，存量凭据记录不受影响、无需迁移。
+ */
+const ledgerDaySchema = z.object({
+  date: z.string(),
+  peak: z.number(),
+  last: z.number(),
+  consumed: z.number(),
+  granted: z.number(),
+  samples: z.number(),
+  updatedAtMs: z.number(),
+}).strict()
+
+const ledgerSchema = z.object({
+  days: z.array(ledgerDaySchema).max(31),
+}).strict()
+
+/**
  * 插件状态域声明。`layout: 'per-record'`：每条凭据一个文件，各变体互不影响；
  * 坏记录挪到备份位（`backup-and-skip`）而不是让整个域打不开。
  */
@@ -57,6 +77,7 @@ export const anyConnectDomain = defineDomain({
   layout: 'per-record',
   tables: {
     auth: domainTable(credentialSchema),
+    ledger: domainTable(ledgerSchema),
   },
   invalidRecords: 'backup-and-skip',
 })
@@ -77,6 +98,9 @@ export interface WorkBuddyStateStore {
 /** 域实现的凭据表名。 */
 const AUTH_TABLE = 'auth'
 
+/** 域内台账表的表名。 */
+const LEDGER_TABLE = 'ledger'
+
 /** 宿主 storageDomain 域句柄的状态存取包装（插件运行时用）。 */
 export function domainStateStore(domain: Domain<typeof anyConnectDomain>): WorkBuddyStateStore {
   const table = domain.table(AUTH_TABLE)
@@ -93,13 +117,31 @@ export function domainStateStore(domain: Domain<typeof anyConnectDomain>): WorkB
 }
 
 /**
+ * 宿主域句柄的台账持久化（credit-ledger.ts 的 CreditLedgerPersistence 实现）。
+ * 写走域的单写链，与凭据副本互不阻塞。
+ */
+export function domainCreditLedgerPersistence(domain: Domain<typeof anyConnectDomain>): CreditLedgerPersistence {
+  const table = domain.table(LEDGER_TABLE)
+  return {
+    load: async variantId => table.get(variantId),
+    save: async (variantId, state) => {
+      await table.put(variantId, state)
+    },
+  }
+}
+
+/**
  * CLI 的独立状态存取：绕过宿主服务，直接实例化同款 json backend 打开**同一**
  * 存储单元（`<DSH_HOME>/storages/dsh_any_connect/`）。宿主进程内也持有该单元的
  * 句柄，但 json 单元是目录式 per-record 布局，短命 CLI 的单次读写与运行时的
  * 域写链不共享内存态——读写各自落盘后天然一致；logout（删记录）与运行时
  * refresh（写记录）同时发生的窗口小到可以接受，与原跨进程文件锁同量级。
  */
-export async function openStandaloneStateStore(): Promise<WorkBuddyStateStore & { close(): Promise<void> }> {
+export async function openStandaloneStateStore(): Promise<WorkBuddyStateStore & {
+  /** 读台账（credit-ledger）一条记录；CLI status 的今日统计只读用。 */
+  readLedger(variantId: VariantId): Promise<CreditLedgerState | undefined>
+  close(): Promise<void>
+}> {
   const backend = new JsonStorageBackend(join(resolveDshHome(), 'storages'))
   const unit = await backend.kv.open(descriptorOf(anyConnectDomain))
   const readAll = async (): Promise<Record<VariantId, WorkBuddyCredential>> => {
@@ -113,8 +155,18 @@ export async function openStandaloneStateStore(): Promise<WorkBuddyStateStore & 
     }
     return parsed
   }
+  const readLedger = async (variantId: VariantId): Promise<CreditLedgerState | undefined> => {
+    const snapshot = await unit.loadAll()
+    const raw = snapshot.tables[LEDGER_TABLE] as Record<string, unknown> | undefined
+    const value = raw?.[variantId]
+    if (value === undefined) return undefined
+    const result = ledgerSchema.safeParse(value)
+    // 损坏台账与凭据同一策略：视为无数据，不炸诊断。
+    return result.success ? result.data : undefined
+  }
   return {
     read: async variantId => (await readAll())[variantId],
+    readLedger,
     write: async (variantId, credential) => {
       await unit.putRecord(AUTH_TABLE, variantId, credentialSchema.parse(credential))
     },

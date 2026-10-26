@@ -16,6 +16,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { codingPlanQuotaWindows } from './zcode-quota.js'
 import { variantIsStartPlan } from './variant-runtime.js'
 import type { VariantRuntime } from './variant-runtime.js'
+import type { CreditLedgerSummary } from './credit-ledger.js'
 import type { WorkBuddyCredential } from './auth.js'
 import type { WorkBuddyCreditAccount, WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
 
@@ -56,9 +57,17 @@ export interface ProviderUsageRegistryLike {
  * 只是行数永远 ≤1。跨币种/跨周期的窗口绝不在此合并：其它 provider 的
  * 窗口各有其语义，这里的 accounts 永远是同口径 credit 点数。
  *
+ * WorkBuddy 的额度是「裂变包」制（每天发新包、旧包到期整包消失），剩余总额
+ * 每天双向跳动，单看读不出今天花了多少——台账（credit-ledger）有今日样本时
+ * 追加一条「今日已用」窗口（无 limit 不画进度条），展开 pill 一眼看到今天的
+ * 消耗；折叠态仍显示总计剩余（windows[0] 语义不变）。
+ *
  * Exported for tests: counted directly without booting the plugin.
  */
-export function totalCreditsWindows(accounts: readonly WorkBuddyCreditAccount[]): Array<{
+export function totalCreditsWindows(
+  accounts: readonly WorkBuddyCreditAccount[],
+  todaySummary?: CreditLedgerSummary,
+): Array<{
   id: string
   label: string
   remain: number
@@ -69,13 +78,28 @@ export function totalCreditsWindows(accounts: readonly WorkBuddyCreditAccount[])
   if (live.length === 0) return []
   const remain = live.reduce((sum, account) => sum + account.remain, 0)
   const limit = live.reduce((sum, account) => sum + (account.size > 0 ? account.size : 0), 0)
-  return [{
+  const windows: Array<{
+    id: string
+    label: string
+    remain: number
+    unit: string
+    limit?: number
+  }> = [{
     id: 'total',
     label: '总计',
     remain,
     unit: 'credits',
     ...limit > 0 ? { limit } : {},
   }]
+  if (todaySummary !== undefined) {
+    windows.push({
+      id: 'today',
+      label: '今日已用',
+      remain: todaySummary.today.consumed,
+      unit: 'credits',
+    })
+  }
+  return windows
 }
 
 /**
@@ -209,6 +233,19 @@ export function registerUsageQueriers(
           const isZCode = runtime.variant.kind === 'zcode'
           const isOpenCode = runtime.variant.kind === 'opencode'
           const isStartPlan = variantIsStartPlan(runtime.variant)
+          const isWorkBuddy = runtime.variant.kind === 'workbuddy'
+          // 今日消耗台账（credit-ledger，仅积分制变体）：pill 每次成功拉到积分
+          // 记一次观测，相邻样本差分出「今日已用」。台账是统计附属品，任何故障
+          // 只降级为「无今日窗口」，绝不拖垮 pill 查询。
+          let todaySummary: CreditLedgerSummary | undefined
+          if (isWorkBuddy && runtime.ledger !== undefined) {
+            try {
+              await runtime.ledger.record(runtime.variant.id, credits.total)
+              todaySummary = await runtime.ledger.summary(runtime.variant.id)
+            } catch {
+              todaySummary = undefined
+            }
+          }
           // Coding Plan 的窗口额度（5 小时 / 7 天 / 工具调用）来自客户端同款
           // `GET bigmodel.cn/api/monitor/usage/quota/limit`：拿得到就按它展示，
           // 拿不到（网络 / 非 bigmodel 账号 / 形状变化）回退订阅有效性窗口。
@@ -240,7 +277,9 @@ export function registerUsageQueriers(
                 ? startPlanWindows(credits.accounts)
                 : quotaWindows.length > 0
                   ? quotaWindows
-                  : isZCode ? currentPlanWindow(credits.accounts) : totalCreditsWindows(credits.accounts),
+                  : isZCode
+                    ? currentPlanWindow(credits.accounts)
+                    : totalCreditsWindows(credits.accounts, todaySummary),
             fetchedAt: Date.now(),
           }
         },

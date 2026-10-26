@@ -212,6 +212,23 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
     ])).toEqual([{ id: 'total', label: '总计', remain: 34, unit: 'credits', limit: 100 }])
   })
 
+  it('台账有今日样本时追加「今日已用」窗口；无样本保持单窗口', () => {
+    // 裂变包制的剩余总额每天双向跳动，「今日已用」行让展开 pill 一眼读到今天的
+    // 消耗；折叠态仍渲染 windows[0]（总计），语义不变。无 limit 不画进度条。
+    const accounts = [{ packageName: 'A', remain: 693, size: 800 }]
+    const today = {
+      today: { date: '2026-10-26', peak: 793, last: 693, consumed: 45, granted: 100, samples: 9, updatedAtMs: 0 },
+      history: [],
+    }
+    expect(WorkBuddy.totalCreditsWindows(accounts)).toEqual([
+      { id: 'total', label: '总计', remain: 693, unit: 'credits', limit: 800 },
+    ])
+    expect(WorkBuddy.totalCreditsWindows(accounts, today)).toEqual([
+      { id: 'total', label: '总计', remain: 693, unit: 'credits', limit: 800 },
+      { id: 'today', label: '今日已用', remain: 45, unit: 'credits' },
+    ])
+  })
+
   it('picks the first live plan, falling back to the first plan', () => {
     expect(WorkBuddy.currentPlanWindow([])).toEqual([])
     expect(WorkBuddy.currentPlanWindow([

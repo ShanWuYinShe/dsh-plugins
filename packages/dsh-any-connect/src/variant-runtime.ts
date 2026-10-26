@@ -20,6 +20,7 @@ import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
 import { AI_VARIANT, CN_VARIANT, OPENCODE_VARIANT, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import type { WorkBuddyAuthStatus, WorkBuddyCredentialStore } from './auth.js'
+import type { CreditLedger } from './credit-ledger.js'
 import type { WorkBuddyCatalogStore } from './catalog-store.js'
 import type { WorkBuddyProbeService } from './probe-service.js'
 import type { WorkBuddyProbeStore } from './probe-store.js'
@@ -78,6 +79,12 @@ export interface VariantRuntime {
   probeStore?: WorkBuddyProbeStore
   probeService?: WorkBuddyProbeService
   filterStore?: ModelFilterStore
+  /**
+   * 今日消耗台账（credit-ledger.ts）：宿主状态域就绪后由 setLedger 后补注入。
+   * 只有积分制变体（kind 'workbuddy'）消费它；缺席（老宿主/注入前窗口/域
+   * 不可用）时今日统计整体降级为「无」，不影响其余链路。
+   */
+  ledger?: CreditLedger | undefined
 }
 
 /** The static catalog a variant serves before its first successful fetch. */
