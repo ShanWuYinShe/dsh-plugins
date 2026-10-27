@@ -714,3 +714,19 @@ POST /billing/meter/get-user-resource  // 返回 accounts 与 proTrialStatus
   `new JsonStorageBackend(<H>/storages)` → `kv.open(descriptorOf(anyConnectDomain))` →
   `unit.putRecord('ledger', 'workbuddy', doc)`，起实例前写入即可验证差分展示。
 - 实测消耗粒度：两次相隔 4 分钟的查询 698→693（消耗 5 积分），pill 60s 轮询足以捕捉日常消耗。
+
+### 10.1 额度数据归属口径（2026-10-27 用户确认）
+
+- provider-usage 是「注册 seam + 通用显示层」（其 README 原话：核心是一套注册机制），
+  不持有任何 provider 的凭据与计费端点；它自带的 8 个 querier 全是开放 API
+  （deepseek/openai/moonshot/bigmodel/minimax/openrouter/siliconflow/opencode，凭据全局可见）。
+- **provider 由 dsh-any-connect 提供的（workbuddy / workbuddy-ai / zcode /
+  zcode-start-plan），额度与消耗统计的数据权威就在 dsh-any-connect**：桌面加密凭据
+  只有它读得到，`fetchCredits` / billing 端点只有它调得动；provider-usage 只收到
+  querier 返回的窗口 payload 按通用 `UsageWindow` 契约渲染，**不得出现 provider 专用**
+  **代码**（registry 注释原文即点名「dsh-any-connect registers its own querier」是预期路径）。
+- 消耗台账（0.4.25）因此落在 dsh-any-connect 而不是 provider-usage：采样源（pill
+  querier + 卡片 status 两路）也在它这里。把台账放进 provider-usage 的「通用采样差分」
+  方案是**有意不做**的方向（采样只覆盖当前会话 provider 且依赖 pill 挂载可见；不装
+  provider-usage 时卡片/CLI 统计会失效；裂变包正负差分语义是 WorkBuddy 特有口径）——
+  等出现真实的「要统计开放 API provider 每日用量」需求再议，不要为一个 provider 提前抽象。
