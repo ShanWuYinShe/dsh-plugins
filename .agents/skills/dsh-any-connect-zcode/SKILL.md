@@ -396,6 +396,49 @@ handle.replace([providerId])           // 同路由替换 = 广播"拓扑变了"
    交付前必须真跑 `bun run test:ci`（它含 build + typecheck + test），
    只跑 `vitest` 会漏掉这一类。
 
+### 5.4 UNKNOWN_MODEL「插件重载窗口」：transport 抖动被升级成整轮失败（2026-10-27 取证）
+
+**症状**：聊天页「本轮运行失败 pi-ai provider "workbuddy" has no configured model "hy4-preview"（UNKNOWN_MODEL）」，
+同一毫秒另一会话 zcode 变体报同样错误；几分钟后一切自愈（或重启后正常）。
+**这不是模型/凭据/数据问题**——saved 目录与排除名单事后核对全部正常。
+
+**机制链（会话日志逐事件还原）**：
+1. 插件被重载（或宿主 runtime 重启），旧实例 `shim.close()` 腰斩在途流式请求
+   → 客户端记 `llm/retry`，failure `{"message":"terminated","code":"TRANSPORT"}`；
+2. TRANSPORT 在可重试名单里（policyKey `["normal",5,["EMPTY_RESPONSE","RATE_LIMIT","SERVER","TIMEOUT","TRANSPORT"],500,10000,0.1]`），
+   客户端 ~500ms 后自动重发；
+3. 重发命中**新实例的启动窗口**：`createRuntime` 故意 `setVisible(false)`（未确认凭据前不服务任何模型），
+   直到异步 `refreshCatalog('startup')` 走完 `store.current()` → `adoptIdentity`（发布 saved 目录）。
+   本机实测窗口 ≤0.8s（注册 20:27:00.630 → live 落盘 20:27:01.412）；
+4. pi-ai `modelOf()` 在空目录找不到模型 → `UNKNOWN_MODEL`——它**不在可重试名单**，
+   重试管线立即放弃 → 整轮失败。报错文案有误导：模型其实配置着，只是目录还没发布。
+
+**判据（指纹）**：跨变体（workbuddy/zcode）**同一毫秒** UNKNOWN_MODEL + 前一拍
+`llm/retry` TRANSPORT terminated = 插件级/宿主级重载事件。单变体、无 retry 前情的
+UNKNOWN_MODEL 才去查名单/排除/凭据。四变体同属一个插件，一次重载清空全部目录。
+
+**取证手法**：DSH 会话是 zstd 压缩的 JSONL——
+`zstd -dc ~/.dsh/sessions/<workspace>/<session-id>/session.v4.jsonl.zstd`，
+看 `llm/retry`（含完整 failure 与 policyKey）、`turn/end`（含最终错误）、
+`step/start/end` 的时间轴即可还原死亡顺序。`~/.dsh/logs` 只有 startup 日志，别指望它。
+
+**孪生面孔 NO_ADAPTER**：同一重载窗口还有第二副面孔——dsh-llm 路由层的
+`no adapter registered for provider "workbuddy"`（NO_ADAPTER，请求派发时 provider 路由
+整个不存在）。重试落点决定看到哪副：落在新实例 `registerAdapter` 之前（注册要等
+`shim.ready`）→ NO_ADAPTER；落在注册后、目录发布前 → UNKNOWN_MODEL。两者都不在默认
+可重试集合（`DEFAULT_RETRYABLE_CODES = EMPTY_RESPONSE/RATE_LIMIT/SERVER/TIMEOUT/TRANSPORT`），
+命中即整轮失败。pi-ai 层另有 `adapter does not own provider`（簿记错位形态），本插件
+profiles 静态构造 + replace 复用同一 provider id，不会产生。稳态不出这两类错；上游真下架
+模型时 UNKNOWN_MODEL 持续且诚实（选择框同步隐藏该行）。saved 目录前移的修法只能消掉
+UNKNOWN_MODEL 面孔；NO_ADAPTER 面孔窗口为 loopback 绑定的毫秒级，遇上了等一秒重发即可。
+
+**修复（2026-10-27 已实施，`primeCatalogForRegistration`）**：saved/fallback 目录采用
+（纯本地读：凭据身份 + saved catalog 文件，`current()` 不触网）挪到 `registerAdapter`
+**之前 await 完成**，上游 fetchModels 仍注册后异步——登录用户的启动窗口归零，重试落窗
+内也能正常解析模型（凭据由 shim 按请求解析；真未登录得到诚实的 auth 错误而非
+UNKNOWN_MODEL）。未登录/区域错配保持隐藏（判定与 refreshCatalog 前半段同构）；
+回归测试 `test/catalog-prime.test.ts`（fetchModels 挂起状态下注册完成即有名单）。
+
 ## 六、宿主线适配（`bun run adapt`）的三个已知缺口（2026-10-04 实测）
 
 适配 DSH 新预发布线时 `adapt` **只改 `@deepseek-ai/dsh-*` 的 range**，以下三处要手工补，
