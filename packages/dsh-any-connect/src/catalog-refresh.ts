@@ -31,6 +31,8 @@ export interface CatalogRefreshDeps {
 /** 目录刷新与发布（外加 timers 需要的空名单自愈阈值）。 */
 export interface CatalogRefresh {
   refreshCatalog(runtime: VariantRuntime, reason: string, retriesLeft?: number): void
+  /** 注册前的本地预热（见实现注释）；只读本地文件，绝不触网。 */
+  primeCatalogForRegistration(runtime: VariantRuntime): Promise<void>
   adoptSignedOut(runtime: VariantRuntime): void
   publishCatalog(runtime: VariantRuntime): void
   claimFlipChanged(runtime: VariantRuntime): Promise<boolean>
@@ -193,6 +195,54 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
       ctx.logger?.debug?.(`dsh-any-connect: ${provider} adapter registration is gone; catalog update not announced: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
+
+  /**
+   * 注册前的本地预热：凭据在则先把该账号 saved/fallback 目录采用并置为可见，
+   * **只读本地文件，绝不触网**（`current()` 不做 token 刷新，`fetchModels` 属于
+   * 注册后的 refreshCatalog）。
+   *
+   * 为什么必须在 registerAdapter 之前做（2026-10-27 取证，全过程记录在项目 skill dsh-any-connect-zcode 第 5.4 节）：插件
+   * 重载/宿主重启会腰斩在途请求，宿主的自动重试（TRANSPORT 可重试，~500ms 后
+   * 重发）若落在新实例「已注册但目录仍隐藏」的窗口里，pi-ai 的 modelOf 在空
+   * 目录里找不到模型 → UNKNOWN_MODEL——它不在默认可重试集合里，重试管线立即
+   * 放弃，整轮失败。注册前先把目录采用好，登录用户的这个窗口归零；重试落进
+   * 窗口也能正常解析模型（凭据由 shim 按请求解析，真未登录得到的是诚实的
+   * auth 错误而非 UNKNOWN_MODEL）。
+   *
+   * 判定与 refreshCatalog 的前半段完全同构：未登录保持隐藏（空目录就是
+   * 「分组不展示」的既有语义）；区域错配同样隐藏并留给卡片原因；其他读失败
+   * 不惊动——保持隐藏，交给注册后的 refreshCatalog('startup') 重试。
+   */
+  async function primeCatalogForRegistration(runtime: VariantRuntime): Promise<void> {
+    try {
+      const signedIn = await runtime.store.current()
+      if (signedIn === undefined || isStopped()) return
+      const identity = credentialIdentity(signedIn as unknown as Parameters<typeof credentialIdentity>[0])
+      if (identity === runtime.lastIdentity) return
+      // 夜免资格与 refreshCatalog 同判（transform 已把 zcodePlan 固定为该变体
+      // 的语义）：saved/fallback 的徽标在采用那一刻就要带对，不能等 live 改写。
+      if (runtime.variant.kind === 'zcode') {
+        runtime.catalog.setNightFreeEligible(
+          (signedIn as unknown as { zcodePlan?: ZCodePlanKind }).zcodePlan !== 'start-plan',
+        )
+      }
+      // 预热阶段的 publish 没有注册句柄可通知（notifyCatalogChanged 静默跳过），
+      // 但它会把指纹记进 publishedCatalog——注册自身会广播 adapters-updated，
+      // 客户端重拉时读到的正是这份已采用的目录，语义完整。
+      await adoptIdentity(runtime, identity, publishCatalog)
+    } catch (error: unknown) {
+      if (error instanceof RegionMismatchError) {
+        if (!isStopped()) {
+          adoptSignedOut(runtime)
+          runtime.catalogError = undefined
+          ctx.logger?.warn?.(`dsh-any-connect: ${runtime.variant.displayName} ${error.message}`)
+        }
+        return
+      }
+      // 其他本地读失败（瞬态）：保持隐藏，不惊动；refreshCatalog('startup') 重试。
+    }
+  }
+
   /** 从上游拉一次模型目录并写入 catalog；启动、配置变更、身份核对共用。
    * 函数声明（而非 const 箭头）：`loader/volatile-update` 处理器引用它，
    *
@@ -297,6 +347,7 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
 
   return {
     refreshCatalog,
+    primeCatalogForRegistration,
     adoptSignedOut,
     publishCatalog,
     claimFlipChanged,

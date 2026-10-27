@@ -314,7 +314,14 @@ export function createVariantRuntimeSet(deps: {
   for (const runtime of runtimes) {
     const { catalog, shim, variant } = runtime
     void shim.ready
-      .then(() => {
+      .then(async () => {
+        if (stopped) return
+
+        // 注册前的本地预热（只读本地文件）：目录在 adapter 挂上路由那一刻
+        // 已非空（登录用户）。否则插件重载窗口里落进来的自动重试会在空目录
+        // 上撞 UNKNOWN_MODEL 且不可重试，整轮失败——取证见
+        // catalog-refresh.ts primeCatalogForRegistration 的注释。
+        await lifecycle.primeCatalogForRegistration(runtime)
         if (stopped) return
 
         try {

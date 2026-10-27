@@ -33,6 +33,8 @@ export interface CatalogLifecycleDeps {
 /** apply() 需要的那几件事。 */
 export interface CatalogLifecycle {
   refreshCatalog(runtime: VariantRuntime, reason: string, retriesLeft?: number): void
+  /** 注册前的本地预热（见 catalog-refresh.ts 的实现注释）。 */
+  primeCatalogForRegistration(runtime: VariantRuntime): Promise<void>
   adoptSignedOut(runtime: VariantRuntime): void
   publishCatalog(runtime: VariantRuntime): void
   claimFlipChanged(runtime: VariantRuntime): Promise<boolean>
@@ -54,6 +56,7 @@ export function createCatalogLifecycle(deps: CatalogLifecycleDeps): CatalogLifec
   })
   return {
     refreshCatalog: refresh.refreshCatalog,
+    primeCatalogForRegistration: refresh.primeCatalogForRegistration,
     adoptSignedOut: refresh.adoptSignedOut,
     publishCatalog: refresh.publishCatalog,
     claimFlipChanged: refresh.claimFlipChanged,
