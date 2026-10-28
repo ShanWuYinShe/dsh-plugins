@@ -63,7 +63,7 @@ oauth:bigmodel:access_token / oauth:active_provider / zcodejwttoken ...
 独立的池子，绝不混报。端点鉴权用 `zcodejwttoken`（凭据文档里的
 `zcodejwttoken` 条目，`enc:v1` 加密，同套 AES-GCM 解密）+ `X-Device-Mid`
 （优先桌面端 `telemetry-state.json` 的 `deviceMid`，缺省生成并持久化到
-`$DSH_HOME/.zcode-device-mid`）。
+`$DSH_HOME/zcode-device-mid`——0.4.x 起无点前缀，带点的旧文件名兼容读取）。
 
 ```
 GET https://zcode.z.ai/api/v1/zcode-plan/billing/balance[?app_version=<ver>]
@@ -99,7 +99,7 @@ GET https://zcode.z.ai/api/v1/zcode-plan/billing/balance[?app_version=<ver>]
   落在本地今日动态判定，不硬编码（插件自 0.4.10 前后已如此实现）。
 - **`X-Device-Mid` 是硬要求**：不给 / 每请求随机 → `400 code 3001` 或 `429`。
   取值优先级：`~/.zcode/v2/telemetry-state.json` 的 `deviceMid` →
-  `$DSH_HOME/.zcode-device-mid`（自生成并持久化）。
+  `$DSH_HOME/zcode-device-mid`（自生成并持久化；0.4.x 起无点前缀，带点旧名兼容读取）。
 - 同族端点都可读：`billing/current`、`billing/preview`；`billing/claim` 需要
   阿里云验证码（无码 → `400 code 3007 captcha verify failed`，2026-10-04 复现）。
 
@@ -284,8 +284,9 @@ curl -sS "http://127.0.0.1:8932/plugins/dsh-any-connect/zcode-sp/status" -H "Hos
 
 - 启动时 `refreshCatalog(runtime, 'startup')`；每 **60s** `sweep` 做身份核对
   （身份变了才真拉，稳态零上游请求）；每 **60 分钟** `catalogTimer` 全量重拉。
-- 四个变体（workbuddy / workbuddy-ai / zcode / zcode-start-plan）**都**接上了这三条，
-  没有变体被条件跳过（audit 实测确认）。
+- 五个变体（workbuddy / workbuddy-ai / zcode / zcode-start-plan / opencode-free）**都**接上了这三条，
+  没有变体被条件跳过（2026-10-04 audit 实测确认前四个；opencode-free 加入后同样走
+  `catalog-lifecycle` → `createCatalogRefresh` 的 runtimes 全量接线）。
 
 **🔴 陷阱一：`ZCodeUpstreamClient.fetchModels` 的 coding 分支曾是"假自动更新"。**
 原实现三个分支全部 `return this.models`，上游 `json.data` 只用来判断非空随后丢弃
@@ -343,6 +344,12 @@ replace 会静默不匹配；②kill 旧实例后 `sleep 2` 可能不够，多�
 看似注册失败实为查错名字。
 
 ### 5.2 推送链：选择框实时刷新（宿主侧被动通知）
+
+**2026-10-28 机制更新（DSH 0.2.2 起）：下述 `handle.replace()` 手段已被公开事件取代。**
+宿主 0.2.2 新增公开事件 `llm/models-updated(provider)`，插件目录内容真变化时直接
+`ctx.emit('llm/models-updated', provider)`（见 `catalog-refresh.ts`，不再借
+`handle.replace()` 触发拓扑事件——语义更准、开销更小）；「必须只在内容真的变了时通知」
+「空名单也是合法变化」两条原则不变。下文保留作 0.2.1 及更早宿主线的取证口径。
 
 **这是"实时"的真正瓶颈，且极容易被忽略。**
 客户端 `dsh-client-ui-model-selection/lib/client.js` 的
@@ -547,7 +554,9 @@ GET https://bigmodel.cn/api/monitor/usage/quota/limit
 3. **Plugins 页显示的版本号来自磁盘 package.json，不代表运行中的进程**：`dsh plugin add`
    只改磁盘与 node_modules；正在跑的 dsh 仍旧用**启动时加载的旧模块**。用户说「已经是新版
    了」却仍看到旧行为（如 11 个模型、pill 没有新窗口）时，先看 DSH_HOME 下插件写的缓存
-   （`~/.dsh/.zcode-catalog.json`）内容：若是旧行为的特征就说明进程没重启。**重启必须完全
+   （2026-10-11 起目录化：`$DSH_HOME/cache/dsh-any-connect/<名>.json`，如
+   `zcode-catalog.json`；历史平铺的 `~/.dsh/.zcode-catalog.json` 已由启动迁移例程搬运）内容：
+   若是旧行为的特征就说明进程没重启。**重启必须完全
    退出 dsh 进程**（刷新浏览器页面不算）；`lsof -p <pid>` 可确认进程打开的 DSH_HOME 文件。
 
 ## 九、workbuddy-ai（海外版）凭据"能用但 chat 被拒"（2026-10-08 取证）

@@ -2,7 +2,7 @@
 
 ### 新增
 
-* **文件定位改用宿主公开快照 `SessionPersistenceSnapshot.location.path`**：`fileInfo` 先读 `persistence.stat()` 快照里的标准 `location`（DSH 0.2.2 新增），拿不到再回退历史版本的 `locate` 诊断钩子；`locate` 已不在宿主公开契约（0.2.2 类型只剩 `stat`/`list`），只剩 jsonl 后端运行时保留，属兼容兜底而非必需路径。
+* **文件定位改用宿主公开快照 `SessionPersistenceSnapshot.location.path`**：`fileInfo` 先读 `persistence.stat()` 快照里的标准 `location`（DSH 0.2.2 新增）；location 缺失按 `unknown` 谨慎拒绝，不再回退已废弃的 `locate` 诊断钩子——本次适配整体移除了 locate 兼容分支（宿主 0.2.2 公开契约的 `SessionPersistence` 只剩 `create`/`open`/`flush`/`stat`/`list`）。
 
 ### 优化
 

@@ -209,6 +209,8 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
 3. 验证通过后，为每个受影响的包：
    - 在 `CHANGELOG.md` 顶部新增 `## <版本> (YYYY-MM-DD)` 小节——GitHub
      Release 说明自动取自这里（`scripts/release-notes.mjs`），不写就没有说明；
+     CHANGELOG 只保留当前适配线的条目（更早历史以 GitHub Releases 为准），
+     适配小节把 `dsh.host`（精确版本）与依赖 range（`^版本`）分开表述；
    - 升 `package.json` 的 `version`（bump 是最后一步）。
 4. **推送前逐提交复核**（`git log --oneline origin/<分支>..HEAD` +
    `git diff origin/<分支>..HEAD`）：版本号、CHANGELOG 小节、实际 diff 三者
@@ -433,11 +435,10 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 
 ## 手动兜底
 
-> **搁置期 main 流水不可用**：main 分支的 `publish.yml` 仍是 npm 时代流水
-> （`pnpm publish --registry=registry.npmjs.org`），npm 渠道随 Trusted
-> Publishing 收紧已死（alpha 线 926cbb8 迁移时的结论）。搁置期若需稳定线
-> 紧急热修，推 main 不会产出 Release 资产，直接用下述 `pnpm pack` +
-> `gh release create` 兜底；main 的 publish 流水留待双线收敛时随整线搬运。
+> main 的 `publish.yml` 已是迁移后的 GitHub Release 流水（`bun pm pack` +
+> `gh release create`；alpha 线 926cbb8 完成迁移，已随收敛进入 main）：
+> 稳定线紧急热修照常推 main、打 tag 即可走 CI 产出 Release。下述完全手工
+> 兜底只在 CI 整体不可用时才需要。
 
 CI tag 流水失败、或需要完全手工发版时，按顺序兜底：
 

@@ -11,7 +11,7 @@
 - **多通道模型聚合接入**：
   - **WorkBuddy 国内版 (`workbuddy`)**：安装并登录 WorkBuddy 桌面 App 即可零配置使用。全面支持 WorkBuddy 5.6+ 的 `$wbEncrypted` 加密凭据（自动定位 macOS Bundle 或 Windows 注册表/安装目录的 Electron 二进制充当解密助手）。
   - **WorkBuddy AI 国际版 (`workbuddy-ai`)**：独立接入国际版桌面 App，独立提供「WorkBuddy AI」模型分组（GPT、Gemini 系列等）、独立凭据与账号积分卡片。
-  - **ZCode Coding Plan (`zcode`)**：接入智谱 ZCode 桌面端 Coding Plan 官方渠道；按桌面端 `setting.json` 当前激活计划精准取用 API Key；以客户端本地内置白名单（`zcode-builtin.json`）动态约束模型；支持 23:00–09:00 夜间免费时段自动识别与费率联动。
+  - **ZCode Coding Plan (`zcode`)**：接入智谱 ZCode 桌面端 Coding Plan 官方渠道；按桌面端 `setting.json` 当前激活计划精准取用 API Key；以客户端本地内置白名单（`zcode-builtin.json`）动态约束模型（智谱此前的 23:00–09:00 夜间免费限时活动已下线，现按 150% 额度与模型基准计费如实展示）。
   - **ZCode Start Plan (`zcode-start-plan`)**：独立专属通道（`zcode.z.ai/api/v1/zcode-plan/anthropic`）与独立一次性 Token 额度池；采用账号 JWT + 设备标识认证；每日领取活动自动探测并在设置卡片中醒目提醒（提供一键复制 Plan ID）；动态跟随用户今日实际权益展示模型，未领取或过期如实隐藏。
   - **OpenCode Free (`opencode-free`)**：官方免密免费模型通道（Muse Spark 1.2/1.3、Qwen3.6 Plus、MiniMax 系列、Nemotron 3.5 Super VL、DeepSeek V4.1 Flash、Big Pickle 等）；自动过闸标头与 `read` 只读工具守卫注入，解除 "free tier can only be used from within OpenCode" 网关限制；多协议实时流式转码（OpenAI Responses、Anthropic Messages、OpenAI-compatible Chat Completions 统一转为标准 OpenAI SSE 流，完整支持 `reasoning_content` 思考过程输出）；自动读取本地官方 specs 缓存（`~/.cache/opencode/models.json`）决议精确上下文与多模态能力。
 
@@ -34,7 +34,7 @@
   - 口径为**估算**：只有 DSH 运行且轮询到查询时才有样本，两次采样之间「发放+消耗」抵消的量会被低估；跨天首观测不计差分（无法归属到哪一天，宁少不虚记）。今日峰值即稳定的「今天的总额度基准」（今日已用 ≈ 峰值 − 当前剩余）。
 
 - **自定义模型管理**：
-  - 设置页模型列表中支持点击删除图标**自定义隐藏/排除不常用模型**；
+  - 设置页模型列表中支持点击「删除」按钮**自定义隐藏/排除不常用模型**；
   - 卡头清晰展示排除模型计数，并提供一键「恢复默认」入口；
   - 模型清单可随时折叠/展开，清晰列出倍率、最大/备选上下文窗口、思考档位与特性标签。
 
@@ -48,7 +48,7 @@
 
 ```bash
 # 推荐使用 DSH plugin 命令安装（唯一官方支持的界面为 Web）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v0.4.19/chaoset-dsh-any-connect-0.4.19.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v0.4.27/chaoset-dsh-any-connect-0.4.27.tgz
 dsh web
 
 # 从本地源码安装
@@ -93,6 +93,7 @@ dsh-any-connect status --provider opencode-free
 | `authFile` | 自动探测 | 显式指定 WorkBuddy 国内版桌面凭据文件路径（覆盖环境变量与平台默认探测） |
 | `authFileAI` | 自动探测 | 同上，作用于 WorkBuddy AI（国际版） |
 | `authFileZCode` | 自动探测 | 同上，作用于 ZCode 桌面端凭据文件（覆盖环境变量与平台默认探测） |
+| `authFileOpenCode` | 免密公开通道 | 同上，作用于 OpenCode Free 通道的凭据 / token 文件路径（默认免密公开通道，一般无需配置） |
 
 ### 凭据来源探测顺序与跨系统支持
 
@@ -103,7 +104,7 @@ dsh-any-connect status --provider opencode-free
   - **Coding Plan 与 Start Plan 是两个独立连接**：`zcode` 与 `zcode-start-plan` 各自拥有独立的模型分组、模型名单、额度池与请求通道；
   - **Coding Plan 白名单**：以本机 ZCode 客户端内置目录（`zcode-builtin.json` 的 `builtinModelIds`）为白名单，随客户端发版自动更新（当前为 GLM-5.3、GLM-5.3-Flash）；可用 `ZCODE_BUILTIN_CONFIG` 显式指定该文件路径；
   - **Start Plan 专属通道与每日领取**：走 `zcode.z.ai/api/v1/zcode-plan/anthropic`，扣减一次性 token 包；每日领取需通过客户端完成，插件每天自动探测可领活动并在卡片醒目提示；
-  - **夜间免费专属 Coding Plan**：23:00–09:00 免费窗仅属于 Coding Plan，Start Plan 不享受夜免。
+  - **夜间免费限时活动已下线**：智谱此前的 23:00–09:00 夜间免费窗（曾为 Coding Plan 专属权益，Start Plan 不享受）已下线，插件已移除夜免徽标与费率改写，模型按 150% 额度与基准计费如实展示。
 - **OpenCode Free**：免密直连。支持通过 `OPENCODE_MODELS_CACHE` 环境变量显式指定官方 models specs 缓存文件路径（默认为 `~/.cache/opencode/models.json`）。
 
 ---

@@ -13,7 +13,7 @@ export const NS = "settings.plugins.sandboxExtraRoots";
 export const zh = {
   title: "沙盒额外允许目录（sandbox-extra-roots）",
   summary: "为 workspace-write 沙箱追加可写目录（在官方白名单之外）",
-  hint: "workspace-write 模式下，除官方白名单（工作区根 + /tmp + 平台临时目录）外额外允许写入的目录。每行一个绝对路径，支持 ~ 表示用户主目录。",
+  hint: "workspace-write 模式下，除官方白名单（工作区根 + /tmp + 平台临时目录等）外额外允许写入的目录。每行一个绝对路径，支持 ~ 表示用户主目录。",
   unsaved: "有未保存的修改",
   discard: "放弃修改",
   saving: "保存中…",
@@ -35,7 +35,7 @@ export const zh = {
 export const en = {
   title: "Extra sandbox roots (sandbox-extra-roots)",
   summary: "Extra writable roots for the workspace-write sandbox, beyond the official allow-list",
-  hint: "Extra writable roots under workspace-write mode, on top of the official allow-list (workspace root + /tmp + platform temp dirs). One absolute path per line; ~ expands to your home directory.",
+  hint: "Extra writable roots under workspace-write mode, on top of the official allow-list (workspace root, /tmp, platform temp dirs, etc.). One absolute path per line; ~ expands to your home directory.",
   unsaved: "Unsaved changes",
   discard: "Discard",
   saving: "Saving…",

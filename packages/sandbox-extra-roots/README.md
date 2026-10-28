@@ -1,8 +1,8 @@
 # @chaoset/sandbox-extra-roots — DSH 沙盒额外允许目录插件
 
 给 dsh 沙盒的 `workspace-write` 模式增加「额外允许写入的目录」列表（工具缓存
-目录等），**官方白名单始终保留**（workspace 根 + /tmp + 平台临时目录），只追加
-不替换：
+目录等），**官方白名单始终保留**（workspace 根 + /tmp + 平台临时目录，以及
+DSH 0.2.2+ 的宿主策略级 `additionalWritableRoots`），只追加不替换：
 
 - **bash**：Seatbelt（macOS）重建 SBPL profile；bwrap / Landlock（Linux）在官方
   profile 基础上插入 `--bind` / `--rw`；Windows ACL runner 无法表达额外根（告警一次）
@@ -45,7 +45,7 @@ dsh plugin --profile web remove @chaoset/sandbox-extra-roots
 macOS 的 `/Users`）保存时直接拒绝，系统目录（`/etc` `/usr` `/bin` `/sbin` 及
 macOS 的 `/private`，仅 POSIX——Windows 暂无对应条目）被过滤，重复行自动去重。
 设置页卡片在保存前就地预览这些问题行（危险/无效行会禁用保存按钮；系统目录
-行保存成功但不生效）。常用工具缓存（npm/pip/cargo/go）可一键添加进列表，
+行保存成功但不生效）。常用工具缓存（npm/bun/pip/cargo/go）可一键添加进列表，
 点选即视为用户显式确认；含明文凭证的目录不在预设内。运行期每次
 沙盒判定都会对目录的最新真实指向（跟随符号链接后）重新做危险根复查——目录
 被替换成指向 `/` 等危险根的符号链接时立即剔除，不授予。

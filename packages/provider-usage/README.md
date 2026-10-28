@@ -10,16 +10,11 @@
 
 ## 效果
 
-在 composer 底部状态栏出现一个形如 `workbuddy · 23 credits left` 的 pill，
-点击展开每个计费包的进度条：
-
-```
-workbuddy
-  CodeBuddy个人版国内运营裂变包    23 credits
-  ▓▓▓▓▓░░░░░░░░░░░░░░░░░  23 / 100
-  CodeBuddy个人版国内运营裂变包   100 credits
-  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 100 / 100
-```
+在 composer 底部状态栏出现一个形如 `workbuddy 23 credits left` 的 pill
+（provider 键 + 剩余摘要），点击展开抽屉查看明细：每个计费包一行图形化
+进度条，标注套餐名、余量/总量（`23 / 100`）、重置时间，进度条颜色随
+余量分三档告警。WorkBuddy 的多个裂变包会汇总为一行「总计」，逐包明细
+在设置页的插件卡片查看。
 
 - **当前 provider 来源**：会话的模型目录（`ctx.modelDirectories`），与 composer
   的模型选择器同源——切换模型时 pill 跟随变化，无需额外协调。
@@ -122,7 +117,7 @@ interface UsageWindow {
 
 - 无 key 的 DeepSeek 路由（`deepseek` / `deepseek-account` / `deepseek-official`，
   三者归一化到同一 provider）读宿主 `deepseekAccount` 服务（`@deepseek-ai/dsh-deepseek-account`，
-  同本包 optionalDependencies 的版本基线）：`getBalance(AccountClientMetadata)` 返回
+  版本基线见本包 devDependencies）：`getBalance(AccountClientMetadata)` 返回
   `{status:'ready', value, bonusWallets} | {status:'failed'} | null`。该服务由宿主挂载，
   非本包提供；宿主改形状时 typecheck 直接红灯（不手写影子类型）。
 - 额度口径完全取决于 provider 是否提供只读余额接口。**没有该接口的 provider

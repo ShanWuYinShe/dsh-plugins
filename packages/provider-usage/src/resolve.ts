@@ -122,16 +122,11 @@ export function inferProviderFromBaseUrl(baseURL?: string): string | undefined {
  * API key but the harness holds a signed-in DeepSeek account, read its
  * recharge + bonus wallets so OAuth users still see a number.
  *
- * 契约（@deepseek-ai/dsh-deepseek-account@0.2.1-alpha.2，同 optionalDependencies）：
+ * 契约（@deepseek-ai/dsh-deepseek-account，版本基线见本包 devDependencies）：
  * 服务名 `deepseekAccount` 由宿主挂载（Context augmentation 声明，非本包提供——
  * owner 在宿主侧，故本包只做具名消费 + 版本声明，不自建影子服务）；`getBalance`
  * 必带 `AccountClientMetadata`，返回 `{status:'ready', value, bonusWallets} |
  * {status:'failed'} | null`（null = 未登录/授权变更中，按无钱包处理）。
- *
- * 注意 dsh-agent 也必须钉在 optionalDependencies（0.2.1-alpha.2 精确版）：
- * account 包的 d.ts 经 account-tasks 引用 dsh-agent 类型，其 SessionId branding
- * 必须与本仓其余宿主包（alpha.2）同源，否则 session-archive 出现双版本
- * SessionId 类型冲突。agent 仅参与编译期，运行时从不加载。
  *
  * Amounts arrive as decimal strings; parsed per currency, unparseable entries
  * skipped. Recharge and bonus stay separate here (no summation — the querier

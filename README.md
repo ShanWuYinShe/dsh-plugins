@@ -20,7 +20,7 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 - **多上游通道无缝接入**：
   - **WorkBuddy 国内版 (`workbuddy`)**：零配置自动读取本机桌面 App 登录态；深度支持 WorkBuddy 5.6+ 针对 `accessToken`/`refreshToken` 的 `$wbEncrypted` 加密信封（自动定位 macOS Bundle 或 Windows 注册表/安装目录的 Electron 二进制充当解密助手，亦支持 `WORKBUDDY_ELECTRON_BIN` 覆盖）；支持图片多模态输入；模型选择器以原生徽标标明积分倍率与限免标签（`/model` 弹窗在模型名后缀显示倍率，如 `· x0.79`）。
   - **WorkBuddy AI 国际版 (`workbuddy-ai`)**：独立接入国际版桌面 App，提供独立的「WorkBuddy AI」模型分组（GPT、Gemini 系列等）、独立凭据与账号积分卡片。
-  - **ZCode Coding Plan (`zcode`)**：接入智谱 ZCode 桌面端 Coding Plan 官方渠道；按桌面端 `setting.json` 当前激活计划精准取用 API Key；以客户端本地内置白名单（`zcode-builtin.json`）动态约束模型，随客户端升级自动更新；支持 23:00–09:00 夜间免费时段自动识别与费率联动。
+  - **ZCode Coding Plan (`zcode`)**：接入智谱 ZCode 桌面端 Coding Plan 官方渠道；按桌面端 `setting.json` 当前激活计划精准取用 API Key；以客户端本地内置白名单（`zcode-builtin.json`）动态约束模型，随客户端升级自动更新（智谱此前的 23:00–09:00 夜间免费限时活动已下线，现按 150% 额度与模型基准计费如实展示）。
   - **ZCode Start Plan (`zcode-start-plan`)**：独立专属通道（`zcode.z.ai/api/v1/zcode-plan/anthropic`）与独立额度池；采用账号 JWT + 设备标识认证，扣减当日一次性 Token 包（过期不结转）；每日领取活动自动探测并在设置卡片中醒目提醒（提供一键复制 Plan ID）；动态跟随用户今日实际权益展示模型，未领取或过期如实隐藏。
   - **OpenCode Free (`opencode-free`)**：官方免密免费模型通道（Muse Spark 1.2/1.3、Qwen3.6 Plus、MiniMax 系列、Nemotron 3.5 Super VL、DeepSeek V4.1 Flash、Big Pickle 等）；自动过闸标头与 `read` 只读工具守卫注入，解除 "free tier can only be used from within OpenCode" 网关限制；多协议实时流式转码（OpenAI Responses、Anthropic Messages、OpenAI-compatible Chat Completions 统一转为标准 OpenAI SSE 流，完整支持 `reasoning_content` 思考过程输出）；自动读取本地官方 specs 缓存（`~/.cache/opencode/models.json`）决议精确上下文与多模态能力。
 - **思考强度智能适配**：
@@ -42,14 +42,14 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 在对话区底部的状态栏（composer dock）直观显示当前会话 provider 的剩余额度、余额与重置周期。
 
 - **Composer Dock 状态栏原生呈现**：
-  - 紧随 DSH 自带的 Token 消耗、步数、轮数指标并列展示，形如 `workbuddy · 23 credits left`、`DeepSeek · ¥45.20`、`OpenRouter · $5.00 left`；
+  - 紧随 DSH 自带的 Token 消耗、步数、轮数指标并列展示，形如 `workbuddy 23 credits left`、`deepseek-official 45.2 cny 剩余`、`openrouter 5 credits left`；
   - 额度来源与对话框当前所选模型同源（`ctx.modelDirectories`），切换模型即刻自动联动切换额度 pill。
 - **交互式额度抽屉 (Popover)**：
   - 点击底栏 pill 展开详细计费抽屉；
-  - 每个计费包配有字符级与图形化进度条（`▓▓▓▓▓░░░░░ 23 / 100`）；
-  - 明确展示套餐名称、额度余量/总量、重置倒计时与阶梯限额。
+  - 每个计费包配有图形化进度条（`23 / 100`），颜色随余量分三档告警；
+  - 明确展示套餐名称、额度余量/总量与重置时间。
 - **全面的内置 Provider 查询器**：
-  - **DeepSeek**：全面支持 DSH 0.2.1+ 官方的两条路由——`deepseek-account`（OAuth 账户余额与赠送代金券钱包）和 `deepseek-official`（API Key `GET /user/balance` 现金与代金券），亦兼容自定义 `deepseek` 路由；
+  - **DeepSeek**：全面支持 DSH 0.2.1+ 官方的两条路由——`deepseek-account`（OAuth 账户余额与赠送代金券钱包）和 `deepseek-official`（API Key `GET /user/balance` 余额），亦兼容自定义 `deepseek` 路由；
   - **OpenRouter**：`/api/v1/key` + `/api/v1/credits`，API Key 自身限额优先，回落到账户额度；
   - **Moonshot (Kimi)**：`GET /v1/users/me/balance` 可用余额、现金、代金券分列；
   - **SiliconFlow (硅基流动)**：`GET /v1/user/info` 总额、可用、充值分列；
@@ -88,7 +88,7 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
   - **TOCTOU 符号链接防御**：运行时动态解析软链接真实目标，一旦被替换为危险根立即剔除权限。
 - **可视化配置与即时热生效**：
   - 设置页「插件配置」提供专属卡片，支持路径实时校验预览与错误提示；
-  - 预置常用工具缓存一键快速添加（npm / pip / cargo / go）；
+  - 预置常用工具缓存一键快速添加（npm / bun / pip / cargo / go）；
   - 经官方 config-editor 直接保存到 `cordis.patch.yml`，修改即时热生效，无需重启。
 
 ---
@@ -131,16 +131,16 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 # 查看 Releases 列表获取最新版本：https://github.com/ShanWuYinShe/dsh-plugins/releases
 
 # 1. 安装 @chaoset/dsh-any-connect（模型接入）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v0.4.19/chaoset-dsh-any-connect-0.4.19.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v0.4.27/chaoset-dsh-any-connect-0.4.27.tgz
 
 # 2. 安装 @chaoset/provider-usage（底栏额度显示）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v0.1.10/chaoset-provider-usage-0.1.10.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v0.2.0/chaoset-provider-usage-0.2.0.tgz
 
 # 3. 安装 @chaoset/sandbox-extra-roots（沙盒额外目录）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/sandbox-extra-roots-v0.4.24/chaoset-sandbox-extra-roots-0.4.24.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/sandbox-extra-roots-v0.4.27/chaoset-sandbox-extra-roots-0.4.27.tgz
 
 # 4. 安装 @chaoset/session-archive（归档会话管理）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v0.3.28/chaoset-session-archive-0.3.28.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v0.3.31/chaoset-session-archive-0.3.31.tgz
 
 # 从本地源码安装（开发调试时使用绝对路径）
 dsh plugin --profile web add /absolute/path/to/dsh-plugins/packages/dsh-any-connect
@@ -196,6 +196,7 @@ bun run typecheck       # 类型检查：host + client 两套 tsconfig --noEmit
 bun run test            # 运行 vitest 单元与集成测试
 bun run test:ci         # build + typecheck + test 门禁验证（提交/发版前必跑）
 bun run dsh-status      # 核对本地依赖基线 vs DSH 上游稳定/预发布线
+bun run adapt <版本>    # dsh 宿主升级适配（--dry-run 预览，详见 RELEASING.md）
 bun run gate            # 发布门禁干跑（检查 tag 与待发布包）
 bun run audit           # 依赖漏洞审计（基于 OSV.dev）
 ```

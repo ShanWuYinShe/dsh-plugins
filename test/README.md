@@ -45,6 +45,10 @@
 | `lock-index.test.ts` | 锁文件与索引表双向一致（单测在 UNIT_TESTS 登记，防索引腐烂） |
 | `no-focused-tests.test.ts` | 测试文件里没有 .only / 裸 .skip / .todo（条件跳过 skipIf 不在此限） |
 
+目录里另有 5 个**普通脚本测试**，不是守卫锁、不在此表：`dep-collect` /
+`dsh-deps` / `publish-gate` / `scripts-cli` / `version-checks`（测的是
+`scripts/` 的行为，不是架构不变式）。
+
 ## 写一把新锁时的约定
 
 1. **先有真实事故或明确风险**，再写锁。锁的成本是长期维护，别为「看起来更规范」而加。
