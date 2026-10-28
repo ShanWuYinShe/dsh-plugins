@@ -196,7 +196,7 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
    * **只读本地文件，绝不触网**（`current()` 不做 token 刷新，`fetchModels` 属于
    * 注册后的 refreshCatalog）。
    *
-   * 为什么必须在 registerAdapter 之前做（2026-10-27 取证，全过程记录在项目 skill dsh-any-connect-zcode 第 5.4 节）：插件
+   * 为什么必须在 registerAdapter 之前做（2026-10-27 取证，全过程记录在项目 skill dsh-any-connect-channels「5.3 重载窗口」）：插件
    * 重载/宿主重启会腰斩在途请求，宿主的自动重试（TRANSPORT 可重试，~500ms 后
    * 重发）若落在新实例「已注册但目录仍隐藏」的窗口里，pi-ai 的 modelOf 在空
    * 目录里找不到模型 → UNKNOWN_MODEL——它不在默认可重试集合里，重试管线立即

@@ -9,7 +9,7 @@ import { signedInDocument, catalogRow } from './catalog-harness.js'
 import type { WorkBuddyModelInfo } from '../src/index.js'
 
 /**
- * 「注册前预热目录」这条线的回归（2026-10-27 取证，全过程记录在项目 skill dsh-any-connect-zcode 第 5.4 节）：
+ * 「注册前预热目录」这条线的回归（2026-10-27 取证，全过程记录在项目 skill dsh-any-connect-channels「5.3 重载窗口」）：
  * 插件重载/宿主重启会腰斩在途请求，宿主的自动重试（TRANSPORT 可重试）若落在
  * 新实例「已注册但目录仍隐藏」的窗口里，pi-ai 的 modelOf 在空目录上抛
  * UNKNOWN_MODEL——不在默认可重试集合，整轮立即失败。修复是注册前本地采用

@@ -24,7 +24,8 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
   生命周期」）。
 - **main 搁置**：只要 dsh 有进行中的 alpha 线，**一切改动都落在 alpha**——源码、
   文档、`scripts/`、workflows、根配置一律不往 main 搬，main 停在原地不开发不
-  发布。唯一例外是稳定线紧急热修（需明确指示，且修完必须把改动带回 alpha）。
+  发布。唯一例外是稳定线紧急热修（需明确指示，且修完必须把改动带回 alpha）；main 的 `publish.yml` 已是迁移后的
+  GitHub Release 流水，热修推 main + 打 tag 即可走 CI 产出 Release（不再需要手工兜底）。
   收敛时随整条线一次搬过去，详见 RELEASING.md「跨分支同步」。
 - **待命期原则（无新 alpha 线时：开发在 main，不创建/维护 alpha）**：上一条线终结、DSH
   尚无更高基础号的新 alpha 线时（`bun run dsh-status` 报告「进行中预发布线: 无」），
@@ -53,9 +54,8 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    # 页面渲染、插件卡片/设置行、模型列表，控制台零报错
    ```
 
-   宿主版本必须与本次适配目标一致（全局 `dsh` 常落后于最新 rc，`dsh --version`
-   或 `grep '"version"' ~/.bun/install/global/node_modules/@deepseek-ai/dsh/package.json`
-   先核对）。不一致时在 `.workwork/dsh-host/` 临时装目标版本：
+   宿主版本必须与本次适配目标一致（先 `dsh --version` 核对——全局 `dsh` 常落后于最新 rc）。
+   不一致时在 `.workwork/dsh-host/` 临时装目标版本：
 
    ```bash
    cd .workwork/dsh-host   # 一次性 init：echo '{"name":"dsh-verify-host","private":true}' > package.json
@@ -79,11 +79,10 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
      后台起宿主用双重 fork（`( nohup … >log 2>&1 & )`）——普通 `… &` 会让
      bash 等待整棵进程树直到超时。
 
-   **沙盒下 bun 装包（2026-10-14 起可直接跑）**：`~/.bun/install/cache` 已由
-   sandbox-extra-roots 插件放行并实测，`bun install` 无需任何重定向。历史记录
-   （未配插件的机器，2026-09-30 实测）：`workspace-write` 下报 `error: bun is unable
-   to write files to tempdir: EPERM`——报错有误导，真因是默认缓存目录不可写
-   （重定向 `TMPDIR` 无效），解法是给它一个工作区内的缓存目录：
+   **沙盒下 bun 装包**：`~/.bun/install/cache` 已由 sandbox-extra-roots 插件放行并实测，
+   `bun install` 无需任何重定向。未配该插件的环境会报 `error: bun is unable to write
+   files to tempdir: EPERM`——报错有误导，真因是默认缓存目录不可写（重定向 `TMPDIR` 无效），
+   解法是给它一个工作区内的缓存目录：
 
    ```bash
    BUN_INSTALL_CACHE_DIR=<repo>/.workwork/bun-cache bun install
@@ -132,12 +131,11 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    创建 tag**。发版后核对 Release 资产 tarball 与 `dsh.host` 字段符合预期
    （解包 `tar -xOf <tgz> package/package.json`）。
 
-   必须逐个推、且推完确认再推下一个，原因两条（**都不报错，只会静默失败**，
-   通用机制见全局 `git-workflow`「打 tag 与推送纪律」）：**单次推超过 3 个 tag
-   时 GitHub 不产生任何 `push` 事件**（CI 完全不触发）；且本仓库 `publish.yml`
-   的仓库级并发组 `group: publish` 只允许「1 个 running + 1 个 pending」，
-   **新排队的 run 会取消前一个 pending 的 run**（中间的 tag 流水被顶成
-   cancelled，Release 永远不建）。
+   必须逐个推、且推完确认再推下一个，原因两条（**都不报错，只会静默失败**）：
+   **单次推超过 3 个 tag 时 GitHub 不产生任何 `push` 事件**（CI 完全不触发）；
+   本仓库 `publish.yml` 的仓库级并发组 `group: publish` 只允许「1 个 running + 1 个 pending」，
+   **新排队的 run 会取消前一个 pending 的 run**（中间流水被顶成 cancelled，Release 永远不建）。
+   机制权威见全局 `git-workflow`「打 tag 与推送纪律」，本仓库操作见 skill dsh-plugin-tag。
 
    多包同发时顺序固定为：**先推分支**（`git push`，只跑测试）→ **再逐个 tag
    推送并逐条确认**（完整循环脚本见 skill dsh-plugin-tag「标准流程」）。
@@ -155,7 +153,7 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
      tag）；跨线收敛合 `main`、以及积压多包的批量清账式发版，仍按当次用户
      指示定范围。
 
-历史反例（先发布再验证连发 6+ 版本、发布产物缺字段多发一版）见
+反例（先发布再验证连发 6+ 版本、发布产物缺字段多发一版）见
 RELEASING.md「日常发布流程」——工作未完成期间代码可以本地 commit（worktree
 隔离），分支推送只跑测试；**不要打 tag**——推 tag 即发版。
 
@@ -163,16 +161,13 @@ RELEASING.md「日常发布流程」——工作未完成期间代码可以本�
 
 - 版本号只在本地手工改（各包 `package.json` 的 `version`），CI 绝不改写。
   升版本必须同时补该包 `CHANGELOG.md` 的 `## <版本> (YYYY-MM-DD)` 小节
-  （GitHub Release 说明自动取自这里）。
-- 推送 `main` / `alpha` 只跑测试（test.yml），永远不发布；发版只由 tag 推送
-  触发（`git tag -a <目录>-v<版本> -m "<包名> v<版本>"` 后逐个
-  `git push origin <目录>-v<版本>`，GitHub Release tarball 分发，不经过 npm）。
-  **tag 由你明确打出，CI 绝不创建 tag**——没推 tag 就没有任何 Release。
-  **tag 必须逐个推送、推完确认再推下一个**：单次推送超过 3 个 tag 时 GitHub 不
-  产生任何 `push` 事件（全部静默漏发），且并发组会取消排队中的 run
-  （通用纪律见全局 `git-workflow`「打 tag 与推送纪律」，本仓库流程见 skill
-  dsh-plugin-tag「标准流程」）。门禁规则（打 tag 发版时强制
-  执行）：版本号**严格低于**已归档版本会直接红；「改了代码没升版本号」
-  不再是 CI 红灯——那种推送只跑测试，想发版就升版本打新 tag。版本与已归档
-  tag 相同则幂等跳过。任何情况下不满足发布条件的包不会出现在 Release 资产里。
+  （GitHub Release 说明自动取自这里）：**CHANGELOG 只保留当前适配线的条目**（更早历史以 GitHub Releases 为准），
+  适配小节把 `dsh.host`（精确版本）与依赖 range（`^版本`）分开表述。
+- 推送 `main` / `alpha` 只跑测试（test.yml），永远不发布；发版只由 tag 推送触发
+  （GitHub Release tarball 分发，不经过 npm）。**tag 由你明确打出，CI 绝不创建 tag**——没推 tag 就没有任何 Release。
+  tag 命名、annotated、逐个推送与逐条确认的完整流程见 skill dsh-plugin-tag「标准流程」
+  （含两条静默失败机制：单次推超 3 个 tag 不产生任何 `push` 事件；本仓库并发组会顶掉排队 run）。
+  门禁规则（打 tag 发版时强制执行）：版本号**严格低于**已归档版本会直接红；「改了代码没升版本号」
+  不再是 CI 红灯——那种推送只跑测试，想发版就升版本打新 tag。版本与已归档 tag 相同则幂等跳过。
+  任何情况下不满足发布条件的包不会出现在 Release 资产里。
 - **待命期版本形态约束**：待命期发版必须为纯 semver 正式版，严禁发布 `-alpha.N` 预发布版本。发布门禁会校验 `dsh.host` 与版本形态的一致性：若宿主声明未适配到新 alpha 预发布线（仍为稳定线 rc），带 `-alpha` 后缀的包会被门禁直接拒绝。
