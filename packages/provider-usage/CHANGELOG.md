@@ -1,3 +1,9 @@
+## 0.2.1-alpha.1 (2026-10-29)
+
+### 文档
+
+* README 对齐真实渲染：pill 示例改为 provider 键 + 余额摘要（无货币符号与 `·` 分隔）、删去不存在的「字符级进度条」、「重置倒计时/阶梯限额」改为重置时间与三色阶告警；`deepseek-official` 只读 `total_balance` 单列；`deepseekAccount` 契约注释的 optionalDependencies / dsh-agent 钉版表述随 0.1.12 依赖分层更新（resolve.ts 注释）。
+
 ## 0.2.1-alpha.0 (2026-10-28)
 
 ### 优化

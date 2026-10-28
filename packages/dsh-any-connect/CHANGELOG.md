@@ -1,3 +1,14 @@
+## 0.4.28-alpha.1 (2026-10-29)
+
+### 修复
+
+* **CLI 诊断面**：help 文本 `--provider` 列表补 `opencode-free` 并删去重复的 `(defaults to workbuddy)` 行；`doctor --provider opencode-free` 的 `fallbackModels` 补上兜底名单计数（此前恒报 0）。
+* **探测状态 reason 带变体来源**：`WorkBuddyProbeService` 装配 `variantId` 后，所有 `unavailable` 状态的 reason 带 `<变体>: ` 前缀（如 `zcode: model does not need detection`），多变体共用宿主日志/状态路由时可区分来源；探针清扫失败日志前缀统一为 `dsh-any-connect:`。
+
+### 文档
+
+* README 移除已下线的 ZCode 夜免声明（实现已按 150% 额度与基准计费如实展示）；「删除图标」改「删除按钮」；配置表补 `authFileOpenCode`；安装示例更新到 0.4.27。
+
 ## 0.4.28-alpha.0 (2026-10-28)
 
 > 基础号让位：稳定线已归档 0.4.27，本预发布线按版本号规则跳到下一个基础号。

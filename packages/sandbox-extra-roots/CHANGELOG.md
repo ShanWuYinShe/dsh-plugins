@@ -1,3 +1,13 @@
+## 0.4.28-alpha.1 (2026-10-29)
+
+### 修复
+
+* **宿主日志告警带插件来源**：`warnOnce` 五条告警（windows-acl / unknown-runner / seatbelt 分隔符×2 / bwrap-Landlock 分隔符）统一加 `[sandbox-extra-roots]` 前缀，宿主日志中可区分错误源。
+
+### 文档
+
+* README 与设置卡片 hint 对齐宿主 0.2.2：官方白名单枚举补策略级 `additionalWritableRoots`；一键添加预设补 Bun（实际 6 条，含 `~/.bun/install/cache`）。
+
 ## 0.4.28-alpha.0 (2026-10-28)
 
 ### 优化
