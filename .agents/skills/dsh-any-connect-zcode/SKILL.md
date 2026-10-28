@@ -451,7 +451,9 @@ UNKNOWN_MODEL）。未登录/区域错配保持隐藏（判定与 refreshCatalog
    处理：若本仓从未 import（`grep -rn <pkg> src/ client/ test/` 为空）就直接删该依赖，
    不要 pin 一个不存在的版本。
 2. **基础包 cordis / schemastery 要跟着一起前移**。`adapt` 不碰它们，但新宿主线常同时前移：
-   0.2.1-alpha.1 要求 `cordis ~4.0.5-alpha.1`、`schemastery ~3.18.5-alpha.1`。
+   0.2.1-alpha.1 要求 `cordis ~4.0.5-alpha.1`、`schemastery ~3.18.5-alpha.1`（历史实测）；
+   0.2.2-alpha.2 要求 `cordis ~4.0.6-alpha.1`、`schemastery ~3.18.6-alpha.1`、
+   `cordis-plugin-loader ~1.0.7-alpha.1`（2026-10-28 实测，本仓四包已同步）。
    继续 pin `^4.0.4` 会解析出**另一份 cordis 实例**，而 `dsh-settings` 的 `Context.settings`
    声明 augment 的是宿主选中的那份 → `typecheck` 报
    `Property 'settings' does not exist on type 'Context'`（运行时同样是两个容器）。

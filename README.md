@@ -172,7 +172,7 @@ dsh plugin --profile web remove @chaoset/session-archive
   dsh plugin --profile <name> add <同一个 tarball URL>
   ```
 
-  一次 `plugin add` 会按 package.json 把该 profile 已装的全部插件一并装回，store 位置直接写对。（2026-10-24 实测：宿主 0.2.1-rc.3 内置 pnpm v11.28.5，web 与 desktop 两个 profile 各用一条命令重装四包；修复后核对 `node_modules/.modules.yaml` 的 `storeDir` 应指向 `$DSH_HOME` 内。）
+  一次 `plugin add` 会按 package.json 把该 profile 已装的全部插件一并装回，store 位置直接写对。（2026-10-24 于宿主 0.2.1-rc.3 时代实测，当时内置 pnpm v11.28.5：web 与 desktop 两个 profile 各用一条命令重装四包；修复后核对 `node_modules/.modules.yaml` 的 `storeDir` 应指向 `$DSH_HOME` 内。）
 
 ### 给 AI Agent
 
