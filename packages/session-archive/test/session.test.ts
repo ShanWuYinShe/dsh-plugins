@@ -56,13 +56,12 @@ function assistantEvent(seq: number, time: number, text: string) {
  * 官方契约夹具：list() 返回
  * SessionPersistenceSnapshot 数组、open() read 句柄读事件流、事件 data
  * 为官方 SessionEventMap 形状（user/message 本体、assistant/message 包装）。
- * 默认带 locate——jsonl 后端的诊断钩子（不在抽象契约上），
- * withLocate=false 覆盖无 locate 后端的降级路径。
+ * stat(id) 快照带 0.2.2 的标准 location（当前代际工件路径），与宿主
+ * jsonl 后端的行为一致。
  */
 function makeFixture(options: {
   archived?: string[];
   headers?: Array<Record<string, any>>;
-  withLocate?: boolean;
   /** sessionQuery 标题索引桩：map 给 fulfilled 标题（缺席=无标题）、
    * reject 列单行 rejected、throwAll 整单抛错。不传=无该服务（回退直读）。 */
   titles?: { map?: Record<string, string>; reject?: string[]; throwAll?: boolean };
@@ -84,7 +83,6 @@ function makeFixture(options: {
       registryState.archivedSessionIds = registryState.archivedSessionIds.filter((id) => id !== sessionId);
     },
   };
-  const withLocate = options.withLocate ?? true;
   const headers = options.headers ?? [];
   const sessions = new Map<string, unknown>();
   let eventReads = 0;
@@ -96,20 +94,24 @@ function makeFixture(options: {
   };
   const eventsOf = (id: string) => JSON.parse(fs.readFileSync(sessionPath(id), "utf8"));
 
-  const persistenceMock: Record<string, any> = withLocate
-    ? { locate: (meta: { id: string }) => ({ kind: "jsonl", path: sessionPath(meta.id) }) }
-    : {};
+  const persistenceMock: Record<string, any> = {};
   let statCalls = 0;
   let listCalls = 0;
   let openCalls = 0;
   let titleCalls = 0;
   // 官方契约 stat(id):只读该会话元数据;枚举不到(无 header 或文件已删)
-  // 返回 undefined。四端点都走 stat 逐 id 定位，不做全量 list()。
+  // 返回 undefined。快照携带 0.2.2 的标准 location(当前代际工件路径)。
+  // 四端点都走 stat 逐 id 定位，不做全量 list()。
   persistenceMock.stat = async (id: string) => {
     statCalls++;
     if (!headers.some((h) => h.id === id) || !fs.existsSync(sessionPath(id))) return void 0;
     const header = headerOf(id);
-    return { header, revision: id + ":rev", sizeBytes: fs.statSync(sessionPath(id)).size };
+    return {
+      header,
+      revision: id + ":rev",
+      sizeBytes: fs.statSync(sessionPath(id)).size,
+      location: { kind: "jsonl", path: sessionPath(id) },
+    };
   };
   persistenceMock.list = async () => {
     listCalls++;
@@ -367,13 +369,19 @@ describe("session-archive host", () => {
     });
     const archiveHost1 = createArchiveHost(f1.ctx, baseCfg);
     writeSession("s-x", []);
-    // locate 覆盖为哈希式目录,同时让 list 的存在性过滤仍能看到该会话
+    // stat 快照的 location 覆盖为哈希式目录(模拟宿主布局契约改为哈希目录名),
+    // 同时让 list 的存在性过滤仍能看到该会话。
     const hashDir = path.join(saRoot, "--proj--", "deadbeef");
     fs.mkdirSync(hashDir, { recursive: true });
     fs.writeFileSync(path.join(hashDir, "session.jsonl"), "[]");
-    const realLocate = f1.persistenceMock.locate;
-    f1.persistenceMock.locate = (meta: { id: string }) =>
-      meta.id === "s-x" ? { kind: "jsonl", path: path.join(hashDir, "session.jsonl") } : realLocate(meta);
+    const realStat = f1.persistenceMock.stat.bind(f1.persistenceMock);
+    f1.persistenceMock.stat = async (id: string) => {
+      const snapshot = await realStat(id);
+      if (id === "s-x" && snapshot !== undefined) {
+        return { ...snapshot, location: { kind: "jsonl", path: path.join(hashDir, "session.jsonl") } };
+      }
+      return snapshot;
+    };
     const out1 = await archiveHost1.deleteArchived(["s-x"]);
     expect(out1.deleted.includes("s-x")).toBe(true);
     expect(fs.existsSync(path.join(hashDir, "session.jsonl"))).toBe(false); // 文件已删
@@ -509,16 +517,23 @@ describe("session-archive host", () => {
       && detail.messages[1]!.role === "assistant" && detail.messages[1]!.text === "回复").toBe(true);
   });
 
-  it("无 locate 的宿主后端:列表/详情可用(文件信息降级),删除按不可定位处理", async () => {
+  it("stat 快照无 location(pending 会话):列表/详情可用(文件信息降级),删除按不可定位处理", async () => {
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-noloc-"));
     const f = makeFixture({
-      withLocate: false,
       archived: ["n1"],
       headers: [{ id: "n1", cwd: "/proj/a", createdAt: 1000 }],
     });
     writeSession("n1", [
       { type: "session/title", seq: 1, time: 1, data: { title: "无定位", messageSeqs: [], source: { kind: "fallback" } } },
     ]);
+    // pending 会话的快照没有 location(宿主对未落盘会话省略该字段)。
+    const realStatN = f.persistenceMock.stat.bind(f.persistenceMock);
+    f.persistenceMock.stat = async (id: string) => {
+      const snapshot = await realStatN(id);
+      if (snapshot === undefined) return void 0;
+      const { location: _location, ...rest } = snapshot;
+      return rest;
+    };
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const listResult = await archiveHost.list();
     expect(listResult.items.length === 1 && listResult.items[0].sessionId === "n1"
@@ -532,11 +547,11 @@ describe("session-archive host", () => {
       && del.failed.length === 1
       && fs.existsSync(sessionPath("n1"))).toBe(true);
   });
-  it("旧代际文件名(locate 指向当前代际落空):恢复/删除按目录扫描落到实际文件", async () => {
+  it("旧代际文件名(stat location 指向当前代际落空):恢复/删除按目录扫描落到实际文件", async () => {
     // 线上故障第二形状:历史会话落盘为旧代际名 session.jsonl(.zstd),而
-    // locate() 只按当前格式版本拼文件名 → stat 落空 → 恢复被判"文件不存在"
-    // 全部拒绝("已恢复 0 个")、删除谎报成功但文件还在。目录路径不随代际
-    // 变化,修复后按目录扫描落到实际文件。
+    // stat location 只指向当前格式版本拼出的文件名 → 落空 → 恢复被判
+    // "文件不存在"全部拒绝("已恢复 0 个")、删除谎报成功但文件还在。目录路径
+    // 不随代际变化,修复后按目录扫描落到实际文件。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-gen-"));
     const f = makeFixture({
       archived: ["g1"],
@@ -575,17 +590,18 @@ describe("session-archive host", () => {
     expect(fs.existsSync(legacyPath)).toBe(false);
   });
 
-  it("locate 抛错:删除按 unlocatable 拒绝,不得谎报成功(0.3.9 同源回归)", async () => {
-    // fileInfo 的外层兜底若把 locate 抛错误判为 absent,删除路径会记成
-    // "幂等删除成功"——文件还在却进了 deleted。按语义表必须归 unknown,
-    // 对应删除路径的 unlocatable 拒绝。
+  it("stat 抛错:删除按 unenumerable 拒绝,不得谎报成功(0.3.9 同源回归)", async () => {
+    // stat 抛错时 snapshotsByIds 枚举不到该 id → 删除按 unenumerable 拒绝;
+    // 若任何一层把它误判为 absent,删除路径会记成"幂等删除成功"——文件还在
+    // 却进了 deleted。fileInfo 里 stat 抛错也归 unknown(unlocatable),是
+    // 「快照拿到之后、fileInfo 再抛」竞态窗口的防御分支。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-loc-"));
     const f = makeFixture({
       archived: ["e1"],
       headers: [{ id: "e1", cwd: "/proj/a", createdAt: 1000 }],
     });
     writeSession("e1", []);
-    f.persistenceMock.locate = () => {
+    f.persistenceMock.stat = async () => {
       throw new Error("backend contract drift");
     };
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
@@ -593,7 +609,7 @@ describe("session-archive host", () => {
     expect(del.deleted.length === 0
       && del.failed.length === 1
       && del.failed[0]!.sessionId === "e1"
-      && del.failed[0]!.reason === "unlocatable"
+      && del.failed[0]!.reason === "unenumerable"
       && fs.existsSync(sessionPath("e1"))).toBe(true);
     // 恢复同样谨慎拒绝(unknown ≠ located)。
     const un = await archiveHost.unarchive(["e1"]);

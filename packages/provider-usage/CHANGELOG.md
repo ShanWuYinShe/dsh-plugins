@@ -1,3 +1,9 @@
+## 0.2.1-alpha.0 (2026-10-28)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.2` 预发布线**：`dsh.host` 与全部 `@deepseek-ai/dsh-*` 依赖对齐 `^0.2.2-alpha.2`，vendor 依赖同步前移；`dsh-client-resources` 的 resource 订阅契约在 0.2.2 未变，pill 的取数与流式刷新逻辑无改动。
+
 ## 0.2.0 (2026-10-24)
 
 - 新增: `/usage` 斜杠命令——在会话里直接返回各 provider 额度文本报告（`/usage <provider>` 点名单个，`/usage refresh` 绕过缓存）；查询顺序执行走既有缓存与在途合并，不把多币种额度相加。

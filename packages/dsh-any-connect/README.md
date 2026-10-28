@@ -24,7 +24,8 @@
   - 选择器的「默认」档对**只能在思考态工作**的模型（上游 `onlyReasoning`）智能补具体档位（优先 `high`，无则取最高档）；OpenAI 通道补顶层 `reasoning_effort`，Anthropic 通道补 `thinking` 预算对象（`enabled` + `budget_tokens` 并相应抬高 `max_tokens`）。
 
 - **费率比例与限免标注**：
-  - 模型选择列表（`/model` 弹窗与 composer 下拉）中每个模型名后直接显示积分倍率（如 `GLM-5.2 · x0.79`、`Hy3 · x0.00`）；
+  - composer 模型选择器以 DSH 0.2.2 原生徽标（`LlmModelInfo.badge`）标注每个模型：免费模型绿色 `Free` 徽标、上游促销活动蓝色 info 徽标、积分倍率灰色中性徽标（如 `GLM-5.2 ·x0.79`）；
+  - `/model` 弹窗由模型名后缀显示倍率（如 `GLM-5.2 · x0.79`）；
   - 状态卡片实时跟随上游标记当前免费 / 限时免费 / 夜间折扣模型。
 
 - **今日积分消耗统计（WorkBuddy）**：

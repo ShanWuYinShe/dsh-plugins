@@ -82,14 +82,10 @@ export function apply(ctx: ClientContext): void {
       inject: (): WorkBuddyConfigPageInjected => ({ t }),
     }, WorkBuddyConfigPage))
 
-    // DSH 0.2.1-alpha.5+: conversation.input.model.label slot for custom inline model labels.
-    try {
-      ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({
-        name: 'conversation.input.model.label',
-      }, ModelLabel))
-    } catch {
-      // Degrade silently if host does not have this slot.
-    }
+    // Inline model labels: the slot is part of the matched host contract (0.2.2).
+    ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({
+      name: 'conversation.input.model.label',
+    }, ModelLabel))
   } catch (error: unknown) {
     // Degrade silently on the page: the host provider still serves models.
     // Developers see the full cause in the browser console; users see no banner.

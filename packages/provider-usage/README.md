@@ -42,7 +42,7 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 
 | provider | 接口 | 说明 |
 |---|---|---|
-| `deepseek` / `deepseek-account` / `deepseek-official` | `GET {base}/user/balance`（无 API key 时退到 OAuth 账户充值+赠送钱包） | 按币种各一行；有 key 永远走接口，不重复计数。DSH 0.2.1-rc.2 官方的两条路由是 `deepseek-account`（OAuth 登录）与 `deepseek-official`（API key），`deepseek` 供自定义 profile 沿用 |
+| `deepseek` / `deepseek-account` / `deepseek-official` | `GET {base}/user/balance`（无 API key 时退到 OAuth 账户充值+赠送钱包） | 按币种各一行；有 key 永远走接口，不重复计数。官方的两条路由是 `deepseek-account`（OAuth 登录）与 `deepseek-official`（API key），`deepseek` 供自定义 profile 沿用 |
 | `openrouter` | `/api/v1/key` + `/api/v1/credits` | 优先 key 自身限额，回落到账户额度 |
 | `moonshot` | `GET {base}/v1/users/me/balance` | 可用/现金/代金券 |
 | `siliconflow` | `GET {base}/v1/user/info` | 总额/可用/充值分列 |

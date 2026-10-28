@@ -10,7 +10,7 @@
 import '@deepseek-ai/dsh-session-persistence';
 import '@deepseek-ai/dsh-workspace';
 import '@deepseek-ai/dsh-session';
-import type { SessionPersistenceSnapshot, SessionHandle, SessionLocation } from '@deepseek-ai/dsh-session-persistence';
+import type { SessionPersistenceSnapshot, SessionHandle } from '@deepseek-ai/dsh-session-persistence';
 import type { Workspace, WorkspaceRegistry } from '@deepseek-ai/dsh-workspace';
 import type { Session, SessionEvent, SessionHeader, SessionId, SessionStore } from '@deepseek-ai/dsh-session';
 import type { SessionTitleEventData } from '@deepseek-ai/dsh-session-title';
@@ -18,7 +18,6 @@ import type { SessionTitleEventData } from '@deepseek-ai/dsh-session-title';
 export type {
   SessionPersistenceSnapshot,
   SessionHandle,
-  SessionLocation,
   Workspace,
   WorkspaceRegistry,
   Session,
@@ -28,12 +27,3 @@ export type {
   SessionStore,
   SessionTitleEventData,
 };
-
-/**
- * jsonl 后端的 `locate` 诊断钩子：按会话头返回当前代际工件路径。它不在
- * `SessionPersistence` 抽象契约上，删除/恢复的物理
- * 定位运行时探测它，缺失时降级为「不可定位」而非失败。
- */
-export interface LocatableSessionPersistence {
-  locate?(meta: SessionHeader): SessionLocation | undefined;
-}

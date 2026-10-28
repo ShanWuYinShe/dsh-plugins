@@ -1,7 +1,7 @@
 /**
  * resource-provider.ts — usage 的 resource 订阅面(protocol 'provider-usage')。
  *
- * 宿主 0.2.1-rc.3 的 dsh-client-resources 把「URL 地址 → live 值」统一成
+ * 宿主的 dsh-client-resources（0.2.1-rc.3 起引入，0.2.2 契约未变）把「URL 地址 → live 值」统一成
  * client 侧订阅:provider.open 首帧给当前值、之后每帧一个变更,最后一个
  * 订阅者释放时 signal abort、流必须结束。把 hook 里手写的 60s 轮询搬进
  * 这里,组件只剩 useResource(address) 消费;同地址多订阅者由 registry

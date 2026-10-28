@@ -172,28 +172,23 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
   /**
    * 通知宿主「该 provider 的目录内容变了」，正在打开的客户端随之重拉模型列表。
    *
-   * 为什么走 `handle.replace()`：客户端（dsh-client-ui-model-selection 的
-   * `ModelCatalogDirectory`）只在四个远程事件上重拉目录，其中
-   * `llm/adapters-updated` 是我们能触发的那个；而它**缓存命中即直接返回**，
-   * 收不到事件就一直展示打开页面那一刻的旧名单，直到用户刷新页面。
-   * 该事件由 `dsh-llm` 私有的 `emitAdaptersUpdated` 发布，插件不能直接调——但
-   * `AdapterRegistrationHandle.replace` 的 JSDoc 明说路由集唯一的变更点正是
-   * 发布该事件的地方，所以"用同样的路由替换自己"就是公开的正式通知手段
-   * （空数组也是合法替换，而初始注册不接受空列表）。**不要另造事件**。
+   * 走宿主公开事件 `llm/models-updated(provider)`（DSH 0.2.2 新增，声明在
+   * `dsh-llm` 的 `Events` 上，语义正是「该路由的模型或展示元数据变了，消费者重拉
+   * `listModels()`」）。客户端 `ModelCatalogDirectory` 订阅了它并直接 `refresh()`
+   * （见宿主 `dsh-client-ui-model-selection` 的 `modelDirectories` 构造器），
+   * 且该事件在 `dsh-api-remotes` 的转发白名单里，Host 一发浏览器就收到。
    *
-   * 容错：插件卸载、或注册与通知之间的竞态，都会让 `replace` 抛
-   * `LlmError REGISTRATION_DISPOSED`（注册已释放，路由没了）。这是正常路径，
-   * 吞掉即可——为一次目录通知打断 refreshCatalog 才是错的。
+   * 0.2.2 之前没有这个事件，只能用 `handle.replace([provider])` 借
+   * `llm/adapters-updated` 通知——那是拓扑事件，语义是「适配器增删了路由」，
+   * 每次都真的重注册一遍路由，比直发目录事件重得多。
+   *
+   * 容错：emit 只是本地派发，没有可抛点；客户端没订阅也只是不刷新，
+   * 下一次轮询自然收敛。
    */
   function notifyCatalogChanged(provider: string): void {
-    // shim 还没监听、或注册已释放：这条目录等注册那次通知自己可见，不额外补一发。
-    const handle = adapterHandles.get(provider)
-    if (handle === undefined) return
-    try {
-      handle.replace([provider])
-    } catch (error: unknown) {
-      ctx.logger?.debug?.(`dsh-any-connect: ${provider} adapter registration is gone; catalog update not announced: ${error instanceof Error ? error.message : String(error)}`)
-    }
+    // shim 还没监听：这条目录等注册那次通知自己可见，不额外补一发。
+    if (!adapterHandles.has(provider)) return
+    ctx.emit('llm/models-updated', provider)
   }
 
   /**

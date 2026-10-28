@@ -1,9 +1,9 @@
 /**
  * Browser half: the provider-usage pill in the composer dock.
  *
- * The body is wrapped so a DSH slot-API break degrades to a console error
- * rather than throwing into the loader and raising the red "Failed to load
- * plugins" banner — the same defense the sibling packages use, because a
+ * The body is wrapped so an unexpected slot-API drift degrades to a console
+ * error rather than throwing into the loader and raising the red "Failed to
+ * load plugins" banner — the same defense the sibling packages use, because a
  * purely cosmetic pill must never be able to break the chat page.
  *
  * The guarded boundary itself is covered by the real-entry regression in
@@ -96,16 +96,15 @@ export function apply(ctx: ClientContext): void {
       }
     }, 'provider-usage: pill copy')
     const t = ctx.locale.bind(namespace) as ProviderUsagePillInjected['t']
-    // usage 订阅面：resources 是可选服务（GUI 装配；独立 dsh-web 部署可能
-    // 没有），registerProviderUsageResources 内部探测，缺席即 no-op，pill
-    // 回退 useProviderUsage 的内置轮询。
+    // usage 订阅面：resources 随宿主 web 客户端装配（匹配线 0.2.2 恒在），
+    // 注册其 protocol provider 供 useProviderUsage 订阅 live 流。
     registerProviderUsageResources(ctx)
     // 等目录服务就绪再注册 dock entry（照抄宿主 ui-model-selection 的既有写法）。
     // 子 fiber 只负责这一件事：服务未就绪时不产出任何 props，服务重启时被销毁
     // 重跑 → entry 重新注册，从而绕开渲染器对 inject 结果的永久缓存。
     ctx.inject(['slots', 'modelDirectories'], (scope) => {
-      // 兜底边界因此分两层：外层 catch 管 `ctx.inject` 自身的同步抛错（含宿主
-      // 没有 inject 的旧版本）；内层 catch 管子 fiber body 的抛错——body 跑在
+      // 兜底边界因此分两层：外层 catch 管 `ctx.inject` 自身的同步抛错（契约
+      // 漂移的快速反馈）；内层 catch 管子 fiber body 的抛错——body 跑在
       // cordis 的微任务边界里，调用栈已经不在 apply 的 try 内，不在这里兜住就
       // 只会落进 cordis logger，本包那句 "client pill failed to load" 就再也
       // 不会出现（兜底文案与实际行为漂移）。两层用同一句文案。

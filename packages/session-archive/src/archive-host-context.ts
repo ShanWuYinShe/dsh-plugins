@@ -18,7 +18,6 @@ import type { SessionPersistence, SessionPersistenceSnapshot } from '@deepseek-a
 import { resolveSessionQueryTitles } from './session-query-bridge.js'
 import type { SessionQueryTitles } from './session-query-bridge.js'
 import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
-import type { LocatableSessionPersistence } from './dsh.js'
 import { name } from './plugin-config.js'
 import { REAPPEAR_SETTLE_MS, readTitle, delay, limitedConcurrency } from './session-scan.js'
 import type { Context } from '@deepseek-ai/cordis'
@@ -36,7 +35,7 @@ export function createHostContext(ctx: Context, cfg: Record<string, any>) {
   const sessionQueryTitles: SessionQueryTitles | undefined =
     typeof ctxGet === 'function' ? resolveSessionQueryTitles(ctxGet.bind(ctx)) : undefined;
   const registry: WorkspaceRegistry = ctx.workspaceRegistry;
-  const persistence: SessionPersistence & LocatableSessionPersistence = ctx.sessionPersistence;
+  const persistence: SessionPersistence = ctx.sessionPersistence;
 
   /** 当前归档集合快照（官方契约：getter 返回只读 SessionId 数组）。 */
   const archivedSet = (): Set<string> => new Set<string>(registry.archivedSessionIds);
@@ -140,8 +139,8 @@ export function createHostContext(ctx: Context, cfg: Record<string, any>) {
 
   /** 归档会话的文件定位结果。
    * located：拿到物理路径（path + stat）；absent：定位成功且文件确认不存在
-   * （ghost，幂等删除）；unknown：后端没有定位钩子（locate 是 jsonl 后端的
-   * 诊断钩子，不在抽象契约上），既不能确认存在也不能确认缺失。
+   * （ghost，幂等删除）；unknown：宿主没给出该会话的 location（stat 返回
+   * undefined/无 location），既不能确认存在也不能确认缺失。
    * unknown 与 absent 必须区分：删除语义里 absent 是幂等成功、unknown 是
    * "不能谎报成功也不能删错东西"的失败兜底。 */
   type FileStatus =
@@ -150,10 +149,10 @@ export function createHostContext(ctx: Context, cfg: Record<string, any>) {
     | { state: 'unknown' };
 
   /**
-   * 解析会话目录里的实际日志文件。locate() 只按当前格式版本拼文件名
-   * （如 session.v2.jsonl.zstd），而历史上落盘的可能是旧代际名
+   * 解析会话目录里的实际日志文件。stat 快照的 location 只指向当前格式版本
+   * 的文件名（如 session.v2.jsonl.zstd），而历史上落盘的可能是旧代际名
    * （session.jsonl / session.v1.jsonl…等旧代际名）——stat 落空不等于会话不存在。官方布局是"一会话一
-   * 目录"，目录路径不随代际变化，因此在 locate 给出的目录里扫描
+   * 目录"，目录路径不随代际变化，因此在快照给出的目录里扫描
    * session*.jsonl(.zstd) 取实际文件（多个代际并存时取最新 mtime）。
    * 扫描结果为空才认定文件不存在。
    */
@@ -177,30 +176,37 @@ export function createHostContext(ctx: Context, cfg: Record<string, any>) {
   }
 
   async function fileInfo(header: SessionHeader): Promise<FileStatus> {
+    // 宿主公开契约：stat(id) 返回的快照携带标准 `location`（0.2.2 起），
+    // 这就是该会话当前代际落盘文件的权威路径；stat 返回 undefined 即会话不存在。
+    let locationPath: string | undefined;
     try {
-      if (typeof persistence.locate !== 'function') return { state: 'unknown' };
-      const location = persistence.locate(header);
-      if (location === undefined || typeof location.path !== 'string' || location.path.length === 0) {
-        return { state: 'unknown' };
-      }
-      // 先试 locate 的当前代际路径，落空再扫会话目录里的实际代际文件。
-      const candidatePaths = [location.path];
-      const generation = await resolveGenerationFile(dirname(location.path));
-      if (generation !== null) candidatePaths.unshift(generation);
-      for (const candidate of candidatePaths) {
-        try {
-          const info = await stat(candidate);
-          return { state: 'located', path: candidate, size: info.size, mtimeMs: info.mtimeMs };
-        } catch {} // ENOENT 或竞态：试下一个候选
-      }
-      return { state: 'absent' };
+      const snapshot = await persistence.stat(header.id);
+      locationPath = snapshot?.location?.path;
     } catch {
-      // 内层每个 stat 都各自兜底，这里只会接到 locate 抛错（后端异常/契约
-      // 漂移）——既不能确认存在也不能确认缺失，必须按 unknown 处理。返回
-      // absent 会让 deleteArchived 把它记成"幂等删除成功"（0.3.9 谎报成功
-      // 的同源变体）；unknown 对应删除路径的 unlocatable 拒绝。
+      // stat 抛错（后端异常/契约漂移）——既不能确认存在也不能确认缺失，
+      // 必须按 unknown 处理。返回 absent 会让 deleteArchived 把它记成
+      // "幂等删除成功"（0.3.9 谎报成功的同源变体）；unknown 对应删除路径
+      // 的 unlocatable 拒绝。
       return { state: 'unknown' };
     }
+    if (typeof locationPath !== 'string' || locationPath.length === 0) {
+      return { state: 'unknown' };
+    }
+
+    // 快照给的是当前代际名；旧代际落盘的可能是历史文件名（session.jsonl /
+    // session.v1.jsonl…）。官方布局是"一会话一目录"，目录路径不随代际变化，
+    // 因此在快照目录里扫描 session*.jsonl(.zstd) 取实际文件（多个代际并存时
+    // 取最新 mtime）；扫描结果为空才认定文件不存在。
+    const candidatePaths: string[] = [locationPath];
+    const generation = await resolveGenerationFile(dirname(locationPath));
+    if (generation !== null) candidatePaths.unshift(generation);
+    for (const candidate of candidatePaths) {
+      try {
+        const info = await stat(candidate);
+        return { state: 'located', path: candidate, size: info.size, mtimeMs: info.mtimeMs };
+      } catch {} // ENOENT 或竞态：试下一个候选
+    }
+    return { state: 'absent' };
   }
 
   /** 删除后的复验:先等 settleMs 给进行中的写入留出落盘时间,再确认文件没有
@@ -221,7 +227,7 @@ export function createHostContext(ctx: Context, cfg: Record<string, any>) {
   /** 单个归档会话的展示行。标题读取失败回退 null（面板显示目录名）。
    * 标题按 mtime 缓存：readSession 会解析整条事件流，而面板关闭态的徽标
    * 轮询每 5 秒打一次 list——不缓存的话就是"读整本会话只为取一行标题"的
-   * 持续开销。mtime 不变即命中缓存；文件不可定位（无 locate 的宿主后端）
+   * 持续开销。mtime 不变即命中缓存；文件不可定位（宿主未给出 location）
    * 时跳过缓存直接读，标题仍然可得。折叠用官方 foldSessionTitle。
    * 缓存有上限（FIFO 淘汰最旧条目）：已删除会话的条目不再被 mtime 命中
    * 更新，长驻 host 进程下无界累积。 */

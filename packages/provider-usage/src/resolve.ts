@@ -75,7 +75,7 @@ export const CANONICAL_ALIASES: Readonly<Record<string, string>> = Object.freeze
   minimaxi: 'minimax',
   openrouter: 'openrouter',
   deepseek: 'deepseek',
-  // 官方 DeepSeek 的两条路由键（宿主 0.2.1-rc.2：deepseek-account 走 OAuth 钱包、
+  // 官方 DeepSeek 的两条路由键（0.2.1-rc.2 起如此：deepseek-account 走 OAuth 钱包、
   // deepseek-official 走 API key）归一到 canonical `deepseek`：前者拿不到别名就
   // 只剩「有 entry 但无 apiKeyEnv」的静默路径，后者则会漏掉 DEEPSEEK_API_KEY 兜底
   // 与无键时的 OAuth 钱包回退。表键必须是去标点后的规范化形式——normalizeProviderKey

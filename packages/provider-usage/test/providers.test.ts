@@ -38,7 +38,7 @@ describe('BUILTIN_USAGE_QUERIERS', () => {
   it('registers the documented providers with display names', () => {
     expect([...BUILTIN_USAGE_QUERIERS.keys()]).toEqual([
       'deepseek',
-      // 宿主官方 DeepSeek 的两条路由键（宿主 0.2.1-rc.2）：钱包与 API key 各一条，
+      // 宿主官方 DeepSeek 的两条路由键（0.2.1-rc.2 起如此）：钱包与 API key 各一条，
       // 界面上的 provider 就是这两个 id，缺任一都会让官方 DeepSeek 显示「不支持」。
       'deepseek-account',
       'deepseek-official',

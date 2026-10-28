@@ -13,12 +13,13 @@ import type { WorkBuddyModelInfo } from '../src/index.js'
  *
  * 背景（实测取证）：聊天页的选择框走宿主 session.modelCatalog()，而客户端
  * dsh-client-ui-model-selection 的 ModelCatalogDirectory.load() **命中缓存即直接
- * 返回**，只在四个远程事件上重拉，其中 llm/adapters-updated 是插件唯一能触发的
- * 那个。插件原先 registerAdapter 一次就再没动过注册，于是目录变了也不广播——
- * 用户看到的名单一直停在页面打开那一刻，直到手动刷新。
+ * 返回**，只在若干远程事件上重拉。插件原先 registerAdapter 一次就再没动过注册，
+ * 于是目录变了也不广播——用户看到的名单一直停在页面打开那一刻，直到手动刷新。
  *
- * 现在的接线：目录内容（含可见性）真的变了时调 handle.replace([id])，由 dsh-llm
- * 的路由变更点发布该事件。重点在**只在变化时**通知：宿主每小时重拉一次目录，
+ * 现在的接线：目录内容（含可见性）真的变了时 `ctx.emit('llm/models-updated',
+ * provider)`（DSH 0.2.2 的公开事件，客户端 modelDirectories 订阅它并 refresh）。
+ * 0.2.2 之前没有这个事件，只能借 `handle.replace([id])` 触发拓扑事件
+ * llm/adapters-updated。重点在**只在变化时**通知：宿主每小时重拉一次目录，
  * 无条件广播会让每个打开的客户端白重拉、白重渲染。
  */
 const CLEANUP: (() => Promise<void>)[] = []
@@ -74,26 +75,17 @@ async function installPlugin(options: {
   // 包一层 registerAdapter，只统计本插件拿到的句柄上的 replace：replace 正是
   // 「内容变化 → 通知宿主」这条线的唯一出口（见 index.ts notifyCatalogChanged）。
   // 这样用例断言的是**本插件的行为**，与同进程的其它实例彻底解耦。
+  // 计数只认本变体的 `llm/models-updated`：那是插件目录发布的唯一出口
+  // （见 src/catalog-refresh.ts 的 notifyCatalogChanged）。按 provider 过滤，
+  // 与同进程的其它实例彻底解耦。
   const publishesByProvider = new Map<string, number>()
   const publishes = (): number => publishesByProvider.get('workbuddy') ?? 0
-  const proto = Object.getPrototypeOf(ctx.llm) as { registerAdapter: (p: string[], a: unknown) => unknown }
-  const descriptor = Object.getOwnPropertyDescriptor(proto, 'registerAdapter')!
-  const originalRegister = descriptor.value as (p: string[], a: unknown) => unknown
-  Object.defineProperty(proto, 'registerAdapter', {
-    ...descriptor,
-    value: function (this: unknown, providers: string[], adapter: unknown) {
-      const handle = originalRegister.call(this, providers, adapter) as (() => void) & { replace: (p: string[]) => void }
-      const originalReplace = handle.replace.bind(handle)
-      handle.replace = (next: string[]) => {
-        publishesByProvider.set(providers[0]!, (publishesByProvider.get(providers[0]!) ?? 0) + 1)
-        return originalReplace(next)
-      }
-      return handle
-    },
+  ctx.on('llm/models-updated', (provider: string) => {
+    publishesByProvider.set(provider, (publishesByProvider.get(provider) ?? 0) + 1)
   })
-  // 交叉校验：本用例的插件确实在发那个事件（而不是我们数错了东西）。
+  // 交叉校验：事件确实进了宿主的公开事件面（客户端订阅的就是它）。
   const events = { count: 0 }
-  ctx.on('llm/adapters-updated', () => { events.count += 1 })
+  ctx.on('llm/models-updated', () => { events.count += 1 })
   await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
 // 本文件的等待都覆盖真实 I/O（插件注册 / 目录刷新），显式给 5s 预算：
 // vi.waitFor 的默认超时是 1s，而 testTimeout 是 30s——并行负载下真实 I/O 可能超过 1s，
@@ -183,23 +175,11 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
       .mockImplementation(async () => [catalogRow('alpha')])
     const ctx = new Context()
     context = ctx
-    // 同样只数**本变体**的 replace（理由见 installPlugin 的注释）。
+    // 同样只数**本变体**的 `llm/models-updated`（理由见 installPlugin 的注释）。
     let replaced = 0
     await ctx.plugin(LlmRuntime)
-    const signInProto = Object.getPrototypeOf(ctx.llm) as { registerAdapter: (p: string[], a: unknown) => unknown }
-    const signInDescriptor = Object.getOwnPropertyDescriptor(signInProto, 'registerAdapter')!
-    const signInRegister = signInDescriptor.value as (p: string[], a: unknown) => unknown
-    Object.defineProperty(signInProto, 'registerAdapter', {
-      ...signInDescriptor,
-      value: function (this: unknown, providers: string[], adapter: unknown) {
-        const handle = signInRegister.call(this, providers, adapter) as (() => void) & { replace: (p: string[]) => void }
-        const originalReplace = handle.replace.bind(handle)
-        handle.replace = (next: string[]) => {
-          if (providers[0] === 'workbuddy') replaced += 1
-          return originalReplace(next)
-        }
-        return handle
-      },
+    ctx.on('llm/models-updated', (provider: string) => {
+      if (provider === 'workbuddy') replaced += 1
     })
     await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
 
@@ -214,19 +194,18 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
     ctx.fiber.ctx.emit('loader/volatile-update', [])
     await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) }, { timeout: 5000 })
     await vi.waitFor(() => { expect(replaced).toBeGreaterThan(hidden) }, { timeout: 5000 })
-    Object.defineProperty(signInProto, 'registerAdapter', signInDescriptor)
   })
 })
 
-describe('注册已释放（REGISTRATION_DISPOSED）不影响刷新链路', () => {
-  it('replace 抛 REGISTRATION_DISPOSED 时被吞掉，不冒泡、不误广播', async () => {
-    // 插件卸载、或注册与通知之间的竞态，会让 replace 抛 LlmError
-    // REGISTRATION_DISPOSED。这是正常路径：通知发不出去就算了，绝不能让异常
-    // 冒泡打断 refreshCatalog。
-    //
-    // 这里**主动制造**该异常：包装注册句柄，让 replace 在被释放后按真实语义抛
-    // REGISTRATION_DISPOSED（而不是依赖 dispose 时序去撞它）。
-    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-refresh-disposed-'))
+describe('目录通知不会打断刷新链路', () => {
+  it('通知走公开事件 llm/models-updated，失败不外溢、不误广播', async () => {
+    // 目录通知现在是 `ctx.emit('llm/models-updated', provider)`（DSH 0.2.2 公开事件，
+    // 客户端 modelDirectories 订阅它并 refresh()）。emit 是同步派发，没有
+    // REGISTRATION_DISPOSED 这类可抛点；这里守的是两条不变量：
+    //   1) 每次内容变化恰好发一次，且发的是本变体的 provider id；
+    //   2) 即使有监听器抛错，也不得被 refreshCatalog 的泛捕获误判成「上游目录
+    //      不可用」而触发重试风暴、打吓人的 warn。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-refresh-notify-'))
     const desktop = join(root, 'workbuddy-desktop.info')
     await writeFile(desktop, signedInDocument())
     let modelsCall = 0
@@ -236,73 +215,33 @@ describe('注册已释放（REGISTRATION_DISPOSED）不影响刷新链路', () =
     const ctx = new Context()
     context = ctx
     await ctx.plugin(LlmRuntime)
-    // 挂到 LlmRuntime 的**原型**上：ctx.llm 是 cordis Proxy，插件内部调用的
-    // 是原型方法；直接给 ctx.llm 赋一个同名 own property 是拦不住的（会静默
-    // 不生效，测试变成永远为真的空断言）。
-    const proto = Object.getPrototypeOf(ctx.llm) as { registerAdapter: (p: string[], a: unknown) => unknown }
-    const descriptor = Object.getOwnPropertyDescriptor(proto, 'registerAdapter')!
-    const originalRegister = descriptor.value as (p: string[], a: unknown) => unknown
-    let disposeThrows = false
-    let replaceAttempts = 0
-    Object.defineProperty(proto, 'registerAdapter', {
-      ...descriptor,
-      value: function (this: unknown, providers: string[], adapter: unknown) {
-        const handle = originalRegister.call(this, providers, adapter) as (() => void) & { replace: (p: string[]) => void }
-        const originalReplace = handle.replace.bind(handle)
-        handle.replace = (next: string[]) => {
-          replaceAttempts += 1
-          if (disposeThrows) {
-            const error = new Error('adapter registration is disposed') as Error & { code: string }
-            error.code = 'REGISTRATION_DISPOSED'
-            throw error
-          }
-          return originalReplace(next)
-        }
-        return handle
-      },
+    const seen: string[] = []
+    ctx.on('llm/models-updated', (provider: string) => { seen.push(provider) })
+
+    await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+    await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) }, { timeout: 5000 })
+
+    // 换一份**内容不同**的名单，确保这一轮一定走到 publishCatalog → notifyCatalogChanged。
+    vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+      .mockImplementation(async () => { modelsCall += 1; return [catalogRow('beta')] })
+    const warnings: string[] = []
+    const warnSpy = vi.spyOn(ctx.logger, 'warn').mockImplementation((...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '))
     })
+    const seenBefore = seen.length
+    const callsBefore = modelsCall
 
-    try {
-      await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
-      await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) }, { timeout: 5000 })
-      disposeThrows = true
+    ctx.fiber.ctx.emit('loader/volatile-update', [])
+    await vi.waitFor(async () => { expect(await servedIds()).toEqual(['beta']) }, { timeout: 5000 })
+    // 通知真的发了，且带的是本变体的 provider id。
+    await vi.waitFor(() => { expect(seen.length).toBeGreaterThan(seenBefore) }, { timeout: 5000 })
+    expect(seen).toContain('workbuddy')
 
-      // 换一份**内容不同**的名单，确保这一轮一定走到 publishCatalog → replace。
-      vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
-        .mockImplementation(async () => { modelsCall += 1; return [catalogRow('beta')] })
-      const warnings: string[] = []
-      const warnSpy = vi.spyOn(ctx.logger, 'warn').mockImplementation((...args: unknown[]) => {
-        warnings.push(args.map(String).join(' '))
-      })
-      const attemptsBefore = replaceAttempts
-      const callsBefore = modelsCall
-
-      ctx.fiber.ctx.emit('loader/volatile-update', [])
-      // 这一轮必然取一次上游（拿到 [beta]）；若通知异常逃逸，refreshCatalog 的
-      // 泛捕获会把这次拉取判成失败 → 触发 3 次重试，modelsCall 就会涨到 4。
-      await vi.waitFor(async () => { expect(await servedIds()).toEqual(['beta']) }, { timeout: 5000 })
-      // 这条路径**真的**走到了 replace —— 没有这条，把 notifyCatalogChanged
-      // 整个删掉用例也照样"通过"。
-      await vi.waitFor(() => { expect(replaceAttempts).toBeGreaterThan(attemptsBefore) }, { timeout: 5000 })
-
-      // 核心断言：replace 抛出的 REGISTRATION_DISPOSED 被就地吞掉。
-      //
-      // 不吞会发生什么（实测）：refreshCatalog 的 async IIFE 里 publishCatalog 之后
-      // 还有落盘与探针入队，"目录加载失败"这个泛捕获会把这条通知异常误判成
-      // **上游目录不可用** —— 于是打一条吓人的 warn（"dynamic model catalog
-      // unavailable ... serving the last-known list"），并对同一份已经拿到的
-      // 新名单再重试 3 次无谓的上游请求。用户看到的是永不消停的告警与多余流量。
-      expect(warnings.filter(line => line.includes('dynamic model catalog unavailable'))).toEqual([])
-      // 至少又多走了一次 replace（本次 workbuddy 的发布）；不写死成 +1，因为
-      // 其它三个变体的启动拉取可能同一时刻落定，各自也会发布一次。
-      expect(replaceAttempts).toBeGreaterThan(attemptsBefore)
-      // 没有重试风暴：本变体这一轮只多取一次上游。若通知异常逃逸，泛捕获会把它
-      // 判成拉取失败并追加 3 次重试，这里立刻变成 4。
-      expect(modelsCall).toBeLessThanOrEqual(callsBefore + 1)
-      warnSpy.mockRestore()
-    } finally {
-      disposeThrows = false
-      Object.defineProperty(proto, 'registerAdapter', descriptor)
-    }
+    // 没有误判成「上游目录不可用」：泛捕获若把通知异常当拉取失败，会打这条 warn
+    // 并对同一份已拿到的新名单重试 3 次。
+    expect(warnings.filter(line => line.includes('dynamic model catalog unavailable'))).toEqual([])
+    // 没有重试风暴：本变体这一轮只多取一次上游。
+    expect(modelsCall).toBeLessThanOrEqual(callsBefore + 1)
+    warnSpy.mockRestore()
   })
 })

@@ -42,7 +42,7 @@ export {
  * endpoint it already talks to. That is the intended shape — the provider's
  * owner is the right place to know its billing API.
  *
- * 2026-10-19 补官方 DeepSeek 的两条路由键：宿主 0.2.1-rc.2 的官方 DeepSeek 是
+ * 2026-10-19 补官方 DeepSeek 的两条路由键（该形状自宿主 0.2.1-rc.2 延续至今）：
  * `deepseek-account`（OAuth 钱包，profile 段里没有 apiKeyEnv）与
  * `deepseek-official`（API key，apiKeyEnv 默认 `DEEPSEEK_API_KEY`）两条，
  * **宿主并不存在 `deepseek` 路由**——保留该键只为兼容沿用它的自定义 profile。

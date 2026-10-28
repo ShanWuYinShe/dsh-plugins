@@ -160,8 +160,7 @@ export function createArchiveMutations(deps: HostContext) {
         if (snapshots.get(sessionId) === undefined) {
           // ghost id(枚举不到)。"枚举不到 ≠ 文件不存在":首行损坏的日志会被
           // persistence 静默跳过;而 jsonl 后端按 cwd 分目录,ghost 探测没有
-          // header、拿不到 cwd,locate 只能探缺省目录(_no-cwd 一类)——既探
-          // 不到真实文件,也确认不了缺失。因此 ghost 一律不能当"已删"报成功
+          // header、拿不到 cwd,stat 无法反推目录——既探不到真实文件,也确认不了缺失。因此 ghost 一律不能当"已删"报成功
           // (0.3.9 谎报成功的同源变体),计入 failed;ghost id 留在归档集合,
           // 由 list() 的存在性过滤隐藏,面板与侧边栏均不可见。
           failed.push({ sessionId, reason: 'unenumerable' });

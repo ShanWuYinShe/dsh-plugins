@@ -11,7 +11,7 @@ import type { Api, AuthContext, CredentialStore, Model, ModelThinkingLevel, Prov
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy'
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy'
 import { resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
-import type { LlmModelInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
+import type { LlmModelBadge, LlmModelInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
@@ -74,26 +74,53 @@ const NO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const
 const RATE_SEPARATOR = ' · '
 
 /**
+ * The billing facts both display surfaces are built from.
+ *
+ * Display-only and cannot affect routing: the wire request is built from
+ * `model.id` (pi-ai's completions API sets `model: model.id`), the selection a
+ * picker submits is `{provider, model: id, reasoningEffort}`, and `dsh-llm`
+ * validates `name` as a non-empty string without comparing its contents.
+ * Nothing in the host resolves a model *by* name.
+ */
+interface BillingFacts {
+  /** Upstream says the model is free right now. */
+  free: boolean
+  /** Upstream promotion label (`限时免费` / `夜间折扣` …), when it declares one. */
+  promo: string | undefined
+  /** Credit multiplier (`x0.79`), when the catalog discloses it. */
+  rate: string | undefined
+}
+
+/** Read the three billing facts once so both surfaces decide from the same input. */
+function billingFacts(info: WorkBuddyModelInfo): BillingFacts {
+  const promo = info.billing?.badges?.[0]
+  return {
+    free: info.billing?.free === true,
+    promo: promo !== undefined && promo.length > 0 ? promo : undefined,
+    rate: normalizeCredits(info.billing?.credits),
+  }
+}
+
+/**
  * Append the billing rate to one model's display name.
  *
  * The rate rides the *name* rather than only `description` because the DSH
  * model surfaces disagree about which field they render: the `/model` popup
- * shows `description` but the composer's model seat (`ModelSelect`) renders
- * `model.name` only and never reads `description`. Carrying the rate on the
- * name makes it visible in both.
+ * builds its rows from `model.name` alone and never reads `description`.
+ * Carrying the rate on the name makes it visible in both.
  *
- * This is display-only and cannot affect routing: the wire request is built
- * from `model.id` (pi-ai's completions API sets `model: model.id`), the
- * selection a picker submits is `{provider, model: id, reasoningEffort}`, and
- * `dsh-llm` validates `name` as a non-empty string without comparing its
- * contents. Nothing in the host resolves a model *by* name.
+ * The suffix deliberately carries only free/rate — not the promotion label:
+ * the name is also what `/model` and the session metadata show, and the promo
+ * label is a selector-only decoration (it lives in the native badge instead).
+ *
+ * @param name - display name the catalog handed in.
+ * @param info - that model's catalog entry.
+ * @returns the name with its billing suffix, or the bare base name.
  */
 function withRate(name: string, info: WorkBuddyModelInfo): string {
   const baseName = name.split(RATE_SEPARATOR)[0] ?? name
-  if (info.billing?.free === true) {
-    return `${baseName}${RATE_SEPARATOR}免费`
-  }
-  const rate = normalizeCredits(info.billing?.credits)
+  const { free, rate } = billingFacts(info)
+  if (free) return `${baseName}${RATE_SEPARATOR}免费`
   return rate === undefined ? baseName : `${baseName}${RATE_SEPARATOR}${rate}`
 }
 
@@ -294,6 +321,22 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
 }
 
 /**
+ * Short provider-authored badge for one model (DSH 0.2.2 `LlmModelInfo.badge`).
+ *
+ * Same decision as the name suffix — see {@link billingLabel} — re-encoded as
+ * localized text plus a tone so the native selector can render it directly.
+ *
+ * @param info - that model's catalog entry.
+ * @returns the badge, or undefined when the catalog discloses no billing data.
+ */
+export function modelBadge(info: WorkBuddyModelInfo): LlmModelBadge | undefined {
+  const { free, promo, rate } = billingFacts(info)
+  if (free) return { text: { en: 'Free', zh: '免费' }, tone: 'success' }
+  if (promo !== undefined) return { text: { en: promo, zh: promo }, tone: 'info' }
+  return rate === undefined ? undefined : { text: rate, tone: 'neutral' }
+}
+
+/**
  * The WorkBuddy route's adapter: `PiAiAdapter` with the billing rate folded
  * into the catalog answers it returns to the DSH model pickers.
  *
@@ -329,10 +372,15 @@ class WorkBuddyPiAiAdapter extends PiAiAdapter {
     return models.map(model => {
       const info = this.infoFor(model.id)
       if (info === undefined) return model
+      const badge = modelBadge(info)
       // The rate rides the display name only: surfaces that render name and
       // description side by side showed it twice when it also filled the
       // description, so the description stays untouched here.
-      return { ...model, name: withRate(model.name, info) }
+      return {
+        ...model,
+        name: withRate(model.name, info),
+        ...badge === undefined ? {} : { badge },
+      }
     })
   }
 
@@ -340,6 +388,11 @@ class WorkBuddyPiAiAdapter extends PiAiAdapter {
     const resolved = await super.resolveModel(provider, model, signal)
     const info = this.infoFor(model)
     if (info === undefined) return resolved
-    return { ...resolved, name: withRate(resolved.name, info) }
+    const badge = modelBadge(info)
+    return {
+      ...resolved,
+      name: withRate(resolved.name, info),
+      ...badge === undefined ? {} : { badge },
+    }
   }
 }

@@ -1,3 +1,9 @@
+## 0.4.28-alpha.0 (2026-10-28)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.2` 预发布线**：`dsh.host` 与全部 `@deepseek-ai/dsh-*` 依赖对齐 `^0.2.2-alpha.2`，vendor 依赖同步前移。宿主 0.2.2 新增策略级 `additionalWritableRoots` / `workspaceWritableRoots`，但那是部署配置（运行时改需重配宿主行，且 Windows ACL 后端直接拒绝），本插件继续走包装 `confine`/`checkedTarget` 的运行时注入，行为不变。
+
 ## 0.4.27 (2026-10-24)
 
 - 修复: Landlock 授权片段改走官方 node-addon-landlock-run grantArgs 产出（apply 侧经 getLandlockRuntime 注入），消除对 launcher flag 拼写的硬编码；bwrap 无官方 API 维持现状。

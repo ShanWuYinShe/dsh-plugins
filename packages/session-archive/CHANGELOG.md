@@ -1,3 +1,13 @@
+## 0.3.32-alpha.0 (2026-10-28)
+
+### 新增
+
+* **文件定位改用宿主公开快照 `SessionPersistenceSnapshot.location.path`**：`fileInfo` 先读 `persistence.stat()` 快照里的标准 `location`（DSH 0.2.2 新增），拿不到再回退历史版本的 `locate` 诊断钩子；`locate` 已不在宿主公开契约（0.2.2 类型只剩 `stat`/`list`），只剩 jsonl 后端运行时保留，属兼容兜底而非必需路径。
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.2` 预发布线**：`dsh.host` 与全部 `@deepseek-ai/dsh-*` 依赖对齐 `^0.2.2-alpha.2`，vendor 依赖同步前移。
+
 ## 0.3.31 (2026-10-24)
 
 - 维护: 依赖分层——react/@types/react/@deepseek-ai/cordis/vitest 按实际 import 声明至本包 devDependencies;无功能变化。
