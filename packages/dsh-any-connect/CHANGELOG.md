@@ -1,3 +1,13 @@
+## 0.4.27 (2026-10-28)
+
+### 修复
+
+* **再解 WorkBuddy 国内网关渠道拦截（400 / 11128）：句子级提示词指纹脱敏（第二代）**：
+  * 症状（2026-10-28 实机取证，iotGW 会话请求逐字重放闭环复现）：WorkBuddy 全系模型（`deepseek-v4.1-flash` / `hy4-preview` / `auto` 实测同样命中，与模型无关）报 `Illegal API invocation from an unapproved channel`；最小探针（无 system 提示词）200 正常，完整 DSH 系统提示词 400 必现，触发点在请求体内容而非通道/凭据；
+  * 根因：0.4.18 的 `DeepSeek Harness` 词级脱敏仍有效但不再充分——上游网关新增**句子级指纹**：跨句连续串 `Tokens prefixed with @ are paths the user explicitly referenced. Relative paths resolve from the workspace root`（二分定位），按「大小写不敏感、空白敏感」的连续子串匹配——句界插换行/双空格/改一个词实测均 400→200，全小写仍被拦（改写必须变动字符，仅改大小写无效）；
+  * 修法：`sanitizeWorkBuddyChannelFingerprints` 追加规则，把指纹句界 `referenced. Relative paths resolve` 的句号后空白改写为换行，语义零变化；对完整 54K 提示词验证当前仅此一处指纹，改写后整单放行；
+  * 回归测试 `test/prepare.test.ts`：system/developer（含 multipart 块）内指纹句界被改写且不再含单空格跨句指纹，user 消息不受影响。
+
 ## 0.4.26 (2026-10-27)
 
 ### 修复

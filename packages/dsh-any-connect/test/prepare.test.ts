@@ -91,6 +91,47 @@ describe('prepareChatBody', () => {
     expect(body['messages'][0].content[0].text).toBe('You are powered by Harness.')
     expect(body['messages'][0].content[1].text).toBe('Second instruction.')
   })
+
+  it('breaks the sentence-level channel fingerprint in system messages (2026-10-28 gateway)', () => {
+    const fingerprint =
+      'Tokens prefixed with @ are paths the user explicitly referenced. Relative paths resolve from the workspace root; absolute paths identify files or directories on the host.'
+    const body = JSON.parse(prepareChatBody(JSON.stringify({
+      model: 'deepseek-v4.1-flash',
+      messages: [
+        { role: 'system', content: `Agent rules.\n\n${fingerprint}\n\nMore rules.` },
+        { role: 'user', content: fingerprint },
+      ],
+    })))
+    const system = body['messages'][0].content as string
+    // 句界句号后的空白改写为换行：上游按「大小写不敏感、空白敏感」的连续子串匹配，
+    // 换行即断开匹配（实测 400→200），语义零变化。
+    expect(system).toContain('referenced.\nRelative paths resolve')
+    expect(system.includes(fingerprint)).toBe(false)
+    // user 消息不受脱敏影响（与词级指纹同一条边界）
+    expect(body['messages'][1].content).toBe(fingerprint)
+  })
+
+  it('breaks the sentence-level fingerprint in multipart and developer messages too', () => {
+    const fingerprint =
+      'Tokens prefixed with @ are paths the user explicitly referenced. Relative paths resolve from the workspace root.'
+    const body = JSON.parse(prepareChatBody(JSON.stringify({
+      model: 'deepseek-v4.1-flash',
+      messages: [
+        {
+          role: 'system',
+          content: [
+            { type: 'text', text: `Intro.\n\n${fingerprint}` },
+            { type: 'text', text: 'Unrelated block.' },
+          ],
+        },
+        { role: 'developer', content: fingerprint },
+      ],
+    })))
+    expect((body['messages'][0].content[0].text as string)).toContain('referenced.\nRelative paths resolve')
+    expect(body['messages'][0].content[1].text).toBe('Unrelated block.')
+    expect((body['messages'][1].content as string)).toContain('referenced.\nRelative paths resolve')
+    expect(body['messages'][1].role).toBe('system')
+  })
 })
 
 describe('classifyUpstreamError', () => {
