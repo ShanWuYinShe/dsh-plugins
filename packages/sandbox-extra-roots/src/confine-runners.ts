@@ -70,7 +70,7 @@ export function seatbeltArgv(a: string[], roots: string[], policy: any, deps: Co
   // 额外根、保持官方 argv 原样(fail-safe,与 bwrap/Landlock 同策略)。
   const sbSep = a.indexOf("--");
   if (sbSep === -1) {
-    deps.warnOnce("seatbelt-separator", "seatbelt argv has no -- separator; cannot add extra writable roots");
+    deps.warnOnce("seatbelt-separator", "[sandbox-extra-roots] seatbelt argv has no -- separator; cannot add extra writable roots");
     return null;
   }
   // 分隔符不在期望位置(profile 后紧跟 --)同样是契约漂移:官方若在
@@ -78,7 +78,7 @@ export function seatbeltArgv(a: string[], roots: string[], policy: any, deps: Co
   // 更宽。与分隔符缺失同策略:放弃追加,保持官方 argv 原样。
   // 漂移自检只比对 profile 文本,检不出这种形态,必须在这里挡。
   if (sbSep !== 3) {
-    deps.warnOnce("seatbelt-separator-position", "seatbelt argv shape changed (args between profile and --); refusing to rebuild it — bash-side extra roots stay OFF (the fs fence still grants them)");
+    deps.warnOnce("seatbelt-separator-position", "[sandbox-extra-roots] seatbelt argv shape changed (args between profile and --); refusing to rebuild it — bash-side extra roots stay OFF (the fs fence still grants them)");
     return null;
   }
   // 分隔符必须原样保留：a.slice(sbSep + 1) 是从 -- **之后**取的 inner 命令，
@@ -117,7 +117,7 @@ export function bindMountArgv(
 ): string[] | null {
   const dashDash = a.indexOf("--");
   if (dashDash === -1) {
-    warnOnce(`${runnerName}-separator`, `${runnerName} argv has no -- separator; cannot add extra writable roots`);
+    warnOnce(`${runnerName}-separator`, `[sandbox-extra-roots] ${runnerName} argv has no -- separator; cannot add extra writable roots`);
     return null;
   }
   const extra: string[] = [];

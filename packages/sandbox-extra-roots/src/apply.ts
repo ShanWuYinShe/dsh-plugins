@@ -183,10 +183,10 @@ export async function apply(ctx: Context, config?: any): Promise<void> {
           // 只检查 runner 参数段（-- 之前），避免误匹配用户命令里的 --workspace。
           const runnerArgs = a.slice(0, a.indexOf("--") === -1 ? a.length : a.indexOf("--"));
           if (runnerArgs.includes("--workspace")) {
-            warnOnce("windows-acl", "windows-acl runner cannot grant extra writable roots; bash-side extra roots are not granted on Windows (the fs fence still grants them)");
+            warnOnce("windows-acl", "[sandbox-extra-roots] windows-acl runner cannot grant extra writable roots; bash-side extra roots are not granted on Windows (the fs fence still grants them)");
             return wrapped;
           }
-          warnOnce(`unknown-runner:${a[0]}`, `unknown sandbox runner argv[0] "${a[0]}"; bash-side extra writable roots are not granted`);
+          warnOnce(`unknown-runner:${a[0]}`, `[sandbox-extra-roots] unknown sandbox runner argv[0] "${a[0]}"; bash-side extra writable roots are not granted`);
           return wrapped;
         };
         rawSandbox.confine = installedConfine;
