@@ -173,11 +173,13 @@ export function createVariantRuntimeSet(deps: {
       // against this identity, so one account's detected levels never answer
       // for another's.
       account: () => runtime.lastIdentity,
+      // 状态 reason 带变体来源：多变体共用宿主日志/状态路由时能区分是哪条通道。
+      variantId: variant.id,
       // 清扫的探针失败必须可见:RegionMismatchError 是用户可修复的配置错误,
       // 静默吞掉会让"为什么模型没检测"无从排查。
       onSweepError: (modelId, error) => {
         ctx.logger?.warn?.(
-          `[anyconnect] background probe for ${variant.id}/${modelId} failed: ${error instanceof Error ? error.message : String(error)}`,
+          `dsh-any-connect: background probe for ${variant.id}/${modelId} failed: ${error instanceof Error ? error.message : String(error)}`,
         )
       },
     })

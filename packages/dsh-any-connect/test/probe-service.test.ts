@@ -85,6 +85,24 @@ describe('WorkBuddyProbeService', () => {
     expect(await h2.service.probe('probe-me')).toEqual({ state: 'unavailable', reason: 'model does not need detection' })
   })
 
+  it('prefixes unavailable reasons with the configured variant id', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-psvc-'))
+    const service = new WorkBuddyProbeService({
+      store: new WorkBuddyProbeStore({ path: join(root, '.workbuddy-probe.json'), pluginVersion: '0.0.0-test' }),
+      catalog: declaredCatalog(),
+      credentials: { current: async () => ({ ...CREDENTIAL }) } as never,
+      client: {} as never,
+      account: () => 'uid-1:',
+      variantId: 'zcode',
+      send: () => async () => { throw new Error('must not send') },
+    })
+    // Declared-set 模型直接走 unavailable 快路径：reason 应带变体来源前缀。
+    expect(await service.probe('probe-me')).toEqual({
+      state: 'unavailable',
+      reason: 'zcode: model does not need detection',
+    })
+  })
+
   it('runs a full validating sweep and reuses the record without new requests', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-psvc-'))
     const answers: Record<string, { status: number; streamed: boolean; errorCode?: string }> = {
