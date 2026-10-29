@@ -7,7 +7,8 @@
  * - WorkBuddyConfigPage.tsx — 配置页入口（解构 + 渲染），对外 API 门面
  * - VariantsPage.tsx useVariantsPage.ts — 变体列表页（渲染）与页面状态/取数
  * - ModelLabel.tsx — 原生模型名称与费率标签内联渲染组件（conversation.input.model.label）
- * - VariantCard.tsx useVariantCard.ts — 单卡（渲染）与卡片状态/动作
+ * - VariantCard.tsx VariantCardQuota.tsx VariantCardModels.tsx — 单卡组合、额度区块、模型区块（渲染）
+ * - useVariantCard.ts variant-card-view.ts — 卡片状态/动作与纯派生视图（渲染之外的全部逻辑）
  * - StartPlanClaimBox.tsx RateLimitBox.tsx ModelRow.tsx SignedOutRow.tsx — 今日待领取提示框、
  *   上游限流提示框（只说上游给过的恢复时刻）、模型行、未登录行
  * - config-types.ts config-styles.ts config-format.ts — 共享类型/常量、内联样式与注入 CSS、展示格式化
@@ -67,7 +68,8 @@ export function apply(ctx: ClientContext): void {
         // 重复注册（HMR/热切换下宿主已持有同 ns 字典）静默忽略，其余失败
         // 只告警——异常若穿透 effect 会跳过下面的 slots.inject，插件卡片
         // 整体消失；吞掉后文案回退到宿主默认，卡片照常渲染。
-        const message = String((error as any)?.message ?? error)
+        // 结构化取 message（不假设一定是 Error），其余值回退 String()。
+        const message = String((typeof error === 'object' && error !== null ? (error as { message?: unknown }).message : undefined) ?? error)
         if (!message.includes('already')) console.warn('dsh-any-connect: locale dictionary registration failed: ' + message)
         return () => {}
       }

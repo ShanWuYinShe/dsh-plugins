@@ -7,11 +7,20 @@
  * @module sandbox-extra-roots/roots-preview
  */
 
+/** 当前运行环境（模块加载时按 UA 近似；单测可注入平台快照）。 */
+const ua = typeof navigator !== "undefined" ? String(navigator.userAgent || navigator.platform || "") : "";
+export const isDarwin = /Mac/i.test(ua);
+export const isWindows = /Win/i.test(ua);
 
+/** 一行输入在保存前的预览问题级别（与 host classifyRoot/normalizeRoots 口径对应）。 */
+export type RootProblemKind = "danger" | "homeAncestor" | "invalid" | "duplicate" | "system";
 
-var ua = typeof navigator !== "undefined" ? String(navigator.userAgent || navigator.platform || "") : "";
-export var isDarwin = /Mac/i.test(ua);
-export var isWindows = /Win/i.test(ua);
+/** 预览发现的一条问题（line 为 1 起的行号）。 */
+export interface RootProblem {
+  line: number;
+  kind: RootProblemKind;
+  value: string;
+}
 // 与 host classifyRoot 的过滤口径保持一致的客户端预览（词法级）：
 // 让"会被静默丢弃的行"在保存前就可见，而不是保存后只看到"已保存"。
 // 名单镜像 src/roots.ts 的 SYSTEM_DIR_SPELLINGS（filter 级：无写入必要且
@@ -40,8 +49,8 @@ export function cleanRootLine(line: string): string {
   return trimmed;
 }
 
-export function analyzeRootsText(text: string, platform: PreviewPlatform = CURRENT_PLATFORM) {
-  const problems: Array<{ line: number; kind: string; value: string }> = [];
+export function analyzeRootsText(text: string, platform: PreviewPlatform = CURRENT_PLATFORM): RootProblem[] {
+  const problems: RootProblem[] = [];
   const seen = new Set<string>();
   // 主目录的词法祖先是 reject 级(host 按 homedir 精确拒绝):只标常见拼写,
   // 宁可少标(交给 host 拒绝),不误标合法路径。
@@ -86,7 +95,7 @@ export function analyzeRootsText(text: string, platform: PreviewPlatform = CURRE
 // host 必然拒绝的行(invalid/danger/homeAncestor)存在时禁用保存:与其让
 // 用户点了保存再读一段英文 TypeError,不如按钮禁用+行内原因。判据具名导出，
 // 保存按钮与单测共用同一条，避免两边各写一份而漂移。
-export function hasBlockingProblems(problems: Array<{ kind: string }>): boolean {
+export function hasBlockingProblems(problems: ReadonlyArray<Pick<RootProblem, "kind">>): boolean {
   return problems.some((p) => p.kind === "invalid" || p.kind === "danger" || p.kind === "homeAncestor");
 }
 // 一键添加的常用工具缓存预设：各工具开箱默认路径（均可被环境变量覆盖，

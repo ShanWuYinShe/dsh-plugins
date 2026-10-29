@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto'
 import type { WorkBuddyCredential } from './auth.js'
 import { classifyUpstreamError, httpStatusLabel, normalizeDeveloperRole, normalizeToolChoice, sanitizeWorkBuddyChannelFingerprints } from './upstream-shared.js'
-import { isObject } from './upstream-workbuddy-parse.js'
+import { isObject } from './values.js'
 
 export type WorkBuddyRegion = 'cn' | 'global'
 
@@ -20,7 +20,7 @@ const CN_BILLING_BASE = 'https://www.codebuddy.cn'
 
 const GLOBAL_BASE = 'https://www.workbuddy.ai'
 
-export const CLI_VERSION = '2.63.2'
+const CLI_VERSION = '2.63.2'
 
 export const CLIENT_UA = `CLI/${CLI_VERSION} CodeBuddy/${CLI_VERSION}`
 

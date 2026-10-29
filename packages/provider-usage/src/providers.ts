@@ -1,8 +1,5 @@
 /**
- * providers.ts — 内置 querier 聚合点：注册表 + 各 provider 的 re-export。
- *
- * 2026-10-08 从 521 行的 providers.ts 拆出：每个 provider 一个文件，共享取值助手
- * 单独成模块，providers.ts 只保留内置注册表与 re-export。
+ * providers.ts — 内置 querier 聚合点：注册表 + 各 provider 查询器的 re-export。
  *
  * @module @chaoset/provider-usage/providers
  */

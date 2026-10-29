@@ -5,14 +5,12 @@
  */
 
 import type { UsageRateLimit, UsageSnapshot } from '../src/types.js'
+import { isQueriedAnswer, type SnapshotAnswer } from './fetch-snapshot.js'
 import { formatAmount, formatReset } from './pill-format.js'
 import type { ProviderUsageLocaleKey } from './locales.js'
 
-/** 路由返回的一行答案：快照，或未注册标记。 */
-export type PillAnswer = UsageSnapshot | { provider: string; queried: false }
-
 /** 文案函数（与注入的 t 同形）。 */
-export type PillCopy = (key: ProviderUsageLocaleKey, params?: Record<string, unknown>) => string
+type PillCopy = (key: ProviderUsageLocaleKey, params?: Record<string, unknown>) => string
 
 /**
  * 头行文案：7 个分支（loading / noQuerier / rateLimited / failed / noWindows /
@@ -24,22 +22,27 @@ export type PillCopy = (key: ProviderUsageLocaleKey, params?: Record<string, unk
  * 额度用尽时头行仍是「0 credits 剩余」（诚实），恢复时刻由
  * {@link exhaustedResetText} 追加在按钮的 title/aria 上，不挤占折叠态宽度。
  */
-export function headlineText(answer: PillAnswer | undefined, provider: string, stale: boolean, t: PillCopy): string {
-  const queried = answer !== undefined && !('queried' in answer)
-  const snapshot = queried ? answer as UsageSnapshot : undefined
-  const headline = answer === undefined
-    ? t('loading')
-    : !queried
-      ? t('noQuerier', { provider })
-      : snapshot!.rateLimit !== undefined
-        ? rateLimitHeadline(snapshot!.rateLimit, t)
-        : snapshot!.error !== undefined && snapshot!.windows.length === 0
-          ? t('failed')
-          : snapshot!.windows.length === 0
-            ? t('noWindows')
-            : snapshot!.windows[0]!.remain === undefined
-              ? `${snapshot!.windows[0]!.label}: ${snapshot!.windows[0]!.unit}${snapshot!.windows.length > 1 ? ` +${snapshot!.windows.length - 1}` : ''}`
-              : `${formatAmount(snapshot!.windows[0]!.remain ?? 0)} ${snapshot!.windows[0]!.unit} ${t('remaining')}${snapshot!.windows.length > 1 ? ` +${snapshot!.windows.length - 1}` : ''}`
+export function headlineText(answer: SnapshotAnswer | undefined, provider: string, stale: boolean, t: PillCopy): string {
+  const snapshot = isQueriedAnswer(answer) ? answer : undefined
+  const first = snapshot?.windows[0]
+  let headline: string
+  if (answer === undefined) {
+    headline = t('loading')
+  } else if (snapshot === undefined) {
+    headline = t('noQuerier', { provider })
+  } else if (snapshot.rateLimit !== undefined) {
+    headline = rateLimitHeadline(snapshot.rateLimit, t)
+  } else if (snapshot.error !== undefined && snapshot.windows.length === 0) {
+    headline = t('failed')
+  } else if (first === undefined) {
+    headline = t('noWindows')
+  } else {
+    /** 多个窗口只在头行报第一个，「 +N」提示展开还有更多。 */
+    const more = snapshot.windows.length > 1 ? ` +${snapshot.windows.length - 1}` : ''
+    headline = first.remain === undefined
+      ? `${first.label}: ${first.unit}${more}`
+      : `${formatAmount(first.remain)} ${first.unit} ${t('remaining')}${more}`
+  }
   return stale ? `${headline} · ${t('staleData')}` : headline
 }
 

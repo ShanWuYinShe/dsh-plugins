@@ -20,8 +20,8 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { fetchSnapshot, type SnapshotAnswer } from './fetch-snapshot.js'
 import type { UsageSnapshot } from '../src/types.js'
 
-/** 本插件独占的 resource 协议键(dsh-resource:// 的 host 段)。 */
-export const USAGE_RESOURCE_PROTOCOL = 'provider-usage'
+/** 本插件独占的 resource 协议键(dsh-resource:// 的 host 段)；外部只经 useResource 地址访问。 */
+const USAGE_RESOURCE_PROTOCOL = 'provider-usage'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface ResourceProtocolMap {

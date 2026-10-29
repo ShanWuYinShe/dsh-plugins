@@ -22,10 +22,10 @@ import type { WorkBuddyShim } from './shim.js'
 import { normalizeCredits } from './upstream.js'
 
 /** Provider route this bundle owns. */
-export const WORKBUDDY_PROVIDER = 'workbuddy'
+const WORKBUDDY_PROVIDER = 'workbuddy'
 
 /** Provider idle ceiling while one stream read is outstanding. */
-export const WORKBUDDY_STREAM_IDLE_TIMEOUT_MS = 300_000
+const WORKBUDDY_STREAM_IDLE_TIMEOUT_MS = 300_000
 
 /**
  * Image-request budgets at the dsh-llm-pi-ai defaults; the profile type

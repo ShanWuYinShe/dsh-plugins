@@ -14,18 +14,13 @@
  * 常量函数，注册期不解析任何会话或服务状态**。宿主那两个 pill 从不失效，
  * 结构性原因就在这里——inject 里没有可能失败的步骤。
  *
- * 历史教训（2026-10-29 重构）：此前本包在注册期解析模型目录，撞上宿主两条
- * 机制，两条都表现为「pill 莫名其妙消失、刷新才好」：
- *
- * 1. `cachedSessionInject` 把 inject 结果按 (entry × 会话绑定) **永久缓存**
- *    （dsh-client-ui-renderer）——注册瞬间服务没就绪，缺 directory
- *    的坏 props 就固化到该会话整页；
- * 2. render 期抛错 → `SlotErrorBoundary` → `reportEntryError({abdicate:true})`
- *    → `SlotRegistry.abdicated`（只增不减的 WeakSet）→ 该 entry 在本注册生命周期内永久退出投影。
- *
- * 现在会话相关数据一律在**渲染期**取：组件从 standard kit 拿 `sessionId`
- * （renderer 无条件提供，永远可用），经注入的 `resolveSeat` 现解析目录。
- * 解析失败只影响这一次渲染，`resolveSeat` 永不抛错，entry 也不会被 abdicate。
+ * 注册期绝不解析会话/服务状态（历史教训）：宿主按 (entry × 会话绑定) **永久
+ * 缓存** inject 结果（`cachedSessionInject`），而 render 期抛错会经
+ * `SlotErrorBoundary` / `reportEntryError({abdicate:true})` 把 entry 永久移出投影
+ * （`SlotRegistry.abdicated` 只增不减）。两条都表现为「pill 莫名其妙消失、刷新
+ * 才好」。因此会话数据一律在**渲染期**取：组件从 standard kit 拿 `sessionId`
+ * （renderer 无条件提供），经注入的 `resolveSeat` 现解析；解析失败只影响这一次
+ * 渲染，`resolveSeat` 永不抛错。
  *
  * 额度数据只有一条通道：apply 里为协议 'provider-usage' 注册的
  * ResourceProvider（`resource-provider.ts`），pill 用 standard kit 的
@@ -61,10 +56,13 @@ import { registerProviderUsageResources } from './resource-provider.js'
 import { ProviderUsagePill } from './ProviderUsagePill.js'
 import type { ProviderUsagePillInjected, ProviderUsageSeat } from './pill-types.js'
 
+/** 本包拥有的 locale 命名空间（dictionary 与绑定共用同一个键）。 */
+const LOCALE_NAMESPACE = 'providerUsage'
+
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** Provider-usage pill copy. */
-    'providerUsage': ProviderUsageLocaleKey
+    [LOCALE_NAMESPACE]: ProviderUsageLocaleKey
   }
 }
 
@@ -94,37 +92,30 @@ export const inject = ['slots', 'locale', 'resources']
  */
 export function apply(ctx: ClientContext): void {
   try {
-    const namespace = 'providerUsage'
     ctx.effect((): (() => void) => {
       try {
-        return ctx.locale.register(namespace, { zh, en })
+        return ctx.locale.register(LOCALE_NAMESPACE, { zh, en })
       } catch (error: unknown) {
         // A duplicate registration (HMR/hot switch where the host already
         // holds this namespace) is ignored; anything else only warns. Letting
         // it escape would skip the slot registration below and the pill would
         // disappear entirely instead of falling back to host copy.
-        const message = String((error as any)?.message ?? error)
+        const message = error instanceof Error ? error.message : String(error)
         if (!message.includes('already')) console.warn('provider-usage: locale dictionary registration failed: ' + message)
         return () => {}
       }
     }, 'provider-usage: pill copy')
-    const t = ctx.locale.bind(namespace) as ProviderUsagePillInjected['t']
+    const t = ctx.locale.bind(LOCALE_NAMESPACE) as ProviderUsagePillInjected['t']
     registerProviderUsageResources(ctx)
-    // 照抄宿主自带 pill 的注册形状：`inject` 是一个**无参常量函数**，不解析
-    // 任何会话/服务状态（dsh-client-ui-chat 的 statPillInject 即
-    // `() => ({ hooks: { performanceUsage } })`）。宿主那两个 pill 从不失效的
-    // 原因就在这里：inject 里没有可能失败的步骤，也就不存在「坏 props 被
-    // 永久缓存」或「render 期抛错被 abdicate」这两条失效路径。
-    //
-    // 会话相关的数据（sessionId → 模型目录）改为由组件从 standard kit 的
-    // `sessionId` 现取，走下面注入的 `resolveSeat`。standard kit 由 renderer
-    // 无条件提供（dsh-client-ui-session 合并进 SessionStandardProps），永远可用。
+    // 与宿主自带 activity / usage pill 同形：`inject` 是无参常量函数，注册期不碰
+    // 会话/服务状态（原因见文件头「注册期绝不解析」）。会话数据由组件在渲染期
+    // 经 standard kit 的 `sessionId` + 注入的 `resolveSeat` 现取。
     ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
       name: 'conversation.composer.dock',
       id: 'provider-usage',
-      // order 10 keeps this pill after the harness's own `stats` entry (order 0),
-      // so the readout reads as an addition to the built-in stats rather than
-      // displacing them.
+      // order 10 keeps this pill after the harness's own activity / usage
+      // entries (order 0 / 1), so the readout reads as an addition to the
+      // built-in stats rather than displacing them.
       order: 10,
       // 无参、无副作用、永不抛错：与宿主 statPillInject 同形。
       inject: (): ProviderUsagePillInjected => ({
@@ -149,8 +140,7 @@ const loadCache = new WeakMap<ModelDirectory, () => void>()
  * 失败只影响这一次渲染，不会波及 entry 的存活。
  *
  * 三种失败都收敛成 `undefined`（组件据此这一帧不渲染），**绝不抛错**——
- * 理由见上方 apply 的注释：render 期抛错会被宿主 SlotErrorBoundary 捕获并
- * 把 entry 永久 abdicate。
+ * render 期抛错会让宿主把 entry 永久 abdicate（见文件头）。
  *
  * @param ctx - the browser plugin context (the apply closure's context).
  * @param sessionId - the session whose directory the dock belongs to.

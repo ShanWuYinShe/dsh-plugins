@@ -15,7 +15,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { assertSessionId, assertSessionIdArray } from './session-id.js';
-import type { createArchiveHost } from './archive-host.js';
+import type { ArchiveHost } from './archive-host.js';
 import type {
   ArchiveCountResult,
   ArchiveDeleteResult,
@@ -23,9 +23,6 @@ import type {
   ArchiveListResult,
   ArchiveUnarchiveResult,
 } from './types.js';
-
-/** 委托目标：index.ts 用 createArchiveHost(ctx, cfg) 构造的 host 组合。 */
-export type ArchiveHost = ReturnType<typeof createArchiveHost>;
 
 /**
  * 归档管理远程服务：list 列出归档会话；count 归档计数（徽标轮询轻端点）；

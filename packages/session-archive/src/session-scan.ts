@@ -113,8 +113,8 @@ export function delay(ms: number): Promise<void> {
 /** 并发限制器：最多 N 个任务并行，其余排队。宽度下限 1——直调
  * createArchiveHost 传 0/负数时若产出 0 个 worker，会静默返回全 undefined
  * 的数组而非报错。 */
-export function limitedConcurrency(limit: number, tasks: Array<() => Promise<any>>): Promise<any[]> {
-  const results = new Array(tasks.length);
+export function limitedConcurrency<T>(limit: number, tasks: ReadonlyArray<() => Promise<T>>): Promise<T[]> {
+  const results = new Array<T>(tasks.length);
   let cursor = 0;
   const width = Math.max(1, Math.min(limit, tasks.length));
   const workers = Array.from({ length: width }, async () => {
@@ -140,8 +140,11 @@ export function messageText(content: unknown, maxChars: number): string {
         text += b.text;
         if (text.length > maxChars) break;
       } else if (b.type === 'tool_use' || b.type === 'tool_call') {
-        const name = typeof b.name === 'string' ? b.name : (typeof (b.function as any)?.name === 'string' ? (b.function as any).name : 'tool');
-        toolNames.push(name);
+        // OpenAI 兼容形态把名字放在 function.name；官方 native 形态在 b.name。
+        const fn = b.function !== null && typeof b.function === 'object'
+          ? b.function as Record<string, unknown>
+          : undefined;
+        toolNames.push(typeof b.name === 'string' ? b.name : typeof fn?.name === 'string' ? fn.name : 'tool');
       }
     }
   }

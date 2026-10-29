@@ -26,7 +26,7 @@ export async function adoptIdentity(
   // 该账号最好的已知目录：上次成功拉取的 saved 优先于编译期 fallback。
   // saved 是"这个账号实际被服务过"的名单，比一次性快照更可信；这同时
   // 覆盖重启场景——重启后 saved 正是阻止分组落回内置名单的东西。
-  const saved = runtime.catalogStore!.saved(identity)
+  const saved = runtime.catalogStore.saved(identity)
   if (saved !== undefined) {
     // saved 可能由**旧版本**写入（那时还没有产品面白名单），启动时会先于
     // live 拉取发布——实测 2026-10-08：升级用户的 saved 里躺着 11 个
@@ -35,7 +35,7 @@ export async function adoptIdentity(
     // saved 展示，也不因读不到客户端文件而抹掉整组）。Start Plan 不走
     // 这条：它的 saved 是 entitlements 派生的名单，语义不同。
     const savedModels = runtime.variant.kind === 'zcode' && !variantIsStartPlan(runtime.variant)
-      ? filterByCodingPlanWhitelist(saved.models, (runtime.client as ZCodeUpstreamClient | undefined)?.codingPlanWhitelist?.())
+      ? filterByCodingPlanWhitelist(saved.models, (runtime.client as ZCodeUpstreamClient).codingPlanWhitelist?.())
       : saved.models
     runtime.catalog.set([...savedModels])
     runtime.catalogSource = 'saved'

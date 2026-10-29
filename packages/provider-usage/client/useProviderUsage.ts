@@ -12,9 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import type { UsageSnapshot } from '../src/types.js'
-import type { SnapshotAnswer } from './fetch-snapshot.js'
-import { fetchSnapshot } from './fetch-snapshot.js'
+import { fetchSnapshot, isQueriedAnswer, type SnapshotAnswer } from './fetch-snapshot.js'
 import { RESOURCE_POLL_INTERVAL_MS, usageResourceAddress } from './resource-provider.js'
 import { isStaleDisplay } from './pill-format.js'
 import { exhaustedResetText, headlineText } from './pill-headline.js'
@@ -120,6 +118,7 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat }: Pro
   // （≤60s+余量）带着宿主强刷后的新缓存值接管，强值不倒退。
   const manualUntilRef = useRef(0)
 
+  // 组件卸载后不再写回异步结果；StrictMode 的 mount→cleanup→mount 需要重新置 true。
   useEffect(() => {
     mounted.current = true
     return () => { mounted.current = false }
@@ -174,12 +173,14 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat }: Pro
 
   const refresh = useCallback(async (signal?: AbortSignal): Promise<void> => {
     if (provider === undefined || provider === '') return
+    // 写回守卫：已卸载 / 已取消 / provider 已切换时，这次请求的结果一律作废。
+    const canApply = (): boolean => mounted.current && signal?.aborted !== true && providerRef.current === provider
     setBusy(true)
     try {
       // 手动刷新要真刷新：force 让宿主绕过缓存读——否则流间隔与宿主 registry
       // TTL 同为 60s，按钮永远拿回上一轮的数。
       const snapshot = await fetchSnapshot(provider, signal, { force: true })
-      if (mounted.current && signal?.aborted !== true && providerRef.current === provider && snapshot !== undefined) {
+      if (canApply() && snapshot !== undefined) {
         answerRef.current = snapshot
         setAnswer(snapshot)
         setStale(false)
@@ -190,15 +191,13 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat }: Pro
       // Keep the last good answer: a transient failure must not blank the
       // number the user is reading. Showing an older success is flagged stale.
       // 最近一次成功可能来自资源流（liveAnswer）而不是手刷，两者都算「旧值」。
-      const liveGood = liveAnswer !== undefined && !('queried' in liveAnswer) && liveAnswer.error === undefined
-        ? liveAnswer
-        : undefined
+      const liveGood = isQueriedAnswer(liveAnswer) && liveAnswer.error === undefined ? liveAnswer : undefined
       const previous = answerRef.current ?? liveGood
       if (previous !== undefined) {
-        if (mounted.current && signal?.aborted !== true && providerRef.current === provider) setStale(true)
+        if (canApply()) setStale(true)
         return
       }
-      if (mounted.current && signal?.aborted !== true && providerRef.current === provider) {
+      if (canApply()) {
         const failed: SnapshotAnswer = { provider, windows: [], fetchedAt: Date.now(), error: error instanceof Error ? error.message : String(error) }
         answerRef.current = failed
         setAnswer(failed)
@@ -228,8 +227,8 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat }: Pro
   // 合成答案：抑制窗内手刷值优先；其余时候流值优先（手刷答案留作流断档时的
   // 兜底，直到下一次 provider 切换清空）。
   const effectiveAnswer = Date.now() < manualUntilRef.current ? answer : (liveAnswer ?? answer)
-  const queried = effectiveAnswer !== undefined && !('queried' in effectiveAnswer)
-  const snapshot = queried ? effectiveAnswer as UsageSnapshot : undefined
+  const queried = isQueriedAnswer(effectiveAnswer)
+  const snapshot = queried ? effectiveAnswer : undefined
   const isDisconnected = state.current === null && lastProviderRef.current !== undefined
   // 资源流失败、手动请求失败（保旧值）、目录重连中（current 为 null）、宿主折叠
   // 旧答案（degraded）均视为「数据可能过期」。

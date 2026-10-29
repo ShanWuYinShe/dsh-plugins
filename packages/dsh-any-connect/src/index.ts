@@ -48,6 +48,7 @@
  *   路径常量、回环守卫、心跳与版本
  * 其它
  * - bin.ts — status/diagnostics CLI
+ * - values.ts — 跨模块共用的 unknown 值守卫与错误文本归一
  *
  * @module dsh-any-connect
  */
@@ -62,6 +63,7 @@ import { CreditLedger } from './credit-ledger.js'
 import { createVariantRuntimeSet } from './runtime.js'
 import { anyConnectDomain, domainCreditLedgerPersistence, domainStateStore } from './state-store.js'
 import { WorkBuddyUpstreamClient } from './upstream.js'
+import { errorMessage } from './values.js'
 import { registerUsageQueriers } from './usage.js'
 
 /** The plugin's configuration schema; the Loader reads it as the `Config` export. */
@@ -99,7 +101,7 @@ export function apply(ctx: Context, config: Config): void {
   const variants = createVariantRuntimeSet({ ctx, client, current })
 
   // Usage readout：注册 seam 与 pill 窗口助手见 usage.ts（本文件不再持有查询器实现）。
-  registerUsageQueriers(ctx, variants.runtimes, client, variants.rateLimits)
+  registerUsageQueriers(ctx, variants.runtimes, variants.rateLimits)
 
   // This plugin ships its own configuration cards: opt out of the host's
   // auto-generated settings page (mirroring upstream `dsh-llm-pi-ai`). The
@@ -129,7 +131,7 @@ export function apply(ctx: Context, config: Config): void {
     })().catch((error: unknown) => {
       ctx.logger?.error?.(
         'dsh-any-connect: state domain unavailable; owned-copy persistence stays on the file fallback:'
-        + ` ${error instanceof Error ? error.message : String(error)}`,
+        + ` ${errorMessage(error)}`,
       )
     })
   })

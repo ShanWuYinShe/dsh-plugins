@@ -1,13 +1,10 @@
 /**
- * provider-shared.ts — 内置 querier 共用的取值助手与 JSON 请求。
- *
- * 2026-10-08 从 521 行的 providers.ts 拆出：每个 provider 一个文件，共享取值助手
- * 单独成模块，providers.ts 只保留内置注册表与 re-export。
+ * provider-shared.ts — 内置 querier 共用的取值助手、JSON 请求与快照组装。
  *
  * @module @chaoset/provider-usage/provider-shared
  */
 
-
+import type { UsageSnapshot, UsageWindow } from './types.js'
 
 /** Read a finite number from either a JSON number or a numeric string. */
 export function num(value: unknown): number | undefined {
@@ -70,4 +67,37 @@ export function joinRoot(root: string, path: string): string {
   const base = trimBase(root)
   if (path.startsWith('/v1/') && base.endsWith('/v1')) return `${base}${path.slice(3)}`
   return `${base}${path}`
+}
+
+/** 快照里由查询器自报、与窗口列表无关的元数据。 */
+interface UsageSnapshotExtras {
+  /** Provider-reported plan or tier name, when disclosed. */
+  plan?: string
+  /**
+   * 查询器为什么答不出可用数据。**只在 windows 为空时写入**：有窗口的答案
+   * 描述的是「额度」，不是「查询失败」——两者是 types 契约里两个不同的陈述。
+   */
+  error?: string
+}
+
+/**
+ * 组装一份查询快照，统一「空 windows + error = 软失败」的口径。
+ *
+ * 每个内置查询器都遵循同一条返回纪律，集中在这里而不是在 8 个文件里各写
+ * 一遍条件展开：`fetchedAt` 取调用时刻；`plan` 有就带上；`error` 只在
+ * 没有可用窗口时出现（有窗口还带 error 会把「余额读数」显示成「查询失败」）。
+ *
+ * @param provider - provider route key the answer belongs to.
+ * @param windows - reported windows, in the provider's own order.
+ * @param extras - optional plan name and the empty-windows failure text.
+ * @returns the snapshot a querier hands back to the registry.
+ */
+export function snapshotOf(provider: string, windows: UsageWindow[], extras: UsageSnapshotExtras = {}): UsageSnapshot {
+  return {
+    provider,
+    windows,
+    fetchedAt: Date.now(),
+    ...extras.plan === undefined ? {} : { plan: extras.plan },
+    ...windows.length === 0 && extras.error !== undefined ? { error: extras.error } : {},
+  }
 }

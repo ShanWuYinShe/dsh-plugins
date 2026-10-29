@@ -18,7 +18,7 @@ import type { WorkBuddyVariant } from './variants.js'
 export { isWsl, windowsPathForWsl }
 
 /** Basename of the plugin-owned credential copy inside the Harness home. */
-export const WORKBUDDY_AUTH_FILENAME = '.workbuddy-auth.json'
+const WORKBUDDY_AUTH_FILENAME = '.workbuddy-auth.json'
 
 /** Env variable that overrides the desktop auth-file location. */
 export const WORKBUDDY_AUTH_FILE_ENV = 'WORKBUDDY_AUTH_FILE'

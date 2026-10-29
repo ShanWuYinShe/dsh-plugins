@@ -21,7 +21,7 @@ export const ERROR_BODY_LIMIT = 4096
  * 不受它约束（流由调用方断开信号与 pi-ai 侧的 idle 超时兜底）；错误体
  * 的读取也在这枚定时器的保护窗口内完成。与各 JSON 端点的超时同值。
  */
-export const CHAT_HEADER_TIMEOUT_MS = 30_000
+const CHAT_HEADER_TIMEOUT_MS = 30_000
 
 /** Insufficient-credit markers, ASCII lowercase plus the original Chinese. */
 const HARD_CREDIT_MARKERS: readonly string[] = [

@@ -1,14 +1,11 @@
 /**
- * provider-openrouter.ts — openrouter 的额度查询器。
- *
- * 2026-10-08 从 521 行的 providers.ts 拆出：每个 provider 一个文件，共享取值助手
- * 单独成模块，providers.ts 只保留内置注册表与 re-export。
+ * provider-openrouter.ts — OpenRouter 的额度查询器。
  *
  * @module @chaoset/provider-usage/provider-openrouter
  */
 
 import type { ProviderUsageQuerier, UsageWindow } from './types.js'
-import { num, rec, getJson, joinRoot, trimBase } from './provider-shared.js'
+import { num, rec, snapshotOf, getJson, joinRoot, trimBase } from './provider-shared.js'
 
 /**
  * OpenRouter's credit balance.
@@ -18,7 +15,7 @@ import { num, rec, getJson, joinRoot, trimBase } from './provider-shared.js'
  * carries one, because a key-scoped limit is what the user configured.
  */
 export const openrouterUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
-  if (apiKey === undefined) return { provider: 'openrouter', windows: [], fetchedAt: Date.now() }
+  if (apiKey === undefined) return snapshotOf('openrouter', [])
   const root = trimBase(baseURL ?? 'https://openrouter.ai/api')
   const headers = { authorization: `Bearer ${apiKey}` }
   const windows: UsageWindow[] = []
@@ -55,10 +52,5 @@ export const openrouterUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, s
     })
   }
 
-  return {
-    provider: 'openrouter',
-    windows,
-    fetchedAt: Date.now(),
-    ...windows.length === 0 ? { error: 'the credits endpoint reported no usable balance' } : {},
-  }
+  return snapshotOf('openrouter', windows, { error: 'the credits endpoint reported no usable balance' })
 }

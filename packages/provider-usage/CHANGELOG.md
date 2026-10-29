@@ -1,3 +1,10 @@
+## 0.2.1-alpha.5 (2026-10-30)
+
+### 重构
+
+* **行为不变的优雅化**（26 文件，+360/−410）：`snapshotOf()` 收敛 8 个 provider 文件 11 处重复的快照组装；`underDeadline()` 消掉 registry 两段约 60 行重复的截止时间逻辑（错误消息原文保留）；线协议单一来源 `ProviderUsageAnswer`（host 响应与 client 解析共用）+ `isQueriedAnswer()` 守卫替代 3 处 `'queried' in` + cast；pill-styles 抽 `BODY_TEXT`/`META_TEXT` 收敛 8 处排版重复。
+* **类型收紧**：删 `ResolverAnswer`/`SnapshotAnswer`/`PillAnswer` 影子类型，改用官方 `ResolvedProvider`/`UsageSnapshot`/`AccountDetails['balance']`；client 非空断言清零、`as any` 清零；删除 `CANONICAL_ALIASES`、4 个 `DEFAULT_*`、`USAGE_RESOURCE_PROTOCOL` 等 9 个未用导出与 10 处过期历史注释。
+
 ## 0.2.1-alpha.4 (2026-10-29)
 
 ### 优化

@@ -7,9 +7,7 @@
  * @module @chaoset/session-archive/client/styles
  */
 
-
-
-export var css = [
+export const css = [
   // sa_root 是 footerActions（display:flex）的直接 flex 项（slot 出口为
   // display:contents 不参与布局）：不设宽度的话 flex 项收缩到内容宽，
   // 徽标的 width:calc(100% + 4px) 只等于内容宽，hover 高亮比「设置」
@@ -123,9 +121,9 @@ export var css = [
   "@media (max-width:560px){.sa_panel{border-radius:12px}.sa_header,.sa_toolbar{padding-left:14px;padding-right:14px}.sa_body{padding:10px 14px 16px}}"
 ].join("");
 
-var tagId = "@chaoset/session-archive/client.css";
+const tagId = "@chaoset/session-archive/client.css";
 if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=\"" + tagId + "\"]") === null) {
-  var tag = document.createElement("style");
+  const tag = document.createElement("style");
   tag.dataset.plugin = "@chaoset/session-archive";
   tag.dataset.pluginCss = tagId;
   tag.textContent = css;

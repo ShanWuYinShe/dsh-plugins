@@ -19,10 +19,15 @@ import { resolveSessionQueryTitles } from './session-query-bridge.js'
 import type { SessionQueryTitles } from './session-query-bridge.js'
 import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import { name } from './plugin-config.js'
+import type { SessionArchiveConfig } from './plugin-config.js'
 import { REAPPEAR_SETTLE_MS, readTitle, delay, limitedConcurrency } from './session-scan.js'
+import type { ArchiveListRow } from './types.js'
 import type { Context } from '@deepseek-ai/cordis'
 
-export function createHostContext(ctx: Context, cfg: Record<string, any>) {
+/** 批量 stat 快照的并发宽度（本地文件元数据读，8 路足够摊薄目录遍历成本）。 */
+const SNAPSHOT_CONCURRENCY = 8
+
+export function createHostContext(ctx: Context, cfg: SessionArchiveConfig) {
   /**
    * sessionQuery 标题批量查询（可选服务，运行时探测）。
    * 探测与契约见 session-query-bridge.ts：命中时返回批量读函数，
@@ -65,7 +70,7 @@ export function createHostContext(ctx: Context, cfg: Record<string, any>) {
   async function snapshotsByIds(ids: readonly string[]): Promise<Map<string, SessionPersistenceSnapshot>> {
     const result = new Map<string, SessionPersistenceSnapshot>();
     if (ids.length === 0) return result;
-    await limitedConcurrency(8, ids.map((id) => async () => {
+    await limitedConcurrency(SNAPSHOT_CONCURRENCY, ids.map((id) => async () => {
       try {
         const snapshot = await persistence.stat(id as SessionId);
         if (snapshot !== undefined) result.set(id, snapshot);
@@ -224,13 +229,6 @@ export function createHostContext(ctx: Context, cfg: Record<string, any>) {
     }
   }
 
-  /** 单个归档会话的展示行。标题读取失败回退 null（面板显示目录名）。
-   * 标题按 mtime 缓存：readSession 会解析整条事件流，而面板关闭态的徽标
-   * 轮询每 5 秒打一次 list——不缓存的话就是"读整本会话只为取一行标题"的
-   * 持续开销。mtime 不变即命中缓存；文件不可定位（宿主未给出 location）
-   * 时跳过缓存直接读，标题仍然可得。折叠用官方 foldSessionTitle。
-   * 缓存有上限（FIFO 淘汰最旧条目）：已删除会话的条目不再被 mtime 命中
-   * 更新，长驻 host 进程下无界累积。 */
   /**
    * 批量读标题（官方标题索引存在时）：O(1)/id，不用 open 整条事件流。
    * 返回 null 表示整单回退直读；Map 缺席的 id 表示该行 rejected，调用方
@@ -264,7 +262,15 @@ export function createHostContext(ctx: Context, cfg: Record<string, any>) {
 
   const TITLE_CACHE_LIMIT = 500;
   const titleCache = new Map<string, { mtimeMs: number; title: string | null }>();
-  async function rowFor(sessionId: SessionId, header: SessionHeader, titles: Map<string, string | null> | null) {
+
+  /** 单个归档会话的展示行。标题读取失败回退 null（面板显示目录名）。
+   * 标题按 mtime 缓存：readTitle 会解析整条事件流，而面板关闭态的徽标
+   * 轮询每 5 秒打一次 list——不缓存的话就是"读整本会话只为取一行标题"的
+   * 持续开销。mtime 不变即命中缓存；文件不可定位（宿主未给出 location）
+   * 时跳过缓存直接读，标题仍然可得。折叠用官方 foldSessionTitle。
+   * 缓存有上限（FIFO 淘汰最旧条目）：已删除会话的条目不再被 mtime 命中
+   * 更新，长驻 host 进程下无界累积。 */
+  async function rowFor(sessionId: SessionId, header: SessionHeader, titles: Map<string, string | null> | null): Promise<ArchiveListRow> {
     const file = await fileInfo(header);
     const located = file.state === 'located' ? file : null;
     let title: string | null = null;

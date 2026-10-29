@@ -19,7 +19,7 @@ import { variantIsStartPlan } from './variant-runtime.js'
 import type { VariantRuntime } from './variant-runtime.js'
 import type { CreditLedgerSummary } from './credit-ledger.js'
 import type { WorkBuddyCredential } from './auth.js'
-import type { WorkBuddyCreditAccount, WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
+import type { WorkBuddyCreditAccount, ZCodeUpstreamClient } from './upstream.js'
 
 /**
  * The slice of @chaoset/provider-usage's registry this plugin calls.
@@ -240,12 +240,10 @@ export function startPlanWindows(accounts: readonly WorkBuddyCreditAccount[]): A
  * member is a TypeScript error, and this package must not import the other's
  * types just to reach an optional neighbour (they install independently).
  *
- * @param client - fallback client for variants that never built their own.
  */
 export function registerUsageQueriers(
   ctx: Context,
   runtimes: readonly VariantRuntime[],
-  client: WorkBuddyUpstreamClient,
   rateLimits?: RateLimitLedger,
 ): void {
   ctx.inject(['providerUsage'], (usageCtx: Context) => {
@@ -255,9 +253,9 @@ export function registerUsageQueriers(
       usageCtx.effect(() => usage.register(
         runtime.variant.id,
         async context => {
-          const credential = await runtime.store.resolve() as WorkBuddyCredential
+          const credential = await runtime.store.resolve()
           if (context.signal?.aborted === true) throw context.signal.reason ?? new Error('aborted')
-          const credits = await (runtime.client ?? client).fetchCredits(credential)
+          const credits = await runtime.client.fetchCredits(credential)
           const isZCode = runtime.variant.kind === 'zcode'
           const isOpenCode = runtime.variant.kind === 'opencode'
           const isStartPlan = variantIsStartPlan(runtime.variant)

@@ -1,14 +1,12 @@
 /**
  * roots.ts — 额外根目录的规范化、分类（reject/filter）与授予集合计算。
  *
- * 2026-10-08 从 545 行的 src/index.ts 拆出：配置、根目录判定、landlock 解析、
- * 网关与 apply 各自成模块，入口只保留 name/inject 与 re-export。
- *
  * @module @chaoset/sandbox-extra-roots/roots
  */
 
 import { homedir } from 'node:os'
 import { join, sep } from 'node:path'
+import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { canonicalPath, writableRoots } from './common.js'
 
 /** 包装状态标记:挂在被包装的底层实例上,保证幂等与跨挂载点共享。 */
@@ -17,9 +15,9 @@ export const STATE = Symbol("sandbox-extra-roots.state");
 /** 取底层实例(sandbox/fs 通常就是 raw,防御性写法)。 */
 export const ORIGINAL = Symbol.for("cordis.original");
 
-/** 以当前环境 canonical 化一个路径(dsh-sandbox 缺失时原样返回)。 */
+/** 官方 @deepseek-ai/dsh-sandbox 的 canonical 化（符号链接按真实目标解析；解析失败返回原拼写）。 */
 export function canon(path: string): string {
-  return typeof canonicalPath === "function" ? canonicalPath(path) : path;
+  return canonicalPath(path);
 }
 
 /** 展开 ~ 前缀为用户主目录（"~"、"~/"、"~\"），其余原样返回。
@@ -71,11 +69,16 @@ function isLexicalAncestor(ancestor: string, path: string): boolean {
   return path.startsWith(prefix);
 }
 
-/** 官方白名单(writableRoots 可能因 dsh-sandbox 加载失败为 undefined;
- * 本函数只在 sandboxAvailable=true 的包装路径被调用,类型上仍做防御)。 */
-function officialWritableRoots(policy: any): string[] {
+/**
+ * 官方白名单在 bwrap/Landlock 分支已授予的根。
+ *
+ * 官方 writableRoots 会对缺失/非目录/符号链接的额外根抛 SandboxInvalidRootError；
+ * 这里宁可按"官方未授予任何根"处理（最多重复插入同一根的授权片段，对
+ * bwrap --bind / landlock --rw 都是幂等无害的），也不让自查异常打断 confine 包装。
+ */
+function officialWritableRoots(policy: SandboxExecutionPolicy): string[] {
   try {
-    const roots = typeof writableRoots === "function" ? writableRoots(policy) : [];
+    const roots = writableRoots(policy);
     return Array.isArray(roots) ? roots : [];
   } catch {
     return [];
@@ -87,7 +90,7 @@ function officialWritableRoots(policy: any): string[] {
  * 去重合并,再减去官方 argv 已授予的官方根——官方参数不动,插入段只补
  * 差额,避免对同一根重复 --bind/--rw(与 Seatbelt 的整表重建语义对齐)。
  */
-export function extraGrantRoots(policy: any, roots: string[]): string[] {
+export function extraGrantRoots(policy: SandboxExecutionPolicy, roots: readonly string[]): string[] {
   const official = officialWritableRoots(policy);
   const officialSet = new Set(official);
   return [...new Set([...official, ...roots])].filter((root) => !officialSet.has(root));

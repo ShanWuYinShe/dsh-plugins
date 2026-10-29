@@ -4,14 +4,16 @@
  * 2026-10-08 从 422 行的 VariantCard.tsx 拆出：探测、刷新、目录等待、领取复制、
  * 展开/折叠等；组件只剩渲染。
  *
+ * 2026-10-29 优雅化：纯派生视图（身份/套餐/卡头摘要/档位）移到
+ * variant-card-view.ts，动作壳（busy/notice/重读 status）合并为一个
+ * runCardAction；本模块只保留状态机与副作用。
+ *
  * @module dsh-any-connect/client/useVariantCard
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchJsonOrThrow } from './fetch-json.js'
 import type {
-  WorkBuddyWebCatalog,
-  WorkBuddyWebModelRow,
   WorkBuddyWebProbeSection,
   WorkBuddyWebStartPlanClaim,
   WorkBuddyWebStatus,
@@ -24,7 +26,7 @@ import {
   type WorkBuddyCardVariant,
   type CardStatus,
 } from './config-types.js'
-import { formatNumber } from './config-format.js'
+import { deriveCardView } from './variant-card-view.js'
 
 /** 探测动作：刷新或模型排除/恢复操作。 */
 type ProbeAction =
@@ -32,6 +34,9 @@ type ProbeAction =
   | { action: 'delete-model'; modelId: string }
   | { action: 'restore-model'; modelId: string }
   | { action: 'restore-models' }
+
+/** useVariantCard 的完整返回值：状态/动作 + 纯派生视图（{@link deriveCardView}）。 */
+export type VariantCardView = ReturnType<typeof useVariantCard>
 
 export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus, applyStatus }: {
   t: WorkBuddyConfigPageInjected['t']
@@ -111,6 +116,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     }
   }, [applyStatus, fetchStatus, t])
 
+  /** 卡片控制端点（探针刷新 / 模型排除 / 恢复）；非 2xx 由 fetchJsonOrThrow 抛。 */
   const control = useCallback(async (action: ProbeAction): Promise<void> => {
     if (probeKey === undefined) throw new Error(t('requestFailed'))
     const response = await fetch(variant.probePath, {
@@ -119,7 +125,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
       credentials: 'same-origin',
       body: JSON.stringify(action),
     })
-    const value: unknown = await fetchJsonOrThrow(response)
+    await fetchJsonOrThrow(response)
   }, [probeKey, t, variant.probePath])
 
   /** 等目录落地：每次重读 status，live 即停、超时即停。首读立即发生，
@@ -136,7 +142,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
       if (!mounted.current) return
       applyStatus(next)
       // signed-out 文档无 catalog 字段：按缺失处理（继续轮询至超时）。
-      const catalog = (next as { catalog?: WorkBuddyWebCatalog }).catalog
+      const catalog = next.status === 'signed-in' ? next.catalog : undefined
       const fetchedAt = catalog?.fetchedAt
       const hasUpdated = previousFetchedAt !== undefined
         ? (fetchedAt !== undefined && fetchedAt > previousFetchedAt)
@@ -146,64 +152,53 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     }
   }, [fetchStatus, applyStatus])
 
+  /**
+   * 卡片动作的统一壳：置 busy / 清旧提示 → 执行控制请求（刷新动作额外等目录
+   * 落地）→ 无论成败都重读一次 status → 清 busy。异常只落 inline notice：
+   * 屏幕上已有数据时，瞬时失败不该把卡片打空。
+   */
+  const runCardAction = useCallback(async (
+    action: ProbeAction,
+    waitCatalog: ((previousFetchedAt?: number) => Promise<void>) | undefined,
+  ): Promise<void> => {
+    setBusy(true)
+    setNotice(undefined)
+    // 刷新动作以当前目录的 fetchedAt 为基线，等一个更新的目录落地。
+    const previousFetchedAt = waitCatalog === undefined ? undefined : status.catalog?.fetchedAt
+    try {
+      await control(action)
+      await waitCatalog?.(previousFetchedAt)
+    } catch (error: unknown) {
+      if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
+    } finally {
+      await refresh()
+      if (mounted.current) setBusy(false)
+    }
+  }, [control, refresh, status.catalog?.fetchedAt, t])
+
   /** The merged refresh button: ask the host to re-pull the catalog first
    * (returns immediately), then poll the status document until the fresh
    * catalog lands or the wait times out. */
-  const refreshWithCatalog = useCallback(async (): Promise<void> => {
-    setBusy(true)
-    setNotice(undefined)
-    const prevFetchedAt = (status as any)?.catalog?.fetchedAt
-    try {
-      await control({ action: 'refresh' })
-      await waitCatalogLive(prevFetchedAt)
-    } catch (error: unknown) {
-      // refresh POST 失败也照常读一次 status：读本身可能仍是成功的。
-      if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
-    } finally {
-      await refresh()
-      if (mounted.current) setBusy(false)
-    }
-  }, [control, refresh, status, t, waitCatalogLive])
+  const refreshWithCatalog = useCallback(
+    (): Promise<void> => runCardAction({ action: 'refresh' }, waitCatalogLive),
+    [runCardAction, waitCatalogLive],
+  )
 
-  const deleteModel = useCallback(async (modelId: string): Promise<void> => {
-    setBusy(true)
-    setNotice(undefined)
-    try {
-      await control({ action: 'delete-model', modelId })
-    } catch (error: unknown) {
-      if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
-    } finally {
-      await refresh()
-      if (mounted.current) setBusy(false)
-    }
-  }, [control, refresh, t])
+  const deleteModel = useCallback(
+    (modelId: string): Promise<void> => runCardAction({ action: 'delete-model', modelId }, undefined),
+    [runCardAction],
+  )
 
   /** 恢复单个隐藏模型（用户主路径：只放回想要的那几个）。 */
-  const restoreModel = useCallback(async (modelId: string): Promise<void> => {
-    setBusy(true)
-    setNotice(undefined)
-    try {
-      await control({ action: 'restore-model', modelId })
-    } catch (error: unknown) {
-      if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
-    } finally {
-      await refresh()
-      if (mounted.current) setBusy(false)
-    }
-  }, [control, refresh, t])
+  const restoreModel = useCallback(
+    (modelId: string): Promise<void> => runCardAction({ action: 'restore-model', modelId }, undefined),
+    [runCardAction],
+  )
 
-  const restoreModels = useCallback(async (): Promise<void> => {
-    setBusy(true)
-    setNotice(undefined)
-    try {
-      await control({ action: 'restore-models' })
-    } catch (error: unknown) {
-      if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
-    } finally {
-      await refresh()
-      if (mounted.current) setBusy(false)
-    }
-  }, [control, refresh, t])
+  const restoreModels = useCallback(
+    (): Promise<void> => runCardAction({ action: 'restore-models' }, undefined),
+    [runCardAction],
+  )
 
   // Stale 目录自动刷新一次：saved/fallback 或上次失败时，后台重拉目录，
   // 用户不用按刷新。once per mount；失败只进 notice，不打扰不循环。
@@ -218,92 +213,8 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     void refreshWithCatalog()
   }, [probeKey, status.catalog, refreshWithCatalog])
 
-  const title = t(variant.titleKey)
-  // 收起态也想知道目录是否健康：目录不 live（拉取失败/回落 saved/内置列表）
-  // 时在卡头摘要追加短标记——细节展开后才看得到，异常必须收着也能看见。
-  // 自动重拉进行中会自愈，标记随之消失。
-  const catalogOffline = !isCatalogLive(status.catalog)
-  const label = status.nickname === undefined
-    ? t('signedInAs', { nickname: '' }).replace(/[:：]\s*$/, '')
-    : t('signedInAs', { nickname: status.nickname })
-
-  // 两个 ZCode 变体是完全独立的连接：coding 走普通通道扣订阅，start 走专属
-  // 通道扣当日有效的专属余额——卡片呈现随变体而定，没有可切换的"模式"。
-  const zcodeSide = variant.id === 'anyconnect-zcode' ? 'coding' : variant.id === 'anyconnect-zcode-sp' ? 'start' : undefined
-  const isZCode = zcodeSide !== undefined
-  const isStartPlanCard = zcodeSide === 'start'
-  const isOpenCode = variant.id === 'anyconnect-opencode'
-  const zcodePlan = isZCode && status.credits?.accounts !== undefined
-    ? (status.credits.accounts.find(a => a.remain > 0) ?? status.credits.accounts[0])
-    : undefined
-  // Start Plan 的额度按模型分池（2026-10-24 实测 "ZCode 1024 Dev Day"：一个活动
-  // 拆成多份 entitlement，每池的 capabilities 绑定各自模型，池子互不通用）。
-  // 卡片必须逐池列出——只渲染"第一个有余额的池"会让其余模型的额度整个不可见，
-  // 用户会以为那些模型根本没有额度。Coding Plan 的订阅额度只是有效性标志，
-  // 维持单池展示。
-  const zcodePools = isStartPlanCard && status.credits?.accounts !== undefined
-    ? status.credits.accounts
-        .filter(account => account.unit === 'tokens' && account.size > 0)
-        .map(account => ({
-          label: account.packageName.replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, ''),
-          remain: account.remain,
-          size: account.size,
-        }))
-    : []
-  // 名称口径：Start Plan 卡报活动名（如 "ZCode Trust Build"），Coding Plan 卡
-  // 报订阅名（如 "GLM Coding Pro"）。都是上游给的真实名字，谁有就用谁。
-  const zcodePlanName = zcodePlan
-    ? (zcodePlan.planName ?? zcodePlan.packageName).replace(/\s*\((?:有效|VALID|EXPIRED|已过期)\)$/i, '')
-    : undefined
-  // 展示状态三态（2026-10-11 修）：有剩余额度=有效；无剩余且仍在有效期内=已用完；
-  // 无剩余且已过到期时刻=已过期。**remain 与到期是两件独立事实**——额度可能在到
-  // 期前就耗尽（本机实测 SP 额度 0/300M、到期在次日 09:00），原来的
-  // `remain > 0 ? 有效 : 已过期` 会把「用完了」误报成「已过期」。
-  const planState: 'active' | 'exhausted' | 'expired' | undefined = zcodePlan === undefined
-    ? undefined
-    : zcodePlan.remain > 0
-      ? 'active'
-      : zcodePlan.expiredAt !== undefined && Date.parse(zcodePlan.expiredAt) <= Date.now()
-        ? 'expired'
-        : 'exhausted'
-  const isPlanActive = planState === 'active'
-  const planStateLabel = planState === undefined
-    ? undefined
-    : t(planState === 'active' ? 'codingPlanActive' : planState === 'expired' ? 'codingPlanExpired' : 'planQuotaExhausted')
-  const displayPlanName = isStartPlanCard ? (zcodePlanName ?? t('startPlanLabel')) : zcodePlanName
-
-  // 卡头摘要：已登录身份 + 当前积分/套餐状态，收起态下也要一眼看到。
-  const headerSummary = [
-    isZCode
-      ? [
-          label,
-          displayPlanName !== undefined
-            ? `${displayPlanName} · ${planStateLabel ?? t('codingPlanActive')}`
-            : (status.credits !== undefined ? t('codingPlanActive') : undefined),
-        ].filter(part => part !== undefined).join(' · ')
-      : isOpenCode
-        ? [label, t('openCodeFreeBadge')].filter(part => part !== undefined).join(' · ')
-        : [
-            label,
-            status.credits !== undefined ? t('creditsTotal', { total: formatNumber(status.credits.total) }) : undefined,
-            // 裂变包每天发新包/旧包到期，「当前积分」每天双向跳动；卡头带上
-            // 「今日已用」，收起态也能一眼读出今天的消耗（台账有样本才显示）。
-            status.credits?.today !== undefined
-              ? t('creditsTodayShort', { used: formatNumber(status.credits.today.consumed) })
-              : undefined,
-          ].filter(part => part !== undefined).join(' · '),
-    ...(catalogOffline ? [t('catalogOfflineShort')] : []),
-  ].filter(part => part !== '').join(' · ')
-
-  /** Efforts shown on one model row: a declared set wins, then a validating
-   * observation (mirrors the adapter's own precedence). Models whose probe
-   * concluded "upstream ignores the parameter" simply show no levels. */
-  const effortsOf = (row: WorkBuddyWebModelRow): readonly string[] | undefined => {
-    if (row.efforts !== undefined && row.efforts.length > 0) return row.efforts
-    const result = probe?.results.find(entry => entry.id === row.id)
-    return result !== undefined && result.validation === 'validating' ? result.efforts : undefined
-  }
-
+  // 纯派生（身份/套餐/卡头摘要/档位）：输入即全部输入，见 variant-card-view.ts。
+  const view = deriveCardView({ t, variant, status, probe })
 
   return {
     variant,
@@ -324,23 +235,12 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     copyPlanId,
     refresh,
     refreshWithCatalog,
-    title,
-    label,
-    isZCode,
-    isStartPlanCard,
-    isOpenCode,
-    zcodePlan,
-    zcodePools,
-    isPlanActive,
-    planStateLabel,
-    displayPlanName,
-    headerSummary,
-    catalogOffline,
-    effortsOf,
     deleteModel,
     restoreModel,
     restoreModels,
     /** 已隐藏模型的完整行（卡片隐藏区逐条渲染）。 */
     excludedModels,
+    /** 纯派生视图（渲染只读它，见 variant-card-view.ts）。 */
+    view,
   }
 }

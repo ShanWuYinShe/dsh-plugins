@@ -11,7 +11,8 @@
 
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelDirectory } from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import type { UseResource } from '@deepseek-ai/dsh-client-resources/client'
+// 仅加载 resources 对 GlobalStandardProps 的 useResource 合并声明。
+import type {} from '@deepseek-ai/dsh-client-resources/client'
 import type { ProviderUsageLocaleKey } from './locales.js'
 
 /** 渲染期解析出的一次会话座位：模型目录快照源 + 惰性加载入口。 */
@@ -38,23 +39,22 @@ export interface ProviderUsagePillInjected {
 }
 
 /**
- * 本组件消费的 standard kit 面。
+ * 本组件额外声明的 standard kit 面。
  *
- * - `sessionId`：session 作用域 standard prop，由 renderer 随会话绑定提供；
- *   本包未把 `@deepseek-ai/dsh-client-ui-session` 列为 devDependency，因此以
- *   unknown 承接(branded SessionId 由宿主定义，这里不复制它的 brand)。
- * - `useResource`：resources 合入 GlobalStandardProps 的全局 hook，类型直接来自
- *   宿主声明。resources 由 dsh.client.inject 保证装配，故为必需项。
+ * `useResource` 不在其中：resources 已把它合入 `GlobalStandardProps`，上面
+ * import 该包的声明即让 `PropsRuntime` 自动带上(重复声明只会让两处定义漂移)。
+ *
+ * `sessionId`：session 作用域 standard prop，由 renderer 随会话绑定提供；本包
+ * 未把 `@deepseek-ai/dsh-client-ui-session` 列为 devDependency，因此以 unknown
+ * 承接(branded SessionId 由宿主定义，这里不复制它的 brand)。
  */
-export interface ProviderUsagePillStandardProps {
+interface ProviderUsagePillSessionProps {
   /** 当前会话 id；无会话绑定时缺席。 */
   sessionId?: unknown
-  /** resources 模型的全局 standard hook。 */
-  useResource: UseResource
 }
 
 /** composer dock 列表 slot 交付的完整 props。 */
 export type ProviderUsagePillProps =
   PropsRuntime<'conversation.composer.dock'>
-  & ProviderUsagePillStandardProps
+  & ProviderUsagePillSessionProps
   & Partial<ProviderUsagePillInjected>

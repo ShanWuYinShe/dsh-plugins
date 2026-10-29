@@ -13,6 +13,7 @@ import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { WorkBuddyCredentialStore, workbuddyOwnAuthPath, WORKBUDDY_AUTH_FILE_ENV } from './auth.js'
 import { openStandaloneStateStore } from './state-store.js'
+import { errorMessage } from './values.js'
 import type { WorkBuddyCreditAccount } from './upstream.js'
 import { FALLBACK_OPENCODE_MODELS, FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS } from './catalog.js'
 import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
@@ -33,7 +34,7 @@ const JSON_SCHEMA_VERSION = 1
 
 /** Remove token-like strings from an unexpected diagnostic message. */
 function safeMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = errorMessage(error)
   return message
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted token]')
     .replace(/(\b(?:code|token|refresh_token|access_token)=)[^&\s]+/giu, '$1[redacted]')
@@ -158,7 +159,7 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
       `Desktop auth file: ${report.desktopAuthFile.present ? 'present' : 'missing'} (${report.desktopAuthFile.path})`,
       `Desktop credential format: ${report.desktopAuthFile.format}`,
       `At-rest key helper: ${report.atRestHelper}`,
-      `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : heartbeat !== undefined ? 'stale heartbeat (process exited)' : 'not started'}`,
+      `Host bundle: ${hostAlive && heartbeat !== undefined ? `running (pid ${heartbeat.pid})` : heartbeat !== undefined ? 'stale heartbeat (process exited)' : 'not started'}`,
       `Sign-in state: ${report.signIn}`,
       ...status.reason === undefined ? [] : [`Sign-in reason: ${status.reason}`],
       `Static fallback models: ${report.fallbackModels}`,
@@ -287,7 +288,7 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
       `Today: used ${creditsToday.today.consumed}, granted +${creditsToday.today.granted}, peak ${creditsToday.today.peak}`
         + ` (${creditsToday.today.samples} samples, estimated)`,
     ]),
-    `Host bundle: ${hostAlive ? `running (pid ${heartbeat!.pid})` : hostState === 'stale' ? 'stale heartbeat (DSH process exited)' : 'not started in this profile'}`,
+    `Host bundle: ${hostAlive && heartbeat !== undefined ? `running (pid ${heartbeat.pid})` : hostState === 'stale' ? 'stale heartbeat (DSH process exited)' : 'not started in this profile'}`,
     'Client card: load failures are logged to the browser console only; the host provider is unaffected.',
     '',
   ].join('\n'))

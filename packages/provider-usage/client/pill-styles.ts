@@ -1,12 +1,15 @@
 /**
- * pill-styles.ts — 样式表与 data-plugin-css 去重注入
+ * pill-styles.ts — 注入的样式表与组件共用的样式对象。
  *
- * 2026-10-08 从 474 行的 ProviderUsagePill.tsx 拆出。
- *
- * @module provider-usage/样式表与 data-plugin-css 去重注入
+ * @module provider-usage/pill-styles
  */
 
 import type { CSSProperties } from 'react'
+
+/** 折叠态主读数/正文的排版基线。 */
+const BODY_TEXT = { fontSize: 12, lineHeight: '18px' } as const
+/** 次要说明文字（窗口元信息、限流统计）的排版基线。 */
+const META_TEXT = { fontSize: 11, lineHeight: '16px' } as const
 
 const PU_STYLE_ID = '@chaoset/provider-usage/pill.css'
 if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css="${PU_STYLE_ID}"]`) === null) {
@@ -91,8 +94,7 @@ export const rootStyle: CSSProperties = {
   alignItems: 'center',
   gap: 6,
   minWidth: 0,
-  fontSize: 12,
-  lineHeight: '18px',
+  ...BODY_TEXT,
   color: 'var(--dsw-alias-label-tertiary)',
 }
 export const pillStyle: CSSProperties = {
@@ -106,8 +108,7 @@ export const pillStyle: CSSProperties = {
   background: 'transparent',
   color: 'inherit',
   font: 'inherit',
-  fontSize: 12,
-  lineHeight: '18px',
+  ...BODY_TEXT,
   cursor: 'pointer',
 }
 export const labelStyle: CSSProperties = {
@@ -160,10 +161,10 @@ export const refreshButtonStyle: CSSProperties = {
 }
 export const panelTitleStyle: CSSProperties = { margin: '0 0 8px', fontSize: 13, fontWeight: 600, lineHeight: '20px' }
 export const windowRowStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 0' }
-export const windowHeadStyle: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, fontSize: 12, lineHeight: '18px' }
-export const windowMetaStyle: CSSProperties = { fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)' }
+export const windowHeadStyle: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, ...BODY_TEXT }
+export const windowMetaStyle: CSSProperties = { ...META_TEXT, color: 'var(--dsw-alias-label-tertiary)' }
 export const trackStyle: CSSProperties = { height: 6, overflow: 'hidden', borderRadius: 999, background: 'var(--dsw-alias-bg-layer-2)' }
-export const noteStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
+export const noteStyle: CSSProperties = { margin: 0, ...BODY_TEXT, color: 'var(--dsw-alias-label-tertiary)' }
 export const errorStyle: CSSProperties = { ...noteStyle, color: 'var(--dsw-alias-state-error-primary)' }
 
 /**
@@ -184,21 +185,18 @@ export const rateLimitBoxStyle: CSSProperties = {
 }
 export const rateLimitTitleStyle: CSSProperties = {
   margin: 0,
-  fontSize: 12,
+  ...BODY_TEXT,
   fontWeight: 600,
-  lineHeight: '18px',
   color: 'var(--dsw-alias-state-warn-primary, #faad14)',
 }
 export const rateLimitLineStyle: CSSProperties = {
   margin: '2px 0 0',
-  fontSize: 12,
-  lineHeight: '18px',
+  ...BODY_TEXT,
   color: 'var(--dsw-alias-label-primary)',
 }
 export const rateLimitMetaStyle: CSSProperties = {
   margin: '2px 0 0',
-  fontSize: 11,
-  lineHeight: '16px',
+  ...META_TEXT,
   color: 'var(--dsw-alias-label-tertiary)',
 }
 

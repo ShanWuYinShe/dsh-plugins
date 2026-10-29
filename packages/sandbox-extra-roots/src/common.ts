@@ -20,6 +20,7 @@ import type { BigIntStats } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { dirname, sep } from 'node:path';
 import { canonicalPath, writableRoots } from '@deepseek-ai/dsh-sandbox';
+import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox';
 
 /** 官方 @deepseek-ai/dsh-sandbox 的路径 canonical 化（同一契约，直接转发给测试与包装层）。 */
 export { canonicalPath, writableRoots };
@@ -44,7 +45,7 @@ function sbplString(path: string): string {
  * @param extraRoots - 已规范化的额外可写根目录列表。
  * @returns sandbox-exec 的 profile 参数。
  */
-export function seatbeltProfileArgs(policy: { mode: string; workspaceRoot?: string }, extraRoots: string[]): string[] {
+export function seatbeltProfileArgs(policy: SandboxExecutionPolicy, extraRoots: string[]): string[] {
   const forms = [
     "(version 1)",
     "(allow default)",
@@ -52,10 +53,7 @@ export function seatbeltProfileArgs(policy: { mode: string; workspaceRoot?: stri
     `(allow file-write* (literal ${sbplString("/dev/null")}))`
   ];
   if (policy.mode === "workspace-write") {
-    const roots = [...new Set([
-      ...writableRoots(policy as never),
-      ...extraRoots
-    ])];
+    const roots = [...new Set([...writableRoots(policy), ...extraRoots])];
     if (roots.length > 0) {
       forms.push(`(allow file-write* ${roots.map((root) => `(subpath ${sbplString(root)})`).join(" ")})`);
     }

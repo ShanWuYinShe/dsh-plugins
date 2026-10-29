@@ -1,3 +1,11 @@
+## 0.4.28-alpha.6 (2026-10-30)
+
+### 重构
+
+* **行为不变的优雅化**（30 个既有文件 + 4 个新文件）：`runtime.ts` 三条变体装配分支合并为一条（457→402 行），删除 `probeService` 假类型骗局字段；新增 `src/values.ts` 统一 `isObject`/`errorMessage` 两个口径（消除 8 处逐字重复与 2 份 isObject 副本）；client 卡片 4 个动作处理器合并为 `runCardAction`（`useVariantCard` 346→246 行），纯派生视图抽到 `variant-card-view.ts`；`VariantCard.tsx` 380→76 行，拆出 `VariantCardQuota.tsx`/`VariantCardModels.tsx`（DOM 顺序不变）。
+* **删死代码与收回导出**：删除 5 个真死导出（`ZCODE_SETTINGS_NS` 等），17 个仅模块内使用的值导出收回为模块私有（类型导出保留）；`VariantRuntime` 的 client/credentialStore/catalogStore/filterStore 改为必需字段，随之删掉 6 处 `as unknown as` 断言链与非空断言兜底。
+* **类型收紧**：`as any` 2→0、`as unknown as` 8→1、非空断言 8→1（`RuntimeStore` 签名按根因收紧）。
+
 ## 0.4.28-alpha.5 (2026-10-29)
 
 ### 修复

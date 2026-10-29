@@ -10,6 +10,7 @@
 import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { regionOf } from './upstream.js'
+import { errorMessage } from './values.js'
 import type { WorkBuddyVariant } from './variants.js'
 import {
   atRestKeyProviderFor,
@@ -231,7 +232,7 @@ export class WorkBuddyCredentialStore {
         : reasonCodeOf(error)
       return {
         state: 'signed-out',
-        reason: error instanceof Error ? error.message : String(error),
+        reason: errorMessage(error),
         ...reasonCode === undefined ? {} : { reasonCode },
       }
     }

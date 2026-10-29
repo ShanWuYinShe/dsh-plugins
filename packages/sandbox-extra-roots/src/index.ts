@@ -7,7 +7,8 @@
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * - index.ts — 插件入口：name/inject 与 re-export
- * - apply.ts — 插件主体：sandbox/fs 包装装配（runner 改写见 confine-runners）
+ * - apply.ts — 插件主体：配置解析、包装装配与 Remote 服务注册
+ * - wrap.ts — sandbox/fs 包装安装与共享挂载生命周期（引用计数/还原）
  * - confine-runners.ts — confine 按 runner 改写 + 运行期危险根复查（纯函数）
  * - roots-filter.ts config-validate.ts — 真实存在目录过滤（带 TTL 缓存）与配置校验/规范化
  * - roots.ts — 额外根目录规范化、分类与授予集合
@@ -16,7 +17,6 @@
  * - landlock-exec.ts — 官方 landlock-run 启动器解析缓存（仅 Linux）
  * - types.ts — Remote 服务面的公共边界类型（typert 生成器引用）
  * - config-store.ts remote.ts — 官方 configEditor 持久化适配与 Remote 服务
- *   （config-store 与 session-archive 逐字一致，根 test 锁一致）
  *
  * typert 工件（./typert Host 面与 ./remote Client 面）由官方
  * @deepseek-ai/dsh-typert-generator 从 src/remote.ts 的装饰器与方法类型生成，

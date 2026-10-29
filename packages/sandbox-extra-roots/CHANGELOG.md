@@ -1,3 +1,9 @@
+## 0.4.28-alpha.4 (2026-10-30)
+
+### 重构
+
+* **行为不变的优雅化**（29 文件 + 新模块 `wrap.ts`，净 −72 行，`any` 词元 225→157）：`apply.ts` 278→96 行，两个宿主服务的包装安装与共享挂载生命周期抽到 `wrap.ts`（消除 sandbox/fs 两套逐字重复的挂载还原逻辑）；远程配置校验收敛到 `config-validate` 单点；session 侧 `statOrNull`/`warn` 助手去重、补 Remote 边界返回类型；官方 `SandboxExecutionPolicy` 类型贯通 seatbelt/confine-runners/roots，删 `as never` 等断言 hack；配置全链 `SessionArchiveConfig` 类型化；客户端入口与配置卡 8 处 any 类型化；删死代码 `validateConfig` 与错位/过期注释。
+
 ## 0.4.28-alpha.3 (2026-10-29)
 
 ### 重构

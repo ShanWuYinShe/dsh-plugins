@@ -19,7 +19,7 @@ import { CACHE_DIRNAME } from './catalog-store.js'
 import { ANYCONNECT_VERSION } from './version.js'
 
 /** Basename of the host heartbeat file inside the Harness home. */
-export const WORKBUDDY_HOST_HEARTBEAT_FILENAME = '.workbuddy-host-heartbeat.json'
+const WORKBUDDY_HOST_HEARTBEAT_FILENAME = '.workbuddy-host-heartbeat.json'
 
 /** Current on-disk heartbeat format; readers reject others. */
 const HEARTBEAT_FORMAT_VERSION = 1

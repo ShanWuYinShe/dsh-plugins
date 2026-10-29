@@ -489,6 +489,101 @@ tsc 产出的 `lib/bin.js` 会 `ERR_MODULE_NOT_FOUND`。因此构建的第 4 阶
   空目录 `--help`/`status --json` 实测）；**只跑 `tsc` 会把 `lib/bin.js` 覆盖回裸产物**，
   该测试会按设计红灯——完整 `bun run build` 后才是发布态。
 
+## 插件索引与静态 registry
+
+DSH 0.2.2 的「自定义插件索引」（实验性 bundle，`@deepseek-ai/dsh-experimental-plugin-market-bundle`）
+让用户在插件页的**发现**标签里浏览索引并一键安装/查看版本。索引的安装源只有 npm registry
+与 git 仓库两种；本仓的发布产物是 GitHub Release tarball，且 npmjs 发布已放弃（commit
+926cbb8：Trusted Publishing 拒绝 + passkey 2FA），因此本仓自建一个**静态 npm 协议 registry**，
+与索引一起发布在仓库 `market` 分支，通过 raw.githubusercontent 提供。
+
+### 站点布局（`market` 分支，CI 生成，禁止手工编辑）
+
+```text
+index.json                 索引源 URL：.../raw.githubusercontent.com/<repo>/market/index.json
+README.md                  生成器写入的「勿手工编辑」说明
+icons/<slug>.svg           索引里相对引用的插件图标（raw 返回 image/svg+xml）
+npm/@chaoset/<pkg>         静态 registry 的 packument；pnpm 以 %2F 编码请求 scoped 名
+```
+
+索引里每个版本的 `source` 是 `{ "type": "npm", "registry": ".../market/npm/" }`；
+packument 的 `dist.tarball` 直接指向对应 GitHub Release 资产（标准 npm tarball），
+`dist.integrity`（sha512 SRI）与 `dist.shasum`（sha1）由生成器下载资产后计算。
+用户安装/更新仍走 DSH 自带的 pnpm 与 bundle 对账，不经过 npmjs。
+
+### 收录规则
+
+生成器只从 **GitHub Releases** 收集，不遍历 git tag：
+
+- tag 形如 `<包目录>-v<精确 SemVer>`，资产为 `chaoset-<包目录>-<版本>.tgz`；
+- 资产内 `package.json` 必须同时具备 `dsh.bundle` 与 `engines.dsh`，且包名/版本与 tag 一致
+  ——这天然只收录当前宿主适配线的产物，老版本（没有 `engines.dsh`）自动排除；
+- `publishTimestamp` 取 Release `published_at`；同一版本重复出现时取发布时间较新的那条。
+- **静态 registry 的 packument 不声明 `dependencies`/`optionalDependencies`/`peerDependencies`**：
+  DSH 安装索引版本时执行 `pnpm add <spec> --registry=<静态 registry>`，`--registry` 作用于整条
+  命令；若 packument 声明了宿主依赖（`zod`、`@deepseek-ai/node-addon-system` 等），pnpm 会
+  去静态 registry 解析它们并 404。这些依赖由宿主 profile runner 的 runtime resolution 从宿主
+  安装闭包补齐（官方外部插件机制），所以用索引安装的插件依赖来自宿主，而不是 profile 的
+  `node_modules`——与直接装 tarball（依赖从常规 registry 安装）在“依赖落地位置”上不同，但插件
+  运行行为一致。`check` 会拒绝带依赖段的 packument。
+
+新增发布包必须同时补 `scripts/lib/plugin-market-core.mjs` 的 `PACKAGE_DISPLAY`
+（标题/描述/分类/图标/排序），否则 `bun run market:build` 直接报错，不会静默漏收录。
+
+### 生成与校验
+
+```bash
+bun run market:plan    # 查 Releases → 输出收录/排除清单（JSON 到 stdout，日志到 stderr）
+bun run market:build   # 生成站点到 .workwork/plugin-market-site（缓存 .workwork/plugin-market-cache）
+bun run market:check   # 离线校验站点（官方 parseMarketIndex + 索引/registry 交叉一致 + 规范序列化）
+```
+
+等价 CLI：`node scripts/plugin-market.mjs <plan|build|check>`；`build/check` 需要 `--out`，
+并支持 `--repo`、`--cache`、`--base-url`、`--registry-url`、`--concurrency`；`build --previous <dir>`
+复用既有站点里历史版本的摘要与元数据、只下载新增版本的 tarball（CI 增量生成用）。
+生成器只下载并读取 tarball 内 `package.json`，从不安装或执行包代码；输出确定性——同一批
+Releases 重复 build 逐字节相同，`check` 输出的 `digest` 可直接对比。缓存与站点目录都在
+gitignore 的 `.workwork/` 下。
+
+`check` 的判据：文件集合恰为上述布局；JSON 为规范序列化（手改会被发现，README 内容必须与
+生成器内置一致）；官方 `parseMarketIndex` 接受；每个版本的 registry 常量、版本集合、
+`engines.dsh`、`publishTimestamp`、`dist.integrity/shasum` 形态与 `dist.tarball`
+（精确等于该版本的 Release 资产 URL）都与索引一致；图标存在且是 SVG。
+
+本地端到端（配合任意静态服务器；pnpm 请求 scoped 名时用 `%2F`，服务器需 decode）：
+
+```bash
+node scripts/plugin-market.mjs build --out /tmp/market-site --registry-url http://127.0.0.1:PORT/npm/
+```
+
+### CI 发布流程
+
+`publish.yml` 在「Pack and publish」之后自动：
+
+1. 用 `actions/cache` 缓存 `.workwork/plugin-market-cache`；
+2. `git fetch --depth=1 origin market` 并用 `git archive` 取出既有站点 → `build --previous`；
+3. `check`；
+4. 用 `git` 底层命令（临时 index + `write-tree`/`commit-tree`）构造只含站点内容的提交并
+   `git push origin <commit>:refs/heads/market`——不切工作区、不动 main/alpha；站点无变化时
+   跳过（幂等）。commit message：`市场: 重新生成插件索引与静态 registry（<tag>）`。
+
+`test.yml` 与 `dsh-follow.yml` 只监听 `main`/`alpha`，`publish.yml` 只监听 tag，因此推送
+`market` 分支不会触发任何其它流水。**回填/修复**：手动触发 publish workflow
+（`workflow_dispatch`）填一个已发布的 tag——发布步骤因已归档跳过，市场步骤照常重新生成。
+
+### 更新链路的真实边界（DSH 0.2.2 行为）
+
+- **安装**：发现页选版本 → `pluginManager.installBundle` → pnpm add 走索引里的 registry，可用。
+- **更新（同一进程内）**：安装成功后 plugin-manager 把 registry 记在内存，同一会话的
+  「已安装」页版本检查/更新沿用该 registry，可用。
+- **更新（重启后）**：内存态丢失，「已安装」页回落到 profile 配置的 registry（npmjs/
+  npmmirror），查不到本仓新版本——这是 DSH 对非 npm 源的设计限制。发现页的更新标记仍会显示
+  （基于索引里的推荐版本），重启后请用
+  `dsh plugin --profile web add @chaoset/<pkg>@<版本> --registry=<registry URL>`，
+  或继续用 Release tarball URL。
+- **禁止**把自建 registry 写入用户 profile 的 pnpm 配置：那会劫持该 profile 的全局 registry，
+  影响其它插件安装；索引里的 `source.registry` 只对单次安装生效。
+
 ## 手动兜底
 
 > main 的 `publish.yml` 已是迁移后的 GitHub Release 流水（`bun pm pack` +

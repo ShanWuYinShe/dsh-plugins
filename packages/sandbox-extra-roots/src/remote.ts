@@ -59,9 +59,7 @@ export class PluginConfigGateway extends TypertRemoteService {
    */
   @Remote('set')
   async set(partial: SandboxExtraRootsSetRequest): Promise<SandboxExtraRootsSetResult> {
-    if (partial === null || typeof partial !== 'object' || Array.isArray(partial)) {
-      throw new TypeError('set expects a plain config object');
-    }
+    // 形状与取值校验统一在 config-validate（非对象/非数组/相对路径/危险根都在这里拒绝）。
     validateSandboxConfig(partial);
     const persist = resolveConfigPersist(this.pluginCtx);
     if (persist === undefined) {

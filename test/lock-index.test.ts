@@ -21,6 +21,7 @@ const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const UNIT_TESTS: Readonly<Record<string, string>> = {
   "dep-collect.test.ts": "依赖收集纯逻辑的单测，不扫全仓",
   "dsh-deps.test.ts": "dsh 基线提取纯逻辑的单测，不扫全仓",
+  "plugin-market.test.ts": "插件市场生成器的离线单测（fixture 驱动、含 check 负例），不扫全仓",
   "publish-gate.test.ts": "发布门禁命令行契约的集成测试，不扫全仓",
   "scripts-cli.test.ts": "其余脚本命令行契约的集成测试，不扫全仓",
   "version-checks.test.ts": "semver/CHANGELOG 纯逻辑的单测，不扫全仓",

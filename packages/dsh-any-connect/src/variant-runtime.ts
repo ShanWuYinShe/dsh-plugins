@@ -19,7 +19,7 @@ import type { WorkBuddyCatalog, WorkBuddyModelInfo } from './catalog.js'
 import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
 import { AI_VARIANT, CN_VARIANT, OPENCODE_VARIANT, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
-import type { WorkBuddyAuthStatus, WorkBuddyCredentialStore } from './auth.js'
+import type { WorkBuddyAuthStatus, WorkBuddyCredential, WorkBuddyCredentialStore } from './auth.js'
 import type { CreditLedger } from './credit-ledger.js'
 import type { WorkBuddyCatalogStore } from './catalog-store.js'
 import type { WorkBuddyProbeService } from './probe-service.js'
@@ -37,8 +37,10 @@ import type { ModelFilterStore } from './model-filter-store.js'
  * look inside.
  */
 interface RuntimeStore {
-  current(): Promise<unknown>
-  resolve(): Promise<unknown>
+  /** 当前登录态；未登录为 undefined。只读本地文件，不刷新 token。 */
+  current(): Promise<WorkBuddyCredential | undefined>
+  /** 已登录凭据；必要时按需刷新 token（未登录由实现抛错）。 */
+  resolve(): Promise<WorkBuddyCredential>
   status(): Promise<WorkBuddyAuthStatus>
   logout(): Promise<void>
 }
@@ -72,13 +74,14 @@ export interface VariantRuntime {
    * 初始值无关紧要：第一轮 refresh 一定经过一次 `publishCatalog`。
    */
   publishedCatalog: string
-  /** WorkBuddy-only parts: live catalog lifecycle, refresh, probe. */
-  client?: WorkBuddyUpstreamClient | ZCodeUpstreamClient | OpenCodeUpstreamClient
-  credentialStore?: WorkBuddyCredentialStore
-  catalogStore?: WorkBuddyCatalogStore
+  /** 该变体的上游客户端（WorkBuddy 线是两变体共享的实例）。 */
+  client: WorkBuddyUpstreamClient | ZCodeUpstreamClient | OpenCodeUpstreamClient
+  credentialStore: WorkBuddyCredentialStore
+  catalogStore: WorkBuddyCatalogStore
+  /** WorkBuddy-only parts：探针记录与档位检测服务。 */
   probeStore?: WorkBuddyProbeStore
   probeService?: WorkBuddyProbeService
-  filterStore?: ModelFilterStore
+  filterStore: ModelFilterStore
   /**
    * 今日消耗台账（credit-ledger.ts）：宿主状态域就绪后由 setLedger 后补注入。
    * 只有积分制变体（kind 'workbuddy'）消费它；缺席（存储域不可用/注入前窗口/域

@@ -45,6 +45,23 @@
 
 ## 安装
 
+### 方式一（推荐）：插件索引
+
+启用 DSH 的「自定义插件索引」实验性 bundle 后，在**发现 → 添加索引源**填入：
+
+```text
+https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
+```
+
+即可在发现页一键安装本插件、查看与安装任意历史版本（索引与静态 registry 由 CI 从
+GitHub Releases 生成，发布在仓库 `market` 分支）。重启 DSH 后更新到指定版本
+（DSH 对自建 registry 的自动更新检查只在安装会话内生效）：
+
+```bash
+dsh plugin --profile web add @chaoset/dsh-any-connect@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
+```
+
+### 方式二：tarball URL（手动）
 > 适配的 DSH 版本见本包 `package.json` 的 `engines.dsh` 字段；仓库的 `dsh-v*` git tag 是各次稳定版适配的归档点。
 
 前置条件：若使用桌面 Agent 通道，需在本机安装并登录对应桌面 App（插件自动复用 App 的登录状态，账号切换自动跟随）。使用 OpenCode Free 渠道无需任何前置账号配置。

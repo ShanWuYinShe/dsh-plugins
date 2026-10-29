@@ -15,11 +15,8 @@ import { normalizeProviderKey } from './resolve.js'
 import type { ProviderUsageRegistry } from './registry.js'
 import type { UsageSnapshot } from './types.js'
 
-/** snapshot 实际形状:registry 把注册期 displayName 回填进答案(route.test.ts:47 同款)。 */
-type SnapshotAnswer = UsageSnapshot & { displayName?: string }
-
-/** 一行额度文本:displayName(缺省回 provider 键)+ 逐窗口 "label remain unit"。 */
-export function formatUsageLine(snapshot: SnapshotAnswer): string {
+/** 一行额度文本:displayName(registry 把注册期 displayName 回填进答案，缺省回 provider 键)+ 逐窗口 "label remain unit"。 */
+export function formatUsageLine(snapshot: UsageSnapshot): string {
   const name = snapshot.displayName ?? snapshot.provider
   if (snapshot.error !== undefined) return `${name}: error — ${snapshot.error}`
   if (snapshot.windows.length === 0) return `${name}: the provider reported no usable balance`
@@ -54,7 +51,7 @@ export function usageCommand(registry: ProviderUsageRegistry): CommandDefinition
       const lines: string[] = []
       for (const provider of providers) {
         const snapshot = await registry.snapshot(provider, { force })
-        lines.push(snapshot === undefined ? `${provider}: (no querier resolved)` : formatUsageLine(snapshot as SnapshotAnswer))
+        lines.push(snapshot === undefined ? `${provider}: (no querier resolved)` : formatUsageLine(snapshot))
       }
       return { kind: 'success', text: formatUsageReport(lines) }
     },
@@ -66,7 +63,7 @@ export function usageCommand(registry: ProviderUsageRegistry): CommandDefinition
  * pill 不受影响(index.ts 对 webServer 的同款姿态)。
  */
 export function registerUsageCommand(ctx: Context, registry: ProviderUsageRegistry): void {
-  ctx.inject(['commands'], (commandsCtx: any) => {
+  ctx.inject(['commands'], commandsCtx => {
     commandsCtx.effect(() => commandsCtx.commands.register(usageCommand(registry)), 'provider-usage: /usage command')
   })
 }

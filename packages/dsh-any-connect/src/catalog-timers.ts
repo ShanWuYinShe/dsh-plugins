@@ -63,9 +63,7 @@ const CATALOG_REFRESH_INTERVAL_MS = 60 * 60_000
       void (async () => {
         try {
           const signedIn = await runtime.store.current()
-          const identity = signedIn === undefined
-            ? undefined
-            : credentialIdentity(signedIn as unknown as Parameters<typeof credentialIdentity>[0])
+          const identity = signedIn === undefined ? undefined : credentialIdentity(signedIn)
           const shouldRefresh = identity !== runtime.lastIdentity
           if (shouldRefresh && !isStopped()) {
             refreshCatalog(runtime, 'identity sweep')

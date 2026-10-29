@@ -123,24 +123,49 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 
 ## 安装与使用
 
-推荐使用 DSH 自带的 `dsh plugin` 命令安装：它会自动调用 pnpm 安装依赖，将包加入 `dsh.profile.bundles`，并由 DSH 应用包内自带的 `cordis.patch.yml` 完成插件注册。
+本仓库通过 **GitHub Releases 分发**（Release 资产是标准 npm tarball），并额外提供 DSH 官方的「自定义插件索引」：索引与静态 npm registry 由 CI 从每个 Release 生成，发布在仓库 `market` 分支。下面两种方式任选，**推荐方式一**。
 
-本仓库通过 **GitHub Releases 分发**。Release 资产为标准 npm tarball（命名规则：`chaoset-<包名>-<版本>.tgz`，tag 名 `<包名>-v<版本>`），公开仓库直接安装对应 URL 即可：
+### 方式一：插件索引（推荐，发现页一键安装）
+
+1. 打开 DSH → **插件** → **实验性插件**，打开 **自定义插件索引**（Custom plugin indexes）；插件页会出现**发现**标签页。
+2. **发现** → **添加索引源**，填入：
+
+   ```text
+   https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
+   ```
+
+3. 在**发现**页浏览本仓四个插件并点**安装**（默认选与当前 DSH 兼容的最高版本）；进入插件页的**版本**列表可以安装任意历史版本。
+4. **更新**：DSH 对自建 registry 的自动更新检查只在安装会话内生效（重启后「已安装」页查不到自建 registry 的新版本，这是 DSH 当前的设计限制）——
+   - 安装后**同一会话内**：「已安装」页可直接点**更新**；
+   - **重启 DSH 后**：用 CLI 把插件更新到指定版本（`<版本>` 见「发现」页或 Releases 页）：
+
+     ```bash
+     dsh plugin --profile web add @chaoset/dsh-any-connect@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
+     ```
+
+     provider-usage / sandbox-extra-roots / session-archive 把包名替换成 `@chaoset/<包名>` 即可。
+5. 卸载：`dsh plugin --profile web remove @chaoset/<包名>`。
+
+索引只提供元数据与安装来源（npm 包名 + 静态 registry），安装/更新仍走 DSH 自带的 pnpm 安装与 bundle 对账流程；索引收录的每个版本都对应本仓的一个 GitHub Release 资产。用索引安装时，插件的宿主运行时依赖由宿主 profile runner 的 runtime resolution 提供（不写入 profile 的 `node_modules`）；需要把依赖装进 profile 时请用下面的 tarball 方式。
+
+### 方式二：tarball URL（手动）
+
+Release 资产命名规则为 `chaoset-<包目录>-<版本>.tgz`，tag 名 `<包目录>-v<版本>`，可直接安装对应 URL：
 
 ```bash
-# 查看 Releases 列表获取最新版本：https://github.com/ShanWuYinShe/dsh-plugins/releases
+# 版本以 Releases 页为准：https://github.com/ShanWuYinShe/dsh-plugins/releases
 
 # 1. 安装 @chaoset/dsh-any-connect（模型接入）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v0.4.27/chaoset-dsh-any-connect-0.4.27.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v<版本>/chaoset-dsh-any-connect-<版本>.tgz
 
 # 2. 安装 @chaoset/provider-usage（底栏额度显示）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v0.2.0/chaoset-provider-usage-0.2.0.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v<版本>/chaoset-provider-usage-<版本>.tgz
 
 # 3. 安装 @chaoset/sandbox-extra-roots（沙盒额外目录）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/sandbox-extra-roots-v0.4.27/chaoset-sandbox-extra-roots-0.4.27.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/sandbox-extra-roots-v<版本>/chaoset-sandbox-extra-roots-<版本>.tgz
 
 # 4. 安装 @chaoset/session-archive（归档会话管理）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v0.3.31/chaoset-session-archive-0.3.31.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v<版本>/chaoset-session-archive-<版本>.tgz
 
 # 从本地源码安装（开发调试时使用绝对路径）
 dsh plugin --profile web add /absolute/path/to/dsh-plugins/packages/dsh-any-connect
@@ -176,7 +201,7 @@ dsh plugin --profile web remove @chaoset/session-archive
 
 ### 给 AI Agent
 
-若由 AI Agent 代为在环境中安装，请直接执行 `dsh plugin ...` 命令，**严禁手动编辑 `cordis.patch.yml`**：
+若由 AI Agent 代为在环境中安装：目标环境已启用「自定义插件索引」时，优先引导用户在**发现 → 添加索引源**填入上面的索引 URL（见「方式一」），再在发现页安装；用命令行安装或指定版本更新时执行 `dsh plugin ...` 命令，**严禁手动编辑 `cordis.patch.yml`**：
 1. 确认 `dsh` 与 `pnpm` 处于 PATH 中；
 2. 确定目标 profile（默认为 `web`）；
 3. 执行 `dsh plugin --profile web add <tarball URL>`；

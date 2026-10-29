@@ -103,7 +103,7 @@ export async function installedAppVersion(): Promise<{ version: string; bundle: 
 }
 
 /** Saved-version file path under the Harness home. */
-export function appVersionPath(): string {
+function appVersionPath(): string {
   // 2026-10-11 起进宿主官方 cache 目录（见 catalog-store 的同名改动）。
   return dshCachePath(CACHE_DIRNAME, WORKBUDDY_APP_VERSION_FILENAME.replace(/^\./u, ''))
 }

@@ -8,12 +8,13 @@
  * @module dsh-any-connect/catalog-refresh
  */
 
-import { RegionMismatchError, type WorkBuddyCredential, type ZCodePlanKind } from './auth.js'
+import { RegionMismatchError, type WorkBuddyCredential } from './auth.js'
 import { credentialIdentity } from './catalog-store.js'
 import { filterByCodingPlanWhitelist } from './zcode-builtin-catalog.js'
+import { errorMessage } from './values.js'
 import type { StartPlanPreviewResult } from './zcode-plan-claim.js'
 import { fallbackFor, variantIsStartPlan, type VariantRuntime } from './variant-runtime.js'
-import { WorkBuddyUpstreamClient, chatBase, type ZCodeUpstreamClient } from './upstream.js'
+import { chatBase, type ZCodeUpstreamClient } from './upstream.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AdapterRegistrationHandle } from '@deepseek-ai/dsh-llm'
 import { catalogFingerprint } from './catalog-fingerprint.js'
@@ -22,7 +23,6 @@ import { adoptIdentity } from './catalog-adopt.js'
 /** 刷新模块依赖（由 catalog-lifecycle 透传）。 */
 export interface CatalogRefreshDeps {
   ctx: Context
-  client: WorkBuddyUpstreamClient
   runtimes: readonly VariantRuntime[]
   adapterHandles: Map<string, AdapterRegistrationHandle>
   isStopped: () => boolean
@@ -42,7 +42,7 @@ export interface CatalogRefresh {
 }
 
 export function createCatalogRefresh(deps: CatalogRefreshDeps): CatalogRefresh {
-  const { ctx, client, runtimes, adapterHandles, isStopped } = deps
+  const { ctx, runtimes, adapterHandles, isStopped } = deps
 
 /** 目录拉取失败后的延迟重试：最多再试 2 次、间隔 60s（暂态故障自愈，耗尽即停）。 */
 const CATALOG_REFRESH_RETRIES = 2
@@ -101,7 +101,7 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
     try {
       const signedIn = await runtime.store.current()
       if (signedIn === undefined) return false
-      const credential = await runtime.store.resolve() as WorkBuddyCredential
+      const credential = await runtime.store.resolve()
       preview = await claimPreviewFor(runtime)(credential)
     } catch {
       // 凭据读不到 / 探测抛错 / 超时：一律「没探到」，不刷新也不改标记。
@@ -212,14 +212,12 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
     try {
       const signedIn = await runtime.store.current()
       if (signedIn === undefined || isStopped()) return
-      const identity = credentialIdentity(signedIn as unknown as Parameters<typeof credentialIdentity>[0])
+      const identity = credentialIdentity(signedIn)
       if (identity === runtime.lastIdentity) return
       // 夜免资格与 refreshCatalog 同判（transform 已把 zcodePlan 固定为该变体
       // 的语义）：saved/fallback 的徽标在采用那一刻就要带对，不能等 live 改写。
       if (runtime.variant.kind === 'zcode') {
-        runtime.catalog.setNightFreeEligible(
-          (signedIn as unknown as { zcodePlan?: ZCodePlanKind }).zcodePlan !== 'start-plan',
-        )
+        runtime.catalog.setNightFreeEligible(signedIn.zcodePlan !== 'start-plan')
       }
       // 预热阶段的 publish 没有注册句柄可通知（notifyCatalogChanged 静默跳过），
       // 但它会把指纹记进 publishedCatalog——注册自身会广播 adapters-updated，
@@ -271,17 +269,15 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
         if (isStopped()) return
         // WorkBuddy 凭据带 uid/enterpriseId；RuntimeStore 的结构最小化类型
         // 只承诺 accessToken，这里按 kind 已分流的前提下还原完整形状。
-        const identity = credentialIdentity(credential as unknown as Parameters<typeof credentialIdentity>[0])
+        const identity = credentialIdentity(credential)
         // 夜间免费是 Coding Plan 的权益，Start Plan 不享受。两个 ZCode 变体
         // 是独立产品，各自的凭据 transform 已固定 zcodePlan，资格随之而定。
         if (variant.kind === 'zcode') {
-          catalog.setNightFreeEligible(
-            (credential as unknown as { zcodePlan?: ZCodePlanKind }).zcodePlan !== 'start-plan',
-          )
+          catalog.setNightFreeEligible(credential.zcodePlan !== 'start-plan')
         }
         if (identity !== runtime.lastIdentity) await adoptIdentity(runtime, identity, publishCatalog)
         const generation = runtime.lastIdentity
-        const models = await (runtime.client ?? client).fetchModels(credential as Parameters<WorkBuddyUpstreamClient['fetchModels']>[0])
+        const models = await runtime.client.fetchModels(credential)
         if (isStopped()) return
         // 拉取中账号又变了（切换/登出）：迟到响应直接丢弃，不覆盖新身份。
         if (generation !== runtime.lastIdentity) return
@@ -301,11 +297,11 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
         // live 拉取再失败（catch 停在 saved），用户就长期看不到这个分组——而这
         // 恰恰是 saved 存在的目的（重启后别落回内置名单）。所以空名单不写盘。
         if (models.length > 0) {
-          await catalogStore!.save({
+          await catalogStore.save({
             account: identity,
             source: variant.kind === 'opencode'
               ? 'https://opencode.ai'
-              : (variant.kind === 'zcode' ? 'https://open.bigmodel.cn' : chatBase(credential as unknown as Parameters<typeof chatBase>[0])),
+              : (variant.kind === 'zcode' ? 'https://open.bigmodel.cn' : chatBase(credential)),
             fetchedAtMs: runtime.catalogFetchedAtMs,
 
             models: [...models],
@@ -324,7 +320,7 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
           }
           return
         }
-        const message = error instanceof Error ? error.message : String(error)
+        const message = errorMessage(error)
         // 拉取失败 = 没拉到（保留上一份名单），不是「拉到了空的」。
         runtime.catalogEmpty = false
         runtime.catalogError = message.slice(0, 300)

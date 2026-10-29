@@ -6,8 +6,7 @@
  * @module sandbox-extra-roots/locales
  */
 
-
-
+/** locale 命名空间（设置卡片文案）。 */
 export const NS = "settings.plugins.sandboxExtraRoots";
 
 export const zh = {
@@ -24,7 +23,7 @@ export const zh = {
   loading: "加载中…",
   roots: "额外可写目录（每行一个绝对路径，支持 ~）",
   rootsCount: "共 {n} 个目录",
-  presetsTitle: "常用工具缓存（一键添加）", 
+  presetsTitle: "常用工具缓存（一键添加）",
   placeholder: "~/data\n/tmp/cache",
   rootDanger: "第 {n} 行“{v}”为根目录或整盘，将破坏沙盒隔离边界，已被禁止保存",
   rootHomeAncestor: "第 {n} 行“{v}”为用户主目录祖先，将破坏主目录隔离边界，已被禁止保存",
@@ -32,7 +31,8 @@ export const zh = {
   rootDuplicate: "第 {n} 行“{v}”与前面的目录重复，保存时将自动合并去重",
   rootSystem: "第 {n} 行“{v}”为系统受限目录，宿主将自动过滤忽略此目录",
 };
-export const en = {
+/** 英文文案必须覆盖中文全部键（缺键在 typecheck 阶段报错）。 */
+export const en: Record<keyof typeof zh, string> = {
   title: "Extra sandbox roots (sandbox-extra-roots)",
   summary: "Extra writable roots for the workspace-write sandbox, beyond the official allow-list",
   hint: "Extra writable roots under workspace-write mode, on top of the official allow-list (workspace root, /tmp, platform temp dirs, etc.). One absolute path per line; ~ expands to your home directory.",

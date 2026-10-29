@@ -1,13 +1,14 @@
 /**
  * confine-runners.ts — bash 侧 confine 的按 runner argv 改写（纯函数，可单测）。
  *
- * 2026-10-10 从 apply.ts 拆出：Seatbelt/bwrap/Landlock/Windows 四分支与
- * 运行期危险根复查各成模块函数，apply 只保留装配。所有分支 fail-closed：
- * 返回 null 表示"保持官方 argv 原样"，调用方不得自行追加。
+ * Seatbelt/bwrap/Landlock/Windows 四分支与运行期危险根复查各成模块函数，
+ * apply 只保留装配。所有分支 fail-closed：返回 null 表示"保持官方 argv 原样"，
+ * 调用方不得自行追加。
  *
  * @module sandbox-extra-roots/confine-runners
  */
 
+import type { SandboxExecutionPolicy } from "@deepseek-ai/dsh-sandbox";
 import { seatbeltProfileArgs } from "./common.js";
 import { classifyRoot, extraGrantRoots } from "./roots.js";
 import { existingDirectoryRoots } from "./roots-filter.js";
@@ -20,7 +21,7 @@ export interface ConfineRunnerDeps {
    * Seatbelt profile 漂移自检：官方 profile（空额外目录）应与本实现重建
    * 结果一致。返回 true 表示已漂移（调用方保持官方 argv 原样）。
    */
-  checkSeatbeltDrift(policy: any, profile: string): boolean;
+  checkSeatbeltDrift(policy: SandboxExecutionPolicy, profile: string): boolean;
 }
 
 /**
@@ -33,7 +34,7 @@ export interface ConfineRunnerDeps {
  * 一次(每次 confine 都会走到这里,不能按调用告警)。
  */
 export function safeRuntimeRoots(
-  roots: string[],
+  roots: readonly string[],
   warned: Set<string>,
   side: string,
   warn: (message: string) => void,
@@ -57,7 +58,12 @@ export function safeRuntimeRoots(
  * Seatbelt:官方 argv 为 [sandbox-exec, -p, <profile>, --, ...inner]。
  * 返回重建后的完整 argv；null = 保持官方原样（漂移/分隔符缺失/错位）。
  */
-export function seatbeltArgv(a: string[], roots: string[], policy: any, deps: ConfineRunnerDeps): string[] | null {
+export function seatbeltArgv(
+  a: readonly string[],
+  roots: readonly string[],
+  policy: SandboxExecutionPolicy,
+  deps: ConfineRunnerDeps,
+): string[] | null {
   if (typeof a[0] !== "string" || typeof a[2] !== "string") return null;
   // 漂移自检:官方 profile(空额外目录)应与本实现重建结果一致。检出
   // 漂移后**放弃重建**、保持官方 argv 原样(fail-closed)——用本插件
@@ -86,14 +92,14 @@ export function seatbeltArgv(a: string[], roots: string[], policy: any, deps: Co
   // [ -p, <profile>, bash, -c, ... ] —— 缺分隔符它会把 bash 当 profile/参数
   // 解析，macOS 上每条受限 bash 命令都执行不了（2026-10-10 实测发现：
   // 重建后 argv 长度 6、已无 "--"，而官方是 7 且含 "--"）。
-  return [a[0], ...seatbeltProfileArgs(policy, roots), "--", ...a.slice(sbSep + 1)];
+  return [a[0], ...seatbeltProfileArgs(policy, [...roots]), "--", ...a.slice(sbSep + 1)];
 }
 
 /**
  * 每 root 产出一段 runner 授权 argv 片段。bwrap 无官方 grant API，
- * \`--bind <root> <root>\` 拼写留在插件侧（bindMountGrant）；Landlock 必须走
- * 官方 grantArgs（apply 侧注入）——node-addon-landlock-run 的 README 契约
- * 明文要求消费者不得自拼 launcher flag。
+ * `--bind <root> <root>` 拼写留在插件侧（bindMountGrant）；Landlock 必须走
+ * 官方 grantArgs（apply 侧注入）——@deepseek-ai/node-addon-system/landlock-run
+ * 的契约明文要求消费者不得自拼 launcher flag。
  */
 export type GrantFragmentBuilder = (root: string) => string[];
 
@@ -106,9 +112,9 @@ export const bindMountGrant: GrantFragmentBuilder = (root) => ["--bind", root, r
  * 返回插入后的完整 argv；null = 保持官方原样。
  */
 export function bindMountArgv(
-  a: string[],
-  roots: string[],
-  policy: any,
+  a: readonly string[],
+  roots: readonly string[],
+  policy: SandboxExecutionPolicy,
   warned: Set<string>,
   warn: (message: string) => void,
   warnOnce: (key: string, message: string) => void,

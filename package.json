@@ -28,6 +28,7 @@
   ],
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.6-alpha.1",
+    "@deepseek-ai/dsh-plugin-market-index": "^0.2.2-alpha.2",
     "@deepseek-ai/dsh-typert-generator": "^0.2.2-alpha.2",
     "@types/node": "^26.6.5",
     "esbuild": "^0.28.2",
@@ -37,6 +38,9 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typert": "node scripts/typert.mjs",
+    "market:plan": "node scripts/plugin-market.mjs plan",
+    "market:build": "node scripts/plugin-market.mjs build --out .workwork/plugin-market-site",
+    "market:check": "node scripts/plugin-market.mjs check --out .workwork/plugin-market-site",
     "typecheck": "node scripts/typert.mjs && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "node scripts/build.mjs && vitest run",
     "test:ci": "bun run build && bun run typecheck && vitest run",

@@ -1,3 +1,9 @@
+## 0.3.32-alpha.4 (2026-10-30)
+
+### 重构
+
+* **行为不变的优雅化**（与 sandbox-extra-roots 同批）：`limitedConcurrency<T>` 泛型化 + `SNAPSHOT_CONCURRENCY` 常量替代魔法数；`messageText` 去 `(b.function as any)` 强转；client `archive-format` 的 formatBytes/formatTime/shortId/sameItems 具体类型化（structured row）；locales `en` 改为 `Record<keyof typeof zh, string>`（缺键即 typecheck 红）；删死代码 `validateConfig`、悬空焦点陷阱注释与两处未使用变量；修正 `rowFor` 错位文档块。
+
 ## 0.3.32-alpha.3 (2026-10-29)
 
 ### 重构

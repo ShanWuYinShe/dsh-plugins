@@ -151,5 +151,13 @@ export interface ProviderUsageContext {
  */
 export type ProviderUsageQuerier = (context: ProviderUsageContext) => Promise<UsageSnapshot>
 
+/**
+ * 路由返回的一行答案：查询到的快照，或「该 provider 未注册查询器」标记。
+ *
+ * host 侧用它组装 GET 响应，browser 侧用同一类型解析响应——同一份线协议只
+ * 在这一处定义，避免两侧各写一遍字面量后漂移。
+ */
+export type ProviderUsageAnswer = UsageSnapshot | { provider: string; queried: false }
+
 /** Route the browser half reads; the host half registers exactly this path. */
 export const PROVIDER_USAGE_PATH = '/plugins/provider-usage/usage'

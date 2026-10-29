@@ -51,6 +51,12 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   与 `./remote`（Client 调用面）由 `@deepseek-ai/dsh-typert-generator` 在构建期生成，
   **不要手写**；新增/修改 `@Remote` 方法后必须重新 `bun run build`。没有 Remote 服务
   的包不要声明 `./typert` / `./remote` 导出。
+- **插件索引 / `market` 分支**：`market` 分支是 CI 生成的发布产物分支（DSH「自定义
+  插件索引」的索引 + 静态 npm registry，布局与 URL 见 RELEASING.md「插件索引与静态
+  registry」），**禁止手工编辑**；索引/registry 只由 `scripts/plugin-market.mjs` 产出，
+  发布后由 publish workflow 自动更新（workflow_dispatch 可回填/修复）。新增发布包必须
+  在 `scripts/lib/plugin-market-core.mjs` 的 `PACKAGE_DISPLAY` 补展示元数据，否则
+  `bun run market:build` 直接报错。
 - **兼容声明**：插件对 DSH 的兼容性用官方 `engines.dsh`（`^<基线版本>`，由
   `bun run adapt` 与依赖 range 同步维护）；不要使用已废弃的自造字段 `dsh.host`。
 - **客户端 inject**：`dsh.client.inject` 声明的是**客户端模块包名**（服务提供方包），

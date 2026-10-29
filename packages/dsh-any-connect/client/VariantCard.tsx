@@ -1,13 +1,14 @@
 /**
- * VariantCard.tsx — 单个变体卡片：账号/额度/模型/探针与领取入口。
+ * VariantCard.tsx — 单个变体卡片：卡头（身份/摘要）+ 额度区块 + 模型区块。
  *
- * 2026-10-08 从 961 行的 WorkBuddyConfigPage.tsx 拆出：本模块只负责上面这一件事，
- * 页面入口与 re-export 保留在 WorkBuddyConfigPage.tsx。
+ * 2026-10-08 从 961 行的 WorkBuddyConfigPage.tsx 拆出：本模块只负责上面这一件事。
+ * 2026-10-29 优雅化：额度区块与模型区块各自成文件（VariantCardQuota /
+ * VariantCardModels），本文件只剩卡头与组合；派生值统一来自 useVariantCard 的
+ * view（variant-card-view.ts）。
  *
  * @module dsh-any-connect/client/VariantCard
  */
 
-import { catalogSourceKey } from './config-types.js'
 import {
   cardStyle,
   headerStyle,
@@ -17,71 +18,14 @@ import {
   summaryStyle,
   chevronStyle,
   cardBodyStyle,
-  dividerStyle,
-  summaryRowStyle,
-  summaryLabelStyle,
-  summaryValueStyle,
-  summaryHeadStyle,
-  summaryToggleStyle,
-  summaryNoteStyle,
-  buttonStyle,
-  refreshButtonStyle,
   errorStyle,
-  chipStyle,
-  modelTableStyle,
-  modelThStyle,
-  planCardStyle,
-  planTitleRowStyle,
-  planNameStyle,
-  planBadgeRowStyle,
-  privilegeChipStyle,
-  planMetaStyle,
   dotStyle,
 } from './config-styles.js'
-import { formatExpiry, formatNumber } from './config-format.js'
-import { ModelRow } from './ModelRow.js'
-
 import type { CardStatus, WorkBuddyCardVariant, WorkBuddyConfigPageInjected } from './config-types.js'
 import type { WorkBuddyWebStatus } from '../src/status-paths.js'
-import { useVariantCard } from './useVariantCard.js'
-import { StartPlanClaimBox } from './StartPlanClaimBox.js'
-import { RateLimitBox } from './RateLimitBox.js'
-
-function CardRefreshButton({ busy, onClick, t }: { busy: boolean; onClick: () => void; t: WorkBuddyConfigPageInjected['t'] }) {
-  return (
-    <button
-      type="button"
-      className="wb-btn"
-      style={{
-        ...refreshButtonStyle,
-        opacity: busy ? 0.65 : 1,
-        cursor: busy ? 'default' : 'pointer',
-      }}
-      disabled={busy}
-      title={busy ? t('refreshing') : t('refresh')}
-      aria-label={busy ? t('refreshing') : t('refresh')}
-      onClick={onClick}
-    >
-      <svg
-        className={busy ? 'wb-spin-icon' : undefined}
-        aria-hidden="true"
-        width="12"
-        height="12"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        style={{ display: 'inline-block', flexShrink: 0 }}
-      >
-        <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-        <polyline points="21 3 21 8 16 8" />
-      </svg>
-      <span>{t('refresh')}</span>
-    </button>
-  )
-}
+import { useVariantCard, type VariantCardView } from './useVariantCard.js'
+import { VariantCardModels } from './VariantCardModels.js'
+import { VariantCardQuota } from './VariantCardQuota.js'
 
 export function VariantCard(props: {
   t: WorkBuddyConfigPageInjected['t']
@@ -93,13 +37,8 @@ export function VariantCard(props: {
   fetchStatus: (signal?: AbortSignal) => Promise<WorkBuddyWebStatus>
   applyStatus: (next: CardStatus) => void
 }): React.ReactNode {
-  const {
-    t, variant, status, open, onToggle,
-    busy, notice, modelsOpen, setModelsOpen, copiedPlanId,
-    probe, startPlanClaim, rateLimit, copyPlanId, refresh,
-    refreshWithCatalog, title, label, isZCode, isStartPlanCard, isOpenCode, zcodePlan, zcodePools, isPlanActive, planStateLabel, displayPlanName, headerSummary, catalogOffline, effortsOf,
-    deleteModel, restoreModel, restoreModels, excludedModels, excludedOpen, setExcludedOpen,
-  } = useVariantCard(props)
+  const card: VariantCardView = useVariantCard(props)
+  const { t, variant, status, open, onToggle, notice, view } = card
 
   return (
     <div className="wb-card" style={cardStyle}>
@@ -108,271 +47,28 @@ export function VariantCard(props: {
         className="wb-header"
         style={headerStyle}
         aria-expanded={open}
-        aria-label={`${t(open ? 'collapse' : 'expand')}: ${title}`}
+        aria-label={`${t(open ? 'collapse' : 'expand')}: ${view.title}`}
         onClick={onToggle}
       >
         <span style={headTextStyle}>
           <span style={nameRowStyle}>
             <span aria-hidden="true" className="wb-dot-pulse" style={dotStyle('signed-in')} />
-            <span style={nameStyle}>{title}</span>
+            <span style={nameStyle}>{view.title}</span>
           </span>
-          <span style={{ ...summaryStyle, ...(catalogOffline ? { color: 'var(--dsw-alias-state-error-primary, #ff4d4f)' } : {}) }} title={t(variant.introKey)}>{headerSummary}</span>
+          <span style={{ ...summaryStyle, ...(view.catalogOffline ? { color: 'var(--dsw-alias-state-error-primary, #ff4d4f)' } : {}) }} title={t(variant.introKey)}>{view.headerSummary}</span>
         </span>
         <span aria-hidden="true" style={{ ...chevronStyle, transform: open ? 'rotate(180deg)' : 'none' }}>⌄</span>
       </button>
       {open ? (
         <div style={cardBodyStyle}>
-          {/* 限流块放在最前：通道正在拒收请求时，这是用户唯一能行动的信息
-              （还要等多久 / 等不到确切时间）。三个分支（ZCode/OpenCode/WorkBuddy）
-              共用同一份展示，因为 429 是所有上游共有的事实。 */}
-          <RateLimitBox t={t} rateLimit={rateLimit} />
-          {isZCode ? (
-            <>
-              <hr style={dividerStyle} />
-              <div style={planCardStyle}>
-                <div style={planTitleRowStyle}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                    <span style={planNameStyle}>{displayPlanName ?? t('codingPlanLabel')}</span>
-                    <span style={isPlanActive ? chipStyle : { ...chipStyle, background: 'var(--dsw-alias-bg-layer-3, rgba(128, 128, 128, 0.12))', color: 'var(--dsw-alias-label-tertiary)' }}>
-                      {planStateLabel ?? t('codingPlanActive')}
-                    </span>
-                  </div>
-                  <CardRefreshButton busy={busy} onClick={() => { void refreshWithCatalog() }} t={t} />
-                </div>
-                <div style={planBadgeRowStyle}>
-                  {/* 不用 emoji 当图标：渲染随系统字体漂移，宿主卡片也以纯文字
-                      chip 为主；语义已由文案完整承载。 */}
-                  {isStartPlanCard ? (
-                    <span style={privilegeChipStyle}>{t('planDedicatedQuota')}</span>
-                  ) : (
-                    <span style={privilegeChipStyle}>{t('codingPlanExtraQuota')}</span>
-                  )}
-                </div>
-                {isStartPlanCard && zcodePools.length > 1 ? (
-                  // 多池：每个模型一份额度，池子互不通用——逐池列出（带模型名），
-                  // 只显示第一个池会让其余模型的额度整个不可见。
-                  zcodePools.map(pool => (
-                    <span key={pool.label} style={planMetaStyle}>
-                      {t('planPoolQuotaLine', { pool: pool.label, remain: formatNumber(pool.remain), size: formatNumber(pool.size) })}
-                    </span>
-                  ))
-                ) : isStartPlanCard && zcodePlan !== undefined && zcodePlan.size > 0 ? (
-                  <span style={planMetaStyle}>
-                    {t('planQuotaLine', { remain: formatNumber(zcodePlan.remain), size: formatNumber(zcodePlan.size) })}
-                  </span>
-                ) : null}
-                {/* 当日一次性池子：余额不会结转，必须显式说明——否则每日重置
-                    会被读成"攒着的额度"，用户会按不存在的余额做计划。判据取上游
-                    回报的 sameDay，而不是"这张卡是 Start Plan"：口径来自数据，
-                    上游哪天改成可累积也会如实跟着变。 */}
-                {isStartPlanCard && zcodePlan?.sameDay === true
-                  ? <span style={planMetaStyle}>{t('planNoCarryOver')}</span>
-                  : null}
-                {zcodePlan?.expiredAt ? (
-                  <span style={planMetaStyle}>
-                    {t('codingPlanExpiresAt', { date: formatExpiry(zcodePlan.expiredAt) })}
-                  </span>
-                ) : null}
-                {isStartPlanCard ? <span style={planMetaStyle}>{t('planStartNote')}</span> : null}
-              </div>
-              {/* 今日待领取提示：只有 Start Plan 变体的 status 才带 startPlanClaim。
-                  available 是唯一需要用户动作的状态，所以只有它给醒目提示；none 是
-                  "已领"（无需动作，不打扰）；unknown **绝不渲染成 none**——探测失败
-                  时说"没得领"会让用户白丢一次领取机会。 */}
-              <StartPlanClaimBox t={t} claim={startPlanClaim} copied={copiedPlanId} onCopy={copyPlanId} />
-            </>
-          ) : isOpenCode ? (
-            <>
-              <hr style={dividerStyle} />
-              <div style={summaryRowStyle}>
-                <span style={summaryLabelStyle}>{t('creditsLabel')}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={summaryValueStyle} title={status.domain}>
-                    {t('openCodeFreeBadge')}
-                  </span>
-                  <CardRefreshButton busy={busy} onClick={() => { void refreshWithCatalog() }} t={t} />
-                </span>
-              </div>
-            </>
-          ) : (
-            <>
-              <hr style={dividerStyle} />
-              <div style={summaryRowStyle}>
-                <span style={summaryLabelStyle}>{t('creditsLabel')}</span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={summaryValueStyle} title={status.domain}>
-                    {status.credits !== undefined
-                      ? formatNumber(status.credits.total)
-                      : (status.creditsError !== undefined ? '—' : t('creditsUnavailable'))}
-                  </span>
-                  <CardRefreshButton busy={busy} onClick={() => { void refreshWithCatalog() }} t={t} />
-                </span>
-              </div>
-              {/* 今日消耗统计（credit-ledger 采样差分）：裂变包每天发新包、旧包到期
-                  整包消失，「当前积分」每天双向跳动读不出今天花多少；这三行给一个
-                  稳定的今日基准。台账缺席或今日无样本时 status 不带 today，整段
-                  静默不渲染——降级不占位。*/}
-              {status.credits?.today !== undefined ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span style={planMetaStyle} title={t('creditTodayEstimate', { samples: status.credits.today.samples })}>
-                    {t('creditTodayLine', {
-                      used: formatNumber(status.credits.today.consumed),
-                      granted: formatNumber(status.credits.today.granted),
-                      peak: formatNumber(status.credits.today.peak),
-                    })}
-                  </span>
-                  {status.credits.history !== undefined && status.credits.history.length > 0 ? (
-                    <span style={planMetaStyle}>
-                      {t('creditHistoryLine', {
-                        days: status.credits.history
-                          .map(day => t('creditHistoryDay', { date: day.date, used: formatNumber(day.consumed) }))
-                          .join(' · '),
-                      })}
-                    </span>
-                  ) : null}
-                </div>
-              ) : null}
-            </>
-          )}
+          {/* 额度/限流区块（含各种上游的额度与限流展示）与模型区块各自见其文件；
+              夹在中间的提示行属于整卡，留在组合层。 */}
+          <VariantCardQuota card={card} />
           {notice !== undefined ? <p style={{ ...errorStyle, fontSize: 12 }} role="alert">{t('refreshFailed', { message: notice })}</p> : null}
           {status.creditsError !== undefined
             ? <p style={{ ...errorStyle, fontSize: 12 }}>{t('creditsError', { message: status.creditsError })}</p>
             : null}
-
-          {/* 空名单说明：live + 刚刚拉取 + 0 个模型，原本与"插件坏了"长得一模一样。
-              现在 source=live 时明确说"上游答了空名单"——这是正常结论，不是故障；
-              Start Plan 还多一句"去客户端领取后自己会更新"（快通道，≤60s）。 */}
-          {status.models !== undefined && status.models.length === 0
-            && status.catalog?.empty === true && status.catalog.error === undefined ? (
-              <p style={summaryNoteStyle}>
-                {isStartPlanCard ? t('catalogEmptyRosterStartPlan') : t('catalogEmptyRoster')}
-              </p>
-            ) : null}
-          {status.models !== undefined && (status.models.length > 0 || (status.excludedCount ?? 0) > 0) ? (
-            <>
-              <hr style={dividerStyle} />
-              <div style={summaryHeadStyle}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    style={summaryToggleStyle}
-                    aria-expanded={modelsOpen}
-                    onClick={() => { setModelsOpen(!modelsOpen) }}
-                  >
-                    <span aria-hidden="true" style={{ ...chevronStyle, fontSize: 14, transform: modelsOpen ? 'rotate(180deg)' : 'none' }}>⌄</span>
-                    <span>{t('modelsCount', { n: status.models.length })}</span>
-                  </button>
-                  {(status.excludedCount ?? 0) > 0 ? (
-                    <>
-                      <span style={{ ...summaryNoteStyle, color: 'var(--dsw-alias-label-secondary)' }}>
-                        ({t('excludedModelsCount', { n: status.excludedCount })})
-                      </span>
-                      {/* 「全部恢复」保留但降级为次要出口：主路径是下面隐藏区里的
-                          逐条恢复。加 title 说清影响范围，避免用户以为它只影响某一个。 */}
-                      <button
-                        type="button"
-                        className="wb-btn"
-                        style={{ ...buttonStyle, minHeight: 20, padding: '1px 8px', fontSize: 11, lineHeight: '16px' }}
-                        disabled={busy}
-                        title={t('restoreDefaultsHint')}
-                        onClick={() => { void restoreModels() }}
-                      >
-                        {t('restoreDefaults')}
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {probe?.running === true ? <span style={summaryNoteStyle}>{t('detectingShort')}</span> : null}
-                  {/* 目录来源与拉取失败对用户可见:stale 与离线是不同处境,
-                      不能只作内部判据(status-paths 的契约声明)。 */}
-                  <span style={summaryNoteStyle}>{t(catalogSourceKey(status.catalog))}</span>
-                  {status.catalog?.error !== undefined
-                    ? <span style={{ ...summaryNoteStyle, color: 'var(--dsw-alias-state-error-primary, #ff4d4f)' }}>{t('catalogSourceError', { message: status.catalog.error })}</span>
-                    : null}
-                </div>
-              </div>
-              {modelsOpen ? (
-                status.models.length === 0 ? (
-                  <p style={{ ...summaryNoteStyle, padding: '12px 8px' }}>{t('allModelsExcluded')}</p>
-                ) : (
-                  <div style={{ width: '100%', overflowX: 'auto' }}>
-                    <table style={modelTableStyle}>
-                      <thead>
-                        <tr>
-                          <th style={{ ...modelThStyle, textAlign: 'left' }}>{t('colName')}</th>
-                          <th style={modelThStyle} aria-label={t('colTags')} />
-                          <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colRate')}</th>
-                          <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colContext')}</th>
-                          <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colEfforts')}</th>
-                          <th style={{ ...modelThStyle, textAlign: 'center', width: 60 }}>{t('colAction')}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {status.models.map((row, i) => (
-                          <ModelRow
-                            key={row.id}
-                            row={row}
-                            t={t}
-                            efforts={effortsOf(row)}
-                            even={i % 2 === 1}
-                            onRefresh={() => { void refreshWithCatalog() }}
-                            onDelete={modelId => { void deleteModel(modelId) }}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )
-              ) : null}
-              {/* 隐藏区：让用户看见自己隐藏了什么，并**逐条**恢复。
-                  此前只有「一键恢复全部」——多数情况只想放回其中一两个，
-                  全恢复后还得把其余重新隐藏一遍（用户报告的痛点）。 */}
-              {excludedModels.length > 0 ? (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ ...summaryHeadStyle, gap: 8 }}>
-                    <button
-                      type="button"
-                      style={summaryToggleStyle}
-                      aria-expanded={excludedOpen}
-                      onClick={() => { setExcludedOpen(!excludedOpen) }}
-                    >
-                      <span aria-hidden="true" style={{ ...chevronStyle, fontSize: 14, transform: excludedOpen ? 'rotate(180deg)' : 'none' }}>⌄</span>
-                      <span>{t('excludedSectionTitle', { n: excludedModels.length })}</span>
-                    </button>
-                  </div>
-                  {excludedOpen ? (
-                    <div style={{ width: '100%', overflowX: 'auto' }}>
-                      <table style={modelTableStyle}>
-                        <thead>
-                          <tr>
-                            <th style={{ ...modelThStyle, textAlign: 'left' }}>{t('colName')}</th>
-                            <th style={modelThStyle} aria-label={t('colTags')} />
-                            <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colRate')}</th>
-                            <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colContext')}</th>
-                            <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colEfforts')}</th>
-                            <th style={{ ...modelThStyle, textAlign: 'center', width: 60 }}>{t('colAction')}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {excludedModels.map((row, i) => (
-                            <ModelRow
-                              key={row.id}
-                              row={row}
-                              t={t}
-                              efforts={effortsOf(row)}
-                              even={i % 2 === 1}
-                              onRestore={modelId => { void restoreModel(modelId) }}
-                            />
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </>
-          ) : null}
+          <VariantCardModels card={card} />
         </div>
       ) : null}
     </div>

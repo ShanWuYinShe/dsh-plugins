@@ -12,6 +12,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { WorkBuddyAuthStatus, WorkBuddyCredential } from './auth.js'
 import type { WorkBuddyCredits } from './upstream.js'
 import { normalizeCredits } from './upstream.js'
+import { errorMessage } from './values.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import type { CreditLedgerSummary } from './credit-ledger.js'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
@@ -82,7 +83,7 @@ export interface WorkBuddyStatusRouteOptions {
  * 口径,两份手抄曾在本仓其他包发生过规则漂移。
  */
 export function safeMessage(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error))
+  return errorMessage(error)
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted token]')
     // api_?key= 与 provider-usage 的 safeMessage 规则集对齐:跨包独立发布
     // 不能互 import,但脱敏规则集应保持等价。

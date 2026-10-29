@@ -67,7 +67,7 @@ describe('confine runner 成功路径：分隔符必须保留', () => {
       }
       const ctx = makeCtx(sandboxMock, makeFsMock())
       await apply(ctx, { extraWritableRoots: [existing] })
-      const policy = { mode: 'workspace-write', workspaceRoot: WS }
+      const policy = { mode: 'workspace-write', workspaceRoot: WS } satisfies import('@deepseek-ai/dsh-sandbox').SandboxExecutionPolicy
       const official = seatbeltProfileArgs(policy, [])
       const profile = official[1]
       if (typeof profile !== 'string') throw new Error('seatbeltProfileArgs 形状变化')

@@ -19,7 +19,7 @@ import type { DecryptZCodeKeyOptions } from './auth-zcode-crypto.js'
 
 
 /** Every plan kind the desktop client can record for an account provider. */
-export const ZCODE_PLAN_KINDS: readonly ZCodePlanKind[] = [
+const ZCODE_PLAN_KINDS: readonly ZCodePlanKind[] = [
   'individual-coding-plan',
   'team-coding-plan',
   'start-plan',
@@ -143,7 +143,7 @@ function readZCodeSelection(desktopPath: string | undefined): ZCodeAccountSelect
 }
 
 /** Basename of the fallback device-id file inside the Harness state directory. */
-export const ZCODE_DEVICE_MID_FILENAME = 'zcode-device-mid'
+const ZCODE_DEVICE_MID_FILENAME = 'zcode-device-mid'
 
 /**
  * Resolve the stable device id the account-plan endpoints require
@@ -153,7 +153,7 @@ export const ZCODE_DEVICE_MID_FILENAME = 'zcode-device-mid'
  * least it is stable across requests; per-request randomness is rejected by
  * the upstream (400 code 3001 / 429).
  */
-export function resolveZCodeDeviceMid(desktopPath: string | undefined): string {
+function resolveZCodeDeviceMid(desktopPath: string | undefined): string {
   if (desktopPath !== undefined) {
     try {
       const telemetry = JSON.parse(readFileSync(join(dirname(desktopPath), 'telemetry-state.json'), 'utf8')) as Record<string, unknown>

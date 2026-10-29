@@ -207,15 +207,16 @@ describe("session-archive host", () => {
     const listResult = await archiveHost.list();
     expect(listResult.items.length === 2 && !listResult.items.some((i) => i.sessionId === "s-ghost")).toBe(true);
     expect(!listResult.items.some((i) => i.sessionId === "s3")).toBe(true);
-    expect(listResult.items.find((i) => i.sessionId === "s1").title === "第一个归档会话"
-      && listResult.items.find((i) => i.sessionId === "s2").title === null).toBe(true);
+    const rowOf = (id: string) => listResult.items.find((i) => i.sessionId === id)!;
+    expect(rowOf("s1").title === "第一个归档会话"
+      && rowOf("s2").title === null).toBe(true);
     expect(listResult.items.every((i) => i.size > 0 && i.updatedAt > 0 && i.live === false)).toBe(true);
 
     // 宿主归档不停止内存会话、web 重连还会恢复旧 tab,但归档会话已从会话
     // 列表移除、无法继续对话——内存存在不构成删除风险,不再标记"运行中"。
     f.sessions.set("s1", {});
     const listLive = await archiveHost.list();
-    expect(listLive.items.find((i) => i.sessionId === "s1").live === false).toBe(true);
+    expect(listLive.items.find((i) => i.sessionId === "s1")!.live === false).toBe(true);
 
     // 未截断:messageCount 与 totalMessageCount 一致,truncated 为 false。
     const full = await archiveHost.detail("s1");
@@ -506,11 +507,12 @@ describe("session-archive host", () => {
     ]);
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const listResult = await archiveHost.list();
-    expect(listResult.items.length === 1 && listResult.items[0].sessionId === "v1").toBe(true);
-    expect(listResult.items[0].title === "快照形状"
-      && listResult.items[0].cwd === "/proj/a"
-      && listResult.items[0].createdAt === 1000
-      && listResult.items[0].size > 0).toBe(true);
+    const row = listResult.items[0]!;
+    expect(listResult.items.length === 1 && row.sessionId === "v1").toBe(true);
+    expect(row.title === "快照形状"
+      && row.cwd === "/proj/a"
+      && row.createdAt === 1000
+      && row.size > 0).toBe(true);
     expect((await archiveHost.count()).count === 1).toBe(true);
     // 官方事件 data 形状:user/message 本体、assistant/message 包装(message.content)。
     const detail = await archiveHost.detail("v1");
@@ -538,10 +540,11 @@ describe("session-archive host", () => {
     };
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const listResult = await archiveHost.list();
-    expect(listResult.items.length === 1 && listResult.items[0].sessionId === "n1"
-      && listResult.items[0].title === "无定位").toBe(true);
+    const pendingRow = listResult.items[0]!;
+    expect(listResult.items.length === 1 && pendingRow.sessionId === "n1"
+      && pendingRow.title === "无定位").toBe(true);
     // 文件不可定位:size 退化为 0、updatedAt 退化为创建时间。
-    expect(listResult.items[0].size === 0 && listResult.items[0].updatedAt === 1000).toBe(true);
+    expect(pendingRow.size === 0 && pendingRow.updatedAt === 1000).toBe(true);
     // 删除:文件存在但无法定位路径 → 既不能谎报成功也不能删错东西,按 busy
     // 同级的失败语义兜底(failed 上报),文件保持原状。
     const del = await archiveHost.deleteArchived(["n1"]);
@@ -704,7 +707,7 @@ describe("session-archive host", () => {
       && detail.messages[0]!.text === "正常消息").toBe(true);
     // list() 的标题读取路径同样不炸,标题正常折叠。
     const items = await archiveHost.list();
-    expect(items.items.length === 1 && items.items[0].title === "畸形会话").toBe(true);
+    expect(items.items.length === 1 && items.items[0]!.title === "畸形会话").toBe(true);
   });
 
   it("标题/详情分块读取:>块长的事件流不重不漏,标题(块首)与尾部消息都可达", async () => {
@@ -729,7 +732,7 @@ describe("session-archive host", () => {
     const readsBefore = f.eventReads();
 
     const items = await archiveHost.list();
-    expect(items.items.length === 1 && items.items[0].title === "长会话").toBe(true);
+    expect(items.items.length === 1 && items.items[0]!.title === "长会话").toBe(true);
     // 451 条事件跨 3 块(200+200+51),标题读取必须真的分块而不是一次性读。
     expect(f.eventReads() - readsBefore).toBe(3);
 

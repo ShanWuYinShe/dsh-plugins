@@ -6,9 +6,9 @@
  * dsh-base 内置该服务），由 Loader 对账生效；本文件不读写任何自建配置文件
  * （旧版 $DSH_HOME/plugins/<name>/config.json 迁移已随 0.2.2 适配删除）。
  *
- * 本文件在 sandbox-extra-roots 与 session-archive 两包里必须逐字相同：两包
- * 刻意零运行时依赖、可独立安装，这份机制无法提为共享 npm 包，只能各持一份，
- * 靠根 `test/bundle.test.ts` 的一致性锁逐字比较防漂移——改一侧必须改另一侧。
+ * 本文件是 sandbox-extra-roots 唯一的持久化适配：session-archive 没有配置保存
+ * 入口，其同名文件已于 2026-10-29 适配收尾时删除（根 `test/bundle.test.ts`
+ * 锁住这一点）。实现只依赖官方 configEditor，不读写任何自建配置文件。
  */
 
 /** 官方持久化通道：edit(change) 编辑本行 config，由 Loader 对账后生效。 */

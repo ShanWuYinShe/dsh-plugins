@@ -6,6 +6,7 @@
       "name": "dsh-plugins",
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.0.6-alpha.1",
+        "@deepseek-ai/dsh-plugin-market-index": "^0.2.2-alpha.2",
         "@deepseek-ai/dsh-typert-generator": "^0.2.2-alpha.2",
         "@types/node": "^26.6.5",
         "esbuild": "^0.28.2",
@@ -15,7 +16,7 @@
     },
     "packages/dsh-any-connect": {
       "name": "@chaoset/dsh-any-connect",
-      "version": "0.4.28-alpha.5",
+      "version": "0.4.28-alpha.6",
       "bin": {
         "dsh-any-connect": "./lib/bin.js",
       },
@@ -52,7 +53,7 @@
     },
     "packages/provider-usage": {
       "name": "@chaoset/provider-usage",
-      "version": "0.2.1-alpha.4",
+      "version": "0.2.1-alpha.5",
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.0.6-alpha.1",
         "@deepseek-ai/dsh-client-locale": "^0.2.2-alpha.2",
@@ -78,7 +79,7 @@
     },
     "packages/sandbox-extra-roots": {
       "name": "@chaoset/sandbox-extra-roots",
-      "version": "0.4.28-alpha.3",
+      "version": "0.4.28-alpha.4",
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.0.6-alpha.1",
         "@deepseek-ai/dsh-api-remotes": "^0.2.2-alpha.2",
@@ -97,7 +98,7 @@
     },
     "packages/session-archive": {
       "name": "@chaoset/session-archive",
-      "version": "0.3.32-alpha.3",
+      "version": "0.3.32-alpha.4",
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.0.6-alpha.1",
         "@deepseek-ai/dsh-api-remotes": "^0.2.2-alpha.2",
@@ -276,6 +277,8 @@
     "@deepseek-ai/dsh-official-bundles": ["@deepseek-ai/dsh-official-bundles@0.2.2-alpha.2", "", { "dependencies": { "@deepseek-ai/dsh-package-manifest": "0.2.2-alpha.2" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.6-alpha.1" } }, "sha512-1ZzPosfWZqq3gjySzmHCV4msx8znD1JmZx1Xc9nHFCqkimRFfLsiA2VdvZXgXenlfmamBg2y+HXPCRmhoEtmRg=="],
 
     "@deepseek-ai/dsh-package-manifest": ["@deepseek-ai/dsh-package-manifest@0.2.2-alpha.2", "", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.6-alpha.1" } }, "sha512-3+FJWR/YptEzUAYPjNJb9P90xX6+MPMT3KmHtQScNuJNi+6gWLw2b/0/xjHGfG11hZyIB9AqSgY1dUIb25x6mA=="],
+
+    "@deepseek-ai/dsh-plugin-market-index": ["@deepseek-ai/dsh-plugin-market-index@0.2.2-alpha.2", "", { "dependencies": { "@deepseek-ai/dsh-package-manifest": "0.2.2-alpha.2", "semver": "^7.8.5" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.0.6-alpha.1" } }, "sha512-tHV3qjDDzi7kG2P2YevqI43B3MUNfkTrNfHwd+l8Ei5YIcb+bSRH5kdAXJsEj/0QZOpewPfYQTAyLvwoApkYAA=="],
 
     "@deepseek-ai/dsh-ptc-runtime": ["@deepseek-ai/dsh-ptc-runtime@0.2.1-alpha.3", "https://registry.npmmirror.com/@deepseek-ai/dsh-ptc-runtime/-/dsh-ptc-runtime-0.2.1-alpha.3.tgz", { "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5-alpha.2", "@deepseek-ai/dsh-sandbox": "0.2.1-alpha.3" } }, "sha512-08g19TFpWR76r2zsB93sSfwtsrMwrr6Uyfz2QdnO9hdnFxytNXUEOdoqAyDk6sdfwcBtUMFuk6y4Lot4SnmJCA=="],
 

@@ -25,13 +25,12 @@ import {
   type WorkBuddyChatResult,
 } from './upstream-shared.js'
 
-export const OPENCODE_BASE_URL = 'https://opencode.ai'
 export const OPENCODE_CHAT_COMPLETIONS_URL = 'https://opencode.ai/inference/v1/chat/completions'
 export const OPENCODE_RESPONSES_URL = 'https://opencode.ai/inference/openai/v1/responses'
 export const OPENCODE_ANTHROPIC_MESSAGES_URL = 'https://opencode.ai/inference/anthropic/v1/messages'
 export const OPENCODE_MODELS_URL = 'https://opencode.ai/inference/v1/models'
 export const OPENCODE_CLI_USER_AGENT = 'opencode/latest/2.0.11/cli'
-export const OPENCODE_DEFAULT_PROJECT_ID = '5da9b72c6f3d58f67b560a1dd82e3c067c3fbd18'
+const OPENCODE_DEFAULT_PROJECT_ID = '5da9b72c6f3d58f67b560a1dd82e3c067c3fbd18'
 
 /**
  * OpenCode 官方 ID 生成算法（逆向取证事实）：
@@ -685,7 +684,7 @@ export function formatOpenCodeModelName(id: string): string {
 /**
  * OpenCode 官方元数据本地缓存路径（由 OpenCode CLI 同步落盘）。
  */
-export function defaultOpenCodeCachePath(): string {
+function defaultOpenCodeCachePath(): string {
   if (process.env.OPENCODE_MODELS_CACHE) {
     return process.env.OPENCODE_MODELS_CACHE
   }
@@ -697,7 +696,7 @@ export function defaultOpenCodeCachePath(): string {
 /**
  * 读取本地 OpenCode 官方模型元数据规范（含真实 contextWindow, maxTokens, attachment, wireProtocol）。
  */
-export function readLocalOpenCodeSpecs(cachePath: string = defaultOpenCodeCachePath()): Map<string, OpenCodeModelSpec> | undefined {
+function readLocalOpenCodeSpecs(cachePath: string = defaultOpenCodeCachePath()): Map<string, OpenCodeModelSpec> | undefined {
   try {
     if (!existsSync(cachePath)) return undefined
     const text = readFileSync(cachePath, 'utf8')

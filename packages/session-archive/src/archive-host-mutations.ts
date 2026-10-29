@@ -12,6 +12,7 @@ import { dirname } from 'node:path'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { BUSY_WRITE_WINDOW_MS, REAPPEAR_SETTLE_MS, removeSessionDirIfOwned } from './session-scan.js'
 import type { HostContext } from './archive-host-context.js'
+import type { ArchiveDeleteResult, ArchiveFailure, ArchiveUnarchiveResult } from './types.js'
 
 export function createArchiveMutations(deps: HostContext) {
   const {
@@ -26,6 +27,19 @@ export function createArchiveMutations(deps: HostContext) {
     fileInfo,
     filePresentAfterSettle,
   } = deps
+
+  /** 插件日志通道（所有告警统一走宿主 logger）。 */
+  const warn = (message: string) => ctx.logger?.warn?.(message)
+
+  /** stat 一个路径：只有 ENOENT 视为"文件已消失"（null），其余错误上抛以真实原因计入 failed。 */
+  const statOrNull = (path: string): Promise<{ size: number; mtimeMs: number } | null> =>
+    stat(path).then(
+      (info) => ({ size: info.size, mtimeMs: info.mtimeMs }),
+      (error: NodeJS.ErrnoException) => {
+        if (error?.code === 'ENOENT') return null
+        throw error
+      },
+    )
 
   return {
     /**
@@ -47,10 +61,10 @@ export function createArchiveMutations(deps: HostContext) {
      * 确认文件已消失的 ghost id；'reappeared' 删除后被生成流重建、二次
      * 删除仍压不掉；其余为底层删除错误消息。
      */
-    async deleteArchived(sessionIds: string[]) {
+    async deleteArchived(sessionIds: string[]): Promise<ArchiveDeleteResult> {
       const unique = [...new Set(sessionIds)];
       const deleted: string[] = [];
-      const failed: Array<{ sessionId: string; reason: string }> = [];
+      const failed: ArchiveFailure[] = [];
       const needsRestart: string[] = [];
       /** 删除成功记账：文件已删、但内存会话仍在的 id 需要宿主重启才能
        * 从原生"设置 → 已归档会话"页消失，如实返回给调用方提示用户。 */
@@ -72,10 +86,7 @@ export function createArchiveMutations(deps: HostContext) {
           // TOCTOU 复核:fileInfo 的 stat 是快照,检查与 rm 之间文件可能
           // 恰好变化;rm 前重取一次。只有 ENOENT 才是「已消失」,其余错误
           // 上抛以真实原因计入 failed。
-          let fresh: { size: number; mtimeMs: number } | null = await stat(path).then(
-            (info) => ({ size: info.size, mtimeMs: info.mtimeMs }),
-            (error: NodeJS.ErrnoException) => { if (error?.code === 'ENOENT') return null; throw error; },
-          );
+          let fresh = await statOrNull(path);
           if (fresh === null) {
             // stat 落空 ≠ 会话数据已删:jsonl 后端的格式迁移是"写临时文件 +
             // rename",若迁移恰好落在锁外定位与本次复核之间,旧代际路径已
@@ -84,14 +95,11 @@ export function createArchiveMutations(deps: HostContext) {
             // 确实无任何代际文件才认定删除完成(顺带补上目录清理)。
             const migrated = await resolveGenerationFile(dirname(path));
             if (migrated !== null) path = migrated;
-            fresh = await stat(path).then(
-              (info) => ({ size: info.size, mtimeMs: info.mtimeMs }),
-              (error: NodeJS.ErrnoException) => { if (error?.code === 'ENOENT') return null; throw error; },
-            );
+            fresh = await statOrNull(path);
             if (fresh === null) {
               // 复扫后仍落空(无新代际,或迁移竞态二连/并发他删):按幂等
               // 删除处理,列表的存在性过滤自会隐藏幽灵 id。
-              await removeSessionDirIfOwned(sessionId, path, (message) => ctx.logger?.warn?.(message));
+              await removeSessionDirIfOwned(sessionId, path, warn);
               markDeleted(sessionId);
               return;
             }
@@ -113,7 +121,7 @@ export function createArchiveMutations(deps: HostContext) {
             fresh = second;
           }
           await rm(path, { force: true });
-          await removeSessionDirIfOwned(sessionId, path, (message) => ctx.logger?.warn?.(message));
+          await removeSessionDirIfOwned(sessionId, path, warn);
           // rm 后复验：防宿主 materialize 的 mkdir -p 把路径在删除窗口内重建。
           // 重现只可能来自活跃写入方（内存中的生成流，或刚写完不久、客户端
           // 重连即恢复的 tab）。据此分两档：
@@ -127,11 +135,11 @@ export function createArchiveMutations(deps: HostContext) {
           if (await filePresentAfterSettle(path, settleMs)) {
             try {
               await rm(path, { force: true });
-              await removeSessionDirIfOwned(sessionId, path, (message) => ctx.logger?.warn?.(message));
+              await removeSessionDirIfOwned(sessionId, path, warn);
             } catch (error) {
               // 二次删除失败必须以真实原因上报:吞掉会让 EPERM/EBUSY 被
               // 误标为 reappeared,把排障方向带偏。
-              ctx.logger?.warn?.(`session-archive: second delete failed for ${sessionId}: ${String(error)}`);
+              warn(`session-archive: second delete failed for ${sessionId}: ${String(error)}`);
               failed.push({ sessionId, reason: (error as Error)?.message ?? 'delete-failed' });
               return;
             }
@@ -157,7 +165,8 @@ export function createArchiveMutations(deps: HostContext) {
         // 删除保护由 deleteLocatedFile 的 busy 沉降观察承担(活跃生成流会
         // 被增长判定拒绝),不是 live 判定。此前的 'live' 分支在该前置检查
         // 之后永不可达(死代码),已删;词表保留 'busy'/'not-archived'。
-        if (snapshots.get(sessionId) === undefined) {
+        const snapshot = snapshots.get(sessionId);
+        if (snapshot === undefined) {
           // ghost id(枚举不到)。"枚举不到 ≠ 文件不存在":首行损坏的日志会被
           // persistence 静默跳过;而 jsonl 后端按 cwd 分目录,ghost 探测没有
           // header、拿不到 cwd,stat 无法反推目录——既探不到真实文件,也确认不了缺失。因此 ghost 一律不能当"已删"报成功
@@ -166,7 +175,7 @@ export function createArchiveMutations(deps: HostContext) {
           failed.push({ sessionId, reason: 'unenumerable' });
           continue;
         }
-        const header = snapshots.get(sessionId)!.header;
+        const header = snapshot.header;
         const file = await fileInfo(header);
         if (file.state === 'unknown') {
           // 文件存在(枚举得到)但无法定位路径:删不得也不该谎报成功。
@@ -224,11 +233,11 @@ export function createArchiveMutations(deps: HostContext) {
      * 每个请求 id 都必须在 failed 里有下落——客户端据此把「已恢复 0 个」
      * 渲染为失败而非成功。
      */
-    async unarchive(sessionIds: string[]) {
+    async unarchive(sessionIds: string[]): Promise<ArchiveUnarchiveResult> {
       const unique = [...new Set(sessionIds)];
       const archived = archivedSet();
       const snapshots = await snapshotsByIds(unique.filter((id) => archived.has(id)));
-      const failed: Array<{ sessionId: string; reason: string }> = [];
+      const failed: ArchiveFailure[] = [];
       // 锁外先做一遍廉价过滤(明显不可恢复的直接淘汰),锁内由 confirm 复核,
       // 消除与并发 deleteArchived 的检查-移除窗口。
       const candidates: string[] = [];

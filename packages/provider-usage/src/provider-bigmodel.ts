@@ -1,14 +1,11 @@
 /**
- * provider-bigmodel.ts — bigmodel 的额度查询器。
- *
- * 2026-10-08 从 521 行的 providers.ts 拆出：每个 provider 一个文件，共享取值助手
- * 单独成模块，providers.ts 只保留内置注册表与 re-export。
+ * provider-bigmodel.ts — BigModel (Zhipu AI) 的额度查询器。
  *
  * @module @chaoset/provider-usage/provider-bigmodel
  */
 
 import type { ProviderUsageQuerier, UsageWindow } from './types.js'
-import { num, str, rec, records, getJson, trimBase } from './provider-shared.js'
+import { num, str, rec, records, snapshotOf, getJson, trimBase } from './provider-shared.js'
 
 /**
  * BigModel (Zhipu AI) Coding Plan and subscription quota.
@@ -23,8 +20,9 @@ import { num, str, rec, records, getJson, trimBase } from './provider-shared.js'
 const QUOTA_ROOT_DEFAULT = 'https://open.bigmodel.cn'
 /** 订阅回退的公网兜底（默认根或回退无果时才用）。 */
 const SUBSCRIPTION_PUBLIC_URL = 'https://bigmodel.cn/api/biz/subscription/list'
+
 export const bigmodelUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
-  if (apiKey === undefined) return { provider: 'bigmodel', windows: [], fetchedAt: Date.now() }
+  if (apiKey === undefined) return snapshotOf('bigmodel', [])
   const root = trimBase(baseURL ?? QUOTA_ROOT_DEFAULT)
   const headers = { authorization: apiKey.startsWith('Bearer ') ? apiKey : `Bearer ${apiKey}` }
   const windows: UsageWindow[] = []
@@ -85,11 +83,8 @@ export const bigmodelUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, sig
     }
   }
 
-  return {
-    provider: 'bigmodel',
-    ...plan === undefined ? {} : { plan },
-    windows,
-    fetchedAt: Date.now(),
-    ...windows.length === 0 ? { error: 'the quota endpoint reported no usable quota or subscription' } : {},
-  }
+  return snapshotOf('bigmodel', windows, {
+    plan,
+    error: 'the quota endpoint reported no usable quota or subscription',
+  })
 }

@@ -36,6 +36,7 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
   const usage = useProviderUsage(props)
   if (usage === null) return null
   const { t, provider, answer, open, setOpen, busy, stale, alignRight, setAlignRight, rootRef, buttonRef, panelRef, refresh, queried, snapshot, headlineText, resetHint } = usage
+  const rateLimit = snapshot?.rateLimit
 
   return (
     <span ref={rootRef} style={{ ...rootStyle, position: 'relative' }}>
@@ -121,26 +122,26 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
           </div>
           <div style={{ opacity: busy ? 0.65 : 1, transition: 'opacity 0.2s ease', pointerEvents: busy ? 'none' : 'auto' }}>
             {/* 限流块排在额度之前：通道被拒时它是用户此刻唯一能行动的信息。 */}
-            {queried && snapshot!.rateLimit !== undefined ? (
+            {rateLimit !== undefined ? (
               <div style={rateLimitBoxStyle} role="status">
                 <p style={rateLimitTitleStyle}>{t('rateLimited')}</p>
                 <p style={rateLimitLineStyle}>
-                  {snapshot!.rateLimit.resetAt === undefined
+                  {rateLimit.resetAt === undefined
                     ? t('rateLimitedUnknown')
-                    : t('rateLimitedUntil', { time: formatReset(new Date(snapshot!.rateLimit.resetAt).toISOString()) })}
+                    : t('rateLimitedUntil', { time: formatReset(new Date(rateLimit.resetAt).toISOString()) })}
                 </p>
                 <p style={rateLimitMetaStyle}>
-                  {t('rateLimitHits', { count: snapshot!.rateLimit.hits })}
-                  {snapshot!.rateLimit.model === undefined ? null : ` · ${snapshot!.rateLimit.model}`}
+                  {t('rateLimitHits', { count: rateLimit.hits })}
+                  {rateLimit.model === undefined ? null : ` · ${rateLimit.model}`}
                 </p>
               </div>
             ) : null}
-            {!queried
+            {snapshot === undefined
               ? <p style={noteStyle}>{t('noQuerierHint')}</p>
-              : snapshot!.windows.length === 0
-                ? <p style={noteStyle}>{snapshot!.error === undefined ? t('noWindows') : t('failed')}</p>
-                : snapshot!.windows.map(window => <WindowRow key={window.id} window={window} t={t} />)}
-            {queried && snapshot!.error !== undefined ? <p style={errorStyle}>{snapshot!.error}</p> : null}
+              : snapshot.windows.length === 0
+                ? <p style={noteStyle}>{snapshot.error === undefined ? t('noWindows') : t('failed')}</p>
+                : snapshot.windows.map(usageWindow => <WindowRow key={usageWindow.id} window={usageWindow} t={t} />)}
+            {snapshot?.error === undefined ? null : <p style={errorStyle}>{snapshot.error}</p>}
           </div>
         </div>
       ) : null}

@@ -277,13 +277,6 @@ export const claimCodeStyle: CSSProperties = {
   wordBreak: 'break-all',
 }
 
-export const planChipOffStyle: CSSProperties = {
-  ...privilegeChipStyle,
-  background: 'var(--dsw-alias-bg-layer-3, rgba(128, 128, 128, 0.12))',
-  color: 'var(--dsw-alias-label-tertiary)',
-  borderColor: 'transparent',
-}
-
 export const signedOutRowStyle: CSSProperties = {
   ...cardStyle,
 }

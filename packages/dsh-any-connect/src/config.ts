@@ -24,12 +24,6 @@ export const WORKBUDDY_SETTINGS_NS = 'anyconnect' as SettingsNamespace
 /** Fallback settings namespace owning the international variant's card. */
 export const WORKBUDDY_AI_SETTINGS_NS = 'anyconnect-ai' as SettingsNamespace
 
-/** Fallback settings namespace owning the ZCode variant's card. */
-export const ZCODE_SETTINGS_NS = 'anyconnect-zcode' as SettingsNamespace
-
-/** Fallback settings namespace owning the OpenCode variant's card. */
-export const OPENCODE_SETTINGS_NS = 'anyconnect-opencode' as SettingsNamespace
-
 /** Plugin configuration: live volatile references committed by the Loader.
  *
  * Editable fields are declared `.volatile()` and read with `.get()`, which
