@@ -77,6 +77,8 @@ export interface BuiltSite {
     readonly baseUrl: string;
     readonly registryUrl: string;
     readonly plugins: readonly { readonly name: string; readonly versions: readonly string[] }[];
+    /** 生效 engines.dsh 的来源统计：新清单 engines.dsh / 旧清单 dsh.host 映射。 */
+    readonly rangeSources: { readonly engines: number; readonly 'dsh-host': number };
     readonly skipped: readonly { readonly tag: string; readonly reason: string }[];
   };
 }
@@ -141,12 +143,18 @@ export declare function collectCandidates(
   releases: readonly unknown[],
   options?: { dirs?: readonly string[] },
 ): { candidates: MarketCandidate[]; skipped: { tag: string; reason: string }[] };
-/** 判断 tarball 内 package.json 是否收录。 */
+/** 收录判定结果：生效 engines.dsh 及其来源。 */
+export type ManifestInspection =
+  | { readonly eligible: true; readonly enginesDsh: string; readonly rangeSource: 'engines' | 'dsh-host' }
+  | { readonly eligible: false; readonly reason: string };
+/** 判断 tarball 内 package.json 是否收录（engines.dsh 原样 / 旧 dsh.host 精确 pin 映射）。 */
 export declare function inspectManifest(
   manifest: unknown,
   candidate: Pick<MarketCandidate, 'version' | 'tag'>,
   expectedName: string,
-): { eligible: boolean; reason?: string };
+): ManifestInspection;
+/** 旧字段 dsh.host 的精确 pin → 该宿主线的 engines.dsh 区间；非精确版本返回 undefined。 */
+export declare function mapHostPinToRange(pin: unknown): string | undefined;
 /** 读取 tarball 内的 package/package.json（不安装、不执行）。 */
 export declare function readPackageJsonFromTarball(bytes: Uint8Array): Record<string, unknown>;
 /** npm tarball 的 sha512 SRI integrity。 */

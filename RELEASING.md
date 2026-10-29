@@ -516,8 +516,20 @@ packument 的 `dist.tarball` 直接指向对应 GitHub Release 资产（标准 n
 生成器只从 **GitHub Releases** 收集，不遍历 git tag：
 
 - tag 形如 `<包目录>-v<精确 SemVer>`，资产为 `chaoset-<包目录>-<版本>.tgz`；
-- 资产内 `package.json` 必须同时具备 `dsh.bundle` 与 `engines.dsh`，且包名/版本与 tag 一致
-  ——这天然只收录当前宿主适配线的产物，老版本（没有 `engines.dsh`）自动排除；
+- 资产内 `package.json` 必须能确定该版本的宿主线，且包名/版本与 tag 一致：
+  1. 声明了 `engines.dsh` → 原样使用（当前适配线：`^0.2.2-alpha.2`）；
+  2. 否则旧字段 `dsh.host` 是**精确版本**（如 `0.2.1-rc.3`）→ 映射成该宿主线的区间
+     `>=<pin> <X.Y.(Z+1)-0`（`0.2.1-rc.3` → `>=0.2.1-rc.3 <0.2.2-0`）：只承认自己那条线，
+     semver 语义下 `0.2.1` ✓、`0.2.2-alpha.2` ✗、`0.2.2` ✗；pin 不是精确版本（range/非法）
+     → fail-safe 跳过并记 `invalid-dsh-host-pin`；
+  3. 两者都没有 → 继续排除（`missing-engines-dsh`）。
+- **单索引双线**：同一个索引同时收录 0.2.1 稳定线与 0.2.2 预览线，宿主「发现」页按宿主版本
+  逐版本算兼容并阻止跨线安装——稳定版宿主默认推荐该包最高的 0.2.1 线稳定版；0.2.2 预览/
+  正式宿主默认回退到 `versions[0]`（最高预览版；宿主 quirk：索引同时含稳定版时卡片不打
+  「默认」标签，不影响安装正确性）；跨线手动安装由发现页阻止（CLI 仍可强制，与旧行为一致）。
+- 被映射版本的 packument 保留原 `dsh.host` 字段，`check` 用它离线断言
+  `engines.dsh === mapHostPin(dsh.host)`（区间包含 pin、上界 = pin 基础版本的下一条线）。
+  不为旧 tarball 重打包补 `engines.dsh`（Release 不可变），映射只发生在索引/registry 侧。
 - `publishTimestamp` 取 Release `published_at`；同一版本重复出现时取发布时间较新的那条。
 - **静态 registry 的 packument 不声明 `dependencies`/`optionalDependencies`/`peerDependencies`**：
   DSH 安装索引版本时执行 `pnpm add <spec> --registry=<静态 registry>`，`--registry` 作用于整条

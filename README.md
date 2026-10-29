@@ -148,6 +148,8 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 
 索引只提供元数据与安装来源（npm 包名 + 静态 registry），安装/更新仍走 DSH 自带的 pnpm 安装与 bundle 对账流程；索引收录的每个版本都对应本仓的一个 GitHub Release 资产。用索引安装时，插件的宿主运行时依赖由宿主 profile runner 的 runtime resolution 提供（不写入 profile 的 `node_modules`）；需要把依赖装进 profile 时请用下面的 tarball 方式。
 
+索引**同时收录稳定线与预览线**，DSH 会按你的宿主版本自动区分：0.2.1 稳定版宿主默认安装/推荐各插件最高的稳定版，0.2.2 预览线宿主安装预览版；版本列表里跨线的版本会标记「不兼容」且不提供安装按钮，不会装错线。
+
 ### 方式二：tarball URL（手动）
 
 Release 资产命名规则为 `chaoset-<包目录>-<版本>.tgz`，tag 名 `<包目录>-v<版本>`，可直接安装对应 URL：

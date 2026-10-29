@@ -12,7 +12,7 @@
 
 import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
-import { compareVersions, isStable, VERSION_RE } from './version-checks.mjs'
+import { compareVersions, isStable, parseVersion, VERSION_RE } from './version-checks.mjs'
 
 /** 默认 GitHub 仓库（owner/name）；CI 里由 GITHUB_REPOSITORY 覆盖。 */
 export const DEFAULT_GITHUB_REPO = 'ShanWuYinShe/dsh-plugins'
@@ -251,6 +251,36 @@ export function parseReleaseTag(tag, dirs) {
   return undefined
 }
 
+/** 旧字段 dsh.host 的精确 pin → 该宿主线的 engines.dsh 区间（非精确值返回 undefined）。 */
+export function mapHostPinToRange(pin) {
+  if (typeof pin !== 'string' || !VERSION_RE.test(pin)) return undefined
+  const { maj, min, pat } = parseVersion(pin)
+  if (!Number.isInteger(maj) || !Number.isInteger(min) || !Number.isInteger(pat)) return undefined
+  // 上界用下一条线的 -0 前缀：semver 语义下它排除下一条线的全部版本（含 prerelease），
+  // 只承认 pin 自己那条线——0.2.1-rc.3 → >=0.2.1-rc.3 <0.2.2-0；
+  // 0.2.1 ✓、0.2.2-alpha.2 ✗、0.2.2 ✗。
+  return '>=' + pin + ' <' + String(maj) + '.' + String(min) + '.' + String(pat + 1) + '-0'
+}
+
+/** 生成器产出的映射区间形态：`>=<精确 pin> <X.Y.(Z+1)-0`。 */
+const MAPPED_RANGE_RE = /^>=(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?) (<\d+\.\d+\.\d+-0)$/
+
+/**
+ * 检查一个 engines.dsh 字符串若是「映射区间形态」是否自洽（下界精确、上界=下一条线）。
+ * 非映射形态（如 ^0.2.2-alpha.2）不在本检查范围内，返回 undefined。
+ * @param range - engines.dsh 值。
+ * @returns 问题描述，或 undefined。
+ */
+function mappedRangeProblem(range) {
+  if (typeof range !== 'string') return 'engines.dsh 必须是字符串'
+  const match = MAPPED_RANGE_RE.exec(range)
+  if (match === null) return undefined
+  const expected = mapHostPinToRange(match[1])
+  if (expected === undefined) return '映射区间下界 ' + match[1] + ' 不是精确版本'
+  if (expected !== range) return '映射区间应以 ' + expected + ' 为界（上界 = 下界基础版本的下一条线），实际 ' + range
+  return undefined
+}
+
 /**
  * 从 GitHub Releases API 记录里收集候选版本（只做元数据筛选，不读 tarball）。
  *
@@ -341,12 +371,16 @@ export function collectCandidates(releases, options = {}) {
 }
 
 /**
- * 判断一个 tarball 内 package.json 是否应被收录。
- * 收录条件：包名与包目录对应、版本与 tag 一致、dsh.bundle 存在、engines.dsh 存在。
+ * 判断一个 tarball 内 package.json 是否应被收录，并给出该版本要声明的 engines.dsh。
+ * 收录条件（brief 六）：包名与包目录对应、版本与 tag 一致、dsh.bundle 存在，且：
+ *  1. 声明了 engines.dsh → 原样使用（当前适配线，如 ^0.2.2-alpha.2）；
+ *  2. 否则旧字段 dsh.host 是精确版本 → 映射成该宿主线的区间（见 mapHostPinToRange）；
+ *     不是精确版本则 fail-safe 跳过（invalid-dsh-host-pin）；
+ *  3. 两者都没有 → 跳过（missing-engines-dsh）。
  * @param manifest - tarball 内 package.json 解析结果。
  * @param candidate - collectCandidates 的条目。
  * @param expectedName - 该目录对应的 npm 包名。
- * @returns { eligible: true } 或 { eligible: false, reason }。
+ * @returns { eligible: true, enginesDsh, rangeSource } 或 { eligible: false, reason }。
  */
 export function inspectManifest(manifest, candidate, expectedName) {
   if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) {
@@ -363,10 +397,15 @@ export function inspectManifest(manifest, candidate, expectedName) {
     return { eligible: false, reason: 'missing-dsh-bundle' }
   }
   const engines = manifest.engines
-  if (engines === null || typeof engines !== 'object' || typeof engines.dsh !== 'string' || engines.dsh.trim() === '') {
-    return { eligible: false, reason: 'missing-engines-dsh' }
+  if (engines !== null && typeof engines === 'object' && typeof engines.dsh === 'string' && engines.dsh.trim() !== '') {
+    return { eligible: true, enginesDsh: engines.dsh, rangeSource: 'engines' }
   }
-  return { eligible: true }
+  if (Object.hasOwn(dsh, 'host')) {
+    const mapped = mapHostPinToRange(dsh.host)
+    if (mapped === undefined) return { eligible: false, reason: 'invalid-dsh-host-pin: ' + JSON.stringify(dsh.host) }
+    return { eligible: true, enginesDsh: mapped, rangeSource: 'dsh-host' }
+  }
+  return { eligible: false, reason: 'missing-engines-dsh' }
 }
 
 /**
@@ -565,9 +604,10 @@ export function buildSite(input) {
       skipped.push({ tag: candidate.tag, reason: inspection.reason })
       continue
     }
+    const entry = { candidate, manifest, enginesDsh: inspection.enginesDsh, rangeSource: inspection.rangeSource }
     const versions = byDir.get(candidate.dir)
-    if (versions === undefined) byDir.set(candidate.dir, [{ candidate, manifest }])
-    else versions.push({ candidate, manifest })
+    if (versions === undefined) byDir.set(candidate.dir, [entry])
+    else versions.push(entry)
   }
   const orderedDirs = Object.keys(PACKAGE_DISPLAY).filter(dir => byDir.has(dir))
   const plugins = []
@@ -580,7 +620,7 @@ export function buildSite(input) {
       version: entry.candidate.version,
       publishTimestamp: entry.candidate.publishedAt,
       source: { type: 'npm', registry: registryUrl },
-      engines: { dsh: entry.manifest.engines.dsh },
+      engines: { dsh: entry.enginesDsh },
     }))
     const iconPath = 'icons/' + display.slug + '.svg'
     files.set(iconPath, renderIcon(display))
@@ -616,6 +656,8 @@ export function buildSite(input) {
   files.set('index.json', serializeJson(index))
   files.set('README.md', MARKET_README)
   const versionCount = plugins.reduce((total, plugin) => total + plugin.versions.length, 0)
+  const rangeSources = { engines: 0, 'dsh-host': 0 }
+  for (const entries of byDir.values()) for (const entry of entries) rangeSources[entry.rangeSource] += 1
   return {
     files,
     summary: {
@@ -624,6 +666,7 @@ export function buildSite(input) {
       registryUrl,
       plugins: plugins.map(plugin => ({ name: plugin.name, versions: plugin.versions.map(version => version.version) })),
       versionCount,
+      rangeSources,
       skipped,
       digest: siteDigest(files),
     },
@@ -670,7 +713,8 @@ function packumentVersion(entry, registryUrl) {
     version: manifest.version,
     description: typeof manifest.description === 'string' ? manifest.description : undefined,
     license: typeof manifest.license === 'string' ? manifest.license : undefined,
-    engines: manifest.engines,
+    // 生效 engines.dsh：新清单原样，旧清单由 dsh.host pin 映射成该宿主线区间（见 inspectManifest）。
+    engines: { ...(manifest.engines === null || typeof manifest.engines !== 'object' ? {} : manifest.engines), dsh: entry.enginesDsh },
     homepage: normalizeHomepage(manifest.homepage),
     repository: repositoryOf(manifest),
     keywords: keywordsOf(manifest),
@@ -924,8 +968,21 @@ function validatePlugin(context) {
       errors.push(label + ' 版本 ' + version + ' 的 source.registry 期望 ' + registryUrl + '，实际 ' + String(entry.source.registry))
     }
     if (typeof entry.engines.dsh !== 'string' || entry.engines.dsh === '') errors.push(label + ' 版本 ' + version + ' 缺少 engines.dsh')
+    const rangeProblem = mappedRangeProblem(entry.engines.dsh)
+    if (rangeProblem !== undefined) errors.push(label + ' 版本 ' + version + ' 的 engines.dsh ' + rangeProblem)
     const packedVersion = packument.versions[version]
     if (packedVersion === null || typeof packedVersion !== 'object') continue
+    // 映射版本的来源必须保留在 packument 的 dsh.host 里，且区间由它唯一决定：
+    // 这样离线也能验证「区间包含 pin、上界 = pin 基础版本的下一条线」。
+    const packedDsh = packedVersion.dsh
+    const hostPin = packedDsh !== null && typeof packedDsh === 'object' ? packedDsh.host : undefined
+    if (hostPin !== undefined) {
+      const mapped = mapHostPinToRange(hostPin)
+      if (mapped === undefined) errors.push('packument ' + plugin.name + '@' + version + ' 的 dsh.host ' + JSON.stringify(hostPin) + ' 不是精确版本，无法映射 engines.dsh')
+      else if (entry.engines.dsh !== mapped) errors.push('packument ' + plugin.name + '@' + version + ' 的 engines.dsh 应等于 dsh.host 的映射结果 ' + mapped + '，实际 ' + String(entry.engines.dsh))
+    } else if (MAPPED_RANGE_RE.test(String(entry.engines.dsh))) {
+      errors.push('packument ' + plugin.name + '@' + version + ' 的 engines.dsh 是映射区间形态，但 packument 缺少来源字段 dsh.host')
+    }
     if (packedVersion.engines === null || typeof packedVersion.engines !== 'object' || packedVersion.engines.dsh !== entry.engines.dsh) {
       errors.push('packument ' + plugin.name + '@' + version + ' 的 engines.dsh 与索引不一致')
     }
