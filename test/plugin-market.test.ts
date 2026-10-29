@@ -24,8 +24,8 @@ import {
   MARKET_DIR,
   MARKET_README,
   expectedNamesFromDisplay,
+  exactPinOfDeclared,
   inspectManifest,
-  mapHostPinToRange,
   normalizeRegistryUrl,
   packumentPath,
   parseReleaseTag,
@@ -44,7 +44,7 @@ import {
  *
  * 覆盖三件事：
  * 1. 收录规则：Release 元数据筛选（tag 形态 / draft / 资产命名 / 重复版本）与 tarball 内
- *    package.json 判定（dsh.bundle + engines.dsh 原样 / 旧 dsh.host 精确 pin 映射 + 名称/版本一致）；
+ *    package.json 判定（dsh.bundle + 精确 engines.dsh / 范围取下界 / 旧 dsh.host 精确 pin + 名称/版本一致），
  * 2. 站点契约：index.json 能被官方 parseMarketIndex 接受，静态 registry 的 packument 与索引
  *    交叉一致（registry 常量、版本集合、engines.dsh、publishTimestamp、dist 摘要），
  *    重复构建逐字节确定；
@@ -54,7 +54,7 @@ import {
  * 真实 Releases 的端到端验证由 node scripts/plugin-market.mjs plan/build 在 CI 与本机完成。
  */
 
-// 映射区间的兼容语义用真实 semver 验证：根 devDependencies 已声明 semver（与官方
+// 精确 pin 的兼容语义用真实 semver 验证：根 devDependencies 已声明 semver（与官方
 // @deepseek-ai/dsh-plugin-market-index 依赖的范围同版本），不手写比较器自己验证自己。
 const requireForTest = createRequire(import.meta.url);
 const semver = requireForTest("semver") as {
@@ -218,7 +218,11 @@ function fixture(): { releases: Record<string, unknown>[]; manifests: Map<string
     releaseTagFor("provider-usage", "0.2.1-alpha.3"),
     manifestOf("provider-usage", "0.2.1-alpha.3", { dsh: { manifestVersion: 1, client: { platform: "web", inject: [] } } }),
   );
-  manifests.set(releaseTagFor("sandbox-extra-roots", "0.4.28-alpha.3"), manifestOf("sandbox-extra-roots", "0.4.28-alpha.3"));
+  // 新版本已写精确 engines.dsh（原样收录，来源 exact）；其余历史版本仍是范围声明。
+  manifests.set(
+    releaseTagFor("sandbox-extra-roots", "0.4.28-alpha.3"),
+    manifestOf("sandbox-extra-roots", "0.4.28-alpha.3", { engines: { node: ">=24.9.0", dsh: "0.2.2-alpha.2" } }),
+  );
   manifests.set(releaseTagFor("sandbox-extra-roots", "0.4.28-alpha.2"), manifestOf("sandbox-extra-roots", "0.4.28-alpha.2"));
   manifests.set(releaseTagFor("sandbox-extra-roots", "0.4.27"), legacyManifestOf("sandbox-extra-roots", "0.4.27", "0.2.1-rc.3"));
   manifests.set(releaseTagFor("sandbox-extra-roots", "0.4.28-alpha.1"), manifestOf("sandbox-extra-roots", "0.4.28-alpha.1"));
@@ -296,13 +300,6 @@ function mutateJson(files: ReadonlyMap<string, string>, path: string, mutate: (v
 function reasonOf(inspection: ManifestInspection): string {
   if (inspection.eligible) throw new Error("期望不收录，但判定为可收录");
   return inspection.reason;
-}
-
-/** 取 dsh.host pin 的映射区间（失败即抛，避免到处非空断言）。 */
-function mappedOf(pin: string): string {
-  const range = mapHostPinToRange(pin);
-  if (range === undefined) throw new Error("pin 无法映射: " + pin);
-  return range;
 }
 
 /** 用既有站点还原出的历史版本重建站点（模拟 CI 的 build --previous）。 */
@@ -443,13 +440,27 @@ describe("tarball 读取与收录判定", () => {
     expect(() => readPackageJsonFromTarball(empty)).toThrow(/缺少 package\/package.json/);
   });
 
-  it("收录条件：名称/版本一致 + dsh.bundle + engines.dsh 或旧 dsh.host 精确 pin", () => {
+  it("收录条件：名称/版本一致 + dsh.bundle + 精确 engines.dsh（范围取最低满足版本）", () => {
     const candidate = { version: "0.2.1-alpha.4", tag: "provider-usage-v0.2.1-alpha.4" };
+    // 历史 tarball 声明范围 ^X → 索引取最低满足版本 X 作为精确 pin，并保留原声明供复核。
     expect(inspectManifest(manifestOf("provider-usage", "0.2.1-alpha.4"), candidate, nameOf("provider-usage"))).toEqual({
       eligible: true,
-      enginesDsh: "^0.2.2-alpha.2",
-      rangeSource: "engines",
+      enginesDsh: "0.2.2-alpha.2",
+      rangeSource: "floor",
+      declaredEnginesDsh: "^0.2.2-alpha.2",
     });
+    // 新 tarball 已写精确版本 → 原样使用。
+    expect(
+      inspectManifest(
+        manifestOf("provider-usage", "0.2.1-alpha.4", { engines: { dsh: "0.2.2-alpha.2" } }),
+        candidate,
+        nameOf("provider-usage"),
+      ),
+    ).toEqual({ eligible: true, enginesDsh: "0.2.2-alpha.2", rangeSource: "exact" });
+    // 无法判定精确版本（* / latest / || 组合）→ fail-safe 跳过，原因里带上原值。
+    expect(
+      reasonOf(inspectManifest(manifestOf("provider-usage", "0.2.1-alpha.4", { engines: { dsh: "*" } }), candidate, nameOf("provider-usage"))),
+    ).toBe('invalid-engines-dsh: "*"');
     expect(reasonOf(inspectManifest(null, candidate, nameOf("provider-usage")))).toBe("manifest-not-object");
     expect(reasonOf(inspectManifest(manifestOf("dsh-any-connect", "0.2.1-alpha.4"), candidate, nameOf("provider-usage")))).toMatch(/name-mismatch/);
     expect(reasonOf(inspectManifest(manifestOf("provider-usage", "0.2.1-alpha.3"), candidate, nameOf("provider-usage")))).toMatch(/version-mismatch/);
@@ -457,11 +468,11 @@ describe("tarball 读取与收录判定", () => {
     expect(reasonOf(inspectManifest(manifestOf("provider-usage", "0.2.1-alpha.3", { dsh: { manifestVersion: 1 } }), { version: "0.2.1-alpha.3", tag: "provider-usage-v0.2.1-alpha.3" }, nameOf("provider-usage")))).toBe("missing-dsh-bundle");
   });
 
-  it("旧清单只有 dsh.host 精确 pin 时映射成该宿主线区间", () => {
+  it("旧清单只有 dsh.host 精确 pin 时原样作为精确 pin", () => {
     const candidate = { version: "0.4.27", tag: "dsh-any-connect-v0.4.27" };
     expect(inspectManifest(legacyManifestOf("dsh-any-connect", "0.4.27", "0.2.1-rc.3"), candidate, nameOf("dsh-any-connect"))).toEqual({
       eligible: true,
-      enginesDsh: ">=0.2.1-rc.3 <0.2.2-0",
+      enginesDsh: "0.2.1-rc.3",
       rangeSource: "dsh-host",
     });
     // pin 不是精确版本（range/非法）→ fail-safe 跳过，原因里带上原值便于排查。
@@ -481,7 +492,7 @@ describe("buildSite", () => {
     const anyConnect = index.plugins.find((plugin: any) => plugin.name === nameOf("dsh-any-connect"));
     expect(anyConnect.versions.map((version: any) => version.version)).toEqual(["0.4.28-alpha.5", "0.4.28-alpha.4", "0.4.27"]);
     expect(site.summary.versionCount).toBe(10);
-    expect(site.summary.rangeSources).toEqual({ engines: 6, "dsh-host": 4 });
+    expect(site.summary.rangeSources).toEqual({ exact: 1, floor: 5, "dsh-host": 4 });
     const skippedReasons = site.summary.skipped.map(item => item.reason).join("\n");
     expect(skippedReasons).toContain("missing-engines-dsh");
     expect(skippedReasons).toContain("missing-dsh-bundle");
@@ -499,7 +510,9 @@ describe("buildSite", () => {
       expect(plugin.metadata.category).toBeTruthy();
       for (const version of plugin.versions) {
         expect(version.source).toEqual({ type: "npm", registry: REGISTRY_URL });
-        expect(["^0.2.2-alpha.2", ">=0.2.1-rc.3 <0.2.2-0"]).toContain(version.engines.dsh);
+        // 每个版本的 engines.dsh 必须是精确宿主版本（不能是范围）。
+        expect(version.engines.dsh).toMatch(/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
+        expect(["0.2.2-alpha.2", "0.2.1-rc.3"]).toContain(version.engines.dsh);
         expect(Number.isInteger(version.publishTimestamp)).toBe(true);
       }
     }
@@ -517,13 +530,19 @@ describe("buildSite", () => {
         expect(packed.version).toBe(version.version);
         expect(packed.engines.dsh).toBe(version.engines.dsh);
         expect(packed.dsh.bundle).toBeTruthy();
-        // 旧清单版本：packument 保留原始 dsh.host，engines.dsh 必须等于它映射出的区间；
-        // 新清单版本：engines.dsh 原样使用，且 packument 不应出现 dsh.host。
-        if (packed.dsh.host === undefined) {
-          expect(packed.engines.dsh).toBe("^0.2.2-alpha.2");
+        // engines.dsh 必须是单个精确宿主版本；映射版本保留来源字段供离线复核。
+        expect(packed.engines.dsh).toMatch(/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
+        if (packed.dsh.host !== undefined) {
+          // 旧清单：dsh.host 精确 pin 原样（无 dshMarket）。
+          expect(packed.engines.dsh).toBe("0.2.1-rc.3");
+          expect(packed.dshMarket).toBeUndefined();
+        } else if (packed.dshMarket !== undefined) {
+          // 历史范围清单：精确 pin = 声明范围的下界，原声明保留在 dshMarket。
+          expect(packed.dshMarket).toEqual({ source: "engines-range", declaredEnginesDsh: "^0.2.2-alpha.2" });
+          expect(packed.engines.dsh).toBe(exactPinOfDeclared("^0.2.2-alpha.2"));
         } else {
-          expect(packed.engines.dsh).toBe(mapHostPinToRange(packed.dsh.host));
-          expect(packed.engines.dsh).toBe(">=0.2.1-rc.3 <0.2.2-0");
+          // 精确声明的新版本：原样使用，不带来源字段。
+          expect(packed.engines.dsh).toBe("0.2.2-alpha.2");
         }
         expect(packed.engines.node).toBeTruthy();
         expect(packed.dist.tarball).toBe(
@@ -597,76 +616,65 @@ describe("buildSite", () => {
 });
 
 describe("版本区分（稳定线 / 预览线）", () => {
-  it("dsh.host 精确 pin → 该宿主线区间（映射单测）", () => {
-    expect(mappedOf("0.2.1-rc.3")).toBe(">=0.2.1-rc.3 <0.2.2-0");
-    expect(mappedOf("0.2.1")).toBe(">=0.2.1 <0.2.2-0");
-    expect(mappedOf("0.2.2-alpha.2")).toBe(">=0.2.2-alpha.2 <0.2.3-0");
-    expect(mappedOf("0.1.6-alpha.2")).toBe(">=0.1.6-alpha.2 <0.1.7-0");
-    // 只接受精确版本：range / 非法值一律 undefined（收录侧 fail-safe 跳过）。
-    for (const invalid of ["^0.2.1", "~0.2.1", ">=0.2.1", "0.2", "0.2.1.x", "latest", "0.2.1 || 0.2.2", "", " 0.2.1 ", 42, null, undefined]) {
-      expect(mapHostPinToRange(invalid), "pin 应拒绝: " + String(invalid)).toBeUndefined();
+  it("exactPinOfDeclared：精确原样 / 范围取下界 / 无法判定返回 undefined", () => {
+    expect(exactPinOfDeclared("0.2.2-alpha.2")).toBe("0.2.2-alpha.2");
+    expect(exactPinOfDeclared("^0.2.2-alpha.2")).toBe("0.2.2-alpha.2");
+    expect(exactPinOfDeclared("~0.2.1-rc.3")).toBe("0.2.1-rc.3");
+    expect(exactPinOfDeclared(">=0.2.1-rc.3")).toBe("0.2.1-rc.3");
+    expect(exactPinOfDeclared(">=0.2.1-rc.3 <0.2.2-0")).toBe("0.2.1-rc.3");
+    expect(exactPinOfDeclared(" 0.2.2-alpha.2 ")).toBe("0.2.2-alpha.2");
+    // * / latest / || 组合 / 非法值一律无法判定（收录侧 fail-safe 跳过）。
+    for (const invalid of ["*", "latest", "^0.2.2-alpha.2 || ^0.3.0-alpha.1", "0.2", "0.2.1.x", "", "  ", 42, null, undefined]) {
+      expect(exactPinOfDeclared(invalid), "应无法判定: " + String(invalid)).toBeUndefined();
     }
   });
 
-  it("映射区间的 semver 语义（宿主兼容检查用 includePrerelease 比较）", () => {
+  it("精确 pin 的 semver 语义（宿主按精确匹配判定，不写范围）", () => {
     const satisfies = (host: string, range: string): boolean => semver.satisfies(host, range, { includePrerelease: true });
-    const stableLine = mappedOf("0.2.1-rc.3");
-    // 0.2.1 线：只认自己这条线（下界含 pin 及其后的同线版本，上界排除 0.2.2 全部版本）。
-    expect(satisfies("0.2.1-rc.3", stableLine)).toBe(true);
-    expect(satisfies("0.2.1", stableLine)).toBe(true);
-    expect(satisfies("0.2.1-alpha.1", stableLine)).toBe(false);
-    expect(satisfies("0.2.0-rc.2", stableLine)).toBe(false);
-    expect(satisfies("0.2.2-alpha.2", stableLine)).toBe(false);
-    expect(satisfies("0.2.2", stableLine)).toBe(false);
-    // 0.2.2 线：新清单 engines.dsh 原样使用，同线 alpha/rc/final 都兼容。
-    const previewLine = "^0.2.2-alpha.2";
-    expect(satisfies("0.2.2-alpha.2", previewLine)).toBe(true);
-    expect(satisfies("0.2.2-rc.1", previewLine)).toBe(true);
-    expect(satisfies("0.2.2", previewLine)).toBe(true);
-    expect(satisfies("0.2.1", previewLine)).toBe(false);
-    expect(satisfies("0.2.2-alpha.1", previewLine)).toBe(false);
-    expect(satisfies("0.3.0-alpha.1", previewLine)).toBe(false);
+    const previewPin = "0.2.2-alpha.2";
+    // 只有与声明完全相同的宿主版本兼容；同线其它预发布/正式版都不兼容——这正是「不误导」的语义。
+    expect(satisfies("0.2.2-alpha.2", previewPin)).toBe(true);
+    expect(satisfies("0.2.2-rc.1", previewPin)).toBe(false);
+    expect(satisfies("0.2.2", previewPin)).toBe(false);
+    expect(satisfies("0.2.2-alpha.3", previewPin)).toBe(false);
+    // 稳定线历史 pin：0.2.1-rc.5 宿主不满足 0.2.1-rc.3 pin。
+    expect(satisfies("0.2.1-rc.3", "0.2.1-rc.3")).toBe(true);
+    expect(satisfies("0.2.1-rc.5", "0.2.1-rc.3")).toBe(false);
+    expect(satisfies("0.2.1", "0.2.1-rc.3")).toBe(false);
   });
 
-  it("行为矩阵：稳定宿主默认推荐稳定版，预览宿主回退 versions[0]", () => {
+  it("行为矩阵：每个版本只对精确匹配的宿主可见（含不误导的代价）", () => {
     const { site } = buildFixtureSite();
     const index = JSON.parse(mustFile(site.files, "index.json"));
     const satisfies = (host: string, range: string): boolean => semver.satisfies(host, range, { includePrerelease: true });
-    /** 复刻宿主 discover 行为：兼容版本里优先最高稳定版；没有则回退 versions[0]（索引降序首条）。 */
-    function recommend(host: string, plugin: any): string {
-      const compatible = plugin.versions.filter((version: any) => satisfies(host, version.engines.dsh));
-      const stable = compatible.filter((version: any) => !version.version.includes("-"));
-      if (stable.length > 0) return stable[0].version;
-      return compatible.length > 0 ? compatible[0].version : plugin.versions[0].version;
+    function compatible(host: string, plugin: any): any[] {
+      return plugin.versions.filter((version: any) => satisfies(host, version.engines.dsh));
     }
-    const stableHost: Record<string, string> = {
-      "@chaoset/dsh-any-connect": "0.4.27",
-      "@chaoset/provider-usage": "0.2.0",
-      "@chaoset/sandbox-extra-roots": "0.4.27",
-      "@chaoset/session-archive": "0.3.31",
-    };
-    const previewHost: Record<string, string> = {
-      "@chaoset/dsh-any-connect": "0.4.28-alpha.5",
-      "@chaoset/provider-usage": "0.2.1-alpha.4",
-      "@chaoset/sandbox-extra-roots": "0.4.28-alpha.3",
-      "@chaoset/session-archive": "0.3.32-alpha.3",
-    };
+    /** 复刻宿主 discover：兼容版本里优先最高稳定版；没有则回退 versions[0]（索引降序首条）。 */
+    function recommend(host: string, plugin: any): string {
+      const list = compatible(host, plugin);
+      const stable = list.filter((version: any) => !version.version.includes("-"));
+      if (stable.length > 0) return stable[0].version;
+      return list.length > 0 ? list[0].version : plugin.versions[0].version;
+    }
     for (const plugin of index.plugins as any[]) {
-      // 0.2.1 稳定宿主：默认到该包最高的稳定版；预览版在版本列表全部不兼容。
-      expect(recommend("0.2.1", plugin), plugin.name).toBe(stableHost[plugin.name]);
-      for (const version of plugin.versions as any[]) {
-        if (!version.version.includes("-")) continue;
-        expect(satisfies("0.2.1", version.engines.dsh), plugin.name + "@" + version.version).toBe(false);
-      }
-      // 0.2.2-alpha.2 / rc / final 宿主：只兼容预览线，默认回退 versions[0]（最高预览版）。
-      for (const host of ["0.2.2-alpha.2", "0.2.2-rc.1", "0.2.2"]) {
-        expect(recommend(host, plugin), host + " " + plugin.name).toBe(previewHost[plugin.name]);
-        for (const version of plugin.versions as any[]) {
-          if (!version.version.includes("-")) {
-            // 稳定线版本在预览宿主下不可安装（区间上界排除整条预览线）。
-            expect(satisfies(host, version.engines.dsh), host + " " + plugin.name + "@" + version.version).toBe(false);
-          }
-        }
+      // 0.2.2-alpha.2 宿主：只见精确 pin = 0.2.2-alpha.2 的预览版；稳定线历史版本不可见。
+      const previewVisible = compatible("0.2.2-alpha.2", plugin).map((version: any) => version.version);
+      expect(previewVisible.length, plugin.name).toBeGreaterThan(0);
+      expect(previewVisible.every((version: string) => version.includes("-")), plugin.name).toBe(true);
+      expect(recommend("0.2.2-alpha.2", plugin), plugin.name).toBe(previewVisible[0]);
+      // 0.2.1-rc.3 宿主：只见精确 pin 到 rc.3 的稳定线历史版本。
+      const stableVisible = compatible("0.2.1-rc.3", plugin).map((version: any) => version.version);
+      expect(stableVisible.length, plugin.name).toBeGreaterThan(0);
+      expect(stableVisible.every((version: string) => !version.includes("-")), plugin.name).toBe(true);
+      expect(recommend("0.2.1-rc.3", plugin), plugin.name).toBe(stableVisible[0]);
+      // 0.2.1-rc.5（当前稳定参考）：历史 pin 是 rc.3 → 无任何兼容版本，宿主回退 versions[0]，
+      // 发现页不会显示旧稳定版可安装。这是「精确匹配、不误导」的已知代价。
+      expect(compatible("0.2.1-rc.5", plugin), plugin.name).toEqual([]);
+      expect(recommend("0.2.1-rc.5", plugin), plugin.name).toBe(plugin.versions[0].version);
+      // 0.2.2-rc.1 / 0.2.2 正式版：与精确 pin 0.2.2-alpha.2 不同 → 同样无兼容版本。
+      for (const host of ["0.2.2-rc.1", "0.2.2"]) {
+        expect(compatible(host, plugin), host + " " + plugin.name).toEqual([]);
       }
     }
   });
@@ -753,43 +761,42 @@ describe("validateSite（check 的正向与反向）", () => {
     expect(result.errors.join("\n")).toMatch(/不得声明 dependencies/);
   });
 
-  it("映射区间被手改（上界不是下一条线）被拒绝", () => {
+  it("索引 engines.dsh 写成范围被拒绝（必须是单个精确宿主版本）", () => {
     const { site } = buildFixtureSite();
     const pluginName = nameOf("dsh-any-connect");
-    const wrong = ">=0.2.1-rc.3 <0.3.0-0";
+    const range = "^0.2.2-alpha.2";
+    // index 与 packument 一起改成范围：避免先命中「与索引不一致」，要验证的是精确形态断言。
     const withIndex = mutateJson(site.files, "index.json", (index: any) => {
       const plugin = index.plugins.find((candidate: any) => candidate.name === pluginName);
-      const version = plugin.versions.find((candidate: any) => candidate.version === "0.4.27");
-      version.engines.dsh = wrong;
+      const version = plugin.versions.find((candidate: any) => candidate.version === "0.4.28-alpha.5");
+      version.engines.dsh = range;
     });
     const files = mutateJson(withIndex, packumentPath(pluginName), (packument: any) => {
-      packument.versions["0.4.27"].engines.dsh = wrong;
+      packument.versions["0.4.28-alpha.5"].engines.dsh = range;
     });
-    expect(checkSite(files).errors.join("\n")).toMatch(/映射区间应以/);
+    expect(checkSite(files).errors.join("\n")).toMatch(/必须是单个精确 SemVer/);
   });
 
-  it("dsh.host 与 engines.dsh 的映射关系不一致被拒绝", () => {
+  it("dsh.host 精确 pin 与 engines.dsh 不一致被拒绝", () => {
     const { site } = buildFixtureSite();
-    const pluginName = nameOf("dsh-any-connect");
-    // dsh.host 仍是 0.2.1-rc.3，但 engines.dsh 被改成 0.2.1-rc.9 的映射区间（索引同步手改）。
-    const wrong = mappedOf("0.2.1-rc.9");
-    const withIndex = mutateJson(site.files, "index.json", (index: any) => {
-      const plugin = index.plugins.find((candidate: any) => candidate.name === pluginName);
-      const version = plugin.versions.find((candidate: any) => candidate.version === "0.4.27");
-      version.engines.dsh = wrong;
-    });
-    const files = mutateJson(withIndex, packumentPath(pluginName), (packument: any) => {
-      packument.versions["0.4.27"].engines.dsh = wrong;
-    });
-    expect(checkSite(files).errors.join("\n")).toMatch(/应等于 dsh\.host 的映射结果/);
-  });
-
-  it("映射区间版本缺少来源 dsh.host 被拒绝", () => {
-    const { site } = buildFixtureSite();
+    // 只改来源字段：dsh.host 被改成 0.2.1-rc.9，索引/engines 仍是 rc.3 → 溯源校验应报错。
     const files = mutateJson(site.files, packumentPath(nameOf("dsh-any-connect")), (packument: any) => {
-      delete packument.versions["0.4.27"].dsh.host;
+      packument.versions["0.4.27"].dsh.host = "0.2.1-rc.9";
     });
-    expect(checkSite(files).errors.join("\n")).toMatch(/缺少来源字段 dsh\.host/);
+    expect(checkSite(files).errors.join("\n")).toMatch(/应等于 dsh\.host 精确 pin/);
+  });
+
+  it("dshMarket 来源字段形态非法或与精确 pin 不一致被拒绝", () => {
+    const { site } = buildFixtureSite();
+    const pluginName = nameOf("dsh-any-connect");
+    const malformed = mutateJson(site.files, packumentPath(pluginName), (packument: any) => {
+      packument.versions["0.4.28-alpha.5"].dshMarket = { source: "wrong-source", declaredEnginesDsh: "^0.2.2-alpha.2" };
+    });
+    expect(checkSite(malformed).errors.join("\n")).toMatch(/dshMarket 来源字段形态非法/);
+    const wrongFloor = mutateJson(site.files, packumentPath(pluginName), (packument: any) => {
+      packument.versions["0.4.28-alpha.5"].dshMarket.declaredEnginesDsh = "^0.2.3-alpha.1";
+    });
+    expect(checkSite(wrongFloor).errors.join("\n")).toMatch(/应等于声明范围的下界/);
   });
 
   it("非规范 JSON 被拒绝", () => {

@@ -87,16 +87,19 @@ describe("scanManifest", () => {
     ]);
   });
 
-  it("engines.dsh：合法 ^<版本> 才收集；缺失时为空", () => {
-    expect(scanManifest({ engines: { dsh: "^0.2.1-alpha.1" } }).enginesDsh).toEqual(["0.2.1-alpha.1"]);
+  it("engines.dsh：必须是精确宿主版本才收集；缺失时为空", () => {
+    expect(scanManifest({ engines: { dsh: "0.2.1-alpha.1" } }).enginesDsh).toEqual(["0.2.1-alpha.1"]);
     expect(scanManifest({ engines: { node: ">=24.9.0" } }).enginesDsh).toEqual([]);
     expect(scanManifest({}).enginesDsh).toEqual([]);
   });
 
-  it("engines.dsh 非法形态进 invalid；旧字段 dsh.host 出现即 invalid", () => {
-    const bad = scanManifest({ engines: { dsh: "0.2.1-alpha.1" } });
-    expect(bad.enginesDsh).toEqual([]);
-    expect(bad.invalid).toEqual([{ section: "engines", name: "dsh", range: "0.2.1-alpha.1" }]);
+  it("engines.dsh 写范围（^X/~X/>=X）一律进 invalid；旧字段 dsh.host 出现即 invalid", () => {
+    // 用户裁定：兼容声明必须精确匹配宿主版本，写范围会过度声明兼容性。
+    for (const range of ["^0.2.1-alpha.1", "~0.2.1-alpha.1", ">=0.2.1-alpha.1", "0.2.1-alpha.1 || 0.3.0-alpha.1"]) {
+      const bad = scanManifest({ engines: { dsh: range } });
+      expect(bad.enginesDsh, range).toEqual([]);
+      expect(bad.invalid, range).toEqual([{ section: "engines", name: "dsh", range }]);
+    }
     const nonString = scanManifest({ engines: { dsh: 42 } });
     expect(nonString.invalid).toEqual([{ section: "engines", name: "dsh", range: 42 }]);
     const legacy = scanManifest({ dsh: { host: "0.2.1-alpha.1" } });
@@ -112,7 +115,8 @@ describe("scanManifest", () => {
 describe("aggregateBaseline", () => {
   const manifest = (version: string | undefined, enginesDsh?: string): Record<string, unknown> => ({
     dependencies: version === undefined ? {} : { [DEP_PREFIX + "atomic-write"]: "^" + version },
-    ...(enginesDsh === undefined ? {} : { engines: { dsh: "^" + enginesDsh } }),
+    // 兼容声明是精确宿主版本（依赖 range 仍是 ^X）。
+    ...(enginesDsh === undefined ? {} : { engines: { dsh: enginesDsh } }),
   });
 
   it("全仓一致时给出共同基线", () => {

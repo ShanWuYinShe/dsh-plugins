@@ -18,11 +18,12 @@ export declare const DEP_SECTIONS: readonly string[];
 /** 仓库内全部 package.json 的相对路径（根 + packages/*，跳过无 manifest 的残留目录）。 */
 export declare function manifestPaths(root?: string): string[];
 
-/** 解析 `^<版本>` 形态的 range；返回版本号或 null（形态不符）。 */
+/** 解析依赖 range 的 `^<版本>` 形态；返回版本号或 null（形态不符）。 */
 export declare function baselineOf(range: unknown): string | null;
 
 /**
  * 扫描一个 package.json 对象，收集 dsh-* 依赖基线与 engines.dsh 兼容声明。
+ * engines.dsh 只接受精确宿主版本（`^X` / `~X` / `>=X` 等范围一律计入 invalid）；
  * 废弃字段 dsh.host 出现即计入 invalid（严格模式据此阻断发布）。
  */
 export declare function scanManifest(manifest: Record<string, unknown>): {

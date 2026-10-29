@@ -152,14 +152,14 @@ for (const { dir, expectVersion } of targets) {
     continue;
   }
 
-  // 待命期安全门禁：若包版本包含 -alpha / -beta 预发布标识，其 engines.dsh 必须为已适配的 alpha/beta 预发布宿主线。
-  // 若 engines.dsh 仍为 rc 稳定候选或纯 semver，说明 DSH 当前处于待命期或尚未适配新宿主，严禁发布 -alpha 预发布版本。
+  // 待命期安全门禁：若包版本包含 -alpha / -beta 预发布标识，其 engines.dsh 必须精确声明为已适配的 alpha/beta 预发布宿主版本（精确 SemVer，不写范围）。
+  // 若 engines.dsh 缺失、非精确、或指向 rc/稳定线，说明尚未适配新宿主，严禁发布 -alpha 预发布版本。
   if (/-alpha|-beta/i.test(version)) {
-    const dshRange = engines?.dsh;
-    const rangePre = typeof dshRange === "string" ? dshRange.replace(/^[\^~>=< ]+/, "").split("-")[1] : null;
-    const isHostAlpha = rangePre && /^(alpha|beta)/i.test(rangePre);
+    const dshPin = engines?.dsh;
+    const hostPrerelease = typeof dshPin === "string" && VERSION_RE.test(dshPin) ? dshPin.split("-")[1] : undefined;
+    const isHostAlpha = typeof hostPrerelease === "string" && /^(alpha|beta)/i.test(hostPrerelease);
     if (!isHostAlpha) {
-      log(`✗ ${name}@${version} 为 -alpha 预发布版本，但 engines.dsh 声明为 ${dshRange ?? "未声明"}（非进行中的 alpha 宿主线）。待命期禁止发 -alpha 版本；日常功能与修复请在 main 分支推进并使用纯 semver 发布正式版。若 DSH 已出新预发布线，请先执行 bun run adapt <新线版本>。`);
+      log(`✗ ${name}@${version} 为 -alpha 预发布版本，但 engines.dsh 声明为 ${dshPin ?? "未声明"}（不是进行中的 alpha/beta 宿主版本；兼容声明必须写精确版本）。待命期禁止发 -alpha 版本；日常功能与修复请在 main 分支推进并使用纯 semver 发布正式版。若 DSH 已出新预发布线，请先执行 bun run adapt <新线版本>。`);
       failed = true;
       continue;
     }

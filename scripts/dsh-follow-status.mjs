@@ -64,7 +64,7 @@ function branchExists(branch) {
 }
 
 /** 读某分支的全部 package.json 基线并聚合成单一基线（应全仓一致）；
- *  同时收集 engines.dsh 兼容声明（DSH 官方 manifest 字段，安装/启动据此
+ *  同时收集 engines.dsh 精确宿主版本声明（DSH 官方 manifest 字段，安装/启动据此
  *  判定兼容性），供一致性核对。
  *  分支不可读（CI checkout 只有当前分支、本地无该分支等）时返回 unmixed
  *  的哨兵形态，由调用方按「无法读取」呈报而非裸栈崩溃。
@@ -238,7 +238,7 @@ for (const { branch, baseline, enginesDsh, target, state } of rows) {
   console.log(`${mark} ${branch.padEnd(5)} 依赖基线 ${baseline.padEnd(16)} ↔ ${String(target).padEnd(24)} ${state}`);
   if (typeof enginesDsh === "string" && !enginesDsh.startsWith("[") && enginesDsh !== baseline) {
     problems++;
-    const message = `dsh 跟随: ${branch} 分支 package.json 的 engines.dsh (${enginesDsh}) 与依赖基线 (${baseline}) 不一致——宿主安装/启动据此判定兼容性，声明失真会导致插件被判不兼容，请以依赖基线为准修正。`;
+    const message = `dsh 跟随: ${branch} 分支 package.json 的 engines.dsh (${enginesDsh}) 未精确匹配依赖基线 (${baseline})——宿主按精确版本判定兼容性，声明失真会导致插件被判不兼容，请改成该基线版本的精确 SemVer（不写范围）。`;
     if (ci) console.log(`::warning::${message}`);
     console.log(`⚠ ${message}`);
   }

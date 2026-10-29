@@ -88,14 +88,19 @@ describe("npm bundle metadata", () => {
         expect(existsSync(join(ROOT, "packages", name, entry)), `${name}: files 里的 ${entry} 在磁盘上存在`).toBe(true);
       }
     });
-    it(`${name}: 兼容声明用官方 engines.dsh，且与依赖基线同源`, () => {
+    it(`${name}: 兼容声明用官方 engines.dsh，并精确匹配发布时适配的宿主版本`, () => {
       // DSH 0.2.2-alpha.2 起安装/profile 启动按引擎区间判定插件兼容性
       // （packages/boot/app-boot/src/plugin-compatibility.ts：engines.dsh 存在
       // 时单独生效，peer 不再参与）。dsh.host 是自造旧字段，不在官方
       // DshManifest 契约内，必须清零。
-      const dshRange = pkg.engines?.dsh;
-      expect(typeof dshRange, `${name}: engines.dsh 必须声明`).toBe("string");
-      expect(dshRange).toMatch(/^\^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
+      //
+      // 兼容声明一律写**精确宿主版本**（不带 ^ / ~ / 比较符）：每个插件版本
+      // 只声明它发布时实际适配的 DSH 版本——DSH 升级后必须安装对应重新发布的
+      // 插件版本（用户 2026-10-30 决策；范围会过度声明兼容性、误导用户）。
+      // 依赖 range 仍是 ^<基线>（npm 依赖语义，与宿主兼容声明不同源）。
+      const dshPin = pkg.engines?.dsh;
+      expect(typeof dshPin, `${name}: engines.dsh 必须声明`).toBe("string");
+      expect(dshPin).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
       const depRanges = [
         ...Object.entries(pkg.dependencies || {}),
         ...Object.entries(pkg.devDependencies || {}),
@@ -104,7 +109,7 @@ describe("npm bundle metadata", () => {
       ].filter(([dep]) => dep.startsWith("@deepseek-ai/dsh-"));
       expect(depRanges.length, `${name}: 至少要有一条 dsh-* 依赖供基线对照`).toBeGreaterThan(0);
       for (const [dep, range] of depRanges) {
-        expect(range, `${name}: ${dep} 的 range 与 engines.dsh 同源`).toBe(dshRange);
+        expect(range, `${name}: ${dep} 的 range 是 ^<engines.dsh 精确版本>`).toBe(`^${dshPin}`);
       }
       expect(pkg.dsh?.host, `${name}: 旧字段 dsh.host 不得保留`).toBeUndefined();
     });

@@ -1,11 +1,12 @@
 // DSH 宿主升级适配：一条命令改齐所有 `@deepseek-ai/dsh-*` 依赖 range
-// 的版本号。
+// 的版本号；engines.dsh 写**精确宿主版本**（不写范围：DSH 升级很可能不兼容旧版
+// 本，范围会过度声明兼容性）。
 // 用法：node scripts/adapt-dsh.mjs <新宿主版本> [--dry-run]
 //   例：node scripts/adapt-dsh.mjs 0.1.2-alpha.4
 //
 // 覆盖范围：根 package.json 与 packages/*/package.json 的 dependencies /
 // optionalDependencies / devDependencies / peerDependencies，以及发布包的
-// engines.dsh 兼容声明（与依赖 range 同形 `^<版本>`，官方 manifest 字段）；
+// engines.dsh 兼容声明（精确宿主版本 `<版本>`，官方 manifest 字段）；
 // 同时删除废弃的旧字段 dsh.host。@deepseek-ai/cordis、schemastery 等非 dsh-*
 // 包不在范围内（独立版本线，另行手工升级）。
 //
@@ -49,17 +50,18 @@ function adaptPackageJson(path) {
     }
   }
   // engines.dsh 兼容声明（DSH 官方 manifest 字段：安装与 profile 启动据此
-  // 判定插件兼容性，存在时单独生效）。写成与依赖 range 同形的 `^<版本>`，
-  // 让「依赖基线 ↔ 兼容声明」由同一命令保持同步（dsh-baseline.ts 严格核对）。
+  // 判定兼容性，存在时单独生效）。按用户裁定写**精确宿主版本**，不写范围——
+  // 每个插件版本只对发布时匹配的那个 DSH 版本声明兼容，避免过度声明误导。
+  // 「依赖 range（`^X`）↔ 兼容声明（精确 `X`）」由 dsh-baseline 严格核对。
   // 根 package.json 私有、无 engines.dsh，自然跳过。
   const engines = json.engines !== null && typeof json.engines === "object"
     ? json.engines
     // 发布包至少有一条 dsh-* 依赖（changes 非空）才补 engines 对象；私有根
     // package.json 无 dsh 依赖，不写宿主兼容声明。
     : changes.length > 0 ? (json.engines = {}) : undefined;
-  if (engines !== undefined && engines.dsh !== `^${version}`) {
-    changes.push(["engines", "dsh", engines.dsh ?? "(缺省)", `^${version}`]);
-    engines.dsh = `^${version}`;
+  if (engines !== undefined && engines.dsh !== version) {
+    changes.push(["engines", "dsh", engines.dsh ?? "(缺省)", version]);
+    engines.dsh = version;
   }
   // 旧字段 dsh.host 已废弃（不在官方 DshManifest 契约内），出现即删除。
   if (json.dsh !== null && typeof json.dsh === "object" && Object.hasOwn(json.dsh, "host")) {

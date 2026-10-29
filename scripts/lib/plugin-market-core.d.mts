@@ -77,8 +77,8 @@ export interface BuiltSite {
     readonly baseUrl: string;
     readonly registryUrl: string;
     readonly plugins: readonly { readonly name: string; readonly versions: readonly string[] }[];
-    /** 生效 engines.dsh 的来源统计：新清单 engines.dsh / 旧清单 dsh.host 映射。 */
-    readonly rangeSources: { readonly engines: number; readonly 'dsh-host': number };
+    /** 生效 engines.dsh 的来源统计：精确声明 / 范围取下界 / 旧清单 dsh.host 精确 pin。 */
+    readonly rangeSources: { readonly exact: number; readonly floor: number; readonly 'dsh-host': number };
     readonly skipped: readonly { readonly tag: string; readonly reason: string }[];
   };
 }
@@ -145,18 +145,25 @@ export declare function collectCandidates(
   releases: readonly unknown[],
   options?: { dirs?: readonly string[] },
 ): { candidates: MarketCandidate[]; skipped: { tag: string; reason: string }[] };
-/** 收录判定结果：生效 engines.dsh 及其来源。 */
+/** 收录判定结果：生效的精确 engines.dsh pin 及其来源。 */
 export type ManifestInspection =
-  | { readonly eligible: true; readonly enginesDsh: string; readonly rangeSource: 'engines' | 'dsh-host' }
+  | {
+      readonly eligible: true;
+      /** 精确宿主版本 pin（index/packument 里的 engines.dsh）。 */
+      readonly enginesDsh: string;
+      readonly rangeSource: 'exact' | 'floor' | 'dsh-host';
+      /** 来源为 floor（声明了范围、取下界）时保留的原始声明，供离线复核。 */
+      readonly declaredEnginesDsh?: string;
+    }
   | { readonly eligible: false; readonly reason: string };
-/** 判断 tarball 内 package.json 是否收录（engines.dsh 原样 / 旧 dsh.host 精确 pin 映射）。 */
+/** 判断 tarball 内 package.json 是否收录（精确 engines.dsh 原样 / 范围取下界 / 旧 dsh.host 精确 pin）。 */
 export declare function inspectManifest(
   manifest: unknown,
   candidate: Pick<MarketCandidate, 'version' | 'tag'>,
   expectedName: string,
 ): ManifestInspection;
-/** 旧字段 dsh.host 的精确 pin → 该宿主线的 engines.dsh 区间；非精确版本返回 undefined。 */
-export declare function mapHostPinToRange(pin: unknown): string | undefined;
+/** 把声明值（精确 SemVer 或 ^X/~X/>=X 范围）化成精确宿主版本 pin；无法判定返回 undefined。 */
+export declare function exactPinOfDeclared(declared: unknown): string | undefined;
 /** 读取 tarball 内的 package/package.json（不安装、不执行）。 */
 export declare function readPackageJsonFromTarball(bytes: Uint8Array): Record<string, unknown>;
 /** npm tarball 的 sha512 SRI integrity。 */

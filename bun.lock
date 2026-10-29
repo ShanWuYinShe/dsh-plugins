@@ -17,7 +17,7 @@
     },
     "packages/dsh-any-connect": {
       "name": "@chaoset/dsh-any-connect",
-      "version": "0.4.28-alpha.6",
+      "version": "0.4.28-alpha.7",
       "bin": {
         "dsh-any-connect": "./lib/bin.js",
       },
@@ -54,7 +54,7 @@
     },
     "packages/provider-usage": {
       "name": "@chaoset/provider-usage",
-      "version": "0.2.1-alpha.5",
+      "version": "0.2.1-alpha.6",
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.0.6-alpha.1",
         "@deepseek-ai/dsh-client-locale": "^0.2.2-alpha.2",
@@ -80,7 +80,7 @@
     },
     "packages/sandbox-extra-roots": {
       "name": "@chaoset/sandbox-extra-roots",
-      "version": "0.4.28-alpha.4",
+      "version": "0.4.28-alpha.5",
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.0.6-alpha.1",
         "@deepseek-ai/dsh-api-remotes": "^0.2.2-alpha.2",
@@ -99,7 +99,7 @@
     },
     "packages/session-archive": {
       "name": "@chaoset/session-archive",
-      "version": "0.3.32-alpha.4",
+      "version": "0.3.32-alpha.5",
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.0.6-alpha.1",
         "@deepseek-ai/dsh-api-remotes": "^0.2.2-alpha.2",

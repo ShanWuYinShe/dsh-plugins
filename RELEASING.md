@@ -60,11 +60,12 @@ npm 的**版本列表**：稳定线目标 = 非进行中预发布的最高版（
 warning（刻意非阻塞——提醒，不是门禁）。
 
 发布侧的强校验由 `node scripts/dsh-baseline.mjs`（发布门禁步骤
-「Verify dsh baseline」）执行：所有 dsh-* 依赖必须是 `^<版本>` 形态、
-基线与 `engines.dsh` 兼容声明都齐全且彼此一致，任一不满足即 exit 1 阻断
-发布——`engines.dsh` 是 DSH 官方 manifest 字段，宿主安装与 profile 启动
-据此判定插件兼容性，发布归档的 tag 不允许带糊的状态。旧字段 `dsh.host`
-已废弃，残留同样会被该脚本拦下。
+「Verify dsh baseline」）执行：所有 dsh-* 依赖必须是 `^<版本>` 形态；
+`engines.dsh` **必须写精确宿主版本**（如 `0.2.2-alpha.2`，不能写
+`^X` / `~X` / `>=X`），且必须与依赖基线精确一致；任一不满足即
+exit 1 阻断发布。`engines.dsh` 是 DSH 官方 manifest 字段，宿主安装与
+profile 启动按**精确匹配**判定插件兼容性——写范围会过度声明兼容性、误导用户，
+因此本仓一律精确声明。旧字段 `dsh.host` 已废弃，残留同样会被该脚本拦下。
 本地干跑直接执行该脚本即可（无网络、无 git 依赖，纯 manifest 校验）。
 
 依赖漏洞审计由 `bun run audit`（发布门禁步骤「Audit dependencies」）
@@ -170,7 +171,8 @@ DSH 0.1.6-alpha 新增的原生「设置 → 已归档会话」页（0.1.5 稳�
   进 main 时**保持基础号、仅去掉后缀**即成为正式版（`0.3.14-alpha.1` →
   `0.3.14`）。唯一的跳号例外见下方「稳定线热修占用基础号」——那是被迫让位，
   不是常规操作。
-- **插件版本号与 dsh 版本号无关**：跟随宿主升级只改依赖 range 与 `engines.dsh`，
+- **插件版本号与 dsh 版本号无关**：跟随宿主升级只改依赖 range（仍是 `^版本`）与
+  `engines.dsh`（改为新的精确宿主版本），
   不改插件自身版本号的基础号；`0.3.14-alpha.1` 收敛得到的是 `0.3.14`，不是
   「dsh 的版本」。
 - 预发布线发版：在 alpha 分支升 `-alpha.N` 的 N；dsh 线进入 rc 阶段后后缀换
@@ -212,7 +214,7 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    - 在 `CHANGELOG.md` 顶部新增 `## <版本> (YYYY-MM-DD)` 小节——GitHub
      Release 说明自动取自这里（`scripts/release-notes.mjs`），不写就没有说明；
      CHANGELOG 只保留当前适配线的条目（更早历史以 GitHub Releases 为准），
-     适配小节把 `engines.dsh`（兼容声明，形如 `^<版本>`）与依赖 range（`^版本`）分开表述；
+     适配小节把 `engines.dsh`（兼容声明，**精确宿主版本**，如 `0.2.2-alpha.2`）与依赖 range（`^版本`）分开表述；
    - 升 `package.json` 的 `version`（bump 是最后一步）。
 4. **推送前逐提交复核**（`git log --oneline origin/<分支>..HEAD` +
    `git diff origin/<分支>..HEAD`）：版本号、CHANGELOG 小节、实际 diff 三者
@@ -230,7 +232,7 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    prerelease 标记）。**tag 由你明确打出，CI 绝不创建 tag**：没推 tag 就没有任何
    Release，不存在「顺手多发一版」。发版后核对 Release 的资产 tarball 与
    `engines.dsh` 字段符合预期（解包资产读 `package/package.json` 的
-   `engines.dsh`：`tar -xOf <tgz> package/package.json`）。
+   `engines.dsh`：`tar -xOf <tgz> package/package.json`——必须是精确版本，不是范围）。
 
 ### tag 推送纪律（一次一个，推完确认再推下一个）
 
@@ -337,12 +339,16 @@ bun run test:ci && git push
 `adapt-dsh.mjs` 支持 `--dry-run` 预览，它只改各 package.json 的依赖 range。若 `bun install` 报某 dsh 包解析不到，先检查 adapt 是否已把 range 改写。稳定线（main）跟进 dsh 新的 rc（如 `0.1.1-rc.2` → `0.1.2-rc.1`）时同样在 main 上执行同一流程。
 
 `adapt-dsh.mjs` 同时把每个发布包 `package.json` 的 `engines.dsh` 兼容声明
-改写为与依赖 range 同形的 `^<版本>`——`engines.dsh` 是 DSH 官方 manifest
+改写为**精确宿主版本**（如 adapt 到 `0.1.3-alpha.0` 就写 `0.1.3-alpha.0`，不写
+`^` / `~` / `>=`）——`engines.dsh` 是 DSH 官方 manifest
 字段（`@deepseek-ai/dsh-package-manifest` 的 `DshEnginesManifest`），宿主安装
-与 profile 启动据此判定插件兼容性；存在时它单独生效、peer 依赖不再参与判定。
-`dsh-follow-status.mjs` 会核对它与依赖基线的一致性，漂移即 warning；
-`dsh-baseline.mjs` 在发布门禁里做严格核对。旧字段 `dsh.host` 已废弃，adapt
-会把残留一并删除。
+与 profile 启动按精确匹配判定兼容性；存在时它单独生效、peer 依赖不再参与判定。
+**为什么精确**（用户裁定 2026-10-30）：每个插件版本都有匹配的 DSH 版本，DSH 升级
+很可能不兼容旧版本；写范围会过度声明兼容性、容易误导用户。代价是每次宿主升级
+（含同线 alpha→rc→下一 alpha）都要重新发布对应插件版本。
+`dsh-follow-status.mjs` 会核对它与依赖基线的一致性（漂移即 warning）；
+`dsh-baseline.mjs` 在发布门禁里严格核对「依赖 range `^X` ↔ 兼容声明精确 `X`」。
+旧字段 `dsh.host` 已废弃，adapt 会把残留一并删除。
 
 同一命令也用于让重建后的 alpha 分支跟进新预发布线：adapt 不比较新旧、按
 指定版本整块覆写，因此「待命的 alpha 分支等到 dsh 新 alpha 线后开始适配」
@@ -523,20 +529,25 @@ packument 的 `dist.tarball` 直接指向对应 GitHub Release 资产（标准 n
 生成器只从 **GitHub Releases** 收集，不遍历 git tag：
 
 - tag 形如 `<包目录>-v<精确 SemVer>`，资产为 `chaoset-<包目录>-<版本>.tgz`；
-- 资产内 `package.json` 必须能确定该版本的宿主线，且包名/版本与 tag 一致：
-  1. 声明了 `engines.dsh` → 原样使用（当前适配线：`^0.2.2-alpha.2`）；
-  2. 否则旧字段 `dsh.host` 是**精确版本**（如 `0.2.1-rc.3`）→ 映射成该宿主线的区间
-     `>=<pin> <X.Y.(Z+1)-0`（`0.2.1-rc.3` → `>=0.2.1-rc.3 <0.2.2-0`）：只承认自己那条线，
-     semver 语义下 `0.2.1` ✓、`0.2.2-alpha.2` ✗、`0.2.2` ✗；pin 不是精确版本（range/非法）
-     → fail-safe 跳过并记 `invalid-dsh-host-pin`；
-  3. 两者都没有 → 继续排除（`missing-engines-dsh`）。
-- **单索引双线**：同一个索引同时收录 0.2.1 稳定线与 0.2.2 预览线，宿主「发现」页按宿主版本
-  逐版本算兼容并阻止跨线安装——稳定版宿主默认推荐该包最高的 0.2.1 线稳定版；0.2.2 预览/
-  正式宿主默认回退到 `versions[0]`（最高预览版；宿主 quirk：索引同时含稳定版时卡片不打
-  「默认」标签，不影响安装正确性）；跨线手动安装由发现页阻止（CLI 仍可强制，与旧行为一致）。
-- 被映射版本的 packument 保留原 `dsh.host` 字段，`check` 用它离线断言
-  `engines.dsh === mapHostPin(dsh.host)`（区间包含 pin、上界 = pin 基础版本的下一条线）。
-  不为旧 tarball 重打包补 `engines.dsh`（Release 不可变），映射只发生在索引/registry 侧。
+- 资产内 `package.json` 必须能确定该版本的**精确宿主版本**，且包名/版本与 tag 一致：
+  1. 声明了精确 `engines.dsh` → 原样使用（新发布的包）；
+  2. 声明的是范围（历史 tarball 全是 `^X`）→ 取**最低满足版本** X 作为精确 pin
+     （即发布时适配的宿主版本）；无法判定精确版本（`*` / `latest` / `||` 组合等）→
+     fail-safe 跳过并记 `invalid-engines-dsh`；
+  3. 否则旧字段 `dsh.host` 是**精确版本**（如 `0.2.1-rc.3`）→ 原样作为精确 pin；
+     不是精确版本则跳过并记 `invalid-dsh-host-pin`；
+  4. 两者都没有 → 继续排除（`missing-engines-dsh`）。
+- **精确匹配的行为矩阵（不误导的代价，如实记录）**：索引里每个版本只对它精确声明的
+  那个宿主版本显示可安装；同线其它预发布/正式版都不匹配（宿主升级很可能不兼容旧版）。
+  - `0.2.2-alpha.2` 宿主：只看到 `engines.dsh` pin 为 `0.2.2-alpha.2` 的版本；
+  - 稳定线历史版本 pin 在 `0.2.1-rc.2`/`rc.3`，因此当前稳定参考 `0.2.1-rc.5` 的宿主
+    **不会看到旧稳定版**可安装——这是「精确匹配、不误导」的代价，收敛期发布对应版本后恢复；
+  - DSH 每次升级（含同线 alpha→rc→下一 alpha）都需要插件重新发布对应版本。
+- 映射来源保留供离线复核：范围取整的版本在 packument 里写
+  `dshMarket: { source: "engines-range", declaredEnginesDsh: "^X" }`；旧 `dsh.host` 版本
+  保留原 `dsh.host` 字段。`check` 据此验算精确 pin（`engines.dsh` 必须等于来源推出的版本）。
+  不为旧 tarball 重打包补 `engines.dsh`（Release 不可变），严格化只发生在索引/registry 侧；
+  安装期检查对历史版本仍宽松（CLI 仍可强制装旧包），发现页不误导由索引保证。
 - `publishTimestamp` 取 Release `published_at`；同一版本重复出现时取发布时间较新的那条。
 - **静态 registry 的 packument 不声明 `dependencies`/`optionalDependencies`/`peerDependencies`**：
   DSH 安装索引版本时执行 `pnpm add <spec> --registry=<静态 registry>`，`--registry` 作用于整条
@@ -566,7 +577,8 @@ gitignore 的 `.workwork/` 下。
 
 `check` 的判据：文件集合恰为上述布局；JSON 为规范序列化（手改会被发现，README 内容必须与
 生成器内置一致）；官方 `parseMarketIndex` 接受；每个版本的 registry 常量、版本集合、
-`engines.dsh`、`publishTimestamp`、`dist.integrity/shasum` 形态与 `dist.tarball`
+`engines.dsh`（必须是单个精确宿主版本 pin，映射版本还能由保留的来源字段离线复核）、
+`publishTimestamp`、`dist.integrity/shasum` 形态与 `dist.tarball`
 （精确等于该版本的 Release 资产 URL）都与索引一致；图标存在且是 SVG。
 
 本地端到端（配合任意静态服务器；pnpm 请求 scoped 名时用 `%2F`，服务器需 decode）：

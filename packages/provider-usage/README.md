@@ -50,7 +50,7 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 
 `<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。
 
-前置：DSH 宿主版本见本包 `package.json` 的 `engines.dsh`（0.2.2-alpha.2 起为 `^0.2.2-alpha.2`）；宿主 0.2.2 起要求 Node.js >= 24.9。
+前置：DSH 宿主版本见本包 `package.json` 的 `engines.dsh`（当前为**精确版本** `0.2.2-alpha.2`，DSH 按精确匹配判定兼容；DSH 升级后请安装为对应新版本重新发布的本插件）；宿主 0.2.2 起要求 Node.js >= 24.9。
 
 ## 内置查询器
 

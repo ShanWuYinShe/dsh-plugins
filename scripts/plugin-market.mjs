@@ -452,7 +452,11 @@ async function main(argv) {
         eligible: verdict.eligible,
         reused: inspection.reused,
         ...verdict.eligible
-          ? { enginesDsh: verdict.enginesDsh, rangeSource: verdict.rangeSource }
+          ? {
+              enginesDsh: verdict.enginesDsh,
+              rangeSource: verdict.rangeSource,
+              ...verdict.declaredEnginesDsh === undefined ? {} : { declaredEnginesDsh: verdict.declaredEnginesDsh },
+            }
           : { reason: verdict.reason },
       })
       if (!verdict.eligible) continue
@@ -473,8 +477,10 @@ async function main(argv) {
         excluded,
         metadataSkipped: collected.skipped,
       }, null, 2) + '\n')
-      const enginesCount = included.filter(entry => entry.rangeSource === 'engines').length
-      process.stderr.write('plugin-market: plan 完成：收录 ' + String(included.length) + ' 个版本（engines.dsh ' + String(enginesCount) + ' / dsh.host 映射 ' + String(included.length - enginesCount) + '，复用历史站点 ' + String(reusedCount) + ' 个），排除 ' + String(excluded.length + collected.skipped.length) + ' 个\n')
+      const exactCount = included.filter(entry => entry.rangeSource === 'exact').length
+      const floorCount = included.filter(entry => entry.rangeSource === 'floor').length
+      const hostCount = included.filter(entry => entry.rangeSource === 'dsh-host').length
+      process.stderr.write('plugin-market: plan 完成：收录 ' + String(included.length) + ' 个版本（精确声明 ' + String(exactCount) + ' / 范围取下界 ' + String(floorCount) + ' / dsh.host pin ' + String(hostCount) + '，复用历史站点 ' + String(reusedCount) + ' 个），排除 ' + String(excluded.length + collected.skipped.length) + ' 个\n')
       return 0
     }
     if (options.out === undefined) throw new UsageError('build 需要 --out <dir>')
@@ -489,7 +495,7 @@ async function main(argv) {
     writeSite(options.out, site.files)
     const summary = { ...site.summary, out: resolve(options.out), files: site.files.size, reused: reusedCount }
     process.stdout.write(JSON.stringify(summary, null, 2) + '\n')
-    process.stderr.write('plugin-market: build 完成：' + String(summary.plugins.length) + ' 个插件 / ' + String(summary.versionCount) + ' 个版本（engines.dsh ' + String(summary.rangeSources.engines) + ' / dsh.host 映射 ' + String(summary.rangeSources['dsh-host']) + '）/ ' + String(summary.files) + ' 个文件，digest ' + summary.digest + '\n')
+    process.stderr.write('plugin-market: build 完成：' + String(summary.plugins.length) + ' 个插件 / ' + String(summary.versionCount) + ' 个版本（精确声明 ' + String(summary.rangeSources.exact) + ' / 范围取下界 ' + String(summary.rangeSources.floor) + ' / dsh.host pin ' + String(summary.rangeSources['dsh-host']) + '）/ ' + String(summary.files) + ' 个文件，digest ' + summary.digest + '\n')
     return 0
   } catch (error) {
     if (error instanceof UsageError) {

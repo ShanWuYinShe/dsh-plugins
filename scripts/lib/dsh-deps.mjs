@@ -6,6 +6,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { VERSION_RE } from "./version-checks.mjs";
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 export const DEP_PREFIX = "@deepseek-ai/dsh-";
@@ -30,9 +31,12 @@ export function baselineOf(range) {
 }
 
 /**
- * 扫描一个 package.json 对象：收集全部 dsh-* 依赖的 range 基线与
- * `engines.dsh` 兼容声明（DSH 官方字段，见 @deepseek-ai/dsh-package-manifest
+ * 扫描一个 package.json 对象：收集全部 dsh-* 依赖的 range 基线（仍是 `^<版本>`）
+ * 与 `engines.dsh` 兼容声明（DSH 官方字段，见 @deepseek-ai/dsh-package-manifest
  * 的 DshEnginesManifest）。
+ *
+ * engines.dsh 按用户裁定必须写**精确宿主版本**（如 `0.2.2-alpha.2`）：写范围
+ * （`^X` / `~X` / `>=X` 等）会过度声明兼容性，一律计入 invalid。
  *
  * 旧字段 `dsh.host` 已废弃且不在官方 manifest 契约内，出现即计入 invalid——
  * 严格模式（dsh-baseline）据此把残留挡在发布前。
@@ -54,9 +58,9 @@ export function scanManifest(manifest) {
   }
   const engines = manifest.engines;
   if (engines !== null && typeof engines === "object" && Object.hasOwn(engines, "dsh")) {
-    const range = engines.dsh;
-    const version = typeof range === "string" ? baselineOf(range) : null;
-    if (version === null) invalid.push({ section: "engines", name: "dsh", range });
+    const declared = engines.dsh;
+    const version = typeof declared === "string" && VERSION_RE.test(declared.trim()) ? declared.trim() : null;
+    if (version === null) invalid.push({ section: "engines", name: "dsh", range: declared });
     else enginesDsh.add(version);
   }
   if (manifest.dsh !== null && typeof manifest.dsh === "object" && Object.hasOwn(manifest.dsh, "host")) {

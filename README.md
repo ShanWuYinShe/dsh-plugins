@@ -4,10 +4,10 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 
 | 插件包 | 核心功能 | 当前版本 | 适配 DSH |
 |---|---|---|---|
-| [`@chaoset/dsh-any-connect`](packages/dsh-any-connect/) | **多渠道桌面端与免密模型接入**：WorkBuddy（国内/国际版）、ZCode（Coding/Start Plan 双通道）、OpenCode Free 官方免密免费模型通道；支持思考强度自测与补全、积分倍率显示、图片多模态、自定义模型隐藏与 CLI 诊断 | `0.4.28-alpha.6` | `0.2.2-alpha.2` |
-| [`@chaoset/provider-usage`](packages/provider-usage/) | **对话底栏模型额度指示器**：在输入框状态栏（composer dock）实时显示当前会话 provider 剩余额度与重置时间，点击展开可视化进度条与详细计费包；内置 8+ 种 Provider 查询器并提供开放注册 Seam | `0.2.1-alpha.5` | `0.2.2-alpha.2` |
-| [`@chaoset/sandbox-extra-roots`](packages/sandbox-extra-roots/) | **沙盒额外允许写入目录**：为 `workspace-write` 沙盒安全追加工具缓存目录（npm/pip/cargo/go 等）；跨平台 Seatbelt/bwrap/Landlock 原生沙盒引擎注入；严格防范危险根与 TOCTOU 符号链接逃逸 | `0.4.28-alpha.4` | `0.2.2-alpha.2` |
-| [`@chaoset/session-archive`](packages/session-archive/) | **归档会话完整生命周期管理**：Web 侧边栏专属归档面板与实时徽标；抽屉式**只读浏览**历史会话事件流；批量安全恢复到会话树；两段式彻底物理删除与落盘防竞态保护；纯前端毫秒级检索与排序 | `0.3.32-alpha.4` | `0.2.2-alpha.2` |
+| [`@chaoset/dsh-any-connect`](packages/dsh-any-connect/) | **多渠道桌面端与免密模型接入**：WorkBuddy（国内/国际版）、ZCode（Coding/Start Plan 双通道）、OpenCode Free 官方免密免费模型通道；支持思考强度自测与补全、积分倍率显示、图片多模态、自定义模型隐藏与 CLI 诊断 | `0.4.28-alpha.7` | `0.2.2-alpha.2` |
+| [`@chaoset/provider-usage`](packages/provider-usage/) | **对话底栏模型额度指示器**：在输入框状态栏（composer dock）实时显示当前会话 provider 剩余额度与重置时间，点击展开可视化进度条与详细计费包；内置 8+ 种 Provider 查询器并提供开放注册 Seam | `0.2.1-alpha.6` | `0.2.2-alpha.2` |
+| [`@chaoset/sandbox-extra-roots`](packages/sandbox-extra-roots/) | **沙盒额外允许写入目录**：为 `workspace-write` 沙盒安全追加工具缓存目录（npm/pip/cargo/go 等）；跨平台 Seatbelt/bwrap/Landlock 原生沙盒引擎注入；严格防范危险根与 TOCTOU 符号链接逃逸 | `0.4.28-alpha.5` | `0.2.2-alpha.2` |
+| [`@chaoset/session-archive`](packages/session-archive/) | **归档会话完整生命周期管理**：Web 侧边栏专属归档面板与实时徽标；抽屉式**只读浏览**历史会话事件流；批量安全恢复到会话树；两段式彻底物理删除与落盘防竞态保护；纯前端毫秒级检索与排序 | `0.3.32-alpha.5` | `0.2.2-alpha.2` |
 
 ---
 
@@ -134,7 +134,7 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
    https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/alpha/market/index.json
    ```
 
-3. 在**发现**页浏览本仓四个插件并点**安装**（卡片显示的即与当前 DSH 兼容的最高版本）；进入插件页的**版本**列表可以安装任意历史版本。
+3. 在**发现**页浏览本仓四个插件并点**安装**（卡片显示的即与你当前 DSH 版本精确匹配的最高版本）；进入插件页的**版本**列表可以安装历史版本（与你的宿主版本不匹配的会标「不兼容」并禁用安装）。
 4. **更新**：DSH 对自建 registry 的自动更新检查只在安装会话内生效（重启后「已安装」页查不到自建 registry 的新版本，这是 DSH 当前的设计限制）——
    - 安装后**同一会话内**：「已安装」页可直接点**更新**；
    - **重启 DSH 后**：用 CLI 把插件更新到指定版本（`<版本>` 见「发现」页或 Releases 页）：
@@ -151,9 +151,11 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 > 当前索引随 `alpha` 适配线发布；收敛合入 `main` 后索引源 URL 的 `alpha` 段会换成 `main`，
 > 届时会公告提醒已添加索引的用户一次性更新 URL。
 
-索引**同时收录稳定线与预览线**，DSH 会按你的宿主版本自动区分：0.2.1 稳定版宿主默认安装/推荐各插件最高的稳定版，0.2.2 预览线宿主卡片显示并安装该线最高兼容预览版；版本列表里跨线的版本会标记「不兼容」且不提供安装按钮，不会装错线。
+索引里的每个版本都**精确声明它所匹配的 DSH 版本**（`engines.dsh` 是精确版本，不是范围），DSH 按精确匹配判定兼容：只有与你当前 DSH 版本完全一致的插件版本会显示可安装，其余版本在列表里标「不兼容」。因此 **DSH 每次升级（含同线 alpha→rc→正式版）后，请安装为那个新版本重新发布的插件版本**。
 
-> 注：索引同时收录两条线时，预览线宿主（如 0.2.2-alpha.2）的版本列表不会给任何版本打「默认」标签（DSH 的默认版本只从兼容的正式版里选）；卡片上的版本与「安装」按钮仍是该宿主可用的最高兼容版本，功能正常。
+> 历史代价（如实说明）：0.2.2 适配线之前发布的 tarball 里 `engines.dsh` 是范围，索引按规则把它们 pin 到发布时适配的精确宿主版本（如 `0.2.1-rc.3`）。所以当前稳定参考 `0.2.1-rc.5` 的宿主不会看到旧稳定版可安装——这是「精确匹配、不误导」的代价，收敛期发布对应版本后恢复。已发布 tarball 不可变，索引侧严格、安装期检查对历史版本仍宽松（CLI 仍可强制装旧包）。
+
+> 注：预览线宿主（如 0.2.2-alpha.2）下兼容版本可能全是预发布版，而 DSH 的「默认」标签只从兼容的正式版里选，因此卡片可能不打「默认」；「安装」按钮仍指向该宿主兼容的最高版本，功能正常。
 
 ### 方式二：tarball URL（手动）
 
