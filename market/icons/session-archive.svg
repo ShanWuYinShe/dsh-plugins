@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="归档会话管理 / Session Archive">
+  <rect width="64" height="64" rx="14" fill="#7c5cfc"/>
+  <rect x="15" y="19" width="34" height="9" rx="2" fill="none" stroke="#fff" stroke-width="4"/>
+  <path d="M19 28v15a3 3 0 003 3h20a3 3 0 003-3V28" fill="none" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M27 35h10" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+</svg>
