@@ -1,15 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { trapTarget } from "../client/index.tsx";
-
-// 模块求值期引用 React（组件内才调用），这里只测纯函数 trapTarget，
-// 给一个空桩让 import 通过即可（同 test/bundle.test.ts 的做法）。
-vi.mock("react", () => ({
-  createElement: (...args: any[]) => ({ args }),
-  useState: (init: any) => [typeof init === "function" ? init() : init, () => {}],
-  useEffect: () => {},
-  useCallback: (fn: any) => fn,
-  useRef: () => ({ current: null }),
-}));
+import { describe, expect, it } from "vitest";
+import { trapTarget } from "../client/archive-entries.js";
 
 /**
  * 焦点陷阱判定回归：面板声明了 aria-modal，Tab 在首末元素处必须环绕，

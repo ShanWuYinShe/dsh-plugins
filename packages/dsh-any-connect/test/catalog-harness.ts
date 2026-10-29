@@ -13,7 +13,7 @@
  * @module dsh-any-connect/test/catalog-harness
  */
 
-import type { WorkBuddyModelInfo } from '../src/index.js'
+import type { WorkBuddyModelInfo } from '../src/catalog.js'
 
 /** 一份已登录的桌面凭据文件，内容只是“看起来登录了”，测试不触真上游。 */
 export function signedInDocument(): string {

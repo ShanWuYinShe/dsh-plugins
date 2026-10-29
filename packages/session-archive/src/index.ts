@@ -28,7 +28,10 @@ import { name, DEFAULT_CONFIG, normalizeConfig } from './plugin-config.js'
 import { createArchiveHost } from './archive-host.js'
 import { SessionArchiveGateway } from './remote.js'
 
-export { name, inject, config } from './plugin-config.js'
+// Cordis Loader 的 function plugin 面：只导出 name / inject / apply（值导出）。
+// 小写 config 导出不是 Cordis 元数据、从不被读取，2026-10-29 已删除；
+// 入口面锁 test/entry-surface.test.ts 拦住它长回来。
+export { name, inject } from './plugin-config.js'
 
 /** 插件 apply：注册远程服务（面板 UI 读写）。 */
 export function apply(ctx: Context, config?: any): any {

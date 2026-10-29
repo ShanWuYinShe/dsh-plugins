@@ -2,7 +2,7 @@
  * index.tsx — 浏览器侧入口：注册设置卡片与 typert 远程贡献。
  *
  * 2026-10-08 从 425 行的单体 client/index.tsx 拆出：样式、预览纯函数、文案、卡片
- * 各自成模块，入口只保留 apply/inject、远程贡献与 re-export。
+ * 各自成模块，入口只保留 apply/inject 与远程贡献挂载。
  *
  * 2026-10-29 适配 0.2.2：远程贡献不再手写（旧 REMOTE_CONTRIBUTION +
  * passthroughCodec 已删），改为消费官方 typert 生成器产出的 ./remote 工件
@@ -12,7 +12,7 @@
  *
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
- * - index.tsx — 入口：apply/inject、typert 远程贡献与 re-export
+ * - index.tsx — 入口：apply/inject 与 typert 远程贡献挂载
  * - SandboxRootsCard.tsx — 设置卡片（表单 + 预览 + 保存）
  * - roots-preview.ts — 危险根预览（平台近似、词法前缀、预设、逐行分析）
  * - styles.ts locales.ts — 样式注入与中英文案
@@ -24,7 +24,6 @@ import remoteContribution from '@chaoset/sandbox-extra-roots/remote'
 // 样式注入是**模块加载副作用**：必须有人导入 styles.ts，否则卡片渲染出来没有任何样式。
 // 2026-10-08 拆分后一度漏掉这条导入（产物里既无样式也无注入代码，测试没覆盖到）。
 import './styles.js'
-import { analyzeRootsText, hasBlockingProblems, presetsForPlatform, appendRootLine, cleanRootLine } from './roots-preview.js'
 import { NS, zh, en } from './locales.js'
 import { SandboxRootsCard } from './SandboxRootsCard.js'
 
@@ -79,4 +78,4 @@ async function apply(ctx: any) {
   }
 }
 
-export { apply, inject, analyzeRootsText, hasBlockingProblems, appendRootLine, presetsForPlatform, cleanRootLine };
+export { apply, inject };

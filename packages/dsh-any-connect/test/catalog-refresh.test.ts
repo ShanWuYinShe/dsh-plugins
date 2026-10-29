@@ -4,9 +4,10 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import * as WorkBuddy from '../src/index.js'
+import * as AnyConnect from '../src/index.js'
 import { signedInDocument, catalogRow } from './catalog-harness.js'
-import type { WorkBuddyModelInfo } from '../src/index.js'
+import type { WorkBuddyModelInfo } from '../src/catalog.js'
+import { WorkBuddyUpstreamClient } from '../src/upstream.js'
 
 /**
  * 「模型选择框实时更新」这条线的回归。
@@ -57,7 +58,7 @@ async function installPlugin(options: {
     // 拿到哪一项取决于并发时序，用例就会随机红（实测全量跑约 2/3 概率失败）。
     // 其余变体一律答空名单：它们与断言无关，也就不会制造无关广播。
     const models = options.models
-    vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+    vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
       .mockImplementation(async function (this: unknown, credential: { domain?: string }) {
         return credential.domain === 'www.codebuddy.cn' ? await models() : []
       })
@@ -86,7 +87,7 @@ async function installPlugin(options: {
   // 交叉校验：事件确实进了宿主的公开事件面（客户端订阅的就是它）。
   const events = { count: 0 }
   ctx.on('llm/models-updated', () => { events.count += 1 })
-  await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+  await ctx.plugin(AnyConnect, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
 // 本文件的等待都覆盖真实 I/O（插件注册 / 目录刷新），显式给 5s 预算：
 // vi.waitFor 的默认超时是 1s，而 testTimeout 是 30s——并行负载下真实 I/O 可能超过 1s，
 // 默认值会造成偶发失败（见 usage.test.ts 那次注册竞态）。
@@ -171,7 +172,7 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
     // 目录内容变化，必须通知，否则用户得刷新页面才看得见新分组。
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-refresh-signin-'))
     const desktop = join(root, 'workbuddy-desktop.info')
-    vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+    vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
       .mockImplementation(async () => [catalogRow('alpha')])
     const ctx = new Context()
     context = ctx
@@ -181,7 +182,7 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
     ctx.on('llm/models-updated', (provider: string) => {
       if (provider === 'workbuddy') replaced += 1
     })
-    await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+    await ctx.plugin(AnyConnect, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
 
     await vi.waitFor(() => {
       expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
@@ -209,7 +210,7 @@ describe('目录通知不会打断刷新链路', () => {
     const desktop = join(root, 'workbuddy-desktop.info')
     await writeFile(desktop, signedInDocument())
     let modelsCall = 0
-    vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+    vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
       .mockImplementation(async () => { modelsCall += 1; return [catalogRow('alpha')] })
 
     const ctx = new Context()
@@ -218,11 +219,11 @@ describe('目录通知不会打断刷新链路', () => {
     const seen: string[] = []
     ctx.on('llm/models-updated', (provider: string) => { seen.push(provider) })
 
-    await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+    await ctx.plugin(AnyConnect, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
     await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) }, { timeout: 5000 })
 
     // 换一份**内容不同**的名单，确保这一轮一定走到 publishCatalog → notifyCatalogChanged。
-    vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+    vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
       .mockImplementation(async () => { modelsCall += 1; return [catalogRow('beta')] })
     const warnings: string[] = []
     const warnSpy = vi.spyOn(ctx.logger, 'warn').mockImplementation((...args: unknown[]) => {

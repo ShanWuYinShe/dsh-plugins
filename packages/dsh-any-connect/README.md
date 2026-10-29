@@ -81,6 +81,11 @@ dsh-any-connect status     # 当前登录态与积分/额度
 dsh-any-connect logout     # 移除本插件的凭据副本（不动桌面 App 的登录）
 ```
 
+该命令是构建期打出的**自包含单文件**（`lib/bin.js`，内联依赖、仅保留 `node:` 内建
+模块）：独立 node 进程即可运行，不依赖宿主包的模块解析路径，也不受当前工作目录影响
+——从 profile 的 `node_modules/.bin` 调用与 `node <包目录>/lib/bin.js` 直接调用等价。
+内联的第三方组件与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
 默认操作 WorkBuddy 国内版；使用 `--provider <id>` 切换操作对象（`workbuddy`、`workbuddy-ai`、`zcode`、`zcode-start-plan`、`opencode-free`）：
 
 ```bash

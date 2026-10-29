@@ -466,9 +466,28 @@ Web client 通过 `ctx.remote` 调用的 Host 能力（本仓 `sandbox-extra-roo
   工作区包）时才可删除该 shim。
 - **无 Remote 的包**不要声明 `./typert` / `./remote`（空工件是历史兼容物，
   2026-10-29 已清除）。
+- **工件跨平台字节一致**（2026-10-29 实测）：同一源码在 macOS arm64 与
+  Linux arm64（Docker `node:24`）上生成的 10 个 typert 工件 sha256 完全相同，
+  `bun.lock` 也未被 Linux 冻结安装改写。CI 若想防生成器升级静默改字节，可记录
+  一份 sha 清单做对比。
 - **发布前干净构建**：先 `rm -rf packages/*/lib` 再 `bun run build`。tsc 不清理解释
   已删源码留下的旧产物（`scripts/typert.mjs` 只清 `typert.host.*.map` 一类已知残留），
   沿用旧 `lib/` 会把过期文件打进 tarball（`files` 含 `lib/` 整目录）。
+
+## 独立 CLI（`dsh-any-connect`）的构建约定
+
+插件的 Host 源码静态 import 宿主包（`@deepseek-ai/dsh-home-paths` 等，只声明在
+devDependencies），由宿主 profile runner 的 runtime resolution 在进程内补齐；
+**但 `bin` 是宿主 Loader 之外的独立 node 进程**，解析路径上没有这些包，直接跑
+tsc 产出的 `lib/bin.js` 会 `ERR_MODULE_NOT_FOUND`。因此构建的第 4 阶段用 esbuild
+把 bin 入口连同依赖闭包打成**自包含单文件 ESM**（`bundle` + `minify`，external
+只剩 `node:` 内建，保留 shebang），产物脱离 `node_modules` 也能运行。
+
+- bin 清单从 `package.json#bin` 派生（`lib/<name>.js` ↔ `src/<name>.ts`），新增 bin 的包自动纳入；
+- 内联第三方包（均 MIT）的许可告知放包根 `THIRD_PARTY_NOTICES.md` 并列入 `files`；
+- 回归由包内 `test/bin-self-contained.test.ts` 守住（shebang、仅 `node:` import、
+  空目录 `--help`/`status --json` 实测）；**只跑 `tsc` 会把 `lib/bin.js` 覆盖回裸产物**，
+  该测试会按设计红灯——完整 `bun run build` 后才是发布态。
 
 ## 手动兜底
 

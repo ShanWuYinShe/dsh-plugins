@@ -5,7 +5,11 @@ import { setTimeout as realSleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import * as WorkBuddy from '../src/index.js'
+import * as AnyConnect from '../src/index.js'
+import { WORKBUDDY_AI_SETTINGS_NS, WORKBUDDY_SETTINGS_NS } from '../src/config.js'
+import { WorkBuddyUpstreamClient } from '../src/upstream.js'
+import { applyVariantConfig } from '../src/variant-runtime.js'
+import { AI_VARIANT, CN_VARIANT } from '../src/variants.js'
 
 // 集成测试与宿主机真实登录态隔离，登录态只由测试显式给出（配置/env/文件）。
 
@@ -35,7 +39,7 @@ describe('WorkBuddy Host settings integration', () => {
     // hermetic (CI runners may carry a real signed-in desktop file, which
     // would flip this case to signed-in). An explicit authFile overrides the
     // platform defaults to this single path.
-    await ctx.plugin(WorkBuddy, { authFile: join(root, 'no-such-file.info'), authFileAI: join(root, 'no-such-ai-file.info') })
+    await ctx.plugin(AnyConnect, { authFile: join(root, 'no-such-file.info'), authFileAI: join(root, 'no-such-ai-file.info') })
 
     // Registration rides on the loopback shim's listening event.
 // 本文件的等待都覆盖真实 I/O（插件注册 / 目录刷新），显式给 5s 预算：
@@ -57,8 +61,8 @@ describe('WorkBuddy Host settings integration', () => {
     // legacy namespace constants.
     const directory = ctx.llm.listConfigurableProviders()
     for (const [provider, settingsNs] of [
-      ['workbuddy', WorkBuddy.WORKBUDDY_SETTINGS_NS],
-      ['workbuddy-ai', WorkBuddy.WORKBUDDY_AI_SETTINGS_NS],
+      ['workbuddy', WORKBUDDY_SETTINGS_NS],
+      ['workbuddy-ai', WORKBUDDY_AI_SETTINGS_NS],
     ] as const) {
       expect(directory).toContainEqual({
         provider,
@@ -84,13 +88,13 @@ describe('WorkBuddy Host settings integration', () => {
       auth: { accessToken: 'at', refreshToken: 'rt', expiresAt: Date.now() + 3600_000, domain: 'www.codebuddy.cn' },
       account: { uid: 'uid-1', nickname: '昵称' },
     }))
-    const spy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+    const spy = vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
       .mockImplementation(async () => { throw new Error('upstream down') })
     try {
       const ctx = new Context()
       context = ctx
       await ctx.plugin(LlmRuntime)
-        await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+        await ctx.plugin(AnyConnect, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(() => {
         expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
       }, { timeout: 5000 })
@@ -143,12 +147,12 @@ describe('WorkBuddy Host settings integration', () => {
     }))
     const savedRow = { id: 'saved-only', name: 'Saved Only', contextWindow: 100, maxTokens: 10, supportsImages: false }
     // 第一程：拉取成功 → 落盘。
-    const okSpy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+    const okSpy = vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
       .mockImplementation(async () => [savedRow])
     const ctx1 = new Context()
     try {
       await ctx1.plugin(LlmRuntime)
-      await ctx1.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+      await ctx1.plugin(AnyConnect, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(async () => {
         expect((await ctx1.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
       }, { timeout: 5000 })
@@ -162,13 +166,13 @@ describe('WorkBuddy Host settings integration', () => {
       await ctx1.fiber.dispose()
     }
     // 第二程（重启）：拉取持续失败 → 服务 saved，不回落 fallback。
-    const failSpy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+    const failSpy = vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
       .mockImplementation(async () => { throw new Error('upstream down') })
     try {
       const ctx = new Context()
       context = ctx
       await ctx.plugin(LlmRuntime)
-        await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+        await ctx.plugin(AnyConnect, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(async () => {
         expect((await ctx.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
       }, { timeout: 5000 })
@@ -191,12 +195,12 @@ describe('WorkBuddy Host settings integration', () => {
       account: { uid: 'uid-1', nickname: '昵称' },
     }))
     // 第一程：拉取成功 → 落盘，saved 里是真实名单。
-    const okSpy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+    const okSpy = vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
       .mockImplementation(async () => [{ id: 'saved-only', name: 'Saved Only', contextWindow: 100, maxTokens: 10, supportsImages: false }])
     const ctx1 = new Context()
     try {
       await ctx1.plugin(LlmRuntime)
-      await ctx1.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+      await ctx1.plugin(AnyConnect, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(async () => {
         expect((await ctx1.llm.listModels('workbuddy')).map(m => m.id)).toContain('saved-only')
       }, { timeout: 5000 })
@@ -210,13 +214,13 @@ describe('WorkBuddy Host settings integration', () => {
     }
     // 第二程：同账号、拉取返回**空名单**（模拟 Start Plan 今日未领取）。
     // 分组必须立刻隐藏，但盘上的 saved 不能被空名单覆盖。
-    const emptySpy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+    const emptySpy = vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
       .mockImplementation(async () => [])
     try {
       const ctx = new Context()
       context = ctx
       await ctx.plugin(LlmRuntime)
-      await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+      await ctx.plugin(AnyConnect, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       await vi.waitFor(async () => {
         expect(await ctx.llm.listModels('workbuddy')).toEqual([])
       }, { timeout: 5000 })
@@ -244,7 +248,7 @@ describe('WorkBuddy Host settings integration', () => {
       account: { uid: 'uid-1', nickname: '昵称' },
     }))
     let calls = 0
-    const spy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+    const spy = vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
       .mockImplementation(async () => {
         calls += 1
         throw new Error('upstream down')
@@ -258,7 +262,7 @@ describe('WorkBuddy Host settings integration', () => {
     // 的一次拉取：单条失败链带重试。
     vi.useFakeTimers()
     try {
-      await ctx.plugin(WorkBuddy, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
+      await ctx.plugin(AnyConnect, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
       // waitFor 在假时钟下自动按 50ms 推进(上限 1s,远够不到 60s 重试点),
       // 等首次失败落地。
       await vi.waitFor(() => { expect(calls).toBe(1) }, { timeout: 5000 })
@@ -294,7 +298,7 @@ describe('WorkBuddy international variant', () => {
     const ctx = new Context()
     context = ctx
     await ctx.plugin(LlmRuntime)
-    await ctx.plugin(WorkBuddy, {
+    await ctx.plugin(AnyConnect, {
       authFile: join(root, 'no-such-file.info'),
       authFileAI: join(root, 'no-such-ai-file.info'),
     })
@@ -309,11 +313,11 @@ describe('WorkBuddy international variant', () => {
     }, { timeout: 5000 })
     const entries = ctx.llm.listConfigurableProviders()
     expect(entries.find(entry => entry.provider === 'workbuddy')).toMatchObject({
-      settingsNs: WorkBuddy.WORKBUDDY_SETTINGS_NS,
+      settingsNs: WORKBUDDY_SETTINGS_NS,
       settingsPath: [],
     })
     expect(entries.find(entry => entry.provider === 'workbuddy-ai')).toMatchObject({
-      settingsNs: WorkBuddy.WORKBUDDY_AI_SETTINGS_NS,
+      settingsNs: WORKBUDDY_AI_SETTINGS_NS,
       settingsPath: [],
     })
   })
@@ -326,13 +330,13 @@ describe('WorkBuddy international variant', () => {
       auth: { accessToken: 'ai-at', refreshToken: 'ai-rt', expiresAt: Date.now() + 3600_000, domain: 'www.workbuddy.ai' },
       account: { uid: 'ai-uid', nickname: 'AI 用户' },
     }))
-    const spy = vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+    const spy = vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
       .mockImplementation(async () => { throw new Error('upstream down') })
     try {
       const ctx = new Context()
       context = ctx
       await ctx.plugin(LlmRuntime)
-        await ctx.plugin(WorkBuddy, {
+        await ctx.plugin(AnyConnect, {
         authFile: join(root, 'no-such-file.info'),
         authFileAI: desktopAI,
       })
@@ -357,14 +361,14 @@ describe('volatile configuration', () => {
     const stores = {
       credentialStore: { setDesktopPath: (path: string | undefined) => { credentialSet.push(path) } },
     }
-    expect(WorkBuddy.applyVariantConfig(WorkBuddy.CN_VARIANT, stores, { authFile: '/tmp/a.info' })).toBe('authFile')
+    expect(applyVariantConfig(CN_VARIANT, stores, { authFile: '/tmp/a.info' })).toBe('authFile')
     expect(credentialSet).toEqual(['/tmp/a.info'])
-    expect(WorkBuddy.applyVariantConfig(WorkBuddy.AI_VARIANT, stores, { authFileAI: '/tmp/ai.info' })).toBe('authFile')
+    expect(applyVariantConfig(AI_VARIANT, stores, { authFileAI: '/tmp/ai.info' })).toBe('authFile')
     expect(credentialSet).toEqual(['/tmp/a.info', '/tmp/ai.info'])
   })
 
   it('tolerates absent stores (variant without a live runtime part)', () => {
-    expect(() => WorkBuddy.applyVariantConfig(WorkBuddy.CN_VARIANT, {}, { authFile: '/tmp/a.info' })).not.toThrow()
+    expect(() => applyVariantConfig(CN_VARIANT, {}, { authFile: '/tmp/a.info' })).not.toThrow()
   })
 
   it('survives a volatile-update with no Loader (install-time values, no crash)', async () => {
@@ -375,7 +379,7 @@ describe('volatile configuration', () => {
     const ctx = new Context()
     context = ctx
     await ctx.plugin(LlmRuntime)
-    const fiber = await ctx.plugin(WorkBuddy, {
+    const fiber = await ctx.plugin(AnyConnect, {
       authFile: join(root, 'no-such-file.info'),
       authFileAI: join(root, 'no-such-ai-file.info'),
     })

@@ -1,11 +1,13 @@
-// 全仓构建，三段顺序固定：
+// 全仓构建，四段顺序固定：
 //   1) 每包 tsc 编译 src/ → lib/（含 dsh.d.ts 增强合并）
 //   2) typert 工件生成（scripts/typert.mjs → lib/typert.*）
 //   3) esbuild 打包 client/index.tsx → client/client.cjs
+//   4) esbuild 打包 package.json 声明的 bin 入口 → 自包含 lib/bin.js
 // 顺序不能换：client 源码用包自引用子路径 import "@chaoset/<pkg>/remote"，
-// esbuild 解析到 lib/typert.remote-client.js，故生成必须早于 client 打包。
+// esbuild 解析到 lib/typert.remote-client.js，故生成必须早于 client 打包；
+// bin 覆盖的是 tsc 阶段写出的同名产物，故打包必须在 tsc 之后（见阶段 4）。
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -125,4 +127,59 @@ for (const { pkg, pkgDir, pkgName } of compiled) {
     await buildClient(pkgDir, pkg, pkgName);
   }
   console.log(`built ${pkg}`);
+}
+
+// ── 阶段 4：包内 bin 的自包含打包 ──
+// bin 由宿主 loader 之外的独立 node 进程启动，不经宿主 runtime resolution：
+// 源码静态 import 的宿主包（dsh-home-paths 等）只声明在包的 devDependencies
+// 里，用户 profile 的解析路径上没有它们——直接跑 tsc 产出的 lib/bin.js 会
+// ERR_MODULE_NOT_FOUND。这里把 bin 入口连同依赖闭包打成单文件 ESM（external
+// 只剩 node: 内建），产物脱离 node_modules 也能运行。内联第三方包的许可告知
+// 见包根 THIRD_PARTY_NOTICES.md；新增 bin 的包同样要随包发布该文件。
+// bundle 落在 lib/<name>.js，与 tsc 产物同目录：运行期按 import.meta.url 读
+// ../package.json（版本号）的相对路径不受影响。
+
+/** bin 声明 → { 源码, 目标产物 }；清单从 package.json 派生，增删 bin 时无需改构建脚本。 */
+function binEntries(pkgDir, pkgJson) {
+  if (pkgJson.bin === undefined) return [];
+  const declared = typeof pkgJson.bin === "string" ? { [pkgJson.name]: pkgJson.bin } : pkgJson.bin;
+  return Object.values(declared).map((target) => {
+    // 约定：bin 指向 lib/*.js，源码是同名的 src/*.ts（tsc 阶段已产出同名 .js，这里覆盖）。
+    const match = /^\.\/lib\/(.+)\.js$/u.exec(target);
+    if (match === null) throw new Error(`bin 目标 ${target} 必须在 lib/*.js 下`);
+    const source = join(pkgDir, "src", `${match[1]}.ts`);
+    if (!existsSync(source)) throw new Error(`bin 目标 ${target} 没有对应的 ${source}`);
+    return { source, target: join(pkgDir, target) };
+  });
+}
+
+/** 打包一个包声明的全部 bin；无 bin 声明的包是空操作。 */
+async function buildBin(pkg, pkgDir) {
+  const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+  for (const { source, target } of binEntries(pkgDir, pkgJson)) {
+    const result = await build({
+      entryPoints: [source],
+      bundle: true,
+      format: "esm",
+      platform: "node",
+      // 宿主 engines.node 下限是 >=24.9.0，产物只需在 Node 24 上跑。
+      target: ["node24"],
+      // 分发产物同 client bundle：调试看源码，发布跑压缩版本。
+      minify: true,
+      write: false,
+    });
+    const output = result.outputFiles?.[0];
+    if (output === undefined) throw new Error(`bin 打包 ${source} 无输出`);
+    // esbuild 会保留入口的 hashbang；发布产物靠它直接执行，丢了会变成
+    // 「SyntaxError: Invalid or unexpected token」。升级 esbuild 时不能默默退化。
+    if (!output.text.startsWith("#!")) throw new Error(`bin 打包 ${source} 丢了 shebang`);
+    writeFileSync(target, output.text);
+    // tsc 阶段写出的 .map 描述的是未打包的产物，被 bundle 覆盖后即成过期文件。
+    rmSync(`${target}.map`, { force: true });
+    console.log(`built ${pkg} bin (${Buffer.byteLength(output.text)} bytes)`);
+  }
+}
+
+for (const { pkg, pkgDir } of compiled) {
+  await buildBin(pkg, pkgDir);
 }

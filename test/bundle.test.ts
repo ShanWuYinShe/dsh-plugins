@@ -64,6 +64,9 @@ describe("npm bundle metadata", () => {
       // （不认目录通配，"lib" 不等于包含 lib/typert.host.js），官方发布包同样
       // 逐个列出。少列一条 = 生成失败/发布产物缺入口。
       const canonical = ["lib", "client", "cordis.patch.yml", "README.md", "CHANGELOG.md", "LICENSE"];
+      // dsh-any-connect 的独立 CLI（lib/bin.js）是构建期自包含 bundle，内联的
+      // MIT 依赖清单随包发布（THIRD_PARTY_NOTICES.md 在包根、files 显式列出）。
+      if (name === "dsh-any-connect") canonical.push("THIRD_PARTY_NOTICES.md");
       const expected = REMOTE_PACKAGES.has(name)
         ? [
             "lib",

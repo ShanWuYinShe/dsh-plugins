@@ -1,14 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { ARCHIVE_PAGE_SIZE, DELETE_ACK_THRESHOLD, needsDeleteAck } from "../client/index.tsx";
-
-// 同 client-focus.test.ts：模块求值期引用 React，给空桩通过即可。
-vi.mock("react", () => ({
-  createElement: (...args: any[]) => ({ args }),
-  useState: (init: any) => [typeof init === "function" ? init() : init, () => {}],
-  useEffect: () => {},
-  useCallback: (fn: any) => fn,
-  useRef: () => ({ current: null }),
-}));
+import { describe, expect, it } from "vitest";
+import { ARCHIVE_PAGE_SIZE, DELETE_ACK_THRESHOLD, needsDeleteAck } from "../client/archive-entries.js";
 
 /**
  * 大批量删除确认闸回归：阈值以下的删除走原两段式（同按钮二次点击），

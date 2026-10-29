@@ -1,3 +1,18 @@
+## 0.4.28-alpha.5 (2026-10-29)
+
+### 修复
+
+* **独立 CLI 恢复可用（`ERR_MODULE_NOT_FOUND`）**：`dsh-any-connect doctor/status/logout` 由宿主 Loader 之外的独立 node 进程运行，不经宿主 runtime resolution；`src/bin.ts` 静态 import 的宿主包（`@deepseek-ai/dsh-home-paths` 等）在用户 profile 的解析路径上不存在，发布的 `lib/bin.js` 一执行就报 `ERR_MODULE_NOT_FOUND`。构建新增第 4 阶段（`scripts/build.mjs`）：用 esbuild 把 bin 入口连同依赖闭包打成**自包含单文件 ESM**（`bundle` + `minify`，external 只剩 `node:` 内建，保留 shebang），产物在任意工作目录、无宿主解析路径下都能运行；版本号仍按 `import.meta.url` 读包根 `package.json`。内联依赖的许可告知（全部 MIT：`@deepseek-ai/cordis`、`cosmokit`、`dsh-atomic-write`、`dsh-home-paths`、`dsh-storage`、`dsh-storage-domain`、`dsh-storage-json`、`dsh-timeout`、`schemastery`、`zod`）随包发布为 `THIRD_PARTY_NOTICES.md`。
+* **bin 打包入口从 manifest 派生**：构建按 `package.json` 的 `bin` 声明推导「目标 `lib/<name>.js` ↔ 源码 `src/<name>.ts`」，新增 bin 的包自动纳入打包；缺源码或 esbuild 丢了 shebang 都直接构建失败，不再靠手工同步清单。
+
+### 重构
+
+* **宿主入口收敛为 Loader 四导出**：`src/index.ts` 由 27 条 export 语句转发 162 个名字收敛为 `name` / `inject` / `Config` / `apply` 四个（移除 158 个实现值与类型转发）；包内 13 个测试与测试辅助文件改为从 `../src/<module>.js` 相对导入，`src/auth.ts` 中只服务于入口转发的 `WORKBUDDY_AUTH_FILENAME` re-export 一并删除。包外扩展统一走 Cordis 服务面——测试便利值不再固化成发布 API（DSH 官方 `docs/defensive-patterns/package-surface.md`「A plugin package exports what the Loader loads」）。
+
+### 测试
+
+* 新增 `test/bin-self-contained.test.ts`：读真实构建产物断言 `lib/bin.js` 首行保留 shebang、只 import `node:` 内建模块（宿主包已内联），并在空目录 / 隔离 `DSH_HOME` 下实测 `--help`（exit 0 且含 Usage）与 `status --json`（可解析 JSON、`version` 与包根 `package.json` 一致）。产物缺失或仍是 tsc 裸产物时**直接红灯**并提示先 `bun run build`，不静默跳过。
+
 ## 0.4.28-alpha.4 (2026-10-29)
 
 ### 破坏性变更

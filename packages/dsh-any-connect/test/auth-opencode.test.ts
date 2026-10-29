@@ -5,11 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   defaultOpenCodeCandidates,
   desktopAuthCandidatesFor,
-  OPENCODE_VARIANT,
   WorkBuddyCredentialStore,
   parseOpenCodeAuth,
   defaultOpenCodePublicCredential,
-} from '../src/index.js'
+} from '../src/auth.js'
+import { OPENCODE_VARIANT } from '../src/variants.js'
 
 describe('OpenCode Auth and Credential Resolution', () => {
   let tempDir: string

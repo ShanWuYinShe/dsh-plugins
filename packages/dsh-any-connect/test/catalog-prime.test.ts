@@ -4,9 +4,10 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import * as WorkBuddy from '../src/index.js'
+import * as AnyConnect from '../src/index.js'
 import { signedInDocument, catalogRow } from './catalog-harness.js'
-import type { WorkBuddyModelInfo } from '../src/index.js'
+import type { WorkBuddyModelInfo } from '../src/catalog.js'
+import { WorkBuddyUpstreamClient } from '../src/upstream.js'
 
 /**
  * 「注册前预热目录」这条线的回归（2026-10-27 取证，全过程记录在项目 skill dsh-any-connect-channels「5.3 重载窗口」）：
@@ -46,7 +47,7 @@ async function installPlugin(options: {
   // 只让被测变体（workbuddy，CN）拿到挂起/指定名单，其余变体一律答空——
   // 既让断言只看 CN，也保证用例零真实网络（同 catalog-refresh.test.ts 的口径）。
   const models = options.models
-  vi.spyOn(WorkBuddy.WorkBuddyUpstreamClient.prototype, 'fetchModels')
+  vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
     .mockImplementation(async function (this: unknown, credential: { domain?: string }) {
       return credential.domain === 'www.codebuddy.cn' ? await models() : []
     })
@@ -80,7 +81,7 @@ async function installPlugin(options: {
     },
   })
   try {
-    await ctx.plugin(WorkBuddy, { authFile: options.desktopFile, authFileAI: join(tmpdir(), 'no-such-ai-file.info') })
+    await ctx.plugin(AnyConnect, { authFile: options.desktopFile, authFileAI: join(tmpdir(), 'no-such-ai-file.info') })
     await vi.waitFor(() => {
       expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
     }, { timeout: 5000 })

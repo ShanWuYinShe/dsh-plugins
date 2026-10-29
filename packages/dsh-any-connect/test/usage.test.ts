@@ -13,7 +13,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import * as WorkBuddy from '../src/index.js'
+import * as AnyConnect from '../src/index.js'
+import { currentPlanWindow, startPlanWindows, totalCreditsWindows } from '../src/usage.js'
 
 /** One registered querier, captured by the stub registry below. */
 interface Registration {
@@ -107,7 +108,7 @@ async function boot(options: { signedIn: boolean }): Promise<{ registry: StubUsa
   // `provide` (not `set`) is the seam that makes the name visible to
   // `ctx.inject`/`ctx.get`, which is how the plugin reaches it.
   ctx.provide('providerUsage', registry)
-  await ctx.plugin(WorkBuddy, { authFile, authFileAI: aiAuthFile })
+  await ctx.plugin(AnyConnect, { authFile, authFileAI: aiAuthFile })
   return { registry, authFile }
 }
 
@@ -208,14 +209,14 @@ describe('WorkBuddy usage querier', () => {
 describe('totalCreditsWindows / currentPlanWindow', () => {
   it('sums live packages, skips drained ones, empties when all drained', () => {
     // 上游一个包都没给 = 真的无可报（不是「用完了」）。
-    expect(WorkBuddy.totalCreditsWindows([])).toEqual([])
+    expect(totalCreditsWindows([])).toEqual([])
     // 有包但全部耗尽 = 用完了，必须报出来（否则界面谎称「不上报额度」）。
-    expect(WorkBuddy.totalCreditsWindows([
+    expect(totalCreditsWindows([
       { packageName: 'A', remain: 0, size: 100 },
     ])).toEqual([
       { id: 'total', label: '总计', remain: 0, unit: 'credits' },
     ])
-    expect(WorkBuddy.totalCreditsWindows([
+    expect(totalCreditsWindows([
       { packageName: 'A', remain: 24, size: 100 },
       { packageName: 'B', remain: 0, size: 500 },
       { packageName: 'C', remain: 10, size: 0 },
@@ -230,22 +231,22 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
       today: { date: '2026-10-26', peak: 793, last: 693, consumed: 45, granted: 100, samples: 9, updatedAtMs: 0 },
       history: [],
     }
-    expect(WorkBuddy.totalCreditsWindows(accounts)).toEqual([
+    expect(totalCreditsWindows(accounts)).toEqual([
       { id: 'total', label: '总计', remain: 693, unit: 'credits', limit: 800 },
     ])
-    expect(WorkBuddy.totalCreditsWindows(accounts, today)).toEqual([
+    expect(totalCreditsWindows(accounts, today)).toEqual([
       { id: 'total', label: '总计', remain: 693, unit: 'credits', limit: 800 },
       { id: 'today', label: '今日已用', remain: 45, unit: 'credits' },
     ])
   })
 
   it('picks the first live plan, falling back to the first plan', () => {
-    expect(WorkBuddy.currentPlanWindow([])).toEqual([])
-    expect(WorkBuddy.currentPlanWindow([
+    expect(currentPlanWindow([])).toEqual([])
+    expect(currentPlanWindow([
       { packageName: 'Dead (已过期)', remain: 0, size: 1 },
       { packageName: 'Pro (有效)', remain: 1, size: 1, expiredAt: '2026-10-21T00:00:00.000Z' },
     ])).toEqual([{ id: 'plan', label: 'Pro', unit: '有效', resetsAt: '2026-10-21T00:00:00.000Z' }])
-    expect(WorkBuddy.currentPlanWindow([
+    expect(currentPlanWindow([
       { packageName: 'Only (VALID)', remain: 0, size: 1 },
     ])).toEqual([{ id: 'plan', label: 'Only', unit: '有效' }])
   })
@@ -255,7 +256,7 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
     // unit: 'tokens'（2026-10-11 起进度条判据是 unit，sameDay 只管文案口径）。
     // 窗口缺 remain 时 pill 只渲染「套餐名: 有效」——数字被
     // 丢掉等于用户在聊天框下方看不到剩余额度。
-    expect(WorkBuddy.currentPlanWindow([
+    expect(currentPlanWindow([
       { packageName: 'GLM-5.3-Flash (有效)', planName: 'ZCode Trust Build', remain: 91_464_568, size: 100_000_000, sameDay: true, unit: 'tokens', expiredAt: '2026-10-06T16:00:00.000Z' },
     ])).toEqual([{
       id: 'plan',
@@ -266,15 +267,15 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
       resetsAt: '2026-10-06T16:00:00.000Z',
     }])
     // 当日用完(remain=0):照样带数字——红色空条正是「今天用完了」的语义。
-    expect(WorkBuddy.currentPlanWindow([
+    expect(currentPlanWindow([
       { packageName: 'GLM-5.3-Flash (有效)', remain: 0, size: 100_000_000, sameDay: true, unit: 'tokens' },
     ])).toEqual([{ id: 'plan', label: 'GLM-5.3-Flash', remain: 0, limit: 100_000_000, unit: 'tokens' }])
     // size = 0(理论不应出现)防御:退回「有效」展示,避免 limit 0 的除零与无意义进度条。
-    expect(WorkBuddy.currentPlanWindow([
+    expect(currentPlanWindow([
       { packageName: 'Odd (有效)', remain: 5, size: 0, sameDay: true, unit: 'tokens' },
     ])).toEqual([{ id: 'plan', label: 'Odd', unit: '有效' }])
     // Coding Plan 订阅(无 sameDay,remain/size=1 的有效性标志)维持原样。
-    expect(WorkBuddy.currentPlanWindow([
+    expect(currentPlanWindow([
       { packageName: 'GLM Coding Pro (有效)', planName: 'GLM Coding Pro', remain: 1, size: 1 },
     ])).toEqual([{ id: 'plan', label: 'GLM Coding Pro', unit: '有效' }])
   })
@@ -283,16 +284,16 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
     // 每日 00:00 后新池子还没发放/领取：accounts 为空（billing/balance 如实返回
     // 空 balances）。pill 若落到通用的「该 provider 不上报额度」，用户会以为额度
     // 功能坏了——额度接口其实是通的，只是今天还没有池子。
-    expect(WorkBuddy.startPlanWindows([])).toEqual([{ id: 'plan', label: 'Start Plan', unit: '今日待领取' }])
+    expect(startPlanWindows([])).toEqual([{ id: 'plan', label: 'Start Plan', unit: '今日待领取' }])
     // 有池子时仍然报真实 token 数（unit: 'tokens' 声明 token 计数池）。
-    expect(WorkBuddy.startPlanWindows([
+    expect(startPlanWindows([
       { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, sameDay: true, unit: 'tokens' },
     ])).toEqual([{ id: 'plan:glm-5.3-flash', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens' }])
     // 多日有效期的池子同样画进度条（sameDay 只管文案口径，不再决定进度条
     // 的有无）——unit: 'tokens' 在就能画。过期时刻先算成常量再两侧共用：
     // 断言两边各取一次 Date.now() 会偶发跨毫秒边界，toISOString 差 1ms 导致 flaky。
     const expiry = new Date(Date.now() + 3 * 86_400_000).toISOString()
-    expect(WorkBuddy.startPlanWindows([
+    expect(startPlanWindows([
       { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, unit: 'tokens', expiredAt: expiry },
     ])).toEqual([{ id: 'plan:glm-5.3-flash', label: 'GLM-5.3-Flash', remain: 90_000_000, limit: 100_000_000, unit: 'tokens', resetsAt: expiry }])
   })
@@ -303,7 +304,7 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
     // "第一个 remain>0 的池"，GLM-5.3 的 200M 整个不可见；求和又谎报"哪个模型
     // 都能用"的总额度。每池一条才与真实消费口径一致。
     const expiry = new Date(Date.now() + 86_400_000).toISOString()
-    expect(WorkBuddy.startPlanWindows([
+    expect(startPlanWindows([
       { packageName: 'GLM-5.3-Flash (有效)', planName: 'ZCode 1024 Dev Day', remain: 299_141_650, size: 300_000_000, unit: 'tokens', expiredAt: expiry },
       { packageName: 'GLM-5.3 (有效)', planName: 'ZCode 1024 Dev Day', remain: 200_000_000, size: 200_000_000, unit: 'tokens', expiredAt: expiry },
     ])).toEqual([
@@ -312,7 +313,7 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
     ])
     // remain=0 的池不丢：用完的池显示红色空条，恰是"这个模型用完了"的语义；
     // 其余池子的数字不受影响。
-    expect(WorkBuddy.startPlanWindows([
+    expect(startPlanWindows([
       { packageName: 'GLM-5.3-Flash (有效)', remain: 0, size: 300_000_000, unit: 'tokens' },
       { packageName: 'GLM-5.3 (有效)', remain: 200_000_000, size: 200_000_000, unit: 'tokens' },
     ])).toEqual([
@@ -321,7 +322,7 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
     ])
     // 非池子条目（畸形 size=0）不进窗口；id 是 React 列表 key，重名池撞名时
     // 追加序号保证窗口内唯一。
-    expect(WorkBuddy.startPlanWindows([
+    expect(startPlanWindows([
       { packageName: 'Odd (有效)', remain: 5, size: 0, unit: 'tokens' },
       { packageName: 'GLM-5.3 (有效)', remain: 1, size: 2, unit: 'tokens' },
       { packageName: 'GLM-5.3 (有效)', remain: 3, size: 4, unit: 'tokens' },

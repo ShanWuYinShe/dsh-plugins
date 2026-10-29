@@ -1,16 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { filterArchived } from "../client/index.tsx";
-
-// 模块求值期引用 React（组件内才调用），这里只测纯函数 filterArchived，
-// 给一个空桩让 import 通过即可（同 client-focus.test.ts 的做法）。
-vi.mock("react", () => ({
-  createElement: (...args: any[]) => ({ args }),
-  useState: (init: any) => [typeof init === "function" ? init() : init, () => {}],
-  useEffect: () => {},
-  useCallback: (fn: any) => fn,
-  useRef: () => ({ current: null }),
-  useMemo: (fn: any) => fn(),
-}));
+import { describe, expect, it } from "vitest";
+import { filterArchived } from "../client/archive-entries.js";
 
 const items = [
   { sessionId: "AAA-BBB", title: "修复登录页", cwd: "/proj/web", live: false },

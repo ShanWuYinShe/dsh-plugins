@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import * as WorkBuddy from '../src/index.js'
-import type { WorkBuddyModelInfo } from '../src/index.js'
+import * as AnyConnect from '../src/index.js'
+import type { WorkBuddyModelInfo } from '../src/catalog.js'
+import { ZCodeUpstreamClient } from '../src/upstream.js'
 import { workBuddyWebStatus } from '../src/web-status.js'
 import type { WorkBuddyStatusRouteOptions } from '../src/web-status.js'
 
@@ -80,7 +81,7 @@ describe('空名单的可区分表达', () => {
       providerFamilyConnectionSelections: { bigmodel: { kind: 'start-plan' } },
     }))
     let settled = false
-    vi.spyOn(WorkBuddy.ZCodeUpstreamClient.prototype, 'fetchModels').mockImplementation(async () => {
+    vi.spyOn(ZCodeUpstreamClient.prototype, 'fetchModels').mockImplementation(async () => {
       try { return await modelsImpl() } finally { settled = true }
     })
     const catalogSeen = (): boolean => settled
@@ -101,7 +102,7 @@ describe('空名单的可区分表达', () => {
         return () => { handlers.delete(options.path) }
       },
     })
-    await ctx.plugin(WorkBuddy, {
+    await ctx.plugin(AnyConnect, {
       authFile: join(root, 'no-such-file.info'),
       authFileAI: join(root, 'no-such-ai-file.info'),
       authFileZCode: credentials,

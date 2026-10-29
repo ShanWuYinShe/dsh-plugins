@@ -2,7 +2,7 @@
  * index.tsx — 浏览器侧插件入口：注册侧边栏徽标与归档面板。
  *
  * 2026-10-08 从 1194 行的 client/index.tsx 拆出：样式、文案、纯逻辑与面板组件
- * 各自成模块，入口只保留注册与 re-export。
+ * 各自成模块，入口只保留 apply/inject 与注册。
  *
  * 2026-10-29 适配 0.2.2：远程贡献不再手写（旧 REMOTE_CONTRIBUTION +
  * passthroughCodec 已删），改为消费官方 typert 生成器产出的 ./remote 工件
@@ -28,10 +28,10 @@
 import archiveRemote from '@chaoset/session-archive/remote'
 import { NS, zh, en } from './locales.js'
 import { ArchivePanel } from './ArchivePanel.js'
+// 样式注入是**模块加载副作用**：必须有人导入 styles.ts，否则面板渲染出来没有任何样式。
+// 入口不转发 css（实现值不进公开面），测试直接从 './styles.js' 导入样式表。
+import './styles.js'
 
-export { filterArchived, ARCHIVE_SORT_KEYS, sortArchived, exportFilename, detailToMarkdown, mergeArchivedMarkdown, trapTarget, needsDeleteAck, DELETE_ACK_THRESHOLD, ARCHIVE_PAGE_SIZE, summarizeBatchResult } from './archive-entries.js'
-export type { ArchiveSortKey, BatchActionResult, BatchOutcome } from './archive-entries.js'
-export { css } from './styles.js'
 export { apply, inject }
 
 const inject = ["slots", "locale", "remote"];

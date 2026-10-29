@@ -11,7 +11,7 @@
  * - confine-runners.ts — confine 按 runner 改写 + 运行期危险根复查（纯函数）
  * - roots-filter.ts config-validate.ts — 真实存在目录过滤（带 TTL 缓存）与配置校验/规范化
  * - roots.ts — 额外根目录规范化、分类与授予集合
- * - plugin-config.ts — 插件身份与配置默认值/生效配置
+ * - plugin-config.ts — 插件身份（name/inject）与配置默认值
  * - common.ts — 沙盒能力探测与宿主路径工具（官方 dsh-sandbox 静态导入）
  * - landlock-exec.ts — 官方 landlock-run 启动器解析缓存（仅 Linux）
  * - types.ts — Remote 服务面的公共边界类型（typert 生成器引用）
@@ -25,5 +25,8 @@
  * @module @chaoset/sandbox-extra-roots/index
  */
 
-export { name, inject, config } from './plugin-config.js'
+// Cordis Loader 的 function plugin 面：只导出 name / inject / apply（值导出）。
+// 小写 config 导出不是 Cordis 元数据、从不被读取，2026-10-29 已删除；
+// 入口面锁 test/entry-surface.test.ts 拦住它长回来。
+export { name, inject } from './plugin-config.js'
 export { apply } from './apply.js'

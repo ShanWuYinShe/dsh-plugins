@@ -14,7 +14,13 @@ export const name = 'session-archive';
 /** sessions 参与 inject：删除前必须能查询 live 会话（存在即拒绝删除）。 */
 export const inject = ['workspaceRegistry', 'sessionPersistence', 'sessions'];
 
-/** 默认配置。apply 时与 YAML 传入的 config 合并（cordis 不合并小写 config 导出）。 */
+/**
+ * 默认配置。apply 时与 YAML 传入的 config 合并。
+ *
+ * 不要从插件入口导出小写 `config`：Cordis 的插件元数据只认大写 `Config`
+ * schema，entry 的 config 来自 profile patch，小写导出从不被读取（2026-10-29
+ * 清除遗留死导出；入口面锁 test/entry-surface.test.ts 会拦住它长回来）。
+ */
 export const DEFAULT_CONFIG = {
   /** detail() 返回的最大消息条数（超出仅计数）。 */
   detailMaxMessages: 200,
@@ -23,8 +29,6 @@ export const DEFAULT_CONFIG = {
   /** list() 时并发读取标题的最大并行数。 */
   titleReadConcurrency: 4,
 };
-
-export const config = { ...DEFAULT_CONFIG };
 
 /** 配置校验：只接受正整数数值字段，避免脏配置拖垮并发/截断逻辑。 */
 export function validateConfig(partial: any) {

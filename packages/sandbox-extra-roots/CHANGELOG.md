@@ -1,3 +1,10 @@
+## 0.4.28-alpha.3 (2026-10-29)
+
+### 重构
+
+* **客户端入口面收敛**：`client/index.tsx` 只保留 `apply` / `inject`；原先供测试使用的 5 个纯函数转发导出（`analyzeRootsText` 等）删除，测试改从 `../client/roots-preview.js` 直接导入（DSH client 入口纪律：实现值不冻结为包 API；根新增入口面锁 `test/entry-surface.test.ts`）。
+* **删除死元数据导出**：服务入口不再导出小写 `config`——Cordis 只认大写 `Config` schema，entry 的 config 来自 profile patch，小写导出从未被读取。
+
 ## 0.4.28-alpha.2 (2026-10-29)
 
 ### 重构

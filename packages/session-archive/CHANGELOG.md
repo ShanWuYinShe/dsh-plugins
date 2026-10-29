@@ -1,3 +1,10 @@
+## 0.3.32-alpha.3 (2026-10-29)
+
+### 重构
+
+* **客户端入口面收敛**：`client/index.tsx` 只保留 `apply` / `inject`；11 个值转发、3 个类型转发与 `css` 转发删除，测试改从 `../client/archive-entries.js` / `../client/styles.js` 直接导入；`styles.ts` 的 CSS 注入改为入口显式副作用 `import './styles.js'`（行为等价）。
+* **删除死元数据导出**：服务入口不再导出小写 `config`（Cordis 只认大写 `Config`，entry 的 config 来自 profile patch，小写导出从未被读取）。
+
 ## 0.3.32-alpha.2 (2026-10-29)
 
 ### 重构
