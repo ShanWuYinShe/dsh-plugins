@@ -143,12 +143,47 @@ jobs:
           done < <(node -e 'for (const p of JSON.parse(process.argv[1])) console.log(`${p.dir}@${p.version}@${p.prerelease}`)' "$PLAN")
           echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
 
-      # ── 插件市场：索引 + 静态 npm registry ─────────────────────────────
-      # 每次发布后把「GitHub Releases 里已适配当前宿主线的版本」汇总成站点并推送到
-      # market 分支（索引 index.json + 图标 icons/ + 静态 registry npm/ + 说明 README.md）。
+      # ── 插件市场：索引 + 静态 npm registry（发行分支根的 market/ 目录）────────────
+      # 每次发布后把「GitHub Releases 里已适配各宿主线的版本」汇总成站点，提交到 tag 所在
+      # 发行分支（alpha，收敛后 main）根下的 market/ 目录；raw URL 以该分支为 ref：
+      #   index:    https://raw.githubusercontent.com/<repo>/<ref>/market/index.json
+      #   registry: https://raw.githubusercontent.com/<repo>/<ref>/market/npm/
       # 生成器只下载并读取 tarball，不安装也不执行包代码；输出确定性，同一批 Releases
-      # 重复构建逐字节相同。只有本次真的发布了新版本才生成；workflow_dispatch 时即使
-      # 无新发布也重新生成（回填/修复用：填一个已发布的 tag，发布步骤会因已归档跳过）。
+      # 重复构建逐字节相同。只有本次真的发布了新版本才生成；workflow_dispatch 无新发布
+      # 也重新生成（回填/修复用：填一个已发布的 tag，发布步骤会因已归档跳过）。
+      - name: Resolve market target ref
+        id: market-target
+        if: steps.plan.outputs.plan != '[]' || github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          # tag 触发时 github.ref_name 是 tag 名（不是分支名），因此找包含该 tag 提交的发行分支。
+          # HEAD 即 checkout 检出的触发 tag（workflow_dispatch 时是 tag 输入），用它做归属判断。
+          TARGET="$(git rev-parse HEAD)"
+          # main 优先：收敛后/待命期的 tag 属于 main；适配期的 tag 只存在于 alpha（main 被搁置，
+          # 不含 alpha 的提交），因此按 main -> alpha 匹配既能保证站点留在长期分支，也不会在
+          # 适配期误推 main。
+          for candidate in main alpha; do
+            git fetch --no-tags origin "+refs/heads/$candidate:refs/remotes/origin/$candidate" >/dev/null 2>&1 || true
+          done
+          REF=""
+          for candidate in main alpha; do
+            if ! git rev-parse --verify --quiet "refs/remotes/origin/$candidate" >/dev/null 2>&1; then
+              continue
+            fi
+            if git merge-base --is-ancestor "$TARGET" "refs/remotes/origin/$candidate" || [ "$TARGET" = "$(git rev-parse "refs/remotes/origin/$candidate")" ]; then
+              REF="$candidate"
+              break
+            fi
+          done
+          if [ -z "$REF" ]; then
+            echo "::error::$GITHUB_REF_NAME 不属于 alpha/main，无法确定站点提交目标分支"
+            exit 1
+          fi
+          BASE="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${REF}/market"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "base_url=$BASE" >> "$GITHUB_OUTPUT"
+          echo "站点目标：分支 $REF 的 market/（$BASE）"
+
       - name: Cache plugin market tarballs
         if: steps.plan.outputs.plan != '[]' || github.event_name == 'workflow_dispatch'
         uses: actions/cache@v4
@@ -158,58 +193,72 @@ jobs:
           restore-keys: |
             plugin-market-${{ github.repository }}-
 
-      - name: Fetch previous market site
+      - name: Fetch previous market dir
         if: steps.plan.outputs.plan != '[]' || github.event_name == 'workflow_dispatch'
+        env:
+          REF: ${{ steps.market-target.outputs.ref }}
         run: |
+          set -euo pipefail
           mkdir -p .workwork/plugin-market-previous
-          if git fetch --depth=1 origin market 2>/dev/null; then
-            git archive FETCH_HEAD | tar -x -C .workwork/plugin-market-previous
-            echo "已取到既有 market 站点，本次只下载新增版本的 tarball。"
+          if git fetch --depth=1 origin "$REF" >/dev/null 2>&1 && git cat-file -e "FETCH_HEAD:market" 2>/dev/null; then
+            git archive FETCH_HEAD market | tar -x -C .workwork/plugin-market-previous
+            echo "已取到 $REF 分支既有 market/ 站点，本次只下载新增版本的 tarball。"
           else
-            echo "market 分支尚不存在，首次全量生成。"
+            echo "$REF 分支还没有 market/ 目录，本次全量生成。"
           fi
 
       - name: Generate plugin market site
         if: steps.plan.outputs.plan != '[]' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
+          BASE_URL: ${{ steps.market-target.outputs.base_url }}
         run: |
-          node scripts/plugin-market.mjs build \
-            --out .workwork/plugin-market-site \
-            --previous .workwork/plugin-market-previous
+          node scripts/plugin-market.mjs build --out .workwork/plugin-market-commit/market --previous .workwork/plugin-market-previous/market --base-url "$BASE_URL" --registry-url "$BASE_URL/npm/"
 
       - name: Check plugin market site
         if: steps.plan.outputs.plan != '[]' || github.event_name == 'workflow_dispatch'
-        run: node scripts/plugin-market.mjs check --out .workwork/plugin-market-site
+        env:
+          BASE_URL: ${{ steps.market-target.outputs.base_url }}
+        run: |
+          node scripts/plugin-market.mjs check --out .workwork/plugin-market-commit/market --base-url "$BASE_URL" --registry-url "$BASE_URL/npm/"
 
-      # 用 git 底层命令直接构造提交（不切工作区）：站点位于 gitignore 的 .workwork 下，
-      # 提交树只含站点内容。树哈希与上次相同时不提交不推送，workflow_dispatch 幂等。
-      - name: Publish market branch
+      # 用临时 worktree 检出目标分支当前头，把站点写入 market/ 后提交并推送：
+      # 只提交 market/ 子树的变化（树不变则跳过，幂等）；并发推送导致 non-fast-forward 时
+      # 重新 fetch 最新头、重新生成提交再推，至多重试 3 次。
+      - name: Publish market directory
         if: steps.plan.outputs.plan != '[]' || github.event_name == 'workflow_dispatch'
         env:
+          REF: ${{ steps.market-target.outputs.ref }}
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          SITE="$PWD/.workwork/plugin-market-site"
+          SITE="$PWD/.workwork/plugin-market-commit/market"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          PARENT=""
-          if git ls-remote --exit-code --heads origin market >/dev/null 2>&1; then
-            git fetch --depth=1 origin market
+          WORKTREE="$(mktemp -d)/checkout"
+          for attempt in 1 2 3; do
+            echo "== 尝试 $attempt/3：提交到 $REF 的 market/ =="
+            rm -rf "$WORKTREE"
+            git fetch --depth=1 origin "$REF"
             PARENT=$(git rev-parse FETCH_HEAD)
-          fi
-          WORK=$(mktemp -d)
-          export GIT_INDEX_FILE="$WORK/index"
-          git --work-tree="$SITE" add -A
-          TREE=$(git write-tree)
-          if [ -n "$PARENT" ] && [ "$TREE" = "$(git rev-parse "$PARENT^{tree}")" ]; then
-            echo "插件市场站点无变化，跳过推送。"
-            exit 0
-          fi
-          if [ -n "$PARENT" ]; then
-            COMMIT=$(git commit-tree "$TREE" -p "$PARENT" -m "市场: 重新生成插件索引与静态 registry（$TAG）")
-          else
-            COMMIT=$(git commit-tree "$TREE" -m "市场: 生成插件索引与静态 registry（$TAG）")
-          fi
-          git push origin "$COMMIT:refs/heads/market"
-          echo "已推送 market 分支：$COMMIT"
+            git worktree add --detach --force "$WORKTREE" "$PARENT" >/dev/null 2>&1
+            rm -rf "$WORKTREE/market"
+            cp -R "$SITE" "$WORKTREE/market"
+            git -C "$WORKTREE" add -A -- market
+            if git -C "$WORKTREE" diff-index --cached --quiet "$PARENT" -- market; then
+              echo "market/ 内容无变化，跳过提交。"
+              git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
+              exit 0
+            fi
+            TREE=$(git -C "$WORKTREE" write-tree)
+            COMMIT=$(git -C "$WORKTREE" commit-tree "$TREE" -p "$PARENT" -m "市场: 更新插件索引与静态 registry（$TAG）")
+            git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
+            if git push origin "$COMMIT:refs/heads/$REF"; then
+              echo "已推送 $REF 分支的 market/ 目录：$COMMIT"
+              exit 0
+            fi
+            echo "推送被拒绝（可能远端并发更新），重取 $REF 最新头后重试…"
+            sleep 3
+          done
+          echo "::error::market/ 目录推送重试 3 次仍失败"
+          exit 1

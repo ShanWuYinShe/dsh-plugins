@@ -107,8 +107,10 @@ export declare class MarketInputError extends Error {
 
 /** 默认 GitHub 仓库（owner/name）。 */
 export declare const DEFAULT_GITHUB_REPO: string;
-/** 站点分支名。 */
-export declare const MARKET_BRANCH: string;
+/** 站点目录名（发行分支根下，默认 alpha：market/）。 */
+export declare const MARKET_DIR: string;
+/** 默认站点引用名（alpha；收敛合入 main 后由 CI 传 main）。 */
+export declare const DEFAULT_MARKET_REF: string;
 /** 索引标题。 */
 export declare const MARKET_TITLE: LocalizedRecord;
 /** 索引说明。 */
@@ -124,12 +126,12 @@ export declare const PACKAGE_DISPLAY: Readonly<Record<string, PackageDisplay>>;
 /** market 分支根目录的说明文件内容（CI 生成，内容固定）。 */
 export declare const MARKET_README: string;
 
-/** market 分支的原始内容根 URL（无尾斜杠）。 */
-export declare function rawMarketBaseUrl(repo?: string): string;
+/** 站点原始内容根 URL（发行分支根下的 market/ 目录，无尾斜杠）。 */
+export declare function rawMarketBaseUrl(repo?: string, ref?: string): string;
 /** 索引源 URL。 */
-export declare function defaultIndexUrl(repo?: string): string;
+export declare function defaultIndexUrl(repo?: string, ref?: string): string;
 /** 静态 npm registry 根 URL（以斜杠结尾）。 */
-export declare function defaultRegistryUrl(repo?: string): string;
+export declare function defaultRegistryUrl(repo?: string, ref?: string): string;
 /** 规范化 registry URL（http(s) 绝对 URL + 结尾斜杠）。 */
 export declare function normalizeRegistryUrl(value: string): string;
 /** 发布 tag 名。 */

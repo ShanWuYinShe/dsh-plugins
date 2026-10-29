@@ -123,7 +123,7 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 
 ## 安装与使用
 
-本仓库通过 **GitHub Releases 分发**（Release 资产是标准 npm tarball），并额外提供 DSH 官方的「自定义插件索引」：索引与静态 npm registry 由 CI 从每个 Release 生成，发布在仓库 `market` 分支。下面两种方式任选，**推荐方式一**。
+本仓库通过 **GitHub Releases 分发**（Release 资产是标准 npm tarball），并额外提供 DSH 官方的「自定义插件索引」：索引与静态 npm registry 由 CI 从每个 Release 生成，发布在发行分支（当前 `alpha`，收敛后 `main`）根下的 `market/` 目录。下面两种方式任选，**推荐方式一**。
 
 ### 方式一：插件索引（推荐，发现页一键安装）
 
@@ -131,7 +131,7 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 2. **发现** → **添加索引源**，填入：
 
    ```text
-   https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
+   https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/alpha/market/index.json
    ```
 
 3. 在**发现**页浏览本仓四个插件并点**安装**（默认选与当前 DSH 兼容的最高版本）；进入插件页的**版本**列表可以安装任意历史版本。
@@ -140,13 +140,16 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
    - **重启 DSH 后**：用 CLI 把插件更新到指定版本（`<版本>` 见「发现」页或 Releases 页）：
 
      ```bash
-     dsh plugin --profile web add @chaoset/dsh-any-connect@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
+     dsh plugin --profile web add @chaoset/dsh-any-connect@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/alpha/market/npm/
      ```
 
      provider-usage / sandbox-extra-roots / session-archive 把包名替换成 `@chaoset/<包名>` 即可。
 5. 卸载：`dsh plugin --profile web remove @chaoset/<包名>`。
 
 索引只提供元数据与安装来源（npm 包名 + 静态 registry），安装/更新仍走 DSH 自带的 pnpm 安装与 bundle 对账流程；索引收录的每个版本都对应本仓的一个 GitHub Release 资产。用索引安装时，插件的宿主运行时依赖由宿主 profile runner 的 runtime resolution 提供（不写入 profile 的 `node_modules`）；需要把依赖装进 profile 时请用下面的 tarball 方式。
+
+> 当前索引随 `alpha` 适配线发布；收敛合入 `main` 后索引源 URL 的 `alpha` 段会换成 `main`，
+> 届时会公告提醒已添加索引的用户一次性更新 URL。
 
 索引**同时收录稳定线与预览线**，DSH 会按你的宿主版本自动区分：0.2.1 稳定版宿主默认安装/推荐各插件最高的稳定版，0.2.2 预览线宿主安装预览版；版本列表里跨线的版本会标记「不兼容」且不提供安装按钮，不会装错线。
 

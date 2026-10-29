@@ -417,6 +417,11 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
    > origin/main`）再 ff 合并——`reset --soft` 的目标必须始终是当下的
    > `origin/main`。
 
+   > **索引源 URL 随收敛换段**：`market/` 目录会随收敛进 `main`（main 发版时 publish
+   > workflow 更新 `main` 的 `market/`）。删除 alpha 分支后旧索引 URL
+   > （`.../alpha/market/index.json`）失效，发布前须公告提醒已添加索引的用户把 URL 的
+   > `alpha` 段换成 `main`（一次性操作）。
+
 5. **删除 alpha 分支（远程与本地都删），进入待命期**：发布完成后该 alpha 分支即完成使命
    （它的全部内容已进 main），**远程和本地都必须彻底删除**，不留残留：
 
@@ -495,18 +500,20 @@ DSH 0.2.2 的「自定义插件索引」（实验性 bundle，`@deepseek-ai/dsh-
 让用户在插件页的**发现**标签里浏览索引并一键安装/查看版本。索引的安装源只有 npm registry
 与 git 仓库两种；本仓的发布产物是 GitHub Release tarball，且 npmjs 发布已放弃（commit
 926cbb8：Trusted Publishing 拒绝 + passkey 2FA），因此本仓自建一个**静态 npm 协议 registry**，
-与索引一起发布在仓库 `market` 分支，通过 raw.githubusercontent 提供。
+与索引一起发布在发行分支根下的 `market/` 目录（当前 `alpha`，收敛后 `main`），通过 raw.githubusercontent 以分支为 ref 提供。
 
-### 站点布局（`market` 分支，CI 生成，禁止手工编辑）
+### 站点布局（发行分支根的 `market/` 目录，CI 生成，禁止手工编辑）
 
 ```text
-index.json                 索引源 URL：.../raw.githubusercontent.com/<repo>/market/index.json
-README.md                  生成器写入的「勿手工编辑」说明
-icons/<slug>.svg           索引里相对引用的插件图标（raw 返回 image/svg+xml）
-npm/@chaoset/<pkg>         静态 registry 的 packument；pnpm 以 %2F 编码请求 scoped 名
+market/index.json          索引源 URL：.../raw.githubusercontent.com/<repo>/<ref>/market/index.json
+market/README.md           生成器写入的「勿手工编辑」说明
+market/icons/<slug>.svg    索引里相对引用的插件图标（raw 返回 image/svg+xml）
+market/npm/@chaoset/<pkg>  静态 registry 的 packument；pnpm 以 %2F 编码请求 scoped 名
 ```
 
-索引里每个版本的 `source` 是 `{ "type": "npm", "registry": ".../market/npm/" }`；
+`<ref>` 当前是 `alpha`（站点随适配线发布），收敛合入 `main` 后由 CI 自然切到 `main`。
+
+索引里每个版本的 `source` 是 `{ "type": "npm", "registry": ".../<ref>/market/npm/" }`；
 packument 的 `dist.tarball` 直接指向对应 GitHub Release 资产（标准 npm tarball），
 `dist.integrity`（sha512 SRI）与 `dist.shasum`（sha1）由生成器下载资产后计算。
 用户安装/更新仍走 DSH 自带的 pnpm 与 bundle 对账，不经过 npmjs。
@@ -572,15 +579,20 @@ node scripts/plugin-market.mjs build --out /tmp/market-site --registry-url http:
 
 `publish.yml` 在「Pack and publish」之后自动：
 
-1. 用 `actions/cache` 缓存 `.workwork/plugin-market-cache`；
-2. `git fetch --depth=1 origin market` 并用 `git archive` 取出既有站点 → `build --previous`；
-3. `check`；
-4. 用 `git` 底层命令（临时 index + `write-tree`/`commit-tree`）构造只含站点内容的提交并
-   `git push origin <commit>:refs/heads/market`——不切工作区、不动 main/alpha；站点无变化时
-   跳过（幂等）。commit message：`市场: 重新生成插件索引与静态 registry（<tag>）`。
+1. 解析目标发行分支：tag 触发时 `github.ref_name` 是 tag 名而非分支名，因此找包含该
+   commit 的分支（`alpha` 优先，其次 `main`），并据此派生 base/registry URL；
+2. 用 `actions/cache` 缓存 `.workwork/plugin-market-cache`；
+3. `git fetch --depth=1 origin <ref>` 并 `git archive FETCH_HEAD market` 取出既有 `market/`
+   站点 → `build --previous`；
+4. `check`（显式传 `--base-url`/`--registry-url`，与索引里声明的 URL 一致）；
+5. 用临时 worktree 检出 `origin/<ref>` 当前头 → 把站点写入 `market/` → `git add -A -- market`
+   → `write-tree`/`commit-tree` → `git push origin <commit>:refs/heads/<ref>`。只提交
+   `market/` 子树的变化（树不变则跳过，幂等）；并发推送导致 non-fast-forward 时重取最新头、
+   重新生成提交再推，至多重试 3 次。commit message：`市场: 更新插件索引与静态 registry（<tag>）`。
 
-`test.yml` 与 `dsh-follow.yml` 只监听 `main`/`alpha`，`publish.yml` 只监听 tag，因此推送
-`market` 分支不会触发任何其它流水。**回填/修复**：手动触发 publish workflow
+`publish.yml` 只监听 tag；`test.yml` / `dsh-follow.yml` 的 push 触发都带路径过滤
+（`packages/**`、`scripts/**`、`test/**`、工作流文件等），而纯 `market/` 提交不触碰这些路径，
+因此站点更新不会触发测试或发布流水。**回填/修复**：手动触发 publish workflow
 （`workflow_dispatch`）填一个已发布的 tag——发布步骤因已归档跳过，市场步骤照常重新生成。
 
 ### 更新链路的真实边界（DSH 0.2.2 行为）

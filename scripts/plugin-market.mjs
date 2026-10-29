@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // scripts/plugin-market.mjs — 插件市场索引 + 静态 npm registry 生成器（CLI）。
 //
-// 站点发布在仓库 market 分支（CI 生成，禁止手工编辑），通过 raw.githubusercontent 提供：
+// 站点发布在发行分支（alpha，收敛后 main）根下的 market/ 目录（CI 生成，禁止手工编辑），
+// 通过 raw.githubusercontent 提供：
 //   index.json    用户添加的「索引源」URL
 //   icons/*.svg   索引里相对引用的图标
 //   npm/<name>    静态 registry 的 packument（pnpm 以 %2F 编码请求 scoped 名）
@@ -57,10 +58,10 @@ const USAGE = [
   '  --out <dir>              站点目录（build/check 必填）',
   '  --cache <dir>            tarball 缓存目录（默认 .workwork/plugin-market-cache）',
   '  --repo <owner/name>      GitHub 仓库（默认 $GITHUB_REPOSITORY 或 ' + DEFAULT_GITHUB_REPO + '）',
-  '  --base-url <url>         站点根 URL（默认 raw market 分支）',
+  '  --base-url <url>         站点根 URL（默认 raw 的 <ref>/market，ref 默认 alpha）',
   '  --registry-url <url>     静态 registry URL（默认 <base-url>/npm/）',
   '  --concurrency <n>        下载并发（默认 6）',
-  '  --previous <dir>         复用既有站点（market 分支内容）里历史版本的摘要/元数据，',
+  '  --previous <dir>         复用既有站点（market/ 目录内容）里历史版本的摘要/元数据，',
   '                           只下载新增版本的 tarball（CI 增量生成用）',
 ].join('\n')
 
@@ -246,7 +247,7 @@ async function mapLimit(items, limit, mapper) {
 }
 
 /**
- * 读取既有站点（market 分支内容），还原历史版本的摘要与元数据。
+ * 读取既有站点（发行分支根的 market/ 目录内容），还原历史版本的摘要与元数据。
  * 目录不存在或没有 index.json 时返回空 Map（首次生成/回填场景），只告警不失败。
  * @param previousDir - 既有站点目录。
  * @param expectedNames - dir → 包名。

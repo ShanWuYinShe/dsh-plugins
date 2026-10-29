@@ -5,7 +5,7 @@
 // package.json，输出是确定性的站点文件内容映射（相对路径 → 文本）。规则来源：
 // .workwork/market/brief.md 与官方索引格式 @deepseek-ai/dsh-plugin-market-index（format 1）。
 //
-// 站点布局（market 分支，由 CI 生成）：
+// 站点布局（发行分支根的 market/ 目录，由 CI 生成；默认 alpha，收敛后 main）：
 //   index.json                     格式 1 索引，用户把它当「索引源」添加
 //   icons/<slug>.svg               索引里相对引用的图标
 //   npm/<name>                     静态 npm registry 的 packument（scoped 名为嵌套目录）
@@ -17,8 +17,11 @@ import { compareVersions, isStable, parseVersion, VERSION_RE } from './version-c
 /** 默认 GitHub 仓库（owner/name）；CI 里由 GITHUB_REPOSITORY 覆盖。 */
 export const DEFAULT_GITHUB_REPO = 'ShanWuYinShe/dsh-plugins'
 
-/** 站点分支名：CI 每次发布后覆盖生成，禁止手工编辑。 */
-export const MARKET_BRANCH = 'market'
+/** 站点目录名：住在发行分支（alpha/main）根下，由 CI 生成，禁止手工编辑。 */
+export const MARKET_DIR = 'market'
+
+/** 默认引用名：站点随 alpha 适配线发布；收敛合入 main 后由 CI 按实际分支覆盖。 */
+export const DEFAULT_MARKET_REF = 'alpha'
 
 /** 索引整体的标题与说明（LocalizedText，必须含 en）。 */
 export const MARKET_TITLE = Object.freeze({
@@ -56,18 +59,20 @@ export const MARKET_SORT_KEYS = Object.freeze({
   order: { title: { en: 'Order', zh: '排序' }, order: 'asc' },
 })
 
-/** market 分支根目录的说明文件（CI 生成，因此内容固定）。 */
+/** 发行分支根 market/ 目录的说明文件（CI 生成，因此内容固定）。 */
 export const MARKET_README = [
   '# dsh-plugins 插件索引与静态 npm registry（自动生成）',
   '',
-  '本分支由 CI 从 GitHub Releases 生成，**请勿手工编辑**；生成器、站点布局与校验方式见主仓',
+  '本目录由 CI 从 GitHub Releases 生成，**请勿手工编辑**；生成器、站点布局与校验方式见主仓',
   '`RELEASING.md` 的「插件索引与静态 registry」一节。',
+  '',
+  '当前随 alpha 适配线发布；收敛合入 main 后，索引源 URL 会随之换成 main 路径。',
   '',
   '- `index.json`：DSH「自定义插件索引」要添加的索引源',
   '- `icons/`：索引里相对引用的插件图标',
   '- `npm/`：静态 npm registry 的 packument（索引里每个版本的 `source.registry` 指向它）',
   '',
-  '重新生成：推送任一 `<包目录>-v<版本>` tag（publish workflow 会在发布后自动生成并推送本分支），',
+  '重新生成：推送任一 `<包目录>-v<版本>` tag（publish workflow 会在发布后自动生成并更新本目录），',
   '或在 Actions 里手动触发 publish workflow（workflow_dispatch，用于回填/修复）。',
   '',
 ].join('\n');
@@ -164,12 +169,18 @@ export class MarketInputError extends Error {
 }
 
 /**
- * market 分支的原始内容根 URL。
+ * 站点原始内容根 URL（发行分支根下的 market/ 目录）。
+ * 默认 ref=alpha：站点随 alpha 适配线发布；收敛合入 main 后 CI 会用 main 覆盖。
  * @param repo - owner/name。
+ * @param ref - 发行分支/引用名（CI 里由 tag 所属分支推导）。
  * @returns raw.githubusercontent 上的站点根（无尾斜杠）。
+ * @throws {MarketInputError} ref 为空或含空白/查询串等非法字符。
  */
-export function rawMarketBaseUrl(repo = DEFAULT_GITHUB_REPO) {
-  return 'https://raw.githubusercontent.com/' + repo + '/' + MARKET_BRANCH
+export function rawMarketBaseUrl(repo = DEFAULT_GITHUB_REPO, ref = DEFAULT_MARKET_REF) {
+  if (typeof ref !== 'string' || ref.trim() === '' || /[\s?#]/.test(ref)) {
+    throw new MarketInputError('站点 ref 不合法: ' + JSON.stringify(ref))
+  }
+  return 'https://raw.githubusercontent.com/' + repo + '/' + ref + '/' + MARKET_DIR
 }
 
 /**
@@ -177,8 +188,8 @@ export function rawMarketBaseUrl(repo = DEFAULT_GITHUB_REPO) {
  * @param repo - owner/name。
  * @returns 索引文件的绝对 URL。
  */
-export function defaultIndexUrl(repo = DEFAULT_GITHUB_REPO) {
-  return rawMarketBaseUrl(repo) + '/index.json'
+export function defaultIndexUrl(repo = DEFAULT_GITHUB_REPO, ref = DEFAULT_MARKET_REF) {
+  return rawMarketBaseUrl(repo, ref) + '/index.json'
 }
 
 /**
@@ -186,8 +197,8 @@ export function defaultIndexUrl(repo = DEFAULT_GITHUB_REPO) {
  * @param repo - owner/name。
  * @returns 以斜杠结尾的 registry URL：pnpm 会把编码后的包名直接拼在后面。
  */
-export function defaultRegistryUrl(repo = DEFAULT_GITHUB_REPO) {
-  return rawMarketBaseUrl(repo) + '/npm/'
+export function defaultRegistryUrl(repo = DEFAULT_GITHUB_REPO, ref = DEFAULT_MARKET_REF) {
+  return rawMarketBaseUrl(repo, ref) + '/npm/'
 }
 
 /**
@@ -801,7 +812,7 @@ function renderIcon(display) {
   return lines.join('\n')
 }
 /**
- * 离线校验一个已生成的站点（CI 在推送 market 分支前跑；本机用 node scripts/plugin-market.mjs check）。
+ * 离线校验一个已生成的站点（CI 在提交 market/ 目录前跑；本机用 node scripts/plugin-market.mjs check）。
  *
  * 校验分四层，任何一条失败都进 errors（不短路，一次报全）：
  *   1. 文件集合恰好是 index.json + 每个插件一个图标 + 每个插件一个 packument；
@@ -857,7 +868,7 @@ export function validateSite(input) {
     validateCanonicalJson(files, path, errors)
   }
   const readme = files.get('README.md')
-  if (readme !== undefined && readme !== MARKET_README) errors.push('README.md 内容与生成器内置说明不一致（market 分支禁止手工编辑）')
+  if (readme !== undefined && readme !== MARKET_README) errors.push('README.md 内容与生成器内置说明不一致（market/ 目录禁止手工编辑）')
   const seenNames = new Set()
   const seenTarballs = new Set()
   const nameToDir = new Map()
