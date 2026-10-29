@@ -4,10 +4,10 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 
 | 插件包 | 核心功能 | 当前版本 | 适配 DSH |
 |---|---|---|---|
-| [`@chaoset/dsh-any-connect`](packages/dsh-any-connect/) | **多渠道桌面端与免密模型接入**：WorkBuddy（国内/国际版）、ZCode（Coding/Start Plan 双通道）、OpenCode Free 官方免密免费模型通道；支持思考强度自测与补全、积分倍率显示、图片多模态、自定义模型隐藏与 CLI 诊断 | `0.4.28-alpha.5` | `0.2.2-alpha.2` |
-| [`@chaoset/provider-usage`](packages/provider-usage/) | **对话底栏模型额度指示器**：在输入框状态栏（composer dock）实时显示当前会话 provider 剩余额度与重置时间，点击展开可视化进度条与详细计费包；内置 8+ 种 Provider 查询器并提供开放注册 Seam | `0.2.1-alpha.4` | `0.2.2-alpha.2` |
-| [`@chaoset/sandbox-extra-roots`](packages/sandbox-extra-roots/) | **沙盒额外允许写入目录**：为 `workspace-write` 沙盒安全追加工具缓存目录（npm/pip/cargo/go 等）；跨平台 Seatbelt/bwrap/Landlock 原生沙盒引擎注入；严格防范危险根与 TOCTOU 符号链接逃逸 | `0.4.28-alpha.3` | `0.2.2-alpha.2` |
-| [`@chaoset/session-archive`](packages/session-archive/) | **归档会话完整生命周期管理**：Web 侧边栏专属归档面板与实时徽标；抽屉式**只读浏览**历史会话事件流；批量安全恢复到会话树；两段式彻底物理删除与落盘防竞态保护；纯前端毫秒级检索与排序 | `0.3.32-alpha.3` | `0.2.2-alpha.2` |
+| [`@chaoset/dsh-any-connect`](packages/dsh-any-connect/) | **多渠道桌面端与免密模型接入**：WorkBuddy（国内/国际版）、ZCode（Coding/Start Plan 双通道）、OpenCode Free 官方免密免费模型通道；支持思考强度自测与补全、积分倍率显示、图片多模态、自定义模型隐藏与 CLI 诊断 | `0.4.28-alpha.6` | `0.2.2-alpha.2` |
+| [`@chaoset/provider-usage`](packages/provider-usage/) | **对话底栏模型额度指示器**：在输入框状态栏（composer dock）实时显示当前会话 provider 剩余额度与重置时间，点击展开可视化进度条与详细计费包；内置 8+ 种 Provider 查询器并提供开放注册 Seam | `0.2.1-alpha.5` | `0.2.2-alpha.2` |
+| [`@chaoset/sandbox-extra-roots`](packages/sandbox-extra-roots/) | **沙盒额外允许写入目录**：为 `workspace-write` 沙盒安全追加工具缓存目录（npm/pip/cargo/go 等）；跨平台 Seatbelt/bwrap/Landlock 原生沙盒引擎注入；严格防范危险根与 TOCTOU 符号链接逃逸 | `0.4.28-alpha.4` | `0.2.2-alpha.2` |
+| [`@chaoset/session-archive`](packages/session-archive/) | **归档会话完整生命周期管理**：Web 侧边栏专属归档面板与实时徽标；抽屉式**只读浏览**历史会话事件流；批量安全恢复到会话树；两段式彻底物理删除与落盘防竞态保护；纯前端毫秒级检索与排序 | `0.3.32-alpha.4` | `0.2.2-alpha.2` |
 
 ---
 
