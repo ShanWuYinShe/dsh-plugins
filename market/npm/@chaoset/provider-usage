@@ -14,7 +14,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=24.9.0",
-        "dsh": "^0.2.2-alpha.2"
+        "dsh": "0.2.2-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -37,6 +37,10 @@
             "@deepseek-ai/dsh-client-ui-model-selection"
           ]
         }
+      },
+      "dshMarket": {
+        "source": "engines-range",
+        "declaredEnginesDsh": "^0.2.2-alpha.2"
       },
       "dist": {
         "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v0.2.1-alpha.5/chaoset-provider-usage-0.2.1-alpha.5.tgz",
@@ -51,7 +55,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=24.9.0",
-        "dsh": "^0.2.2-alpha.2"
+        "dsh": "0.2.2-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -75,6 +79,10 @@
           ]
         }
       },
+      "dshMarket": {
+        "source": "engines-range",
+        "declaredEnginesDsh": "^0.2.2-alpha.2"
+      },
       "dist": {
         "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v0.2.1-alpha.4/chaoset-provider-usage-0.2.1-alpha.4.tgz",
         "integrity": "sha512-Ehh7FKIkMGxmuQrIewDV9TzQvhFz51pXLuZh/XnopNbk6ItPYn8t2RdbPqVFU+RROtnaXo7wG8rcie2Xs8dzqg==",
@@ -88,7 +96,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.2-alpha.2 <0.2.3-0"
+        "dsh": "0.2.2-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -125,7 +133,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.2-alpha.2 <0.2.3-0"
+        "dsh": "0.2.2-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -159,7 +167,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.2-alpha.2 <0.2.3-0"
+        "dsh": "0.2.2-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -193,7 +201,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.3 <0.2.2-0"
+        "dsh": "0.2.1-rc.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -227,7 +235,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.3 <0.2.2-0"
+        "dsh": "0.2.1-rc.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -261,7 +269,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.3 <0.2.2-0"
+        "dsh": "0.2.1-rc.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -295,7 +303,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.2 <0.2.2-0"
+        "dsh": "0.2.1-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -329,7 +337,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.2 <0.2.2-0"
+        "dsh": "0.2.1-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -363,7 +371,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.2 <0.2.2-0"
+        "dsh": "0.2.1-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -397,7 +405,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.2 <0.2.2-0"
+        "dsh": "0.2.1-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -431,7 +439,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.5 <0.2.2-0"
+        "dsh": "0.2.1-alpha.5"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -465,7 +473,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.5 <0.2.2-0"
+        "dsh": "0.2.1-alpha.5"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -499,7 +507,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.4 <0.2.2-0"
+        "dsh": "0.2.1-alpha.4"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -533,7 +541,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.4 <0.2.2-0"
+        "dsh": "0.2.1-alpha.4"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -567,7 +575,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.3 <0.2.2-0"
+        "dsh": "0.2.1-alpha.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -601,7 +609,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.3 <0.2.2-0"
+        "dsh": "0.2.1-alpha.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -635,7 +643,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.2 <0.2.2-0"
+        "dsh": "0.2.1-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -669,7 +677,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.2 <0.2.2-0"
+        "dsh": "0.2.1-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -703,7 +711,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.2 <0.2.2-0"
+        "dsh": "0.2.1-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -737,7 +745,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.1 <0.2.2-0"
+        "dsh": "0.2.1-alpha.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -771,7 +779,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.1 <0.2.2-0"
+        "dsh": "0.2.1-alpha.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -805,7 +813,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.0-rc.2 <0.2.1-0"
+        "dsh": "0.2.0-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -839,7 +847,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.0-rc.1 <0.2.1-0"
+        "dsh": "0.2.0-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -873,7 +881,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.2 <0.1.8-0"
+        "dsh": "0.1.7-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -907,7 +915,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.2 <0.1.8-0"
+        "dsh": "0.1.7-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -941,7 +949,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.1 <0.1.8-0"
+        "dsh": "0.1.7-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -975,7 +983,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.1 <0.1.8-0"
+        "dsh": "0.1.7-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -1009,7 +1017,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.1 <0.1.8-0"
+        "dsh": "0.1.7-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -1043,7 +1051,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-alpha.2 <0.1.8-0"
+        "dsh": "0.1.7-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -1077,7 +1085,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-alpha.2 <0.1.8-0"
+        "dsh": "0.1.7-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -1111,7 +1119,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.6-alpha.2 <0.1.7-0"
+        "dsh": "0.1.6-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {
@@ -1145,7 +1153,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.6-alpha.2 <0.1.7-0"
+        "dsh": "0.1.6-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
       "repository": {

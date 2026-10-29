@@ -13,7 +13,7 @@
       "description": "DSH host plugin: extra writable roots for the workspace-write sandbox (Seatbelt/bwrap/Landlock profiles and the fs fence)",
       "license": "MIT",
       "engines": {
-        "dsh": "^0.2.2-alpha.2",
+        "dsh": "0.2.2-alpha.2",
         "node": ">=24.9.0"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
@@ -35,6 +35,10 @@
             "@deepseek-ai/dsh-api-remotes"
           ]
         }
+      },
+      "dshMarket": {
+        "source": "engines-range",
+        "declaredEnginesDsh": "^0.2.2-alpha.2"
       },
       "dist": {
         "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/sandbox-extra-roots-v0.4.28-alpha.4/chaoset-sandbox-extra-roots-0.4.28-alpha.4.tgz",
@@ -48,7 +52,7 @@
       "description": "DSH host plugin: extra writable roots for the workspace-write sandbox (Seatbelt/bwrap/Landlock profiles and the fs fence)",
       "license": "MIT",
       "engines": {
-        "dsh": "^0.2.2-alpha.2",
+        "dsh": "0.2.2-alpha.2",
         "node": ">=24.9.0"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
@@ -70,6 +74,10 @@
             "@deepseek-ai/dsh-api-remotes"
           ]
         }
+      },
+      "dshMarket": {
+        "source": "engines-range",
+        "declaredEnginesDsh": "^0.2.2-alpha.2"
       },
       "dist": {
         "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/sandbox-extra-roots-v0.4.28-alpha.3/chaoset-sandbox-extra-roots-0.4.28-alpha.3.tgz",
@@ -83,7 +91,7 @@
       "description": "DSH host plugin: extra writable roots for the workspace-write sandbox (Seatbelt/bwrap/Landlock profiles and the fs fence)",
       "license": "MIT",
       "engines": {
-        "dsh": "^0.2.2-alpha.2",
+        "dsh": "0.2.2-alpha.2",
         "node": ">=24.9.0"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
@@ -105,6 +113,10 @@
             "@deepseek-ai/dsh-api-remotes"
           ]
         }
+      },
+      "dshMarket": {
+        "source": "engines-range",
+        "declaredEnginesDsh": "^0.2.2-alpha.2"
       },
       "dist": {
         "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/sandbox-extra-roots-v0.4.28-alpha.2/chaoset-sandbox-extra-roots-0.4.28-alpha.2.tgz",
@@ -119,7 +131,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.2-alpha.2 <0.2.3-0"
+        "dsh": "0.2.2-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -154,7 +166,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.2-alpha.2 <0.2.3-0"
+        "dsh": "0.2.2-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -189,7 +201,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.3 <0.2.2-0"
+        "dsh": "0.2.1-rc.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -224,7 +236,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.3 <0.2.2-0"
+        "dsh": "0.2.1-rc.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -259,7 +271,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.3 <0.2.2-0"
+        "dsh": "0.2.1-rc.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -294,7 +306,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.2 <0.2.2-0"
+        "dsh": "0.2.1-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -329,7 +341,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.2 <0.2.2-0"
+        "dsh": "0.2.1-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -364,7 +376,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.2 <0.2.2-0"
+        "dsh": "0.2.1-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -399,7 +411,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.5 <0.2.2-0"
+        "dsh": "0.2.1-alpha.5"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -434,7 +446,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.4 <0.2.2-0"
+        "dsh": "0.2.1-alpha.4"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -469,7 +481,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.4 <0.2.2-0"
+        "dsh": "0.2.1-alpha.4"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -504,7 +516,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.3 <0.2.2-0"
+        "dsh": "0.2.1-alpha.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -539,7 +551,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.3 <0.2.2-0"
+        "dsh": "0.2.1-alpha.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -574,7 +586,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.2 <0.2.2-0"
+        "dsh": "0.2.1-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -609,7 +621,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.2 <0.2.2-0"
+        "dsh": "0.2.1-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -644,7 +656,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.1 <0.2.2-0"
+        "dsh": "0.2.1-alpha.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -679,7 +691,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.1 <0.2.2-0"
+        "dsh": "0.2.1-alpha.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -714,7 +726,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.0-rc.2 <0.2.1-0"
+        "dsh": "0.2.0-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -749,7 +761,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.0-rc.1 <0.2.1-0"
+        "dsh": "0.2.0-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -784,7 +796,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.2 <0.1.8-0"
+        "dsh": "0.1.7-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -819,7 +831,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.2 <0.1.8-0"
+        "dsh": "0.1.7-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -854,7 +866,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.2 <0.1.8-0"
+        "dsh": "0.1.7-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -889,7 +901,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.1 <0.1.8-0"
+        "dsh": "0.1.7-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -924,7 +936,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.1 <0.1.8-0"
+        "dsh": "0.1.7-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -959,7 +971,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.1 <0.1.8-0"
+        "dsh": "0.1.7-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -994,7 +1006,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-alpha.2 <0.1.8-0"
+        "dsh": "0.1.7-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -1029,7 +1041,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-alpha.2 <0.1.8-0"
+        "dsh": "0.1.7-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {
@@ -1064,7 +1076,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-alpha.2 <0.1.8-0"
+        "dsh": "0.1.7-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
       "repository": {

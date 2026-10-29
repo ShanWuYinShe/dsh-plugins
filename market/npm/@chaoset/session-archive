@@ -13,7 +13,7 @@
       "description": "DSH plugin: browse archived sessions, inspect their content, batch-restore or permanently delete them with multi-select",
       "license": "MIT",
       "engines": {
-        "dsh": "^0.2.2-alpha.2",
+        "dsh": "0.2.2-alpha.2",
         "node": ">=24.9.0"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
@@ -37,6 +37,10 @@
             "@deepseek-ai/dsh-api-session-controller"
           ]
         }
+      },
+      "dshMarket": {
+        "source": "engines-range",
+        "declaredEnginesDsh": "^0.2.2-alpha.2"
       },
       "dist": {
         "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v0.3.32-alpha.4/chaoset-session-archive-0.3.32-alpha.4.tgz",
@@ -50,7 +54,7 @@
       "description": "DSH plugin: browse archived sessions, inspect their content, batch-restore or permanently delete them with multi-select",
       "license": "MIT",
       "engines": {
-        "dsh": "^0.2.2-alpha.2",
+        "dsh": "0.2.2-alpha.2",
         "node": ">=24.9.0"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
@@ -74,6 +78,10 @@
             "@deepseek-ai/dsh-api-session-controller"
           ]
         }
+      },
+      "dshMarket": {
+        "source": "engines-range",
+        "declaredEnginesDsh": "^0.2.2-alpha.2"
       },
       "dist": {
         "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v0.3.32-alpha.3/chaoset-session-archive-0.3.32-alpha.3.tgz",
@@ -87,7 +95,7 @@
       "description": "DSH plugin: browse archived sessions, inspect their content, batch-restore or permanently delete them with multi-select",
       "license": "MIT",
       "engines": {
-        "dsh": "^0.2.2-alpha.2",
+        "dsh": "0.2.2-alpha.2",
         "node": ">=24.9.0"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
@@ -111,6 +119,10 @@
             "@deepseek-ai/dsh-api-session-controller"
           ]
         }
+      },
+      "dshMarket": {
+        "source": "engines-range",
+        "declaredEnginesDsh": "^0.2.2-alpha.2"
       },
       "dist": {
         "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v0.3.32-alpha.2/chaoset-session-archive-0.3.32-alpha.2.tgz",
@@ -125,7 +137,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.2-alpha.2 <0.2.3-0"
+        "dsh": "0.2.2-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -160,7 +172,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.2-alpha.2 <0.2.3-0"
+        "dsh": "0.2.2-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -195,7 +207,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.3 <0.2.2-0"
+        "dsh": "0.2.1-rc.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -230,7 +242,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.3 <0.2.2-0"
+        "dsh": "0.2.1-rc.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -265,7 +277,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.3 <0.2.2-0"
+        "dsh": "0.2.1-rc.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -300,7 +312,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.2 <0.2.2-0"
+        "dsh": "0.2.1-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -335,7 +347,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.2 <0.2.2-0"
+        "dsh": "0.2.1-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -370,7 +382,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-rc.2 <0.2.2-0"
+        "dsh": "0.2.1-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -405,7 +417,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.5 <0.2.2-0"
+        "dsh": "0.2.1-alpha.5"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -440,7 +452,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.5 <0.2.2-0"
+        "dsh": "0.2.1-alpha.5"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -475,7 +487,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.4 <0.2.2-0"
+        "dsh": "0.2.1-alpha.4"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -510,7 +522,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.4 <0.2.2-0"
+        "dsh": "0.2.1-alpha.4"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -545,7 +557,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.3 <0.2.2-0"
+        "dsh": "0.2.1-alpha.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -580,7 +592,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.3 <0.2.2-0"
+        "dsh": "0.2.1-alpha.3"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -615,7 +627,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.2 <0.2.2-0"
+        "dsh": "0.2.1-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -650,7 +662,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.2 <0.2.2-0"
+        "dsh": "0.2.1-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -685,7 +697,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.1 <0.2.2-0"
+        "dsh": "0.2.1-alpha.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -720,7 +732,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.1-alpha.1 <0.2.2-0"
+        "dsh": "0.2.1-alpha.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -755,7 +767,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.0-rc.2 <0.2.1-0"
+        "dsh": "0.2.0-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -790,7 +802,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.2.0-rc.1 <0.2.1-0"
+        "dsh": "0.2.0-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -825,7 +837,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.2 <0.1.8-0"
+        "dsh": "0.1.7-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -860,7 +872,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.2 <0.1.8-0"
+        "dsh": "0.1.7-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -895,7 +907,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.2 <0.1.8-0"
+        "dsh": "0.1.7-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -930,7 +942,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.2 <0.1.8-0"
+        "dsh": "0.1.7-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -965,7 +977,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.2 <0.1.8-0"
+        "dsh": "0.1.7-rc.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -1000,7 +1012,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.1 <0.1.8-0"
+        "dsh": "0.1.7-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -1035,7 +1047,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.1 <0.1.8-0"
+        "dsh": "0.1.7-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -1070,7 +1082,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.1 <0.1.8-0"
+        "dsh": "0.1.7-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -1105,7 +1117,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-rc.1 <0.1.8-0"
+        "dsh": "0.1.7-rc.1"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -1140,7 +1152,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-alpha.2 <0.1.8-0"
+        "dsh": "0.1.7-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -1175,7 +1187,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.7-alpha.2 <0.1.8-0"
+        "dsh": "0.1.7-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
@@ -1210,7 +1222,7 @@
       "license": "MIT",
       "engines": {
         "node": ">=22.19.0",
-        "dsh": ">=0.1.6-alpha.2 <0.1.7-0"
+        "dsh": "0.1.6-alpha.2"
       },
       "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
       "repository": {
