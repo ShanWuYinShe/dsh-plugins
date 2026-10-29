@@ -72,6 +72,16 @@ export type WorkBuddyProbeAction =
   }
   | {
     /**
+     * `restore-model` removes ONE model ID from the excluded list.
+     *
+     * 与 `restore-models` 的差别是误伤范围：全量恢复会把用户刻意隐藏的其它
+     * 模型一并放回，想保持原样就得逐个重新隐藏。单条恢复是主路径。
+     */
+    action: 'restore-model'
+    modelId: string
+  }
+  | {
+    /**
      * `restore-models` clears the excluded models list, restoring all defaults.
      */
     action: 'restore-models'
@@ -232,6 +242,33 @@ export interface WorkBuddyWebCatalog {
   empty?: true
 }
 
+/**
+ * 上游限流观测的展示面（provider 卡片用）。
+ *
+ * 字段选择的唯一依据是「用户下一步要做什么」：
+ * - 有 `resetAt` → 能说出「到几点恢复」，用户等着就行；
+ * - 没有 `resetAt` → 只能说「何时被限、撞了几次」，界面必须如实写「恢复时间未知」，
+ *   绝不能按固定窗口编一个倒计时——GLM Coding Plan 的限流是按订阅档位的并发
+ *   动态调整的（官方 usage-policy），根本不存在可推算的固定窗口。
+ */
+export interface WorkBuddyWebRateLimit {
+  /** 首次观测到限流的时刻，epoch ms。 */
+  blockedAt: number
+  /** 最近一次仍被限的时刻，epoch ms。 */
+  lastSeenAt: number
+  /**
+   * 上游明示的恢复时刻，epoch ms。**只有**响应头给了才存在
+   * （`Retry-After` / `X-RateLimit-Reset`）；缺失即「上游没说」。
+   */
+  resetAt?: number
+  /** 上游状态码（429；OpenCode FreeTierError 为 403）。 */
+  status: number
+  /** 触发限流的模型 id，若上游回执里带得到。 */
+  model?: string
+  /** 同一段限流期内撞到的次数。 */
+  hits: number
+}
+
 /** The JSON document the plugin card renders. */
 export type WorkBuddyWebStatus =
   | {
@@ -270,6 +307,21 @@ export type WorkBuddyWebStatus =
     startPlanClaim?: WorkBuddyWebStartPlanClaim
     /** 处于排除状态（已在设置页删除）的模型总数。 */
     excludedCount?: number
+    /**
+     * 已隐藏模型的完整行，供卡片列出并**逐个恢复**。
+     *
+     * 只给 `excludedCount` 时，用户唯一能做的动作是「一键全部恢复」——而多数
+     * 情况下他只想放回其中一两个，全部恢复后还得把其余再隐藏一遍。这里给出
+     * 完整行（与 {@link WorkBuddyWebModelRow} 同形），卡片就能逐条渲染恢复按钮。
+     *
+     * 缺席表示「没有隐藏任何模型」；空数组不出现（省一次判断）。
+     */
+    excludedModels?: readonly WorkBuddyWebModelRow[]
+    /**
+     * 当前仍在生效的上游限流。缺席表示「现在没被限」——不是「不查」：
+     * 台账是进程内的实时观测，没有观测就是没发生。
+     */
+    rateLimit?: WorkBuddyWebRateLimit
   }
   | { status: 'error'; message: string }
 

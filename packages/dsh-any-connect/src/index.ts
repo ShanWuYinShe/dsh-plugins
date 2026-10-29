@@ -42,6 +42,7 @@
  *   HTTP 管道（读体/写错误体）、pi-ai 适配器、默认档回落（无非思考态模型补 high/最高档）、
  *   版本 UA、deadline 抽象
  * 探针与状态
+ * - rate-limit.ts — 上游 429 限流观测台账（有上游明示的重置时刻才报，绝不按窗口推算）
  * - probe.ts probe-service.ts probe-store.ts probe-route.ts — 档位探测
  * - web-status.ts status-paths.ts loopback.ts host-heartbeat.ts version.ts — 同源 status 路由、
  *   路径常量、回环守卫、心跳与版本
@@ -283,7 +284,7 @@ export function apply(ctx: Context, config: Config): void {
   const variants = createVariantRuntimeSet({ ctx, client, current })
 
   // Usage readout：注册 seam 与 pill 窗口助手见 usage.ts（本文件不再持有查询器实现）。
-  registerUsageQueriers(ctx, variants.runtimes, client)
+  registerUsageQueriers(ctx, variants.runtimes, client, variants.rateLimits)
 
   // This plugin ships its own configuration cards: opt out of the host's
   // auto-generated settings page (mirroring upstream `dsh-llm-pi-ai`). The

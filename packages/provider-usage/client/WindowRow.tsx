@@ -29,7 +29,13 @@ export function WindowRow({ window, t }: { window: UsageWindow; t: ProviderUsage
       <div style={windowHeadStyle}>
         <span id={`pu-window-${window.id}`} style={labelStyle}>{window.label}</span>
         <span style={{ fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
-          {window.remain === undefined ? window.unit : `${formatAmount(remain)} ${window.unit}`}
+          {/* blocked 是上游真的拒绝过（不是余额读数为 0）：说「已用尽」比「0」更
+              准确，因为这一行此刻确实用不了。 */}
+          {window.remain === undefined
+            ? window.unit
+            : window.blocked === true
+              ? t('blocked')
+              : `${formatAmount(remain)} ${window.unit}`}
         </span>
       </div>
       {hasLimit && hasRemain ? <div style={trackStyle} role="progressbar" aria-labelledby={`pu-window-${window.id}`} aria-valuenow={Math.round(percent)} aria-valuemin={0} aria-valuemax={100}><div className={percent <= 20 ? 'pu-stripe' : undefined} style={fillStyle(percent)} /></div> : null}

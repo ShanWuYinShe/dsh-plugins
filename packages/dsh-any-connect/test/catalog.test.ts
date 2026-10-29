@@ -178,4 +178,35 @@ describe('Provider model parameter & billing isolation', () => {
     expect(catalog.excludedCount()).toBe(0)
     expect(catalog.current().length).toBe(FALLBACK_WORKBUDDY_MODELS.length)
   })
+
+  // 2026-10-29：隐藏区需要**完整行**而不只是数量，否则用户只能一键全恢复。
+  it('excludedModels() 给出被隐藏模型的完整行（卡片逐条恢复用）', () => {
+    const catalog = new WorkBuddyCatalog(FALLBACK_WORKBUDDY_MODELS, 'workbuddy')
+    catalog.setExcludedModelIds(['hy4-preview', 'kimi-k3-1'])
+
+    const hidden = catalog.excludedModels()
+    expect(hidden.map(m => m.id)).toEqual(['hy4-preview', 'kimi-k3-1'])
+    // 完整行：名称、窗口、计费这些卡片要显示的字段都在，不是只有 id。
+    const first = hidden[0]!
+    expect(first.name).not.toBe('')
+    expect(typeof first.contextWindow).toBe('number')
+    // 与可见区同源：同一模型两处必须一致（否则隐藏后像"变了"）。
+    const visibleRows = catalog.current()
+    expect(visibleRows.map(m => m.id)).not.toContain('hy4-preview')
+  })
+
+  it('没有隐藏项时 excludedModels() 为空数组', () => {
+    const catalog = new WorkBuddyCatalog(FALLBACK_WORKBUDDY_MODELS, 'workbuddy')
+    expect(catalog.excludedModels()).toEqual([])
+  })
+
+  it('visible=false（无凭据）时仍能看到自己隐藏过什么', () => {
+    const catalog = new WorkBuddyCatalog(FALLBACK_WORKBUDDY_MODELS, 'workbuddy')
+    catalog.setExcludedModelIds(['hy4-preview'])
+    catalog.setVisible(false)
+    // current() 是「这个变体现在能用什么」，未登录时为空；
+    // excludedModels() 是「用户自己的配置」，两者语义不同。
+    expect(catalog.current()).toEqual([])
+    expect(catalog.excludedModels().map(m => m.id)).toEqual(['hy4-preview'])
+  })
 })

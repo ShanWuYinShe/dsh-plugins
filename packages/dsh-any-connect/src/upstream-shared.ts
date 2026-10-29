@@ -58,6 +58,46 @@ export function normalizeCredits(credits: string | undefined): string | undefine
 /** Session-invalidation markers that mean "sign in again in the WorkBuddy app". */
 const SESSION_DEAD_MARKERS: readonly string[] = ['Offline user session not found', '12153']
 
+/**
+ * 智谱（BigModel / GLM Coding Plan）错误码里**不是限流**的那几个。
+ *
+ * 官方错误码表把好几种完全不同的处境都塞进 HTTP 429，只有「限流」值得重试，
+ * 其余三种按限流重试永远不会成功（https://docs.bigmodel.cn/cn/api/rate-limit，
+ * 错误码语义取自平台错误码表）：
+ *
+ * - `1113` 账户已欠费 → 充值才恢复，重试无意义 → hard_credit；
+ * - `1309` 套餐已到期 → 续订才恢复 → hard_credit；
+ * - `1311` 套餐未开通该模型 → 换模型 → auth_forbidden；
+ * - `1313` 账号被风控封禁 → 申诉 → auth_forbidden。
+ *
+ * 而 `1302`（触发用户速率限制）与 `1305`（平台服务过载）才是真正的限流：
+ * 前者等并发降下来，后者稍后重试。
+ *
+ * 用「"code":NNNN」而不是裸数字匹配：429 的响应体里还有别处可能出现同样的
+ * 数字（token 计数、时间戳），只有 JSON 字段形态才是错误码本身。
+ */
+const ZHIPU_NON_RATE_CODES: ReadonlyArray<{ code: string; kind: UpstreamErrorKind }> = [
+  { code: '1113', kind: 'hard_credit' },
+  { code: '1309', kind: 'hard_credit' },
+  { code: '1311', kind: 'auth_forbidden' },
+  { code: '1313', kind: 'auth_forbidden' },
+]
+
+/**
+ * 智谱 429 的真实分类：错误码优先，状态码兜底。
+ *
+ * @param body - 上游错误体原文。
+ * @returns 分类结果；不是已知的智谱错误码时返回 undefined（交回通用判定）。
+ */
+function classifyZhipuErrorCode(body: string): UpstreamErrorKind | undefined {
+  for (const entry of ZHIPU_NON_RATE_CODES) {
+    // JSON 允许 "code" 与数字之间有任意空白（上游不同端点序列化不一致，
+    // 实测见过紧凑与带空格两种）。用正则而不是 includes，两种都覆盖。
+    if (new RegExp(`"code"\\s*:\\s*${entry.code}(?!\\d)`, 'u').test(body)) return entry.kind
+  }
+  return undefined
+}
+
 
 
 /**
@@ -158,7 +198,10 @@ export function classifyUpstreamError(status: number, body: string): UpstreamErr
   // 未开通 chat 权益的账号也归到这里（code 11140 auth_forbidden，官方错误码表
   // 同口径），单列出来让上层能给出「检查账号权益」而非「检查密钥」的指引。
   if (status === 403) return 'auth_forbidden'
-  if (status === 429) return 'soft_rate'
+  // 429 之前先看智谱错误码：同一个 429 里混着欠费(1113)、套餐到期(1309)、
+  // 无模型权限(1311)、风控封禁(1313)——按限流重试永远不会成功。1302/1305
+  // 才是真限流，落到下面的 soft_rate。
+  if (status === 429) return classifyZhipuErrorCode(body) ?? 'soft_rate'
   if (status === 404) return 'not_found'
   if (status >= 500) return 'server'
   if (status >= 400) return 'client'
@@ -215,7 +258,7 @@ export async function settleChatFetch(
     // 这里按 server 分类兜底而非无限挂起。
     text = (await response.text()).slice(0, ERROR_BODY_LIMIT)
   } catch {
-    return { settled: true, result: { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)' } }
+    return { settled: true, result: { ok: false, status: response.status, kind: 'server', message: '(error body unavailable)', headers: response.headers } }
   } finally {
     headersTimeout.dispose()
   }

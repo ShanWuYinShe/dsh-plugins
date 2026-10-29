@@ -1,3 +1,25 @@
+## 0.2.1-alpha.3 (2026-10-29)
+
+### 修复
+
+* **pill 偶发消失的结构性根因（对齐宿主自带 pill 的注册形状）**：宿主自带的 activity / usage pill 从不失效，因为它们的 `inject` 是**无参常量函数**（`statPillInject = () => ({ hooks: { performanceUsage } })`），注册期不解析任何会话或服务状态，会话数据全部走 standard kit。本包此前在注册期解析模型目录，同时踩中宿主两条机制：`cachedSessionInject` 对 inject 结果的**永久缓存**（坏 props 固化），以及 render 期抛错触发的 `reportEntryError({abdicate:true})` → `SlotRegistry.abdicated`（只增不减的 WeakSet，entry 永久退出投影）。两者都表现为「pill 莫名其妙消失、刷新才好」。
+  * 重构：`inject` 改为无参常量，只交付 `t` 与 `resolveSeat`；不再用 `ctx.inject(['slots','modelDirectories'])` 等目录服务（那层原本的唯一作用就是「等就绪再注册」）。
+  * 目录解析下移到组件渲染期：hook 从 standard kit 的 `sessionId` 经 `resolveSeat` 现取，`useMemo` 按 sessionId 缓存；`resolveSeat` **永不抛错**，拿不到返回 `undefined`，下一次 render 自动重试。
+  * 移除上一版引入的 `resolveError` 重试补丁（问题下移后不再需要）。
+  * 测试：`test/client-seat.test.ts` 重写为「注册形状」回归（inject 零参恒定、不含会话快照、任意 sessionId 不抛错、服务缺席/就绪两种状态）；根 `test/bundle.test.ts` 的 dock 冒烟同步改为断言新形状。
+
+## 0.2.1-alpha.2 (2026-10-29)
+
+### 修复
+
+* **pill 偶发消失（刷新页面/重开插件才恢复）的剩余根因**：dock entry 的 `inject` 在目录解析失败时会向外抛错（原意是阻止坏 props 进 `sessionInjectCache`），但宿主 `SlotErrorBoundary` 捕获 render 期异常后调 `reportEntryError({ abdicate: true })`，而 `SlotRegistry.abdicated` 是只增不减的 WeakSet——该 entry 在本次注册生命周期内永久退出 dock 投影，表现即「pill 莫名其妙不见」。现改为返回 `resolveError` 让组件下一帧重试：自愈且不触发崩溃上报；`test/client-seat.test.ts` 增加穷举断言锁住「`inject` 任意异常都不穿透」。
+* **额度用尽不再谎报「不提供额度查询」**：查询器在额度耗尽时曾返回空窗口列表，界面渲染成 `noWindows`（「该 provider 不上报额度」），用户据此以为查询功能坏了。现在由查询器上报真实的 0 额度窗口，并用 `blocked` 标志区分「上游确认拒收」与「余额读数为 0」。
+
+### 新增
+
+* **上游限流（429）展示**：`UsageSnapshot.rateLimit` 承载观测到的限流状态，pill 折叠态优先显示「限流中 · {时间} 恢复」，展开面板给出被拒次数与模型；恢复时刻**只来自上游响应头**（`Retry-After` / `X-RateLimit-Reset`），拿不到就如实说「上游未提供恢复时间」，绝不按固定窗口推算。
+* 额度用尽且窗口声明了 `resetsAt` 时，pill 的 title 补上恢复时刻（用户「到什么时候能接着用」的直接答案）。
+
 ## 0.2.1-alpha.1 (2026-10-29)
 
 ### 文档

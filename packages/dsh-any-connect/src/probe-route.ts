@@ -48,6 +48,14 @@ export interface WorkBuddyProbeRouteOptions {
   refresh?: () => Promise<{ state: string; reason?: string }>
   /** Exclude a model from the active roster. */
   deleteModel?: (modelId: string) => Promise<{ state: string; excludedCount?: number }>
+  /**
+   * Restore ONE excluded model.
+   *
+   * `restored` is false when the id was not actually hidden (a stale card, or a
+   * double click) — reported rather than treated as an error, because the
+   * caller's intent ("make it visible") already holds.
+   */
+  restoreModel?: (modelId: string) => Promise<{ state: string; restored?: boolean; excludedCount?: number }>
   /** Restore all excluded models back to default. */
   restoreModels?: () => Promise<{ state: string; excludedCount?: number }>
   /**
@@ -109,6 +117,13 @@ function parseAction(text: string): WorkBuddyProbeAction | undefined {
     }
     return undefined
   }
+  if (wrapped['action'] === 'restore-model') {
+    const modelId = wrapped['modelId']
+    if (typeof modelId === 'string' && modelId.trim().length > 0) {
+      return { action: 'restore-model', modelId: modelId.trim() }
+    }
+    return undefined
+  }
   if (wrapped['action'] === 'restore-models') return { action: 'restore-models' }
   return undefined
 }
@@ -159,6 +174,14 @@ export function workBuddyProbeHandler(
           return
         }
         json(res, 200, await deps.deleteModel(action.modelId))
+        return
+      }
+      if (action.action === 'restore-model') {
+        if (deps.restoreModel === undefined) {
+          json(res, 404, { error: 'restore-model-not-supported' })
+          return
+        }
+        json(res, 200, await deps.restoreModel(action.modelId))
         return
       }
       if (action.action === 'restore-models') {

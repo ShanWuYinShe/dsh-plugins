@@ -920,6 +920,7 @@ export class OpenCodeUpstreamClient {
       status: response.status,
       kind: classifyUpstreamError(response.status, text),
       message: text,
+      headers: response.headers,
     }
   }
 

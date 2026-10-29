@@ -3,17 +3,22 @@ import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 
 /**
- * 注册时序回归（缺陷 1「有时候不显示，刷新页面或重新开关插件才行」）。
+ * 注册形状回归（「pill 有时候不显示，刷新页面或重开插件才行」）。
  *
- * 宿主 renderer 把一个 entry 的 `inject` 结果按 (entry × 会话绑定) **永久缓存**
- * （dsh-client-ui-renderer 的 cachedSessionInject / sessionInjectCache，无失效
- * 路径）。旧实现在 apply 里同步注册 entry、并在 props 里同步
- * `ctx.get('modelDirectories')`——目录服务的提供方 fiber 尚未 active 时 cordis
- * 的严格 get 静默返回 undefined，那份缺 directory 的 props 就此被永久缓存，
- * 该会话整页再也长不出 pill，直到 entry 被重新注册（用户手工刷新/重开插件）。
+ * 对照宿主自带的两个 pill（dsh-client-ui-chat 的 activity / usage）：它们的
+ * `inject` 是**无参常量函数** `() => ({ hooks: { performanceUsage } })`，注册期
+ * 不解析任何会话或服务状态；会话数据全部走 standard kit（`sessionId` /
+ * `useProjection`），而 standard kit 由 renderer 无条件提供，永远可用。
  *
- * 这里用**真实 cordis Context** 装载真实入口模块（不是抄一遍 apply 的镜像
- * 测试），锁定「等目录服务就绪后才注册 entry」这条顺序。
+ * 这正是它们从不失效的结构性原因。本包此前在注册期解析目录服务，撞上两条
+ * 宿主机制：
+ *
+ * 1. `cachedSessionInject` 按 (entry × 会话绑定) 永久缓存 inject 结果；
+ * 2. render 期抛错 → `SlotErrorBoundary` → `reportEntryError({abdicate:true})`
+ *    → `SlotRegistry.abdicated`（只增不减的 WeakSet）→ entry 永久退出投影。
+ *
+ * 现在改成同一形状：`inject` 无参且恒定，目录在组件渲染期经 `resolveSeat`
+ * 现取。这里用**真实 cordis Context** 装载真实入口模块，锁住这个形状。
  */
 
 /** 目录服务桩：store 是 props 交付给 pill 的目录快照源，load 记调用次数。 */
@@ -50,9 +55,6 @@ function makeSlots(faults: { throwOnRegister?: boolean } = {}): {
   return {
     registrations,
     service: {
-      // 真机契约（dsh-client-ui-renderer 的 SlotRegistry.inject）：声明已存在时
-      // 同步执行回调，返回幂等 disposer；贡献的撤下由该实现绑在调用方 fiber 上
-      // （桩不模拟 fiber 生命周期，故用例只断言"重新注册"，不断言"撤下"）。
       inject: (_slot: string, callback: () => unknown) => {
         callback()
         return () => {}
@@ -85,10 +87,8 @@ async function settle(): Promise<void> {
  * 只提供 slots/locale（不给 modelDirectories），装载真实入口模块。
  *
  * @param faults - 透传给 slots 桩的故障注入开关。
- * @returns 装载后的上下文、注册记录、目录服务桩，以及插件装载 promise（供
- * 用例断言"不冒泡"）。
  */
-async function mountEntryWithoutDirectory(faults: { throwOnRegister?: boolean } = {}): Promise<{
+async function mountEntry(faults: { throwOnRegister?: boolean } = {}): Promise<{
   ctx: Context
   registrations: Array<{ options: any; component: unknown }>
   directories: ReturnType<typeof makeDirectories>
@@ -100,80 +100,109 @@ async function mountEntryWithoutDirectory(faults: { throwOnRegister?: boolean } 
   const ctx = new Context()
   ctx.provide('slots', slots.service as never)
   ctx.provide('locale', makeLocale() as never)
-  // 真实入口模块（name/inject/apply 齐备，inject 在运行时读）按宿主 loader 的
-  // 方式装载：声明的 slots/locale 已就绪，故 apply 立即执行。
   const load = ctx.plugin(mod).await()
   await load
   await settle()
   return { ctx, registrations: slots.registrations, directories, load }
 }
 
-describe('provider-usage dock entry 注册时序', () => {
-  it('目录服务缺席时不注册 entry；就绪后注册并解析出目录与 lazy load', async () => {
-    const { ctx, registrations, directories } = await mountEntryWithoutDirectory()
-
-    // 断言 1：目录服务缺席 → 一个 entry 都不许注册。旧实现此刻已经注册了一个
-    // props 只有 {t} 的 entry，那份 props 会被宿主永久缓存 → 整页没有 pill。
-    expect(registrations, '目录服务缺席时不得注册 dock entry').toHaveLength(0)
-
-    // 断言 2：服务就绪 → 子 fiber 结算 → entry 注册完成。
-    ctx.provide('modelDirectories', { directoryFor: directories.directoryFor } as never)
-    await settle()
-    expect(registrations, '目录服务就绪后必须注册 dock entry').toHaveLength(1)
+describe('provider-usage dock entry 注册形状（对齐宿主自带 pill）', () => {
+  it('inject 是无参常量：不解析会话、不碰服务，永不抛错', async () => {
+    const { registrations } = await mountEntry()
+    expect(registrations, '注册不依赖目录服务是否就绪').toHaveLength(1)
     const [dock] = registrations
     expect(dock!.options.name).toBe('conversation.composer.dock')
     expect(dock!.options.id).toBe('provider-usage')
     expect(dock!.options.order).toBe(10)
     expect(typeof dock!.component).toBe('function')
 
-    // props 的两条取数路径：无 session 只回译写函数；有 session 解析出目录。
-    const bare = dock!.options.inject()
-    expect(typeof bare.t).toBe('function')
-    expect(bare.directory).toBeUndefined()
-    expect(bare.load).toBeUndefined()
-    const seated = dock!.options.inject('session-1')
-    expect(seated.directory).toBe(directories.store)
-    expect(typeof seated.load).toBe('function')
-    seated.load()
+    // 宿主 statPillInject 的形状：零参数调用即可拿到 props。
+    const props = dock!.options.inject()
+    expect(typeof props.t).toBe('function')
+    expect(typeof props.resolveSeat).toBe('function')
+    // 关键：props 里**不含**会话状态——它是常量，所以缓存它永远不会变坏。
+    expect('directory' in props).toBe(false)
+    expect('sessionId' in props).toBe(false)
+  })
+
+  it('多次调用 inject 返回等价 props（可安全被宿主永久缓存）', async () => {
+    const { registrations } = await mountEntry()
+    const [dock] = registrations
+    const first = dock!.options.inject()
+    const second = dock!.options.inject()
+    // t 是同一份绑定；resolveSeat 每次是新闭包但**行为等价**——两者都不含
+    // 任何会「过期」的会话快照，所以宿主缓存任意一份都安全。
+    expect(first.t).toBe(second.t)
+    expect(typeof first.resolveSeat).toBe('function')
+    expect(typeof second.resolveSeat).toBe('function')
+    expect(first.resolveSeat?.('same-session')).toBeUndefined()
+    expect(second.resolveSeat?.('same-session')).toBeUndefined()
+  })
+
+  it('目录服务缺席时 resolveSeat 返回 undefined 而非抛错', async () => {
+    const { registrations } = await mountEntry()
+    const [dock] = registrations
+    const { resolveSeat } = dock!.options.inject()
+    // 未 provide modelDirectories：strict get 返回 undefined，解析收敛成 undefined。
+    expect(() => resolveSeat('session-1')).not.toThrow()
+    expect(resolveSeat('session-1')).toBeUndefined()
+  })
+
+  it('目录服务就绪后 resolveSeat 解析出目录与 lazy load', async () => {
+    const { ctx, registrations, directories } = await mountEntry()
+    const [dock] = registrations
+    const { resolveSeat } = dock!.options.inject()
+
+    ctx.provide('modelDirectories', { directoryFor: directories.directoryFor } as never)
+    await settle()
+
+    const seat = resolveSeat('session-1')
+    expect(seat?.directory).toBe(directories.store)
+    expect(typeof seat?.load).toBe('function')
+    seat!.load()
     expect(directories.loadCount()).toBe(1)
   })
 
-  it('目录服务重启后 entry 重新注册（等价于用户手工重开插件）', async () => {
-    const { ctx, registrations, directories } = await mountEntryWithoutDirectory()
-    const dispose = ctx.provide('modelDirectories', { directoryFor: directories.directoryFor } as never)
-    await settle()
-    expect(registrations).toHaveLength(1)
-    const firstEntry = registrations[0]!.options
-
-    // 服务消失：注册子 fiber 连带被销毁（真机上 entry 由 SlotRegistry 绑在
-    // 调用方 fiber 上的 effect 撤下，桩不模拟这一段，故不断言撤下）。
-    await dispose()
-    await settle()
-
-    // 服务重启 → cordis 重跑注册子 fiber → 新 entry（拿到全新 props 解析），
-    // 这正是用户手工「重开插件」所做的事，现在由服务生命周期自动完成。
+  it('无 sessionId / 空 sessionId 时返回 undefined（没有会话就没有可报的账号）', async () => {
+    const { ctx, registrations, directories } = await mountEntry()
+    const [dock] = registrations
+    const { resolveSeat } = dock!.options.inject()
     ctx.provide('modelDirectories', { directoryFor: directories.directoryFor } as never)
     await settle()
-    expect(registrations, '服务回来后会再注册一份 entry').toHaveLength(2)
-    expect(registrations[1]!.options).not.toBe(firstEntry)
-    expect(registrations[1]!.options.inject('session-1').directory).toBe(directories.store)
+
+    expect(resolveSeat(undefined)).toBeUndefined()
+    expect(resolveSeat(null)).toBeUndefined()
+    expect(resolveSeat('')).toBeUndefined()
   })
 
-  it('子 fiber body 内注册抛错：同句 console.error 兜底且不冒泡', async () => {
-    // 注册体跑在 cordis 的微任务边界里，apply 的 try/catch 包不到它；这条锁住
-    // body 内的第二层兜底——否则异常只进 cordis logger，本包文案静默丢失。
+  it('directoryFor 抛错（会话 scope 未就绪/已销毁）也不穿透', async () => {
+    const { ctx, registrations } = await mountEntry()
+    const [dock] = registrations
+    const { resolveSeat } = dock!.options.inject()
+    ctx.provide('modelDirectories', {
+      directoryFor: () => { throw new Error('session resolved no scope') },
+    } as never)
+    await settle()
+
+    // 这条锁住「render 期绝不抛错」：抛错会被宿主 SlotErrorBoundary 捕获，
+    // 进而把 entry 永久 abdicate（SlotRegistry.abdicated 只增不减）。
+    for (const sessionId of ['s1', 42, { nested: true }, 'session-unready']) {
+      expect(
+        () => resolveSeat(sessionId),
+        `sessionId=${JSON.stringify(sessionId)} 时不得抛错`,
+      ).not.toThrow()
+      expect(resolveSeat(sessionId)).toBeUndefined()
+    }
+  })
+
+  it('注册体抛错：同句 console.error 兜底且不冒泡', async () => {
     const errors: string[] = []
     const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       errors.push(args.map(String).join(' '))
     })
     try {
-      const { ctx, registrations, directories, load } = await mountEntryWithoutDirectory({ throwOnRegister: true })
-      // 装载本身不得 reject：apply 同步段无错，抛错发生在子 fiber body 里。
+      const { registrations, load } = await mountEntry({ throwOnRegister: true })
       await expect(load, '注册抛错不得冒泡到宿主 loader').resolves.toBeDefined()
-
-      ctx.provide('modelDirectories', { directoryFor: directories.directoryFor } as never)
-      await settle()
-
       expect(registrations, '注册抛错时不得留下 entry').toHaveLength(0)
       expect(
         errors.some(line => line.includes('[provider-usage] client pill failed to load (host registry unaffected):')),
@@ -182,22 +211,5 @@ describe('provider-usage dock entry 注册时序', () => {
     } finally {
       spy.mockRestore()
     }
-  })
-
-  it('会话目录未就绪抛错时不吞成空 props（防止 cachedSessionInject 永久固化缺 directory 的坏缓存）', async () => {
-    const { ctx, registrations } = await mountEntryWithoutDirectory()
-    ctx.provide('modelDirectories', {
-      directoryFor: (sessionId: unknown) => {
-        if (sessionId === 'session-unready') throw new Error('session resolved no scope')
-        return { store: {}, load: () => Promise.resolve() }
-      },
-    } as never)
-    await settle()
-    expect(registrations).toHaveLength(1)
-    const [dock] = registrations
-    // 无 sessionId 正常返回 { t }
-    expect(dock!.options.inject().directory).toBeUndefined()
-    // 有 sessionId 但目录服务抛错：绝不能返回 { t }，必须抛出以阻止 sessionInjectCache 固化
-    expect(() => dock!.options.inject('session-unready')).toThrow('session resolved no scope')
   })
 })

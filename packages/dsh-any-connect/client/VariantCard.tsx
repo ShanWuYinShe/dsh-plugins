@@ -45,6 +45,7 @@ import type { CardStatus, WorkBuddyCardVariant, WorkBuddyConfigPageInjected } fr
 import type { WorkBuddyWebStatus } from '../src/status-paths.js'
 import { useVariantCard } from './useVariantCard.js'
 import { StartPlanClaimBox } from './StartPlanClaimBox.js'
+import { RateLimitBox } from './RateLimitBox.js'
 
 function CardRefreshButton({ busy, onClick, t }: { busy: boolean; onClick: () => void; t: WorkBuddyConfigPageInjected['t'] }) {
   return (
@@ -95,9 +96,9 @@ export function VariantCard(props: {
   const {
     t, variant, status, open, onToggle,
     busy, notice, modelsOpen, setModelsOpen, copiedPlanId,
-    probe, startPlanClaim, copyPlanId, refresh,
+    probe, startPlanClaim, rateLimit, copyPlanId, refresh,
     refreshWithCatalog, title, label, isZCode, isStartPlanCard, isOpenCode, zcodePlan, zcodePools, isPlanActive, planStateLabel, displayPlanName, headerSummary, catalogOffline, effortsOf,
-    deleteModel, restoreModels,
+    deleteModel, restoreModel, restoreModels, excludedModels, excludedOpen, setExcludedOpen,
   } = useVariantCard(props)
 
   return (
@@ -121,6 +122,10 @@ export function VariantCard(props: {
       </button>
       {open ? (
         <div style={cardBodyStyle}>
+          {/* 限流块放在最前：通道正在拒收请求时，这是用户唯一能行动的信息
+              （还要等多久 / 等不到确切时间）。三个分支（ZCode/OpenCode/WorkBuddy）
+              共用同一份展示，因为 429 是所有上游共有的事实。 */}
+          <RateLimitBox t={t} rateLimit={rateLimit} />
           {isZCode ? (
             <>
               <hr style={dividerStyle} />
@@ -262,11 +267,14 @@ export function VariantCard(props: {
                       <span style={{ ...summaryNoteStyle, color: 'var(--dsw-alias-label-secondary)' }}>
                         ({t('excludedModelsCount', { n: status.excludedCount })})
                       </span>
+                      {/* 「全部恢复」保留但降级为次要出口：主路径是下面隐藏区里的
+                          逐条恢复。加 title 说清影响范围，避免用户以为它只影响某一个。 */}
                       <button
                         type="button"
                         className="wb-btn"
                         style={{ ...buttonStyle, minHeight: 20, padding: '1px 8px', fontSize: 11, lineHeight: '16px' }}
                         disabled={busy}
+                        title={t('restoreDefaultsHint')}
                         onClick={() => { void restoreModels() }}
                       >
                         {t('restoreDefaults')}
@@ -316,6 +324,52 @@ export function VariantCard(props: {
                     </table>
                   </div>
                 )
+              ) : null}
+              {/* 隐藏区：让用户看见自己隐藏了什么，并**逐条**恢复。
+                  此前只有「一键恢复全部」——多数情况只想放回其中一两个，
+                  全恢复后还得把其余重新隐藏一遍（用户报告的痛点）。 */}
+              {excludedModels.length > 0 ? (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ ...summaryHeadStyle, gap: 8 }}>
+                    <button
+                      type="button"
+                      style={summaryToggleStyle}
+                      aria-expanded={excludedOpen}
+                      onClick={() => { setExcludedOpen(!excludedOpen) }}
+                    >
+                      <span aria-hidden="true" style={{ ...chevronStyle, fontSize: 14, transform: excludedOpen ? 'rotate(180deg)' : 'none' }}>⌄</span>
+                      <span>{t('excludedSectionTitle', { n: excludedModels.length })}</span>
+                    </button>
+                  </div>
+                  {excludedOpen ? (
+                    <div style={{ width: '100%', overflowX: 'auto' }}>
+                      <table style={modelTableStyle}>
+                        <thead>
+                          <tr>
+                            <th style={{ ...modelThStyle, textAlign: 'left' }}>{t('colName')}</th>
+                            <th style={modelThStyle} aria-label={t('colTags')} />
+                            <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colRate')}</th>
+                            <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colContext')}</th>
+                            <th style={{ ...modelThStyle, textAlign: 'right' }}>{t('colEfforts')}</th>
+                            <th style={{ ...modelThStyle, textAlign: 'center', width: 60 }}>{t('colAction')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {excludedModels.map((row, i) => (
+                            <ModelRow
+                              key={row.id}
+                              row={row}
+                              t={t}
+                              efforts={effortsOf(row)}
+                              even={i % 2 === 1}
+                              onRestore={modelId => { void restoreModel(modelId) }}
+                            />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
             </>
           ) : null}

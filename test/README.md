@@ -30,6 +30,7 @@
 | `export-surface.test.ts` | 非入口模块的值转发导出必须真的有人从这个模块导入（包外消费者登记白名单） |
 | `internal-dead-code.test.ts` | 未导出的顶层声明必须在同文件里被用到 |
 | `declared-deps.test.ts` | `devDependencies` 里的每个包都要在包内源码中出现（声明了不用 = 依赖清单不可信） |
+| `client-inject-manifest.test.ts` | 清单里的 `dsh.client.inject` 写的是**客户端包名**（模块图依赖），不是 cordis 服务名——写错会被 `graphRows.get()` 静默跳过、悄悄失去加载顺序保证 |
 | `locale-keys.test.ts` | 文案 key 都有引用；同一包内 en 与 zh 的键集完全一致 |
 | `css-classes.test.ts` | 样式表里的每个类名都在本包 client 源码里出现 |
 | `css-tokens.test.ts` | 插件手写的样式只引用宿主真实存在的 CSS 变量 |

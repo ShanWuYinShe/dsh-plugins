@@ -16,8 +16,8 @@
  * @module provider-usage/pill
  */
 
-import { rootStyle, pillStyle, labelStyle, dotStyle, panelStyle, panelTitleStyle, refreshButtonStyle, noteStyle, errorStyle } from './pill-styles.js'
-import { getDotColor } from './pill-format.js'
+import { rootStyle, pillStyle, labelStyle, dotStyle, panelStyle, panelTitleStyle, refreshButtonStyle, noteStyle, errorStyle, rateLimitBoxStyle, rateLimitTitleStyle, rateLimitLineStyle, rateLimitMetaStyle } from './pill-styles.js'
+import { formatReset, getDotColor } from './pill-format.js'
 import { WindowRow } from './WindowRow.js'
 import { useProviderUsage } from './useProviderUsage.js'
 import type { ProviderUsagePillProps } from './pill-types.js'
@@ -38,7 +38,7 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
   // 组件原样早退（与原实现同一分支）。
   const usage = useProviderUsage(props)
   if (usage === null) return null
-  const { t, provider, answer, open, setOpen, busy, stale, alignRight, setAlignRight, rootRef, buttonRef, panelRef, refresh, queried, snapshot, headlineText } = usage
+  const { t, provider, answer, open, setOpen, busy, stale, alignRight, setAlignRight, rootRef, buttonRef, panelRef, refresh, queried, snapshot, headlineText, resetHint } = usage
 
   return (
     <span ref={rootRef} style={{ ...rootStyle, position: 'relative' }}>
@@ -52,7 +52,10 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
         }}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={headlineText}
+        // 折叠态放不下恢复时刻（dock 是一行窄读数），但它必须可达：
+        // 额度用尽时 title/aria-label 带上「几点恢复」，悬停即见。
+        aria-label={resetHint === undefined ? headlineText : `${headlineText} · ${resetHint}`}
+        title={resetHint}
         onClick={() => {
           if (!open && buttonRef.current) {
             // 面板默认左对齐；触发按钮靠右缘时 320px 面板会溢出视口，
@@ -120,6 +123,21 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
             </button>
           </div>
           <div style={{ opacity: busy ? 0.65 : 1, transition: 'opacity 0.2s ease', pointerEvents: busy ? 'none' : 'auto' }}>
+            {/* 限流块排在额度之前：通道被拒时它是用户此刻唯一能行动的信息。 */}
+            {queried && snapshot!.rateLimit !== undefined ? (
+              <div style={rateLimitBoxStyle} role="status">
+                <p style={rateLimitTitleStyle}>{t('rateLimited')}</p>
+                <p style={rateLimitLineStyle}>
+                  {snapshot!.rateLimit.resetAt === undefined
+                    ? t('rateLimitedUnknown')
+                    : t('rateLimitedUntil', { time: formatReset(new Date(snapshot!.rateLimit.resetAt).toISOString()) })}
+                </p>
+                <p style={rateLimitMetaStyle}>
+                  {t('rateLimitHits', { count: snapshot!.rateLimit.hits })}
+                  {snapshot!.rateLimit.model === undefined ? null : ` · ${snapshot!.rateLimit.model}`}
+                </p>
+              </div>
+            ) : null}
             {!queried
               ? <p style={noteStyle}>{t('noQuerierHint')}</p>
               : snapshot!.windows.length === 0

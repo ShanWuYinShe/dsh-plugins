@@ -24,6 +24,8 @@ import { applyDefaultEffort, applyDefaultThinking } from './reasoning-default.js
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { prepareChatBody, WorkBuddyUpstreamClient, type UpstreamErrorKind } from './upstream.js'
 import { isJsonContentType, KIND_STATUS, writeJson, writeOpenAIError, writeAnthropicError, RequestBodyTooLarge, readBody, upstreamFailureMessage } from './shim-http.js'
+import { observeRateLimit } from './rate-limit.js'
+import type { RateLimitObservation } from './rate-limit.js'
 
 /** Minimal logger surface the plugin context already provides. */
 export interface ShimLogger {
@@ -48,13 +50,50 @@ export interface WorkBuddyShim {
   close(): Promise<void>
 }
 
+/**
+ * The model id a prepared request body names, for rate-limit attribution.
+ *
+ * The prepared body is the exact JSON about to go upstream, so reading it back
+ * reports the model the upstream actually refused rather than whatever the
+ * catalog currently lists. Malformed input yields undefined instead of throwing:
+ * attribution is diagnostics, never a reason to fail a request.
+ */
+function preparedModelId(prepared: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(prepared)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    const model = (parsed as { model?: unknown }).model
+    return typeof model === 'string' && model !== '' ? model : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** Constructor dependencies. */
 export interface WorkBuddyShimOptions {
   kind: 'workbuddy' | 'zcode' | 'opencode'
+  /** Provider route key (variant id); used to file rate-limit observations. */
+  providerId?: string
   store: Pick<WorkBuddyCredentialStore, 'resolve'>
   client: Pick<WorkBuddyUpstreamClient, 'chatStream'>
   catalog: WorkBuddyCatalog
   logger?: ShimLogger
+  /**
+   * Records upstream 429s so the provider card and the usage pill can say when
+   * the channel opens again. Optional: a shim without a ledger still proxies.
+   */
+  rateLimits?: RateLimitRecorder
+}
+
+/**
+ * The slice of {@link RateLimitLedger} the shim reports into.
+ *
+ * Structural rather than the class so tests can pass a stub, and so a shim
+ * constructed without the plugin runtime (CLI paths) simply omits it.
+ */
+export interface RateLimitRecorder {
+  record(observation: RateLimitObservation): unknown
+  clear(provider: string): void
 }
 
 
@@ -68,6 +107,8 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
   const catalog = options.catalog
   const store = options.store
   const client = options.client
+  const rateLimits = options.rateLimits
+  const providerId = options.providerId ?? options.kind
 
   // Per-process shared secret. Lives only in memory; the adapter resolves it
   // as the client apiKey — the OpenAI SDK sends it as `Authorization: Bearer
@@ -121,6 +162,38 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
       throw new Error('workbuddy shim has no listening address')
     }
     return `http://127.0.0.1:${address.port}`
+  }
+
+  /**
+   * File an upstream refusal into the rate-limit ledger.
+   *
+   * Called on both success and failure so the ledger self-heals: a request that
+   * gets through proves the channel is open again, which is the only way to
+   * clear an observation whose upstream never sent a reset header.
+   *
+   * Never throws: bookkeeping must not turn a model answer into an error.
+   */
+  function trackRateLimit(
+    result: { ok: false; status: number; kind: string; headers?: Headers } | { ok: true },
+    model?: string,
+  ): void {
+    if (rateLimits === undefined) return
+    try {
+      if (result.ok) {
+        rateLimits.clear(providerId)
+        return
+      }
+      const observation: RateLimitObservation | undefined = observeRateLimit({
+        provider: providerId,
+        status: result.status,
+        kind: result.kind,
+        ...model === undefined || model === '' ? {} : { model },
+        ...result.headers === undefined ? {} : { headers: result.headers },
+      })
+      if (observation !== undefined) rateLimits.record(observation)
+    } catch (error: unknown) {
+      logger?.warn('dsh-any-connect: rate-limit bookkeeping failed', error)
+    }
   }
 
   /** Kind-shaped auth failure so the calling SDK can parse the rejection. */
@@ -234,6 +307,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     // 正常结束与提前断开时都触发,事后 abort 是无害 no-op。
     res.once('close', () => controller.abort())
     const result = await client.chatStream(credential, prepared, controller.signal)
+    trackRateLimit(result, preparedModelId(prepared))
 
     if (!result.ok) {
       // 客户端已断开（pi-ai 取消生成 / 请求中止）：响应写进已销毁的 socket
@@ -308,6 +382,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     // 'close' 在响应开始后不再触发)。
     res.once('close', () => controller.abort())
     const result = await client.chatStream(credential, prepared, controller.signal)
+    trackRateLimit(result, preparedModelId(prepared))
 
     if (!result.ok) {
       if (controller.signal.aborted || res.destroyed) return

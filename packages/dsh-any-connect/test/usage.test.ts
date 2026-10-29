@@ -155,7 +155,11 @@ describe('WorkBuddy usage querier', () => {
     ])
   })
 
-  it('reports an empty window list when every package is drained', async () => {
+  // 2026-10-29 语义修正：全部耗尽**不等于**「不提供额度查询」。旧实现返回空
+  // windows，provider-usage 渲染成 noWindows（「该 provider 不上报额度」），
+  // 用户看到的是「查询功能坏了」——而事实是额度用完了。现在报一条 remain:0 的
+  // 窗口，pill 上显示「0 credits 剩余」+ 红色空条。
+  it('reports a drained window (not an empty list) when every package is spent', async () => {
     const { registry } = await boot({ signedIn: true })
     // 等**这个** provider 注册好：只看 length>0 可能被另一个 provider 先满足，
     // 随后的 find(...)! 就会在未注册时炸（曾出现偶发失败）。
@@ -165,7 +169,9 @@ describe('WorkBuddy usage querier', () => {
     ])))
 
     const entry = registry.registered.find(candidate => candidate.provider === 'workbuddy')!
-    expect((await entry.query({ provider: 'workbuddy' })).windows).toEqual([])
+    expect((await entry.query({ provider: 'workbuddy' })).windows).toEqual([
+      { id: 'total', label: '总计', remain: 0, unit: 'credits' },
+    ])
   })
 
   it('propagates a billing failure so the registry records it', async () => {
@@ -201,10 +207,14 @@ describe('WorkBuddy usage querier', () => {
 
 describe('totalCreditsWindows / currentPlanWindow', () => {
   it('sums live packages, skips drained ones, empties when all drained', () => {
+    // 上游一个包都没给 = 真的无可报（不是「用完了」）。
     expect(WorkBuddy.totalCreditsWindows([])).toEqual([])
+    // 有包但全部耗尽 = 用完了，必须报出来（否则界面谎称「不上报额度」）。
     expect(WorkBuddy.totalCreditsWindows([
       { packageName: 'A', remain: 0, size: 100 },
-    ])).toEqual([])
+    ])).toEqual([
+      { id: 'total', label: '总计', remain: 0, unit: 'credits' },
+    ])
     expect(WorkBuddy.totalCreditsWindows([
       { packageName: 'A', remain: 24, size: 100 },
       { packageName: 'B', remain: 0, size: 500 },

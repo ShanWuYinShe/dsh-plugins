@@ -166,3 +166,39 @@ export const trackStyle: CSSProperties = { height: 6, overflow: 'hidden', border
 export const noteStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
 export const errorStyle: CSSProperties = { ...noteStyle, color: 'var(--dsw-alias-state-error-primary)' }
 
+/**
+ * 限流块：用告警色的浅底把「现在发不出请求」和下面的额度数字分开。
+ *
+ * 刻意不用 error 红：限流是**会自愈**的状态，不是故障；红色会让用户以为
+ * 账号/配置出了问题。用 warn 色（与进度条 20% 以下同一套语义）。
+ */
+export const rateLimitBoxStyle: CSSProperties = {
+  margin: '0 0 10px',
+  padding: '8px 10px',
+  border: '1px solid var(--dsw-alias-state-warn-primary, #faad14)',
+  borderRadius: 10,
+  // 宿主没有 warn 的 hover 底色变量（只有 -danger 那支），而这里要的是
+  // 「会自愈的告警」而不是错误色：从真实存在的 warn 主色派生一个淡底，
+  // 主题换色时自动跟随，也避免引用不存在的变量名（css-tokens 回归会抓）。
+  background: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent)',
+}
+export const rateLimitTitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 12,
+  fontWeight: 600,
+  lineHeight: '18px',
+  color: 'var(--dsw-alias-state-warn-primary, #faad14)',
+}
+export const rateLimitLineStyle: CSSProperties = {
+  margin: '2px 0 0',
+  fontSize: 12,
+  lineHeight: '18px',
+  color: 'var(--dsw-alias-label-primary)',
+}
+export const rateLimitMetaStyle: CSSProperties = {
+  margin: '2px 0 0',
+  fontSize: 11,
+  lineHeight: '16px',
+  color: 'var(--dsw-alias-label-tertiary)',
+}
+

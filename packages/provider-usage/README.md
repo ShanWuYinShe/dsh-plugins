@@ -105,13 +105,44 @@ interface UsageWindow {
   `/plugins/provider-usage/usage` 暴露同域只读路由（仅回环 Origin，与
   dsh-any-connect 的状态路由同一姿态）。
 - browser 半侧把 pill 注册进 `conversation.composer.dock`（list slot，
-  `order: 10`，排在宿主自带 `stats` 之后），按当前 provider 轮询路由。注册
-  挂在 `ctx.inject(['slots','modelDirectories'])` 子 fiber 下——**必须等模型目录
-  服务就绪再注册**：宿主对 entry props 的缓存按「entry × 会话绑定」永久存活，
-  过早解析出的 `undefined` 会固化，让该会话整页看不到 pill（只能靠刷新页面或
-  重开插件恢复）。
+  `order: 10`，排在宿主自带 `stats` 之后），按当前 provider 轮询路由。
+- **注册形状对齐宿主自带的 activity / usage pill**：`inject` 是**无参常量函数**，
+  注册期不解析任何会话或服务状态（宿主即
+  `statPillInject = () => ({ hooks: { performanceUsage } })`）。会话相关数据一律
+  在**渲染期**取：组件从 standard kit 拿 `sessionId`，经注入的 `resolveSeat`
+  现解析模型目录。
+
+  这一条是 2026-10-29 重构的结论。此前在注册期解析目录，撞上宿主两条机制，
+  两条都表现为「pill 莫名其妙消失、刷新才好」：
+
+  1. `cachedSessionInject` 把 inject 结果按 (entry × 会话绑定)**永久缓存**
+     （`dsh-client-ui-renderer`，无失效路径）——注册瞬间服务没就绪，缺 directory
+     的坏 props 就固化到该会话整页；
+  2. render 期抛错 → `SlotErrorBoundary` → `reportEntryError({ abdicate: true })`
+     → `SlotRegistry.abdicated`（只增不减的 WeakSet）→ 该 entry 永久退出投影。
+
+  现在 `resolveSeat` 永不抛错、拿不到就返回 `undefined`（这一次渲染不显示，
+  下一次 render 自动重试），entry 的存活与任何服务生命周期都无关。
 - 缓存 60s、查询超时 15s、并发读取单飞；失败保留上次数据并脱敏（JWT / `sk-`
   / 查询参数里的 token）。
+
+### 限流与「额度用尽」是两件事
+
+pill 与 provider 卡片都会显示上游 **429 限流**，但两者口径不同、互不替代：
+
+| 状态 | 含义 | 数据来源 | 界面 |
+| --- | --- | --- | --- |
+| `rateLimit` | 通道此刻**拒收请求** | 查询器观测到的 429 响应头 | 「限流中 · {时间} 恢复」或「上游未提供恢复时间」 |
+| 窗口 `remain: 0` | 额度**用完了** | 上游额度接口 | 「0 {unit} 剩余」+ 红色空条 |
+| `resetsAt` | 会回填的窗口何时重置 | 上游额度接口 | 用尽时补在 pill 的 title 上 |
+
+关键约束：**恢复时刻只来自上游响应头**（`Retry-After` / `X-RateLimit-Reset`）。
+拿不到就如实说「未提供」，绝不按固定窗口推算——GLM Coding Plan 的并发限流按
+订阅档位动态调整（官方 rate-limit 文档），根本不存在可推算的窗口。
+
+额度耗尽与「不提供额度查询」也**必须分开**：前者是有额度但用完了，后者是
+上游没有账单接口。查询器用「空 windows + error」表达软失败、用真实窗口表达
+额度，二者不能混。
 
 ## 已知边界
 

@@ -1,6 +1,6 @@
 {
   "name": "@chaoset/provider-usage",
-  "version": "0.2.1-alpha.1",
+  "version": "0.2.1-alpha.3",
   "description": "DSH plugin: show the current LLM provider's remaining quota in the composer dock — a generic querier registry any provider plugin can extend",
   "engines": {
     "node": ">=22.19.0"
@@ -30,8 +30,11 @@
     "client": {
       "platform": "web",
       "inject": [
-        "slots",
-        "locale"
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-model-selection"
       ]
     }
   },

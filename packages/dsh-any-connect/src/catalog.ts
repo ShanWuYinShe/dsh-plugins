@@ -454,6 +454,22 @@ export class WorkBuddyCatalog {
     return this.models.filter(model => this.excludedModelIds.has(model.id)).length
   }
 
+  /**
+   * 被隐藏的模型**完整行**（含名称/窗口/计费/档位），顺序与上游目录一致。
+   *
+   * 卡片要让人「看见隐藏了什么、再单独恢复」，只给数量是不够的——用户报告
+   * 的痛点正是「只能一键全恢复」。这里复用 {@link current} 的同一套促销解析，
+   * 保证隐藏区与可见区对同一个模型显示同一个价格。
+   *
+   * 与 {@link current} 的可见性无关：`visible` 只控制「这个变体有没有可用凭据」，
+   * 隐藏列表是用户自己的配置，未登录时也该能看到自己隐藏过什么。
+   */
+  excludedModels(): readonly WorkBuddyModelInfo[] {
+    return this.models
+      .filter(model => this.excludedModelIds.has(model.id))
+      .map(model => modelWithCurrentPromotion(model, Date.now(), this.kind, this.nightFreeEligible))
+  }
+
   /** Raw un-filtered models list. */
   rawModels(): readonly WorkBuddyModelInfo[] {
     return this.models

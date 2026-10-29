@@ -31,6 +31,18 @@ export interface UsageWindow {
   limit?: number
   /** ISO-8601 instant this window refills, when the provider reports one. */
   resetsAt?: string
+  /**
+   * The window is exhausted right now: the provider refused the last request
+   * for this window and nothing is left in it until `resetsAt`.
+   *
+   * Distinct from `remain: 0` on purpose. A drained balance ("no money left")
+   * and a rate-limit block ("wait N seconds") both read as zero to a progress
+   * bar, but they need different words: one is over until the user tops up, the
+   * other clears itself. Only a querier that actually observed a refusal may
+   * set this — inferring it from `remain: 0` would claim knowledge of the
+   * upstream's admission decision that a balance reading does not carry.
+   */
+  blocked?: boolean
 }
 
 /** One provider's usage answer, as cached and as sent to the browser. */
@@ -57,6 +69,41 @@ export interface UsageSnapshot {
    * dims the readout instead of presenting stale numbers as fresh.
    */
   degraded?: boolean
+  /**
+   * The provider is refusing requests right now for rate reasons, and when it
+   * expects to accept them again.
+   *
+   * Separate from `windows` because the two answer different questions: a
+   * window says how much is left, this says whether the channel admits a
+   * request at all. A provider can be rate limited with plenty of quota left
+   * (concurrency/window caps) — that is the common case for subscription
+   * coding plans. A querier sets it only from an observation it actually made
+   * (a 429/refusal with the upstream's headers), never by guessing a window.
+   */
+  rateLimit?: UsageRateLimit
+}
+
+/**
+ * An observed rate-limit block.
+ *
+ * `resetAt` is present only when the upstream said so (`Retry-After` /
+ * `X-RateLimit-Reset`). Providers that rate-limit by plan concurrency and
+ * adjust it dynamically publish no window at all, so the absence of `resetAt`
+ * is a fact to display, not a gap to fill with a computed guess.
+ */
+export interface UsageRateLimit {
+  /** Epoch milliseconds the block was first observed. */
+  blockedAt: number
+  /** Epoch milliseconds it was most recently observed still blocking. */
+  lastSeenAt: number
+  /** Upstream-declared instant the channel reopens; absent when unstated. */
+  resetAt?: number
+  /** Upstream HTTP status that carried the refusal (429, or 403 for free tiers). */
+  status: number
+  /** Model the refusal was attributed to, when known. */
+  model?: string
+  /** Refusals observed within this continuous block. */
+  hits: number
 }
 
 /** One OAuth/account wallet bucket, amounts already parsed to numbers. */

@@ -263,13 +263,12 @@ describe("client bundles", () => {
     }
   });
 
-  it("provider-usage 额度 pill 挂载 composer dock（注册 + inject 两条取数路径）", async () => {
+  it("provider-usage 额度 pill 挂载 composer dock（对齐宿主 pill 的常量 inject 形状）", async () => {
     // provider-usage 的 client 入口同样只运行时依赖 react 与包内文件（dsh
     // 客户端包全是 type-only 导入），可在此直接 import 真实源码做挂载冒烟。
     const mod = await import("../packages/provider-usage/client/index.tsx");
     const registrations: Array<{ options: any; component?: any }> = [];
-    let injectDeps: string[] = [];
-    // modelDirectories 桩：验证有 session 时 inject 解析出的目录与 lazy load 接线。
+    // modelDirectories 桩：验证组件渲染期经 resolveSeat 解析出目录与 lazy load。
     const directoryStub = { subscribe: () => () => {}, getSnapshot: () => ({}) };
     const directoryLoad = vi.fn(() => Promise.resolve());
     const ctx = {
@@ -284,36 +283,31 @@ describe("client bundles", () => {
         svc === "modelDirectories"
           ? { directoryFor: () => ({ store: directoryStub, load: directoryLoad }) }
           : {},
-      // 同上：provider-usage 在模型目录服务就绪后才注册 dock entry。桩成
-      // "依赖已就绪"，并记录它等的是哪两个依赖，供下方断言接线意图。
-      inject: (deps: string[], callback: (scope: any) => unknown) => {
-        injectDeps = deps;
-        callback(ctx);
-        return () => {};
-      },
     };
     await mod.apply(ctx as any);
-    // entry 注册必须挂在"等模型目录服务"的子 fiber 下：宿主对 entry props 的
-    // 缓存按 entry × 会话绑定永久存活，注册前解析出的 undefined 会固化成一
-    // 整页空白（旧实现缺陷）。这条断言锁住"先等服务、再注册"的顺序。
-    expect(injectDeps).toContain("modelDirectories");
+    // 与宿主自带 pill（dsh-client-ui-chat 的 activity/usage）同一形状：直接
+    // ctx.slots.inject 注册，**不等**任何可选服务。等服务的写法会让 entry 的
+    // 存活与目录服务生命周期耦合，而宿主对 inject 结果永久缓存、对 render 期
+    // 抛错永久 abdicate——两条都表现为「pill 莫名其妙不见了」。
+    // 目录解析下移到组件渲染期（resolveSeat），注册期不碰会话状态。
     const dock = registrations.find((r) => r.options.name === "conversation.composer.dock");
     expect(dock !== undefined && dock.options.id === "provider-usage").toBe(true);
     expect(dock!.options.order).toBe(10);
     // 注册必须携带 pill 组件本体（register 的第二参），缺了 slot 出口无物可渲染。
     expect(typeof dock!.component).toBe("function");
-    // 无 session（dock 注入器未交付 session）→ 只回译写函数，不解析模型目录。
-    const bare = dock!.options.inject();
-    expect(typeof bare.t).toBe("function");
-    expect(bare.directory).toBeUndefined();
-    expect(bare.load).toBeUndefined();
+    // inject 是无参常量：零参数调用即可拿到 props，且不含会话快照。
+    const props = dock!.options.inject();
+    expect(typeof props.t).toBe("function");
+    expect(typeof props.resolveSeat).toBe("function");
+    expect("directory" in props).toBe(false);
+    // resolveSeat 在渲染期解析：无 sessionId 时 undefined（没有可报的账号）。
+    expect(props.resolveSeat(undefined)).toBeUndefined();
     expect(directoryLoad).not.toHaveBeenCalled();
-    // 有 session → 额度目录接线：directory 即 modelDirectories 的 store，
-    // load 包装目录的 lazy load（供 pill 挂载时拉取目录）。
-    const seated = dock!.options.inject("session-1");
-    expect(seated.directory).toBe(directoryStub);
-    expect(typeof seated.load).toBe("function");
-    seated.load();
+    // 有 sessionId → 解析出目录 store 与 lazy load（供 pill 挂载时拉取目录）。
+    const seat = props.resolveSeat("session-1");
+    expect(seat?.directory).toBe(directoryStub);
+    expect(typeof seat?.load).toBe("function");
+    seat!.load();
     expect(directoryLoad).toHaveBeenCalledTimes(1);
   });
 });

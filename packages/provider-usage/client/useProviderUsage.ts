@@ -6,13 +6,13 @@
  * @module provider-usage/状态与取数（订阅目录 + 60s 轮询 + 交互状态）
  */
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { UsageSnapshot } from '../src/types.js'
 import { fetchSnapshot } from './fetch-snapshot.js'
 import { RESOURCE_POLL_INTERVAL_MS, usageResourceAddress } from './resource-provider.js'
 import { isStaleDisplay } from './pill-format.js'
-import { headlineText } from './pill-headline.js'
+import { exhaustedResetText, headlineText } from './pill-headline.js'
 import type { ProviderUsagePillProps } from './pill-types.js'
 
 /** Poll cadence while a session is open; the host caches on the same order. */
@@ -32,8 +32,21 @@ const ABSENT_DIRECTORY: ModelDirectoryState = {
   error: null,
 }
 
-export function useProviderUsage({ t, directory, load, useResource }: ProviderUsagePillProps) {
+export function useProviderUsage({ t, directory: injectedDirectory, load: injectedLoad, useResource, resolveSeat, sessionId }: ProviderUsagePillProps) {
   if (t === undefined) throw new Error('provider-usage: the pill requires its translation function')
+  // 目录在**渲染期**解析，不在注册期（宿主自带 pill 同样如此：它们的 inject 是
+  // 无参常量，会话数据走 standard kit）。resolveSeat 从不抛错，拿不到就返回
+  // undefined，这一次渲染不显示，下一帧自动重试——不存在「坏 props 被永久缓存」
+  // 或「render 抛错被宿主 abdicate」这两条失效路径。
+  //
+  // useMemo 按 sessionId 缓存：同一会话的重渲染不该反复问服务，切换会话才重解析。
+  const seat = useMemo(
+    () => resolveSeat?.(sessionId),
+    [resolveSeat, sessionId],
+  )
+  // 兼容旧注入面：调用方（测试/独立部署）也可以直接给 directory/load。
+  const directory = injectedDirectory ?? seat?.directory
+  const load = injectedLoad ?? seat?.load
   // Subscribe to the same per-session directory the composer's model seat
   // renders from, so a model switch moves the pill with no coordination and a
   // brand-new session (empty durable projection) still reports.
@@ -51,6 +64,7 @@ export function useProviderUsage({ t, directory, load, useResource }: ProviderUs
       load?.()
     }
   }, [state.current, state.status, load])
+
 
   const currentProvider = state.current?.provider
   const lastProviderRef = useRef<string | undefined>(undefined)
@@ -278,6 +292,9 @@ export function useProviderUsage({ t, directory, load, useResource }: ProviderUs
   // 宿主折叠旧答案（degraded）、客户端请求失败、或目录重连中（current 为 null）均视为「数据可能过期」。
   const displayStale = isStaleDisplay(stale || isDisconnected, snapshot)
   const headline = headlineText(effectiveAnswer, provider, displayStale, t)
+  // 额度用尽时补「几点恢复」：这是用户「到什么时候能接着用」的直接答案。
+  // 只在真用尽（remain === 0 且有 resetsAt）时出现，有余额时不打扰。
+  const resetHint = snapshot === undefined ? undefined : exhaustedResetText(snapshot, t)
 
 
   return {
@@ -297,5 +314,6 @@ export function useProviderUsage({ t, directory, load, useResource }: ProviderUs
     queried,
     snapshot,
     headlineText: headline,
+    resetHint,
   }
 }

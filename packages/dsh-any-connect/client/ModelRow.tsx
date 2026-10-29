@@ -14,6 +14,7 @@ import {
   buttonStyle,
   chipStyle,
   deleteButtonStyle,
+  restoreButtonStyle,
   modelBadgesStyle,
   modelRowBaseStyle,
   modelRowEvenStyle,
@@ -29,7 +30,7 @@ import { formatTokens, modelBadgeLabel } from './config-format.js'
  * `<table>`, so tabular figures line up perfectly. Even-indexed rows get a
  * subtle background for visual grouping.
  */
-export function ModelRow({ row, efforts, t, even, onRefresh, onDelete }: {
+export function ModelRow({ row, efforts, t, even, onRefresh, onDelete, onRestore }: {
   row: WorkBuddyWebModelRow
   /** The effort levels the model accepts: declared, or automatically detected. */
   efforts: readonly string[] | undefined
@@ -38,8 +39,15 @@ export function ModelRow({ row, efforts, t, even, onRefresh, onDelete }: {
   even: boolean
   /** 卡片级刷新动作：「价格未知」行就地给一个刷新入口，提示与动作不脱节。 */
   onRefresh?: () => void
-  /** 删除/排除模型动作。 */
+  /** 删除/排除模型动作（可见列表用）。 */
   onDelete?: (modelId: string) => void
+  /**
+   * 恢复单个隐藏模型（隐藏区用）。
+   *
+   * 与 {@link onDelete} 互斥使用：同一行不可能既在可见列表又在隐藏区，
+   * 所以两个回调同时只会有其中一个被传入，动作列永远只有一个按钮。
+   */
+  onRestore?: (modelId: string) => void
 }): React.ReactNode {
   return (
     <tr style={even ? modelRowEvenStyle : modelRowBaseStyle}>
@@ -81,6 +89,17 @@ export function ModelRow({ row, efforts, t, even, onRefresh, onDelete }: {
             onClick={() => onDelete(row.id)}
           >
             {t('deleteModel')}
+          </button>
+        ) : null}
+        {onRestore !== undefined ? (
+          <button
+            type="button"
+            className="wb-btn"
+            style={restoreButtonStyle}
+            title={t('restoreModelHint')}
+            onClick={() => onRestore(row.id)}
+          >
+            {t('restoreModel')}
           </button>
         ) : null}
       </td>

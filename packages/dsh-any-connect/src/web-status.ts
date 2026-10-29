@@ -16,13 +16,13 @@ import type { WorkBuddyModelInfo } from './catalog.js'
 import type { CreditLedgerSummary } from './credit-ledger.js'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { WORKBUDDY_STATUS_PATH } from './status-paths.js'
-import type { WorkBuddyWebCatalog, WorkBuddyWebCreditDay, WorkBuddyWebCreditToday, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStartPlanClaim, WorkBuddyWebStatus } from './status-paths.js'
+import type { WorkBuddyWebCatalog, WorkBuddyWebCreditDay, WorkBuddyWebCreditToday, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebRateLimit, WorkBuddyWebStartPlanClaim, WorkBuddyWebStatus } from './status-paths.js'
 import type { StartPlanPreviewResult } from './zcode-plan-claim.js'
 
 // `WorkBuddyWebStartPlanClaim` 的形状定义在 status-paths.ts（客户端与宿主共用同一
 // 份契约，避免两处各写一遍后漂移）。这里只转出，不再重复声明。
 
-export type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebStartPlanClaim, WorkBuddyWebStatus } from './status-paths.js'
+export type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebRateLimit, WorkBuddyWebStartPlanClaim, WorkBuddyWebStatus } from './status-paths.js'
 
 /** Constructor dependencies. */
 export interface WorkBuddyStatusRouteOptions {
@@ -51,6 +51,13 @@ export interface WorkBuddyStatusRouteOptions {
   catalog: () => WorkBuddyWebCatalog
   /** Resolve the count of excluded models for this variant. */
   excludedCount?: () => number
+  /**
+   * 已隐藏模型的完整行（供卡片逐条恢复）。缺席则不展示隐藏区。
+   *
+   * 与 {@link excludedCount} 并存而非替换：计数用于折叠态的一行摘要，
+   * 完整行只在展开隐藏区时才需要渲染。
+   */
+  excludedModels?: () => readonly WorkBuddyModelInfo[]
   /** Resolve the probe section, for the card's detection controls. Omitted hides it. */
   probe?: () => WorkBuddyWebProbeSection
   /**
@@ -61,6 +68,11 @@ export interface WorkBuddyStatusRouteOptions {
   fetchStartPlanClaim?: (credential: WorkBuddyCredential) => Promise<StartPlanPreviewResult>
   /** In-process key authorizing probe control writes; handed to the card. */
   probeKey: string
+  /**
+   * 当前生效的上游限流（rate-limit.ts 的台账读数）。返回 undefined 即「现在没被限」。
+   * 可选：没有台账的装配（CLI/测试）不展示这一块。
+   */
+  rateLimit?: () => WorkBuddyWebRateLimit | undefined
   /** Route path; one per variant. */
   path: string
 }
@@ -105,13 +117,19 @@ export async function workBuddyWebStatus(
     catalog: deps.catalog(),
     ...deps.excludedCount !== undefined ? { excludedCount: deps.excludedCount() } : {},
     ...deps.probe === undefined ? {} : { probe: deps.probe() },
+    // 限流读在「已登录」分支里：未登录时不存在模型通道，报一个空限流块只会
+    // 让卡片多一行噪音。
+    ...(() => {
+      const rateLimit = deps.rateLimit?.()
+      return rateLimit === undefined ? {} : { rateLimit }
+    })(),
     probeKey: deps.probeKey,
   }
   // One unified row per served model: display name, working window, billing
   // facts, declared efforts, and the larger selectable windows. The rate is
   // normalized here (not in the card) so both halves agree on one display
   // form; the card additionally localizes badge labels.
-  const models: readonly WorkBuddyWebModelRow[] = deps.models().map(model => {
+  const toRow = (model: WorkBuddyModelInfo): WorkBuddyWebModelRow => {
     const rate = model.billing?.free === true ? undefined : normalizeCredits(model.billing?.credits)
     const efforts = model.reasoning?.supportedEfforts
     return {
@@ -125,8 +143,16 @@ export async function workBuddyWebStatus(
       ...model.billing?.rateUnknown === true ? { rateUnknown: true as const } : {},
       ...efforts === undefined || efforts.length === 0 ? {} : { efforts: [...efforts] },
     }
-  })
-  const statusWithModels: WorkBuddyWebStatus = { ...status, models }
+  }
+  const models: readonly WorkBuddyWebModelRow[] = deps.models().map(toRow)
+  // 隐藏区与可见区用**同一个** toRow：同一个模型在两处必须显示同一个价格与
+  // 同一组档位，否则用户会以为隐藏后模型"变了"。
+  const excludedModels = deps.excludedModels?.().map(toRow) ?? []
+  const statusWithModels: WorkBuddyWebStatus = {
+    ...status,
+    models,
+    ...excludedModels.length === 0 ? {} : { excludedModels },
+  }
   const statusWithClaim = { ...statusWithModels, ...await startPlanClaimSection(deps) }
   try {
     if (deps.fetchCredits !== undefined) {

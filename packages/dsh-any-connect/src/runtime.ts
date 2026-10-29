@@ -20,6 +20,9 @@ import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
 import { WorkBuddyCatalogStore, workbuddyCatalogPath } from './catalog-store.js'
 import { createWorkBuddyAdapter } from './adapter.js'
 import { createWorkBuddyShim } from './shim.js'
+import { RateLimitLedger } from './rate-limit.js'
+import type { RateLimitObservation } from './rate-limit.js'
+import type { WorkBuddyWebRateLimit } from './status-paths.js'
 import { WorkBuddyUpstreamClient } from './upstream.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { PROVIDER_VARIANTS } from './variants.js'
@@ -42,6 +45,8 @@ import type { CreditLedger } from './credit-ledger.js'
 /** apply() 拿到的运行时集合句柄。 */
 export interface VariantRuntimeSet {
   readonly runtimes: readonly VariantRuntime[]
+  /** 上游限流台账（shim 写、卡片与 pill 读）。 */
+  readonly rateLimits: RateLimitLedger
   /** `loader/volatile-update`：把新配置推进每个变体并重拉目录。 */
   applyConfiguredAuthFiles(): void
   /** 状态域就绪后注入自有副本的域存取（见 index.ts 的 inject 时序）。 */
@@ -64,6 +69,10 @@ export function createVariantRuntimeSet(deps: {
 }): VariantRuntimeSet {
   const { ctx, client, current } = deps
   let stopped = false
+  // 上游 429 观测台账（进程内）：shim 写入，provider 卡片与 pill 读取。
+  // 一个实例服务全部变体，按 provider 键分开记——用户切模型组时看到的是
+  // 「这一条通道被限了多久、什么时候恢复」。
+  const rateLimits = new RateLimitLedger()
 
   function createRuntime(variant: WorkBuddyVariant): VariantRuntime {
     const filterStore = new ModelFilterStore(variant.id)
@@ -90,7 +99,7 @@ export function createVariantRuntimeSet(deps: {
         onWarning: message => ctx.logger?.warn?.(message),
       })
       const catalogStore = new WorkBuddyCatalogStore({ path: workbuddyCatalogPath(variant.catalogFilename) })
-      const shim = createWorkBuddyShim({ kind: 'zcode', store: credentialStore, client: zcodeClient, catalog, logger: ctx.logger })
+      const shim = createWorkBuddyShim({ kind: 'zcode', providerId: variant.id, store: credentialStore, client: zcodeClient, catalog, logger: ctx.logger, rateLimits })
       const runtime: VariantRuntime = {
         variant, store: credentialStore, catalog, shim,
         client: zcodeClient, credentialStore, catalogStore,
@@ -121,7 +130,7 @@ export function createVariantRuntimeSet(deps: {
         onWarning: message => ctx.logger?.warn?.(message),
       })
       const catalogStore = new WorkBuddyCatalogStore({ path: workbuddyCatalogPath(variant.catalogFilename) })
-      const shim = createWorkBuddyShim({ kind: 'opencode', store: credentialStore, client: opencodeClient, catalog, logger: ctx.logger })
+      const shim = createWorkBuddyShim({ kind: 'opencode', providerId: variant.id, store: credentialStore, client: opencodeClient, catalog, logger: ctx.logger, rateLimits })
       const runtime: VariantRuntime = {
         variant, store: credentialStore, catalog, shim,
         client: opencodeClient, credentialStore, catalogStore,
@@ -150,7 +159,7 @@ export function createVariantRuntimeSet(deps: {
       pluginVersion: ANYCONNECT_VERSION,
       path: workbuddyProbePath(variant.probeFilename),
     })
-    const shim = createWorkBuddyShim({ kind: 'workbuddy', store: credentialStore, client, catalog, logger: ctx.logger })
+    const shim = createWorkBuddyShim({ kind: 'workbuddy', providerId: variant.id, store: credentialStore, client, catalog, logger: ctx.logger, rateLimits })
     const runtime: VariantRuntime = {
       variant, store: credentialStore, catalog, shim,
       client, credentialStore, catalogStore, probeStore,
@@ -235,6 +244,13 @@ export function createVariantRuntimeSet(deps: {
         // 没有账号计划可领，报一个恒为 none 的字段只会误导。
         ...variantIsStartPlan(runtime.variant) ? { fetchStartPlanClaim: lifecycle.claimPreviewFor(runtime) } : {},
         excludedCount: () => runtime.catalog.excludedCount(),
+        // 隐藏区数据：让用户看见隐藏了什么并能逐条恢复（而不是只能一键全恢复）。
+        excludedModels: () => runtime.catalog.excludedModels(),
+        // 上游限流读数：卡片据此说「被限多久、几点恢复（或恢复时间未知）」。
+        rateLimit: () => {
+          const active = rateLimits.activeFor(runtime.variant.id)
+          return active === undefined ? undefined : toWebRateLimit(active)
+        },
         probeKey,
       })
       registerWorkBuddyProbeRoute(webCtx, {
@@ -266,6 +282,15 @@ export function createVariantRuntimeSet(deps: {
           runtime.catalog.setExcludedModelIds(runtime.filterStore?.getExcluded() ?? [])
           lifecycle.publishCatalog(runtime)
           return { state: 'ok', excludedCount: runtime.catalog.excludedCount() }
+        },
+        restoreModel: async (modelId: string) => {
+          if (stopped) return { state: 'failed', excludedCount: runtime.catalog.excludedCount() }
+          const restored = await runtime.filterStore?.restoreOne(modelId) ?? false
+          // 以 store 的真实状态回填（而不是「恢复成功就清空」）：一键恢复与单条
+          // 恢复可能交错，只信 store 才不会让 catalog 与持久化文件漂移。
+          runtime.catalog.setExcludedModelIds(runtime.filterStore?.getExcluded() ?? [])
+          lifecycle.publishCatalog(runtime)
+          return { state: 'ok', restored, excludedCount: runtime.catalog.excludedCount() }
         },
         restoreModels: async () => {
           if (stopped) return { state: 'failed', excludedCount: runtime.catalog.excludedCount() }
@@ -411,5 +436,22 @@ export function createVariantRuntimeSet(deps: {
     for (const runtime of runtimes) runtime.ledger = ledger
   }
 
-  return { runtimes, applyConfiguredAuthFiles, setState, setLedger, start, dispose }
+  return { runtimes, applyConfiguredAuthFiles, setState, setLedger, start, dispose, rateLimits }
+}
+
+/**
+ * 台账观测 → 卡片文档。
+ *
+ * 刻意逐字段搬运而不是展开对象：文档契约在 status-paths.ts 里是对外的
+ * 稳定面，台账内部形状（`kind`/`provider` 等诊断字段）不该顺带漏出去。
+ */
+function toWebRateLimit(observation: RateLimitObservation): WorkBuddyWebRateLimit {
+  return {
+    blockedAt: observation.blockedAtMs,
+    lastSeenAt: observation.lastSeenAtMs,
+    ...observation.resetAtMs === undefined ? {} : { resetAt: observation.resetAtMs },
+    status: observation.status,
+    ...observation.model === undefined ? {} : { model: observation.model },
+    hits: observation.hits,
+  }
 }

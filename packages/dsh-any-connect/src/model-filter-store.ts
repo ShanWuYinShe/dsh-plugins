@@ -56,9 +56,34 @@ export class ModelFilterStore {
     await this.save()
   }
 
-  async restore(): Promise<void> {
+  /**
+   * 恢复单个模型。
+   *
+   * 与 {@link restore} 的差别不是便利性，是**误伤范围**：一键恢复会把用户
+   * 之前刻意隐藏的模型全部放回列表，想保持原样就得再逐个隐藏一遍。用户报告
+   * 的正是这个场景，所以单条恢复是主路径，全量恢复只作为「清空重来」的出口。
+   *
+   * @param modelId - 要恢复的模型 id。
+   * @returns 该模型此前是否确实处于隐藏状态（false 表示本来就没隐藏）。
+   */
+  async restoreOne(modelId: string): Promise<boolean> {
+    const trimmed = modelId.trim()
+    if (trimmed === '') return false
+    if (!this.excluded.delete(trimmed)) return false
+    await this.save()
+    return true
+  }
+
+  /**
+   * 恢复全部隐藏模型。
+   *
+   * @returns 恢复前处于隐藏状态的模型 id（供调用方回报影响范围）。
+   */
+  async restore(): Promise<readonly string[]> {
+    const restored = Array.from(this.excluded)
     this.excluded.clear()
     await this.save()
+    return restored
   }
 
   private async save(): Promise<void> {

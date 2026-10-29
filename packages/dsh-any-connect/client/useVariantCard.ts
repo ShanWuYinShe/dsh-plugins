@@ -30,6 +30,7 @@ import { formatNumber } from './config-format.js'
 type ProbeAction =
   | { action: 'refresh' }
   | { action: 'delete-model'; modelId: string }
+  | { action: 'restore-model'; modelId: string }
   | { action: 'restore-models' }
 
 export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus, applyStatus }: {
@@ -53,6 +54,9 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
   }, [notice])
   // 模型清单默认收起：它是最长的一段，而卡片的常看信息只有积分本身。
   const [modelsOpen, setModelsOpen] = useState(false)
+  // 隐藏区默认收起：它是「找回来」的入口，不是日常查看的对象，展开会挤占
+  // 可见模型列表。有隐藏项时标题行始终显示数量，用户知道它存在。
+  const [excludedOpen, setExcludedOpen] = useState(false)
   // 「已复制」是短暂反馈：复制成功给一次确认，2s 后自行复原，不留陈旧状态。
   const [copiedPlanId, setCopiedPlanId] = useState(false)
   const mounted = useRef(true)
@@ -66,6 +70,16 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
   const probeKey = status.probeKey
   /** 今日 Start Plan 待领取探测结果；只有 Start Plan 变体的 status 会带。 */
   const startPlanClaim: WorkBuddyWebStartPlanClaim | undefined = status.startPlanClaim
+  /** 当前上游限流（429 观测）；缺席即「现在没被限」。 */
+  const rateLimit = status.rateLimit
+  /**
+   * 已隐藏模型的完整行。
+   *
+   * 只拿 excludedCount 时用户唯一能做的就是「一键全部恢复」——多数情况他只想
+   * 放回其中一两个，全恢复后还得把其余重新隐藏一遍。完整行让隐藏区能逐条渲染
+   * 恢复按钮。
+   */
+  const excludedModels = status.excludedModels ?? []
 
   /**
    * 把 plan_id 复制到剪贴板（用户要拿着它去客户端核对领取的活动）。
@@ -156,6 +170,20 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     setNotice(undefined)
     try {
       await control({ action: 'delete-model', modelId })
+    } catch (error: unknown) {
+      if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
+    } finally {
+      await refresh()
+      if (mounted.current) setBusy(false)
+    }
+  }, [control, refresh, t])
+
+  /** 恢复单个隐藏模型（用户主路径：只放回想要的那几个）。 */
+  const restoreModel = useCallback(async (modelId: string): Promise<void> => {
+    setBusy(true)
+    setNotice(undefined)
+    try {
+      await control({ action: 'restore-model', modelId })
     } catch (error: unknown) {
       if (mounted.current) setNotice(error instanceof Error ? error.message : t('requestFailed'))
     } finally {
@@ -287,9 +315,12 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     notice,
     modelsOpen,
     setModelsOpen,
+    excludedOpen,
+    setExcludedOpen,
     copiedPlanId,
     probe,
     startPlanClaim,
+    rateLimit,
     copyPlanId,
     refresh,
     refreshWithCatalog,
@@ -307,6 +338,9 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     catalogOffline,
     effortsOf,
     deleteModel,
+    restoreModel,
     restoreModels,
+    /** 已隐藏模型的完整行（卡片隐藏区逐条渲染）。 */
+    excludedModels,
   }
 }
