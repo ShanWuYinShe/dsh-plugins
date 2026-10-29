@@ -1,3 +1,13 @@
+## 0.4.28-alpha.2 (2026-10-29)
+
+### 重构
+
+* **适配 DSH 宿主 `0.2.2-alpha.2` 契约**：`dsh.host` → 官方 `engines.dsh`（`^0.2.2-alpha.2`）；`engines.node` 提升到 `>=24.9.0`；补 `dsh.manifestVersion: 1`；`dsh.client.inject` 由 cordis 服务名改为真实客户端包名（`@deepseek-ai/dsh-client-ui-renderer` / `dsh-client-locale` / `dsh-api-remotes`）并声明 devDependencies。
+* **Typert 工件改官方生成器产出**：`./typert`（宿主工件）与 `./remote`（客户端调用面）由 `@deepseek-ai/dsh-typert-generator` 在构建期生成；删除手写 `typert.host.ts`、`typert-loader.ts`（createRequire 多级 fallback + 手写装饰器模拟）与 `gateway.ts` 的动态 import 兜底。
+* **Remote 服务面 @Remote 装饰器化**：`src/remote.ts` 直接 `import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'`，方法参数/返回类型收敛到新增的 `src/types.ts`（`./types` 子路径）；客户端改为消费生成的 `./remote` 工件，删除手写 `REMOTE_CONTRIBUTION` 与 passthrough codec。
+* **清除旧兼容实现**：删除 `legacy-migrate.ts` 与 `config-store.ts` 的旧版 `config.json` 迁移（配置只走官方 config-editor）；官方 sandbox 依赖改静态导入（`@deepseek-ai/dsh-sandbox` 的 `canonicalPath`/`writableRoots`），移除 profile 依赖树/createRequire 回退与模块求值期 await；`src/dsh.d.ts` 收敛为 `sandboxPolicy.resolve` 的最小 augmentation（引用官方 `SandboxExecutionPolicy` 并注明出处）。
+* **Landlock 启动器换官方新包**：`@deepseek-ai/node-addon-landlock-run` 已不在 0.2.2 宿主安装内，改依赖 `@deepseek-ai/node-addon-system/landlock-run`（官方 `launcherPath`/`grantArgs` 契约不变）。
+
 ## 0.4.28-alpha.1 (2026-10-29)
 
 ### 修复

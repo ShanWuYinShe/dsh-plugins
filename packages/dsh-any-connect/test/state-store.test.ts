@@ -1,10 +1,9 @@
 /**
  * state-store.test.ts — 自有凭据副本的状态域（storageDomain）持久化回归。
  *
- * 覆盖三块（2026-10-11 迁移，见 src/state-store.ts）：
- * 1. standalone 存取（CLI 与插件同一存储单元）的写/读/改/删闭环；
- * 2. 旧散文件迁移：根布局搬进域、搬完删源；
- * 3. 迁移边界：回落目录副本优先于旧根副本、损坏文件原样保留、空迁移 no-op。
+ * 覆盖 standalone 存取（CLI 与插件同一存储单元）的写/读/改/删闭环与类型化
+ * 校验。旧散文件迁移（根布局 → 域）已随 0.2.2-alpha.2 适配删除（见
+ * src/state-store.ts 模块注释），不再有迁移用例。
  *
  * domainStateStore（宿主 Domain 句柄包装）不经单测：Domain 实例只能由宿主
  * DomainFacility.open 构造，其表语义（get/put/delete）在 storage-domain 包内
@@ -14,15 +13,11 @@
  * @module dsh-any-connect/state-store-test
  */
 
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  migrateLegacyCredentialFiles,
-  openStandaloneStateStore,
-} from '../src/state-store.js'
-import { legacyOwnAuthPath, workbuddyOwnAuthPath } from '../src/auth-paths.js'
+import { openStandaloneStateStore } from '../src/state-store.js'
 
 let root: string | undefined
 
@@ -39,20 +34,6 @@ const BASE_CREDENTIAL = {
   domain: 'example.com',
   uid: 'u1',
   source: 'dsh' as const,
-}
-
-/** 旧根布局的 ownDocument 形态（version 包装，见 auth-document.ts）。 */
-function legacyDocument(uid: string): string {
-  return `${JSON.stringify({ version: 1, credential: { ...BASE_CREDENTIAL, uid } }, null, 2)}\n`
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await readFile(path, 'utf8')
-    return true
-  } catch {
-    return false
-  }
 }
 
 describe('state-store', () => {
@@ -91,83 +72,6 @@ describe('state-store', () => {
     try {
       // accessToken 缺失 → schema 拒绝（类型化持久化的核心承诺）。
       await expect(state.write('workbuddy', { ...BASE_CREDENTIAL, accessToken: undefined as unknown as string })).rejects.toThrow()
-    } finally {
-      await state.close()
-    }
-  })
-
-  it('migrate: legacy root files move into the domain and are removed', async () => {
-    root = await mkdtemp(join(tmpdir(), 'wb-state-mig-'))
-    vi.stubEnv('DSH_HOME', root)
-    await mkdir(join(root, '.dsh-any-connect'), { recursive: true })
-    await writeFile(legacyOwnAuthPath('.workbuddy-auth.json'), legacyDocument('legacy'), 'utf8')
-    await writeFile(legacyOwnAuthPath('.zcode-sp-auth.json'), legacyDocument('legacy-sp'), 'utf8')
-
-    const state = await openStandaloneStateStore()
-    try {
-      const migrated = await migrateLegacyCredentialFiles(state, legacyOwnAuthPath, workbuddyOwnAuthPath)
-      expect(migrated).toContain(legacyOwnAuthPath('.workbuddy-auth.json'))
-      expect(migrated).toContain(legacyOwnAuthPath('.zcode-sp-auth.json'))
-      // 源文件已删、域里可读。
-      expect(await exists(legacyOwnAuthPath('.workbuddy-auth.json'))).toBe(false)
-      expect((await state.read('workbuddy'))?.uid).toBe('legacy')
-      expect((await state.read('zcode-start-plan'))?.uid).toBe('legacy-sp')
-    } finally {
-      await state.close()
-    }
-  })
-
-  it('migrate: the fallback-dir copy wins over the legacy-root copy of the same variant', async () => {
-    root = await mkdtemp(join(tmpdir(), 'wb-state-both-'))
-    vi.stubEnv('DSH_HOME', root)
-    await mkdir(join(root, '.dsh-any-connect'), { recursive: true })
-    await writeFile(legacyOwnAuthPath('.workbuddy-auth.json'), legacyDocument('from-root'), 'utf8')
-    await writeFile(workbuddyOwnAuthPath('.workbuddy-auth.json'), legacyDocument('from-fallback'), 'utf8')
-
-    const state = await openStandaloneStateStore()
-    try {
-      await migrateLegacyCredentialFiles(state, legacyOwnAuthPath, workbuddyOwnAuthPath)
-      // 回落目录的那份是更晚的回落写，必须胜出；两处源文件都被清掉。
-      expect((await state.read('workbuddy'))?.uid).toBe('from-fallback')
-      expect(await exists(legacyOwnAuthPath('.workbuddy-auth.json'))).toBe(false)
-      expect(await exists(workbuddyOwnAuthPath('.workbuddy-auth.json'))).toBe(false)
-    } finally {
-      await state.close()
-    }
-  })
-
-  it('migrate: an unreadable legacy file is kept untouched and does not block the rest', async () => {
-    root = await mkdtemp(join(tmpdir(), 'wb-state-broken-'))
-    vi.stubEnv('DSH_HOME', root)
-    await mkdir(join(root, '.dsh-any-connect'), { recursive: true })
-    await writeFile(legacyOwnAuthPath('.workbuddy-auth.json'), '{ not json', 'utf8')
-    await writeFile(legacyOwnAuthPath('.workbuddy-ai-auth.json'), legacyDocument('ai'), 'utf8')
-    const warnings: string[] = []
-
-    const state = await openStandaloneStateStore()
-    try {
-      const migrated = await migrateLegacyCredentialFiles(
-        state,
-        legacyOwnAuthPath,
-        workbuddyOwnAuthPath,
-        message => warnings.push(message),
-      )
-      // 损坏文件原样保留（绝不吞掉用户的落盘副本），可读的照常搬。
-      expect(await exists(legacyOwnAuthPath('.workbuddy-auth.json'))).toBe(true)
-      expect(migrated).toContain(legacyOwnAuthPath('.workbuddy-ai-auth.json'))
-      expect((await state.read('workbuddy-ai'))?.uid).toBe('ai')
-      expect(warnings.some(message => message.includes('.workbuddy-auth.json'))).toBe(true)
-    } finally {
-      await state.close()
-    }
-  })
-
-  it('migrate: no legacy files is a no-op', async () => {
-    root = await mkdtemp(join(tmpdir(), 'wb-state-none-'))
-    vi.stubEnv('DSH_HOME', root)
-    const state = await openStandaloneStateStore()
-    try {
-      expect(await migrateLegacyCredentialFiles(state, legacyOwnAuthPath, workbuddyOwnAuthPath)).toEqual([])
     } finally {
       await state.close()
     }

@@ -11,10 +11,10 @@
 ## 效果
 
 在 composer 底部状态栏出现一个形如 `workbuddy 23 credits left` 的 pill
-（provider 键 + 剩余摘要），点击展开抽屉查看明细：每个计费包一行图形化
+（provider 键 + 剩余摘要），点击展开浮层面板查看明细：每个计费包一行图形化
 进度条，标注套餐名、余量/总量（`23 / 100`）、重置时间，进度条颜色随
-余量分三档告警。WorkBuddy 的多个裂变包会汇总为一行「总计」，逐包明细
-在设置页的插件卡片查看。
+余量分三档告警。同时安装 `dsh-any-connect` 时，WorkBuddy 的多个计费包会汇总为
+一行「总计」，逐包明细在设置页的插件卡片查看。
 
 - **当前 provider 来源**：会话的模型目录（`ctx.modelDirectories`），与 composer
   的模型选择器同源——切换模型时 pill 跟随变化，无需额外协调。
@@ -22,6 +22,8 @@
 - **查询失败**：保留上次成功的数据并标注错误，不把用户正在看的数字抹掉。
 - **不消耗额度**：只调用各 provider 的**只读**余额接口，60s 缓存 + 并发单飞
   （多个读取共用一次请求）。
+- **单一数据通道**：额度经宿主 resources 模型的 live 流（协议 `provider-usage`）
+  读取，由 resources 服务统一轮询；组件内不存在第二条轮询/兜底路径。
 
 ## 安装
 
@@ -31,7 +33,7 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 
 `<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。
 
-前置：DSH 宿主版本见本包 `package.json` 的 `dsh.host` 字段。
+前置：DSH 宿主版本见本包 `package.json` 的 `engines.dsh`（0.2.2-alpha.2 起为 `^0.2.2-alpha.2`）；宿主 0.2.2 起要求 Node.js >= 24.9。
 
 ## 内置查询器
 
@@ -53,7 +55,10 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 
 ## 为其他 provider 注册查询器
 
-任何插件的 host 半侧都可以注册（`provider` 即 DSH 的 provider 路由 id）：
+任何插件的 host 半侧都可以注册（`provider` 即 DSH 的 provider 路由 id）。
+本包入口只保留 Loader 面（`name` / `inject` / `apply`）；TypeScript 下让编译器
+看到 `ctx.providerUsage` 的服务声明即可（例如 `import type {} from '@chaoset/provider-usage'`），
+类型与实现模块不从入口转出：
 
 ```ts
 ctx.inject(['providerUsage'], usageCtx => {
@@ -96,6 +101,7 @@ interface UsageWindow {
   unit: string          // 单位：credits / usd / cny / requests…
   limit?: number        // 窗口上限；缺省表示「只有剩余量」（余额），不是「上限为 0」
   resetsAt?: string     // ISO-8601 重置时刻；有它表示会回填的限额
+  blocked?: boolean     // 上游此次确认拒收（与「余额为 0」不同）
 }
 ```
 
@@ -105,7 +111,11 @@ interface UsageWindow {
   `/plugins/provider-usage/usage` 暴露同域只读路由（仅回环 Origin，与
   dsh-any-connect 的状态路由同一姿态）。
 - browser 半侧把 pill 注册进 `conversation.composer.dock`（list slot，
-  `order: 10`，排在宿主自带 `stats` 之后），按当前 provider 轮询路由。
+  `order: 10`，排在宿主自带的 activity / usage pill（order 0 / 1）之后），并为协议 `provider-usage` 注册
+  ResourceProvider：流首帧立即、之后每 60s 读一次同域路由，pill 用 standard
+  kit 的 `useResource` 消费这条 live 流。resources 由本包 `dsh.client.inject`
+  与 Cordis `inject` 双重声明为硬依赖，因此没有「resources 缺席时退回组件
+  内轮询」的降级路径。
 - **注册形状对齐宿主自带的 activity / usage pill**：`inject` 是**无参常量函数**，
   注册期不解析任何会话或服务状态（宿主即
   `statPillInject = () => ({ hooks: { performanceUsage } })`）。会话相关数据一律
@@ -134,6 +144,7 @@ pill 与 provider 卡片都会显示上游 **429 限流**，但两者口径不�
 | --- | --- | --- | --- |
 | `rateLimit` | 通道此刻**拒收请求** | 查询器观测到的 429 响应头 | 「限流中 · {时间} 恢复」或「上游未提供恢复时间」 |
 | 窗口 `remain: 0` | 额度**用完了** | 上游额度接口 | 「0 {unit} 剩余」+ 红色空条 |
+| 窗口 `blocked: true` | 上游对**该窗口**确认拒收（与「余额读数为 0」不同） | 查询器实际观测到的拒绝 | 展开面板该行显示「已用尽」 |
 | `resetsAt` | 会回填的窗口何时重置 | 上游额度接口 | 用尽时补在 pill 的 title 上 |
 
 关键约束：**恢复时刻只来自上游响应头**（`Retry-After` / `X-RateLimit-Reset`）。

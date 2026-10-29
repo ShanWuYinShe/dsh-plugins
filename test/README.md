@@ -29,13 +29,12 @@
 | `comment-references.test.ts` | 注释里的「见 <文件>」「见 <符号>」都真实存在 |
 | `export-surface.test.ts` | 非入口模块的值转发导出必须真的有人从这个模块导入（包外消费者登记白名单） |
 | `internal-dead-code.test.ts` | 未导出的顶层声明必须在同文件里被用到 |
-| `declared-deps.test.ts` | `devDependencies` 里的每个包都要在包内源码中出现（声明了不用 = 依赖清单不可信） |
+| `declared-deps.test.ts` | `devDependencies` 里的每个包都要在包内源码中出现（声明了不用 = 依赖清单不可信；客户端 inject 提供方与 Typert 工件的运行时依赖登记在 ALLOWED_UNREFERENCED 并写明理由） |
 | `client-inject-manifest.test.ts` | 清单里的 `dsh.client.inject` 写的是**客户端包名**（模块图依赖），不是 cordis 服务名——写错会被 `graphRows.get()` 静默跳过、悄悄失去加载顺序保证 |
 | `locale-keys.test.ts` | 文案 key 都有引用；同一包内 en 与 zh 的键集完全一致 |
 | `css-classes.test.ts` | 样式表里的每个类名都在本包 client 源码里出现 |
 | `css-tokens.test.ts` | 插件手写的样式只引用宿主真实存在的 CSS 变量 |
-| `typert-surface-parity.test.ts` | 宿主 `remote.ts` ↔ `typert.host.ts` ↔ 浏览器 `REMOTE_CONTRIBUTION` 三面一致 |
-| `bundle.test.ts` | 构建产物与元数据：字节一致文件、client bundle 冒烟、四个包的兜底边界、files 清单有货 |
+| `bundle.test.ts` | 构建产物与元数据：manifest 契约（engines.dsh / manifestVersion / client inject / exports 标准键）、Typert 工件导出与产物齐全、client bundle 冒烟、四个包的兜底边界、files 清单有货 |
 | `loopback-parity.test.ts` | 两个包各自持有的回环守卫不许静默分叉；差异须逐项登记在根 test 的真值表里——当前是 provider-usage 委托宿主后的 4 项放宽 + 空串 Origin 这一处收紧 |
 | `skill-facts.test.ts` | 技能文档里引用的标识符在实现里真实存在（外部事实走 `EXTERNAL_FACTS` 白名单） |
 | `wait-for-budget.test.ts` | 每个 `vi.waitFor` 都显式声明 timeout（默认 1s 而 testTimeout 是 30s） |
@@ -49,6 +48,11 @@
 目录里另有 5 个**普通脚本测试**，不是守卫锁、不在此表：`dep-collect` /
 `dsh-deps` / `publish-gate` / `scripts-cli` / `version-checks`（测的是
 `scripts/` 的行为，不是架构不变式）。
+
+> **Typert 工件不再有手写三面一致锁**（原 `typert-surface-parity.test.ts` 已删）：
+> 2026-10-29 起 `./typert` / `./remote` 由官方 `@deepseek-ai/dsh-typert-generator`
+> 从 `@Remote` 装饰器与服务方法签名生成，「手写工件 ↔ 装饰器」的漂移面在结构上
+> 不再存在；生成失败会让 `bun run build` 直接失败。
 
 ## 写一把新锁时的约定
 

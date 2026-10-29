@@ -22,9 +22,6 @@ import { WindowRow } from './WindowRow.js'
 import { useProviderUsage } from './useProviderUsage.js'
 import type { ProviderUsagePillProps } from './pill-types.js'
 
-// 入口（index.tsx）从本模块取注入面类型：再导出以保持既有导入路径不变。
-export type { ProviderUsagePillInjected, ProviderUsagePillProps } from './pill-types.js'
-
 /**
  * The usage pill itself.
  *
@@ -101,7 +98,7 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
               aria-label={busy ? t('refreshing') : t('refresh')}
               // 手动刷新要真刷新:force 让宿主绕过缓存读——否则轮询间隔与
               // 宿主 TTL 同为 60s,缓存恒新鲜,按钮永远拿回上一轮轮询的数。
-              onClick={() => { void refresh(undefined, { force: true }) }}
+              onClick={() => { void refresh() }}
             >
               <svg
                 className={busy ? 'pu-spin-icon' : undefined}

@@ -81,7 +81,7 @@ export interface VariantRuntime {
   filterStore?: ModelFilterStore
   /**
    * 今日消耗台账（credit-ledger.ts）：宿主状态域就绪后由 setLedger 后补注入。
-   * 只有积分制变体（kind 'workbuddy'）消费它；缺席（老宿主/注入前窗口/域
+   * 只有积分制变体（kind 'workbuddy'）消费它；缺席（存储域不可用/注入前窗口/域
    * 不可用）时今日统计整体降级为「无」，不影响其余链路。
    */
   ledger?: CreditLedger | undefined

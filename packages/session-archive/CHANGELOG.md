@@ -1,3 +1,12 @@
+## 0.3.32-alpha.2 (2026-10-29)
+
+### 重构
+
+* **适配 DSH 宿主 `0.2.2-alpha.2` 契约**：`dsh.host` → 官方 `engines.dsh`（`^0.2.2-alpha.2`）；`engines.node` 提升到 `>=24.9.0`；补 `dsh.manifestVersion: 1`；`dsh.client.inject` 由 cordis 服务名改为真实客户端包名（`@deepseek-ai/dsh-client-ui-renderer` / `dsh-client-locale` / `dsh-api-remotes` / `dsh-api-workspace-controller` / `dsh-api-session-controller`）并声明 devDependencies。
+* **Typert 工件改官方生成器产出**：`./typert` 与 `./remote` 由 `@deepseek-ai/dsh-typert-generator` 在构建期生成；删除手写 `typert.host.ts`、`typert-loader.ts`（createRequire 多级 fallback + 手写装饰器模拟）、入口的动态 import 兜底与类型别名 `dsh.d.ts`；入口不再导出测试便利值 `createArchiveHost`（测试改相对路径导入）。
+* **Remote 服务面 @Remote 装饰器化**：`src/remote.ts` 直接 `import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'`（`super(ctx, 'sessionArchive')` 字面量服务键），方法参数/返回类型收敛到新增的 `src/types.ts`（`./types` 子路径）；客户端改为消费生成的 `./remote` 工件，删除手写 `REMOTE_CONTRIBUTION` 与 passthrough codec。
+* **清除旧兼容实现**：删除 `legacy-migrate.ts` 与未使用的 `config-store.ts`（会话归档没有配置保存入口；配置迁移随旧版删除）；`archive-host-queries` 的消息时间标注改为官方 `number` 以对齐 Remote 边界类型。
+
 ## 0.3.32-alpha.1 (2026-10-29)
 
 ### 文档

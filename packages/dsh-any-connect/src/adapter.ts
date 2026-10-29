@@ -222,8 +222,13 @@ export function reasoningFields(
   return { reasoning: true, thinkingLevelMap: map as ThinkingLevelMap }
 }
 
-/** Build one pi-ai model descriptor pointing at the loopback shim. */
-function toPiModel(
+/**
+ * Build one pi-ai model descriptor pointing at the loopback shim.
+ *
+ * Exported for the package's own contract tests（同包测试走相对路径 import，
+ * 不经包入口——入口只保留 Loader 四导出）。不供宿主/其它包使用。
+ */
+export function toPiModel(
   info: WorkBuddyModelInfo,
   baseUrl: string,
   providerId: string,
@@ -239,11 +244,24 @@ function toPiModel(
     input: info.supportsImages === true ? ['text', 'image'] : ['text'],
     ...reasoningFields(info, observe?.(info.id)),
     cost: NO_COST,
+    // 容量必须显式声明：DSH 0.2.2 起「未声明容量的自定义模型」默认按十进制
+    // 1M 上下文 / 128K 输出（release notes「其他变更」），本插件不能依赖那个
+    // 默认值。目录每行都带真实容量——FALLBACK_* 常量、上游响应解析
+    // （parseModelRow 对 maxInput/maxOutput 缺失或非正的行直接丢弃）、saved
+    // 目录校验（catalog-store 的 isModel 要求两个字段是有限数字）、未知模型的
+    // 保守默认（200K / 32K，见 defaultZCodeModelInfo / startPlanModelInfo）——
+    // 所以这里透传即可；test/capacity.test.ts 锁住这条不变量。
     contextWindow: info.contextWindow,
     maxTokens: info.maxTokens,
-    compat: {
-      supportsDeveloperRole: false,
-    },
+    // `compat` 是 pi-ai 的官方 `Model.compat`（openai-completions 通道取
+    // `OpenAICompletionsCompat`，见 pi-ai 1.3.0+/dist/providers/compat-schema.d.ts），
+    // 不是本仓自造的兼容字段：该分发在 `model.reasoning && compat.supportsDeveloperRole`
+    // 为真时把系统提示词发成 `role: "developer"`，而 WorkBuddy 网关对该角色回
+    // HTTP 400 code 11128，所以从源头上声明 `false` 让它发 `system`（shim 的
+    // normalizeDeveloperRole 仍作为第二道防线兜住别处混入的 developer）。
+    // anthropic-messages 协议没有 developer 角色（其 compat 类型里也没有这个
+    // 字段），因此只对 OpenAI 形通道声明。
+    ...api === 'openai-completions' ? { compat: { supportsDeveloperRole: false } } : {},
   } as unknown as Model<Api>
 }
 

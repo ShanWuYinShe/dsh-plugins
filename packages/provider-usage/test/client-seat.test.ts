@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 
 /**
- * 注册形状回归（「pill 有时候不显示，刷新页面或重开插件才行」）。
+ * 注册形状与数据通道路径回归（「pill 有时候不显示，刷新页面或重开插件才行」）。
  *
  * 对照宿主自带的两个 pill（dsh-client-ui-chat 的 activity / usage）：它们的
  * `inject` 是**无参常量函数** `() => ({ hooks: { performanceUsage } })`，注册期
@@ -18,7 +18,9 @@ import { Context } from '@deepseek-ai/cordis'
  *    → `SlotRegistry.abdicated`（只增不减的 WeakSet）→ entry 永久退出投影。
  *
  * 现在改成同一形状：`inject` 无参且恒定，目录在组件渲染期经 `resolveSeat`
- * 现取。这里用**真实 cordis Context** 装载真实入口模块，锁住这个形状。
+ * 现取。同时锁住唯一的额度数据通道：apply 必须把协议 'provider-usage' 的
+ * ResourceProvider 注册到 ctx.resources（不再有组件内轮询兜底）。
+ * 这里用**真实 cordis Context** 装载真实入口模块，锁住这两个形状。
  */
 
 /** 目录服务桩：store 是 props 交付给 pill 的目录快照源，load 记调用次数。 */
@@ -76,6 +78,20 @@ function makeLocale(): unknown {
   }
 }
 
+/** resources 服务桩：记录协议 provider 注册，返回幂等 disposer。 */
+function makeResources(): { service: unknown; protocols: string[] } {
+  const protocols: string[] = []
+  return {
+    protocols,
+    service: {
+      register: (provider: { protocol: string }) => {
+        protocols.push(provider.protocol)
+        return () => {}
+      },
+    },
+  }
+}
+
 /** 让出若干微任务 + 一拍宏任务，等 cordis 的 fiber 结算（_reload 先 await 一拍）。 */
 async function settle(): Promise<void> {
   for (let i = 0; i < 5; i += 1) await Promise.resolve()
@@ -84,7 +100,7 @@ async function settle(): Promise<void> {
 }
 
 /**
- * 只提供 slots/locale（不给 modelDirectories），装载真实入口模块。
+ * 只提供 slots/locale/resources（不给 modelDirectories），装载真实入口模块。
  *
  * @param faults - 透传给 slots 桩的故障注入开关。
  */
@@ -92,18 +108,21 @@ async function mountEntry(faults: { throwOnRegister?: boolean } = {}): Promise<{
   ctx: Context
   registrations: Array<{ options: any; component: unknown }>
   directories: ReturnType<typeof makeDirectories>
+  resources: ReturnType<typeof makeResources>
   load: Promise<unknown>
 }> {
   const mod = (await import('../client/index.tsx')) as unknown as { apply: (ctx: Context) => void }
   const slots = makeSlots(faults)
   const directories = makeDirectories()
+  const resources = makeResources()
   const ctx = new Context()
   ctx.provide('slots', slots.service as never)
   ctx.provide('locale', makeLocale() as never)
+  ctx.provide('resources', resources.service as never)
   const load = ctx.plugin(mod).await()
   await load
   await settle()
-  return { ctx, registrations: slots.registrations, directories, load }
+  return { ctx, registrations: slots.registrations, directories, resources, load }
 }
 
 describe('provider-usage dock entry 注册形状（对齐宿主自带 pill）', () => {
@@ -193,6 +212,12 @@ describe('provider-usage dock entry 注册形状（对齐宿主自带 pill）', 
       ).not.toThrow()
       expect(resolveSeat(sessionId)).toBeUndefined()
     }
+  })
+
+  it('额度数据单一通道：apply 为协议 provider-usage 注册 resources provider', async () => {
+    const { resources } = await mountEntry()
+    // 轮询兜底已删除；额度只能来自 resource 流，协议注册少一次就整块失效。
+    expect(resources.protocols).toEqual(['provider-usage'])
   })
 
   it('注册体抛错：同句 console.error 兜底且不冒泡', async () => {

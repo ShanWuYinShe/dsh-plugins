@@ -29,18 +29,13 @@ export const WORKBUDDY_AUTH_FILE_ENV = 'WORKBUDDY_AUTH_FILE'
  * 平铺 `$DSH_HOME` 根——宿主官方包的既有先例是 `dsh-agent-presets` 的
  * `dshHomePath('.agent-presets')` 点前缀子目录。真正的持久化位在状态域
  * （`storages/dsh_any_connect/`，见 state-store.ts）；这里的文件路径只剩
- * 「域不可用时的回落」与「域迁移的目标读取」两个用途。
+ * 「域不可用时的回落」一个用途。
  */
 export const WORKBUDDY_STATE_DIRNAME = '.dsh-any-connect'
 
 /** Plugin-owned copy path inside the Harness home state directory. */
 export function workbuddyOwnAuthPath(filename: string = WORKBUDDY_AUTH_FILENAME): string {
   return join(resolveDshHome(), WORKBUDDY_STATE_DIRNAME, filename)
-}
-
-/** Pre-migration copy location (the Harness home root); migration reads and removes these. */
-export function legacyOwnAuthPath(filename: string): string {
-  return join(resolveDshHome(), filename)
 }
 
 /** Directory portion of the desktop auth path, shared by both products. */

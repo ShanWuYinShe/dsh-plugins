@@ -1,9 +1,9 @@
 /**
- * session id 断言 — remote.ts 方法层与 typert.host.ts codec 层共享的入参校验。
+ * session id 断言 — 归档 Remote 服务方法层的入参校验。
  *
- * 两层都对网关入参做同形校验，历史注释声称"两处语义一致（改一处必须改
- * 另一处）"——实际曾漂移（方法层漏了非空与上限）。抽成单一来源后漂移
- * 不再可能：两层引用同一实现，改一处即两处。
+ * 生成的 typert codec（./typert 工件）只按声明类型校验「字符串 / 字符串数组」
+ * 的 JSON 形状，不会校验非空与批量上限；方法层保留本实现作为第二道防线
+ * （单测直调方法也不经过网关 codec）。两层引用同一实现，语义不会漂移。
  */
 
 /** 批量上限：面板勾选集现实中不足千级，超限直接拒绝（防网关层失控展开）。 */
@@ -23,5 +23,5 @@ export function assertSessionIdArray(value: unknown): string[] {
     || value.some((id) => typeof id !== "string" || id.length === 0)) {
     throw new TypeError("sessionArchive expects an array of non-empty session id strings");
   }
-  return value;
+  return value as string[];
 }

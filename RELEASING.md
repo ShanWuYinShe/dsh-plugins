@@ -61,8 +61,10 @@ warning（刻意非阻塞——提醒，不是门禁）。
 
 发布侧的强校验由 `node scripts/dsh-baseline.mjs`（发布门禁步骤
 「Verify dsh baseline」）执行：所有 dsh-* 依赖必须是 `^<版本>` 形态、
-基线一致、`dsh.host` 存在且与基线一致，任一不满足即 exit 1 阻断发布——
-`dsh.host` 是 npm 消费者可见的适配声明，发布归档的 tag 不允许带糊的状态。
+基线与 `engines.dsh` 兼容声明都齐全且彼此一致，任一不满足即 exit 1 阻断
+发布——`engines.dsh` 是 DSH 官方 manifest 字段，宿主安装与 profile 启动
+据此判定插件兼容性，发布归档的 tag 不允许带糊的状态。旧字段 `dsh.host`
+已废弃，残留同样会被该脚本拦下。
 本地干跑直接执行该脚本即可（无网络、无 git 依赖，纯 manifest 校验）。
 
 依赖漏洞审计由 `bun run audit`（发布门禁步骤「Audit dependencies」）
@@ -168,7 +170,7 @@ DSH 0.1.6-alpha 新增的原生「设置 → 已归档会话」页（0.1.5 稳�
   进 main 时**保持基础号、仅去掉后缀**即成为正式版（`0.3.14-alpha.1` →
   `0.3.14`）。唯一的跳号例外见下方「稳定线热修占用基础号」——那是被迫让位，
   不是常规操作。
-- **插件版本号与 dsh 版本号无关**：跟随宿主升级只改依赖 range 与 `dsh.host`，
+- **插件版本号与 dsh 版本号无关**：跟随宿主升级只改依赖 range 与 `engines.dsh`，
   不改插件自身版本号的基础号；`0.3.14-alpha.1` 收敛得到的是 `0.3.14`，不是
   「dsh 的版本」。
 - 预发布线发版：在 alpha 分支升 `-alpha.N` 的 N；dsh 线进入 rc 阶段后后缀换
@@ -210,7 +212,7 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    - 在 `CHANGELOG.md` 顶部新增 `## <版本> (YYYY-MM-DD)` 小节——GitHub
      Release 说明自动取自这里（`scripts/release-notes.mjs`），不写就没有说明；
      CHANGELOG 只保留当前适配线的条目（更早历史以 GitHub Releases 为准），
-     适配小节把 `dsh.host`（精确版本）与依赖 range（`^版本`）分开表述；
+     适配小节把 `engines.dsh`（兼容声明，形如 `^<版本>`）与依赖 range（`^版本`）分开表述；
    - 升 `package.json` 的 `version`（bump 是最后一步）。
 4. **推送前逐提交复核**（`git log --oneline origin/<分支>..HEAD` +
    `git diff origin/<分支>..HEAD`）：版本号、CHANGELOG 小节、实际 diff 三者
@@ -226,9 +228,9 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    门禁校验（tag 形态、annotated、tag 与 package.json 版本一致、版本不落后已归档）→
    `bun pm pack` 出 tarball 并创建 GitHub Release 挂为资产（prerelease 版本带
    prerelease 标记）。**tag 由你明确打出，CI 绝不创建 tag**：没推 tag 就没有任何
-   Release，不存在「顺手多发一版」。发版后核对 Release 的资产 tarball 与 `dsh.host`
-   字段符合预期（解包资产读 `package/package.json` 的 `dsh.host`：
-   `tar -xOf <tgz> package/package.json`）。
+   Release，不存在「顺手多发一版」。发版后核对 Release 的资产 tarball 与
+   `engines.dsh` 字段符合预期（解包资产读 `package/package.json` 的
+   `engines.dsh`：`tar -xOf <tgz> package/package.json`）。
 
 ### tag 推送纪律（一次一个，推完确认再推下一个）
 
@@ -321,19 +323,26 @@ DSH 出新高基础号的 alpha 线（如 `0.1.2` 终结后的 `0.1.3-alpha.0`�
 alpha 分支：
 
 ```bash
-node scripts/adapt-dsh.mjs 0.1.3-alpha.0   # 改全部 @deepseek-ai/dsh-* range
+node scripts/adapt-dsh.mjs 0.1.3-alpha.0   # 改全部 @deepseek-ai/dsh-* range 与 engines.dsh
 bun install                                 # 重新生成 lockfile
+bun run build                               # 重新生成 lib/ 与 Typert 工件（见下节）
 # 对照新宿主的 diff 复核用到的契约（参照历史 CHANGELOG 的记录方式），
 # 升版本号、写 CHANGELOG，然后：
 bun run test:ci && git push
 ```
 
+宿主升级后必须重跑 `bun run build`：Typert 工件由构建期生成器按当前宿主契约
+的类型分析产出，手工复用旧工件会让 `./typert` / `./remote` 与新宿主失配。
+
 `adapt-dsh.mjs` 支持 `--dry-run` 预览，它只改各 package.json 的依赖 range。若 `bun install` 报某 dsh 包解析不到，先检查 adapt 是否已把 range 改写。稳定线（main）跟进 dsh 新的 rc（如 `0.1.1-rc.2` → `0.1.2-rc.1`）时同样在 main 上执行同一流程。
 
-`adapt-dsh.mjs` 同时把每个发布包 `package.json` 的 `dsh.host` 字段改写为
-目标版本——那是 npm 消费者可见的「本包适配的宿主版本」声明
-（`npm view <包名> dsh.host` 可查），跟随宿主版本自动维护，无需手工改。
-`dsh-follow-status.mjs` 会核对它与依赖基线的一致性，漂移即 warning。
+`adapt-dsh.mjs` 同时把每个发布包 `package.json` 的 `engines.dsh` 兼容声明
+改写为与依赖 range 同形的 `^<版本>`——`engines.dsh` 是 DSH 官方 manifest
+字段（`@deepseek-ai/dsh-package-manifest` 的 `DshEnginesManifest`），宿主安装
+与 profile 启动据此判定插件兼容性；存在时它单独生效、peer 依赖不再参与判定。
+`dsh-follow-status.mjs` 会核对它与依赖基线的一致性，漂移即 warning；
+`dsh-baseline.mjs` 在发布门禁里做严格核对。旧字段 `dsh.host` 已废弃，adapt
+会把残留一并删除。
 
 同一命令也用于让重建后的 alpha 分支跟进新预发布线：adapt 不比较新旧、按
 指定版本整块覆写，因此「待命的 alpha 分支等到 dsh 新 alpha 线后开始适配」
@@ -364,7 +373,7 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 
    ```bash
    git checkout -b alpha main
-   node scripts/adapt-dsh.mjs <新线版本>   # 改全部 @deepseek-ai/dsh-* range 与 dsh.host
+   node scripts/adapt-dsh.mjs <新线版本>   # 改全部 @deepseek-ai/dsh-* range 与 engines.dsh
    bun install                             # 重新生成 lockfile
    ```
 
@@ -380,8 +389,8 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
    工作树里完成（不在主检出目录操作），分三件事：
 
    a. **`adapt` 到新正式版并去掉预发布后缀**：`node scripts/adapt-dsh.mjs
-      <该线最新 rc>` + `bun install`，让依赖基线与 `dsh.host` 对齐这条线的
-      正式版；把包版本去掉后缀（`0.3.2-alpha.0` → `0.3.2`；若稳定线热修已
+      <该线最新 rc>` + `bun install`，让依赖基线与 `engines.dsh` 对齐这条线
+      的正式版；把包版本去掉后缀（`0.3.2-alpha.0` → `0.3.2`；若稳定线热修已
       占用该基础号，先跳到下一个基础号），写 CHANGELOG。
 
    b. **压缩成单个提交**：整条 alpha 线的累积改动只留**一个**基于 main 的
@@ -433,6 +442,34 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 > 删除（远程与本地）再重建，因此它的起点永远是当下的 main，main 的历史里
 > 也看不到 alpha 的迭代过程。
 
+## Typert 工件与 @Remote 服务面
+
+Web client 通过 `ctx.remote` 调用的 Host 能力（本仓 `sandbox-extra-roots`、
+`session-archive` 的配置/归档网关）用 DSH 官方 Typert 机制实现，禁止手写工件：
+
+- **服务面**：`TypertRemoteService` 子类 + 具体业务方法上的标准装饰器 `@Remote`；
+  参数与返回类型定义在包的 `src/types.ts`，经 `package.json` 的 `./types` 子路径导出
+  （生成器的 `./remote` 调用面按该子路径引用类型）。JSDoc 会被收进工件的线上描述与
+  JSON Schema，改类型时一并维护注释。
+- **工件**：`./typert`（Host 工件，typert-loader 注册进 `ctx.typert.local`）与
+  `./remote`（Client 调用面，client `ctx.remote.$mount` 挂载）由
+  [`@deepseek-ai/dsh-typert-generator`](https://github.com/deepseek-ai/deepseek-harness)
+  在 `bun run build` 的第二阶段生成到 `lib/`（gitignore 产物）。新增/修改 `@Remote`
+  方法或签名后必须重新构建；client 源码用包自引用子路径 `import "@chaoset/<pkg>/remote"`，
+  因此生成必须先于 client 打包。
+- **登记**：新增一个带 `./typert` 导出的包时，必须同时登记进根 `tsconfig.host.json`
+  的 `references`；`scripts/typert.mjs` 对「声明了 `./typert` 却未登记」直接报错。
+- **构建期类型契约 shim**：`scripts/lib/typert-protocol.d.ts` 是生成器 program 的
+  输入契约（官方 `@deepseek-ai/dsh-typert-protocol` 的公开类型面），只经
+  `tsconfig.host.json` 的 `paths` 提供给生成器；包编译/typecheck 不使用它。
+  仅当官方生成器支持从 `node_modules` 解析协议包类型（不再要求协议包是已登记的
+  工作区包）时才可删除该 shim。
+- **无 Remote 的包**不要声明 `./typert` / `./remote`（空工件是历史兼容物，
+  2026-10-29 已清除）。
+- **发布前干净构建**：先 `rm -rf packages/*/lib` 再 `bun run build`。tsc 不清理解释
+  已删源码留下的旧产物（`scripts/typert.mjs` 只清 `typert.host.*.map` 一类已知残留），
+  沿用旧 `lib/` 会把过期文件打进 tarball（`files` 含 `lib/` 整目录）。
+
 ## 手动兜底
 
 > main 的 `publish.yml` 已是迁移后的 GitHub Release 流水（`bun pm pack` +
@@ -442,8 +479,9 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 
 CI tag 流水失败、或需要完全手工发版时，按顺序兜底：
 
-1. **先在仓库根执行 `bun run build`**——`lib/` 与 `client/client.cjs` 都是
-   gitignore 的构建产物，跳过构建直接 pack 会打出缺文件的 tarball（装上即坏）。
+1. **先在仓库根执行干净构建**：`rm -rf packages/*/lib` 后 `bun run build`——
+   `lib/` 与 `client/client.cjs` 都是 gitignore 的构建产物，跳过构建直接 pack 会打出
+   缺文件的 tarball（装上即坏）；不先删 `lib/` 则可能把已删源码的旧产物带进 tarball。
 2. 自己打 tag 并推出，让 CI 走完发布：`git tag -a <目录>-v<版本> -m "<包名> v<版本>"`
    然后**逐个** `git push origin <目录>-v<版本>`（一次一个 tag，推完确认触发与
    成败再推下一个，见「tag 推送纪律」；tag 流水会自动测试 → 门禁 → 建 Release）。

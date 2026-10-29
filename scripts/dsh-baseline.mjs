@@ -3,8 +3,9 @@
 // 对 dsh 此稳定版的已验证适配"）由用户手工打，CI 绝不自动创建；
 // `bun run dsh-status` 的判定逻辑见 dsh-follow-status.mjs。
 //
-// 严格模式：任何非 `^<版本>` 形态的 dsh 依赖、基线不一致、dsh.host 缺失
-// 或不一致都 exit 1——发布归档的 tag 不允许带糊的状态。
+// 严格模式：任何非 `^<版本>` 形态的 dsh 依赖、依赖基线不一致、engines.dsh
+// 缺失或与依赖基线不一致、残留旧字段 dsh.host 都 exit 1——发布归档的 tag
+// 不允许带糊的状态。
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,17 +24,17 @@ for (const { path, manifest } of manifests) {
   }
 }
 
-const { baseline, host } = aggregateBaseline((path) => JSON.parse(readFileSync(join(ROOT, path), "utf8")));
+const { baseline, enginesDsh } = aggregateBaseline((path) => JSON.parse(readFileSync(join(ROOT, path), "utf8")));
 if (baseline.startsWith("[不一致")) {
   console.error(`dsh-baseline: 依赖基线不一致: ${baseline}`);
   process.exit(1);
 }
-if (typeof host !== "string") {
-  console.error("dsh-baseline: 发布包缺少 dsh.host 适配声明（package.json 的 dsh.host 字段）");
+if (typeof enginesDsh !== "string") {
+  console.error("dsh-baseline: 发布包缺少 engines.dsh 兼容声明（package.json 的 engines.dsh 字段，形如 ^<基线版本>）");
   process.exit(1);
 }
-if (host !== baseline) {
-  console.error(`dsh-baseline: dsh.host (${host}) 与依赖基线 (${baseline}) 不一致`);
+if (enginesDsh !== baseline) {
+  console.error(`dsh-baseline: engines.dsh (${enginesDsh}) 与依赖基线 (${baseline}) 不一致`);
   process.exit(1);
 }
 console.log(baseline);

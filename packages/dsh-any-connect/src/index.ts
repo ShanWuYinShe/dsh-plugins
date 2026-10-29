@@ -27,7 +27,7 @@
  * - desktop-credential-protection.ts desktop-auth-envelope.ts desktop-discovery.ts
  *   desktop-discovery-windows.ts desktop-at-rest-key.ts desktop-app-discovery.ts wsl.ts — at-rest 凭据门面与
  *   信封/发现/密钥解析器、按平台找 Electron 二进制、WSL 判定与 Windows 路径转换
- * - state-store.ts — 自有凭据副本的状态域持久化（storageDomain）与旧散文件迁移
+ * - state-store.ts — 自有凭据副本的状态域持久化（storageDomain）
  * 上游通道
  * - upstream.ts upstream-shared.ts upstream-types.ts — 上游门面、协议共享层（常量与助手）、
  *   协议类型（纯声明，零运行时）
@@ -47,7 +47,7 @@
  * - web-status.ts status-paths.ts loopback.ts host-heartbeat.ts version.ts — 同源 status 路由、
  *   路径常量、回环守卫、心跳与版本
  * 其它
- * - bin.ts typert.host.ts — status/diagnostics CLI 与 typert 服务面声明
+ * - bin.ts — status/diagnostics CLI
  *
  * @module dsh-any-connect
  */
@@ -56,16 +56,15 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-settings'
-import { legacyOwnAuthPath, workbuddyOwnAuthPath } from './auth-paths.js'
+import { workbuddyOwnAuthPath } from './auth-paths.js'
 import { CreditLedger } from './credit-ledger.js'
-import { anyConnectDomain, domainCreditLedgerPersistence, domainStateStore, migrateLegacyCredentialFiles } from './state-store.js'
+import { anyConnectDomain, domainCreditLedgerPersistence, domainStateStore } from './state-store.js'
 import { WorkBuddyUpstreamClient } from './upstream.js'
 
 export {
   anyConnectDomain,
   domainStateStore,
   openStandaloneStateStore,
-  migrateLegacyCredentialFiles,
   type WorkBuddyStateStore,
 } from './state-store.js'
 import { registerUsageQueriers } from './usage.js'
@@ -295,17 +294,15 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   // 状态域（storageDomain）：自有凭据副本的官方持久化位（storages/dsh_any_connect/，
-  // 见 state-store.ts）。服务就绪后搬旧散文件、把域存取推进每个变体；注入前的
-  // 读写走 `.dsh-any-connect/` 下的文件回落，由迁移例程收编，两侧无缝衔接。
+  // 见 state-store.ts）。服务就绪后把域存取推进每个变体；域 open 之前（注入前
+  // 的 refresh 等）读写走 `.dsh-any-connect/` 下的文件回落，域就绪后以域为准。
   // 域不可用时 error 日志 + 继续文件回落——模型代理的主链路不该因持久化层
-  // 故障整体不可用；回落与域之间由迁移例程保证单向收敛（先写域成功才删源）。
-  // 宿主未挂 storage-domain 表单（更老的宿主）时 inject 永不触发，行为同回落。
+  // 故障整体不可用。
+  // 宿主未挂 storage-domain 表单时 inject 永不触发，行为同回落。
   ctx.inject(['storageDomain'], child => {
     void (async () => {
       const domain = await child.storageDomain.open(anyConnectDomain)
       const state = domainStateStore(domain)
-      const warn = (message: string) => ctx.logger?.warn?.(message)
-      await migrateLegacyCredentialFiles(state, legacyOwnAuthPath, workbuddyOwnAuthPath, warn)
       variants.setState(state)
       // 今日消耗台账（credit-ledger.ts）与凭据副本同域（ledger 表）：域就绪即
       // 注入；open 失败时整个域走下面的统一 error 路径，台账随域一起缺席。

@@ -28,6 +28,7 @@
   ],
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.6-alpha.1",
+    "@deepseek-ai/dsh-typert-generator": "^0.2.2-alpha.2",
     "@types/node": "^26.6.5",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
@@ -35,7 +36,8 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "typert": "node scripts/typert.mjs",
+    "typecheck": "node scripts/typert.mjs && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "node scripts/build.mjs && vitest run",
     "test:ci": "bun run build && bun run typecheck && vitest run",
     "gate": "node scripts/publish-gate.mjs",

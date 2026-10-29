@@ -20,7 +20,7 @@
  *   不是这个语义，不进台账。
  *
  * 持久化走状态域（dsh_any_connect 域的 ledger 表，per-record 布局按变体一条
- * 记录），与凭据副本同一机制；域不可用（老宿主/注入前窗口）时台账整体缺席，
+ * 记录），与凭据副本同一机制；域不可用（storageDomain 服务缺席/注入前窗口）时台账整体缺席，
  * 功能静默降级为「无今日统计」，绝不影响主链路。
  *
  * @module dsh-any-connect/credit-ledger

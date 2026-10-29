@@ -21,16 +21,19 @@ export declare function manifestPaths(root?: string): string[];
 /** 解析 `^<版本>` 形态的 range；返回版本号或 null（形态不符）。 */
 export declare function baselineOf(range: unknown): string | null;
 
-/** 扫描一个 package.json 对象，收集 dsh-* 依赖基线与 dsh.host 声明。 */
+/**
+ * 扫描一个 package.json 对象，收集 dsh-* 依赖基线与 engines.dsh 兼容声明。
+ * 废弃字段 dsh.host 出现即计入 invalid（严格模式据此阻断发布）。
+ */
 export declare function scanManifest(manifest: Record<string, unknown>): {
   baselines: string[];
-  hosts: string[];
+  enginesDsh: string[];
   invalid: { section: string; name: string; range: unknown }[];
 };
 
-/** 聚合一组 manifest：共同基线、host 与非法项计数；不一致时给出标记字符串。 */
+/** 聚合一组 manifest：共同依赖基线、engines.dsh 与非法项计数；不一致时给出标记字符串。 */
 export declare function aggregateBaseline(
   reader: (path: string) => Record<string, unknown>,
   root?: string,
   paths?: string[],
-): { baseline: string; host: string | undefined; invalid: number };
+): { baseline: string; enginesDsh: string | undefined; invalid: number };

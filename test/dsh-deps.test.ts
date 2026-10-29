@@ -87,11 +87,21 @@ describe("scanManifest", () => {
     ]);
   });
 
-  it("dsh.host：字符串才收集，空串与非字符串忽略", () => {
-    expect(scanManifest({ dsh: { host: "0.2.1-alpha.1" } }).hosts).toEqual(["0.2.1-alpha.1"]);
-    expect(scanManifest({ dsh: { host: "" } }).hosts).toEqual([]);
-    expect(scanManifest({ dsh: { host: 42 } }).hosts).toEqual([]);
-    expect(scanManifest({}).hosts).toEqual([]);
+  it("engines.dsh：合法 ^<版本> 才收集；缺失时为空", () => {
+    expect(scanManifest({ engines: { dsh: "^0.2.1-alpha.1" } }).enginesDsh).toEqual(["0.2.1-alpha.1"]);
+    expect(scanManifest({ engines: { node: ">=24.9.0" } }).enginesDsh).toEqual([]);
+    expect(scanManifest({}).enginesDsh).toEqual([]);
+  });
+
+  it("engines.dsh 非法形态进 invalid；旧字段 dsh.host 出现即 invalid", () => {
+    const bad = scanManifest({ engines: { dsh: "0.2.1-alpha.1" } });
+    expect(bad.enginesDsh).toEqual([]);
+    expect(bad.invalid).toEqual([{ section: "engines", name: "dsh", range: "0.2.1-alpha.1" }]);
+    const nonString = scanManifest({ engines: { dsh: 42 } });
+    expect(nonString.invalid).toEqual([{ section: "engines", name: "dsh", range: 42 }]);
+    const legacy = scanManifest({ dsh: { host: "0.2.1-alpha.1" } });
+    expect(legacy.enginesDsh).toEqual([]);
+    expect(legacy.invalid).toEqual([{ section: "dsh", name: "host", range: "0.2.1-alpha.1" }]);
   });
 
   it("区块列表覆盖四个区块名", () => {
@@ -100,15 +110,15 @@ describe("scanManifest", () => {
 });
 
 describe("aggregateBaseline", () => {
-  const manifest = (version: string | undefined, host?: string): Record<string, unknown> => ({
+  const manifest = (version: string | undefined, enginesDsh?: string): Record<string, unknown> => ({
     dependencies: version === undefined ? {} : { [DEP_PREFIX + "atomic-write"]: "^" + version },
-    ...(host === undefined ? {} : { dsh: { host } }),
+    ...(enginesDsh === undefined ? {} : { engines: { dsh: "^" + enginesDsh } }),
   });
 
   it("全仓一致时给出共同基线", () => {
     const reader = (): Record<string, unknown> => manifest("0.2.1-alpha.1", "0.2.1-alpha.1");
     const result = aggregateBaseline(reader, ROOT, ["a/package.json", "b/package.json"]);
-    expect(result).toEqual({ baseline: "0.2.1-alpha.1", host: "0.2.1-alpha.1", invalid: 0 });
+    expect(result).toEqual({ baseline: "0.2.1-alpha.1", enginesDsh: "0.2.1-alpha.1", invalid: 0 });
   });
 
   it("基线不一致时给出标记字符串（调用方据此报错）", () => {
@@ -121,19 +131,19 @@ describe("aggregateBaseline", () => {
   });
 
   it("没有任何 dsh 依赖时给出占位文案", () => {
-    const { baseline, host } = aggregateBaseline(() => manifest(undefined), ROOT, ["a/package.json"]);
+    const { baseline, enginesDsh } = aggregateBaseline(() => manifest(undefined), ROOT, ["a/package.json"]);
     expect(baseline).toBe("(无 dsh 依赖)");
-    expect(host).toBeUndefined();
+    expect(enginesDsh).toBeUndefined();
   });
 
-  it("host 不一致时给出 [不一致]，缺失时为 undefined", () => {
+  it("engines.dsh 不一致时给出 [不一致]，缺失时为 undefined", () => {
     const conflicting = aggregateBaseline(
       (path) => manifest("0.2.1-alpha.1", path.startsWith("a/") ? "0.2.1-alpha.1" : "0.3.0-alpha.1"),
       ROOT,
       ["a/package.json", "b/package.json"],
     );
-    expect(conflicting.host).toBe("[不一致]");
-    expect(aggregateBaseline(() => manifest("0.2.1-alpha.1"), ROOT, ["a/package.json"]).host).toBeUndefined();
+    expect(conflicting.enginesDsh).toBe("[不一致]");
+    expect(aggregateBaseline(() => manifest("0.2.1-alpha.1"), ROOT, ["a/package.json"]).enginesDsh).toBeUndefined();
   });
 
   it("非法项计数跨 manifest 累加", () => {

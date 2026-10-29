@@ -18,22 +18,28 @@
  * 机制，两条都表现为「pill 莫名其妙消失、刷新才好」：
  *
  * 1. `cachedSessionInject` 把 inject 结果按 (entry × 会话绑定) **永久缓存**
- *    （dsh-client-ui-renderer，无失效路径）——注册瞬间服务没就绪，缺 directory
+ *    （dsh-client-ui-renderer）——注册瞬间服务没就绪，缺 directory
  *    的坏 props 就固化到该会话整页；
  * 2. render 期抛错 → `SlotErrorBoundary` → `reportEntryError({abdicate:true})`
- *    → `SlotRegistry.abdicated`（只增不减的 WeakSet，lib/index.js:62/286/458）
- *    → 该 entry 在本注册生命周期内永久退出投影。
+ *    → `SlotRegistry.abdicated`（只增不减的 WeakSet）→ 该 entry 在本注册生命周期内永久退出投影。
  *
  * 现在会话相关数据一律在**渲染期**取：组件从 standard kit 拿 `sessionId`
  * （renderer 无条件提供，永远可用），经注入的 `resolveSeat` 现解析目录。
  * 解析失败只影响这一次渲染，`resolveSeat` 永不抛错，entry 也不会被 abdicate。
  *
+ * 额度数据只有一条通道：apply 里为协议 'provider-usage' 注册的
+ * ResourceProvider（`resource-provider.ts`），pill 用 standard kit 的
+ * `useResource` 消费。宿主 0.2.2 的 web-app bundle 恒装配
+ * `@deepseek-ai/dsh-client-resources`，本包 `dsh.client.inject` 与 Cordis
+ * `inject` 都把它声明为硬依赖，因此不保留「resources 缺席时组件内轮询」的
+ * 退路——缺席即插件不激活、不渲染，而不是悄悄换一条数据源。
+ *
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
- * - index.tsx — 浏览器侧入口：注册 composer dock 的用量 pill
+ * - index.tsx — 浏览器侧入口：注册 composer dock 的用量 pill 与 usage 资源协议
  * - resource-provider.ts — usage 的 resource 订阅面（协议注册 + live 流）
  * - ProviderUsagePill.tsx — pill 组件（只剩渲染：早退 + 展开面板）
- * - useProviderUsage.ts — 状态与取数（订阅目录、60s 轮询、交互状态）
+ * - useProviderUsage.ts — 状态与取数（目录 seat、resource live 流、交互状态）
  * - WindowRow.tsx pill-types.ts — 展开面板的一行窗口、注入面与 props 类型
  * - pill-styles.ts pill-format.ts — 样式表与注入、纯格式化助手
  * - pill-headline.ts fetch-snapshot.ts — 头行文案纯函数、路由取数（fetch+解析）
@@ -48,21 +54,17 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import type { SnapshotAnswer } from './fetch-snapshot.js'
-import { registerProviderUsageResources, USAGE_RESOURCE_PROTOCOL } from './resource-provider.js'
-import { ProviderUsagePill } from './ProviderUsagePill.js'
-import type { ProviderUsagePillInjected } from './ProviderUsagePill.js'
-import { en, zh } from './locales.js'
+import type { ModelDirectory } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import type { ProviderUsageLocaleKey } from './locales.js'
+import { en, zh } from './locales.js'
+import { registerProviderUsageResources } from './resource-provider.js'
+import { ProviderUsagePill } from './ProviderUsagePill.js'
+import type { ProviderUsagePillInjected, ProviderUsageSeat } from './pill-types.js'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** Provider-usage pill copy. */
     'providerUsage': ProviderUsageLocaleKey
-  }
-  /** usage 订阅面的值类型：与 route 序列化形状一致（snapshot 或未查询标记）。 */
-  interface ResourceProtocolMap {
-    [USAGE_RESOURCE_PROTOCOL]: SnapshotAnswer
   }
 }
 
@@ -70,21 +72,23 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 export const name = 'provider-usage-client'
 
 /**
- * Client modules to wait for.
+ * Client services to wait for.
  *
- * `providerUsage` is the locale namespace this package owns, not a service;
- * `slots` and `locale` are the contribution registry and the dictionary
- * service. The model directory is deliberately NOT declared here: it is an
- * optional dependency, and a deployment without the model-selection UI must
- * still load this plugin (getting the copy registered and a harmless no-op)
- * instead of a plugin that refuses to load. It is awaited on the registration
- * sub-fiber instead, so the dock entry only exists once the directory service
- * is live — see the module comment for why that order is load-bearing.
+ * - `slots` — the contribution registry (`@deepseek-ai/dsh-client-ui-renderer`)；
+ * - `locale` — the dictionary runtime (`@deepseek-ai/dsh-client-locale`)；
+ * - `resources` — the resource model and its `useResource` standard hook
+ *   (`@deepseek-ai/dsh-client-resources`)。
+ *
+ * 三者都是 pill 运行所必需的客户端包（`dsh.client.inject` 声明同一组包名），
+ * 因此作为硬依赖等待：缺任何一个，本插件不激活，而不是换一条降级数据路径。
+ * 模型目录（`modelDirectories`，dsh-client-ui-model-selection 的客户端服务）
+ * 不是硬依赖——没有模型选择 UI 的部署仍应挂载本插件（只是没有可报的
+ * provider），它在渲染期经 `ctx.get` 探测。
  */
-export const inject = ['slots', 'locale']
+export const inject = ['slots', 'locale', 'resources']
 
 /**
- * Register the pill's copy and its composer-dock entry.
+ * Register the pill's copy, the usage resource protocol, and its composer-dock entry.
  *
  * @param ctx - the browser plugin context.
  */
@@ -105,8 +109,6 @@ export function apply(ctx: ClientContext): void {
       }
     }, 'provider-usage: pill copy')
     const t = ctx.locale.bind(namespace) as ProviderUsagePillInjected['t']
-    // usage 订阅面：resources 随宿主 web 客户端装配（匹配线 0.2.2 恒在），
-    // 注册其 protocol provider 供 useProviderUsage 订阅 live 流。
     registerProviderUsageResources(ctx)
     // 照抄宿主自带 pill 的注册形状：`inject` 是一个**无参常量函数**，不解析
     // 任何会话/服务状态（dsh-client-ui-chat 的 statPillInject 即
@@ -117,14 +119,6 @@ export function apply(ctx: ClientContext): void {
     // 会话相关的数据（sessionId → 模型目录）改为由组件从 standard kit 的
     // `sessionId` 现取，走下面注入的 `resolveSeat`。standard kit 由 renderer
     // 无条件提供（dsh-client-ui-session 合并进 SessionStandardProps），永远可用。
-    //
-    // 连 `ctx.inject(['slots','modelDirectories'])` 这层都不再需要：它原本的唯一
-    // 作用是「等目录服务就绪再注册」，而注册已经完全不依赖目录服务了。宿主自带
-    // 的 activity/usage pill 同样直接 `ctx.slots.inject(...)`，不等任何可选服务。
-    //
-    // 目录服务缺席/未就绪只影响组件这一次渲染（resolveSeat 返回 undefined），
-    // 服务晚到或重启时下一次 render 自然解析成功——不再有任何「注册时机」
-    // 与「服务生命周期」耦合的地方。
     ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
       name: 'conversation.composer.dock',
       id: 'provider-usage',
@@ -144,19 +138,9 @@ export function apply(ctx: ClientContext): void {
   }
 }
 
-/** The per-session directory store shape the pill renders from. */
-type DirectoryStore = NonNullable<ProviderUsagePillInjected['directory']>
-
-/** The per-session model directory the harness exposes to client plugins. */
-interface ModelDirectoryLike {
-  store: DirectoryStore
-  load: () => Promise<unknown>
-}
-
-/** Load closures keyed by directory: inject() runs per slot render and would
- * otherwise hand the pill a fresh `load` identity each time, re-firing its
- * load effect (and the host request behind it, if the host never dedupes). */
-const loadCache = new WeakMap<object, () => void>()
+/** Inject() 每次 slot render 都会重跑；load 闭包按目录实例缓存，避免把新
+ * identity 交给组件的加载 effect（那会反复重拉目录）。 */
+const loadCache = new WeakMap<ModelDirectory, () => void>()
 
 /**
  * Resolve one session's model seat **at render time**, from the component.
@@ -168,42 +152,34 @@ const loadCache = new WeakMap<object, () => void>()
  * 理由见上方 apply 的注释：render 期抛错会被宿主 SlotErrorBoundary 捕获并
  * 把 entry 永久 abdicate。
  *
- * @param ctx - the registration sub-fiber's context (the one that declared the
- * `modelDirectories` dependency), so the lookup stays inside that fiber's scope.
+ * @param ctx - the browser plugin context (the apply closure's context).
  * @param sessionId - the session whose directory the dock belongs to.
  * @returns the seat, or undefined when it cannot be resolved right now.
  */
 function resolveSeat(
   ctx: ClientContext,
   sessionId: unknown,
-): { directory: DirectoryStore; load: () => void } | undefined {
+): ProviderUsageSeat | undefined {
   if (sessionId === undefined || sessionId === null || sessionId === '') return undefined
-  // The model directory is a lazy service: `current` stays null until someone
-  // calls `load()`, which the composer's own model seat does on mount. A pill
-  // that only reads the snapshot would sit blank forever on a fresh session,
-  // so it must request the load itself.
-  //
-  // strict get：服务提供方 fiber 未 active 时返回 undefined（cordis
-  // lib/index.js:763-771）。这是**正常中间态**（插件加载顺序、服务重启），
-  // 不是错误——等下一次 render 再来一次即可。
-  let directories: { directoryFor: (id: never) => ModelDirectoryLike } | undefined
-  try {
-    directories = ctx.get('modelDirectories') as
-      | { directoryFor: (id: never) => ModelDirectoryLike }
-      | undefined
-  } catch {
-    return undefined
-  }
+  // 模型目录是可选服务：ctx.get 是宿主对可选服务的官方读取方式（严格模式下
+  // 服务提供方 fiber 未 active 时返回 undefined）。这是**正常中间态**（插件
+  // 加载顺序、服务重启），不是错误——等下一次 render 再来一次即可。
+  const directories = ctx.get('modelDirectories')
   if (directories === undefined) return undefined
-  let directory: ModelDirectoryLike
+  let directory: ModelDirectory
   try {
-    directory = directories.directoryFor(sessionId as never)
+    // SessionId 是宿主 branded 类型；本包不复制它的 brand，直接取声明参数类型。
+    directory = directories.directoryFor(sessionId as Parameters<typeof directories.directoryFor>[0])
   } catch {
     // 会话 scope 尚未建立（重连期）/已销毁：下一帧再试。
     return undefined
   }
   let load = loadCache.get(directory)
   if (load === undefined) {
+    // The model directory is lazy: `current` stays null until someone calls
+    // `load()`, which the composer's own model seat does on mount. A pill that
+    // only reads the snapshot would sit blank forever on a fresh session, so it
+    // must request the load itself.
     load = () => { void directory.load().catch(() => {}) }
     loadCache.set(directory, load)
   }

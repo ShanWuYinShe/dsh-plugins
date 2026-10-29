@@ -30,6 +30,13 @@ const ALLOWED_UNREFERENCED: Readonly<Record<string, string>> = {
   "@types/react": "TSX 的类型包,由 TypeScript 自动加载,源码不显式 import",
   "@types/react-dom": "同上,react-dom 入口的类型",
   jsdom: "vitest 测试环境,由测试文件头部的 @vitest-environment 注释选用,源码不 import",
+  // 以下两类是 2026-10-29 适配 DSH 0.2.2-alpha.2 新增的声明，均刻意不在源码里 import：
+  "@deepseek-ai/dsh-client-ui-renderer": "客户端模块图依赖：slots 服务提供方，只在 package.json 的 dsh.client.inject 里按包名声明（不 import）；根 test/client-inject-manifest 校验其真实带 dsh.client",
+  "@deepseek-ai/dsh-client-locale": "客户端模块图依赖：locale 服务提供方，同上",
+  "@deepseek-ai/dsh-api-remotes": "客户端模块图依赖：remote 服务提供方，同上",
+  "@deepseek-ai/dsh-api-session-controller": "客户端模块图依赖：sessions 服务提供方（session-archive 经 ctx.get 惰性取用），同上",
+  "@deepseek-ai/dsh-api-workspace-controller": "客户端模块图依赖：workspaces 服务提供方（session-archive 经 ctx.get 惰性取用），同上",
+  zod: "Typert 生成工件（lib/typert.*.js，构建产物、不在源码扫描面）运行时 import zod；源码不 import。运行期由宿主 runtime resolution 供给同实例",
 };
 
 function sourceFiles(dir: string, out: string[] = []): string[] {

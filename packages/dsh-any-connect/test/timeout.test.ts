@@ -1,22 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import { timeoutOf } from '@deepseek-ai/dsh-timeout'
-import { deadlineSignal, localDeadlineSignal, withTimeout } from '../src/timeout.js'
+import { deadlineSignal, withTimeout } from '../src/timeout.js'
 
 /**
- * 超时抽象回归：宿主 dsh-timeout 优先（可分类的 TimeoutReason code），
- * 缺席回退本地实现（同语义、普通 Error）。生产安装裁掉 devDep 时走
- * 回退，插件照常工作——两条路径语义分别钉住。
+ * 超时抽象回归：`src/timeout.ts` 现在是宿主 `@deepseek-ai/dsh-timeout` 的
+ * deadline 薄封装（静态 import，外部插件由宿主 runtime resolution 供给同一份
+ * 模块）。这里钉住三件事：
+ * - 超时 abort 的原因能被宿主 `timeoutOf` 按 code 分类（即真的走了宿主实现）；
+ * - 上游取消原样透传（不等超时）；
+ * - `withTimeout` 在结束后拆 timer（当前实现 dispose 拆 timer，signal 不再触发）
+ *   并透传返回值。
  */
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
-describe('deadlineSignal（宿主路径）', () => {
+describe('deadlineSignal（宿主 dsh-timeout）', () => {
   it('超时 abort 且原因可被 timeoutOf 按 code 识别', async () => {
     const handle = await deadlineSignal(undefined, 15, 'TEST_CODE')
     expect(handle.signal.aborted).toBe(false)
     await sleep(60)
     expect(handle.signal.aborted).toBe(true)
-    // 能被宿主 taxonomy 识别=走的真实宿主实现，不是本地回退。
+    // 能被宿主 taxonomy 识别 = 走的是宿主 TimeoutReason，而不是本地回退。
     expect(timeoutOf(handle.signal, 'TEST_CODE')?.code).toBe('TEST_CODE')
     handle.dispose()
   })
@@ -31,44 +35,19 @@ describe('deadlineSignal（宿主路径）', () => {
     expect(timeoutOf(handle.signal, 'TEST_CODE')).toBeUndefined()
     handle.dispose()
   })
-})
-
-describe('localDeadlineSignal（回退路径）', () => {
-  it('超时 abort 且原因携带 code', async () => {
-    const handle = localDeadlineSignal(undefined, 15, 'TEST_CODE')
-    await sleep(60)
-    expect(handle.signal.aborted).toBe(true)
-    expect(String(handle.signal.reason)).toContain('TEST_CODE')
-    // 回退原因与宿主 TimeoutReason 同形状:code/timeoutMs 结构化字段
-    // 可程序化分类(消费方按字段匹配,不解析消息文本)。
-    const reason = handle.signal.reason as { code?: string; timeoutMs?: number; name?: string }
-    expect(reason.code).toBe('TEST_CODE')
-    expect(reason.timeoutMs).toBe(15)
-    expect(reason.name).toBe('TimeoutReason')
-    handle.dispose()
-  })
 
   it('dispose 后 timer 不再触发', async () => {
-    const handle = localDeadlineSignal(undefined, 15, 'TEST_CODE')
+    const handle = await deadlineSignal(undefined, 15, 'TEST_CODE')
     handle.dispose()
     await sleep(60)
     expect(handle.signal.aborted).toBe(false)
   })
 
-  it('上游取消透传且拆监听', async () => {
+  it('非正超时时不设 timer，只融合上游取消（宿主 sentinel 语义）', async () => {
     const upstream = new AbortController()
-    const handle = localDeadlineSignal(upstream.signal, 10_000, 'TEST_CODE')
-    upstream.abort(new Error('caller gone'))
-    await sleep(10)
-    expect(handle.signal.aborted).toBe(true)
+    const handle = await deadlineSignal(upstream.signal, 0, 'TEST_CODE')
+    expect(handle.signal).toBe(upstream.signal)
     handle.dispose()
-  })
-
-  it('非正超时不设 timer（与宿主 sentinel 语义一致）', async () => {
-    const upstream = new AbortController()
-    const fused = localDeadlineSignal(upstream.signal, 0, 'TEST_CODE')
-    expect(fused.signal).toBe(upstream.signal)
-    fused.dispose()
     await sleep(20)
     expect(upstream.signal.aborted).toBe(false)
   })

@@ -1,0 +1,31 @@
+{
+  // Typert 生成器的 host face 聚合 tsconfig（生成器默认读取 <root>/tsconfig.host.json）。
+  // 与根 tsconfig.json 分工：tsconfig.json 是 typecheck 用（include 全仓 src/test，不参与生成）；
+  // 本文件只登记「产出 typert 工件的包」——生成器从 references 里发现贡献包，并从
+  // packages/<name>/tsconfig.json 取各自的源文件清单。因此新增 ./typert 导出时必须
+  // 同时在这里加 reference，否则 scripts/typert.mjs 会报错（不会静默漏生成）。
+  //
+  // 为什么不登记全部 packages：generateContributors() 内部会先 discover() 全量
+  // 「有 typert 面」的包再把它们一起交给分析器建 program；无关包会把它们的宿主依赖
+  // 闭包拉进 program，而 TypertLookupMap/TypertContextMap 是全局声明合并，同一宿主包
+  // 多份拷贝会直接报 duplicate key。只登记贡献包可以把这个 surface 收敛到最小。
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "types": ["node"],
+    "typeRoots": ["./node_modules/@types"],
+    // 见 scripts/lib/typert-protocol.d.ts 的头部说明：只给生成器 program 提供
+    // 可识别的 @Remote / TypertRemoteService 声明；包编译与 typecheck 不走这里。
+    "paths": {
+      "@deepseek-ai/dsh-typert-protocol": ["./scripts/lib/typert-protocol.d.ts"]
+    }
+  },
+  "files": [],
+  "references": [
+    { "path": "./packages/sandbox-extra-roots" },
+    { "path": "./packages/session-archive" }
+  ]
+}

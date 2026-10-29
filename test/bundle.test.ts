@@ -14,6 +14,10 @@ const PACKAGES = readdirSync(join(ROOT, "packages"), { withFileTypes: true })
   .filter((name) => existsSync(join(ROOT, "packages", name, "package.json")))
   .sort();
 
+// 暴露 @Remote 服务面、需要构建期 Typert 工件（./typert + ./remote）的包。
+// 其余包的客户端数据面走同域 HTTP 路由（webServer），不需要 Typert。
+const REMOTE_PACKAGES = new Set(["sandbox-extra-roots", "session-archive"]);
+
 // 客户端 bundle 冒烟需要 react 可解析；用 vi.mock 注入一个最小 stub，
 // 这样 client/index.tsx 的 `import * as React from "react"` 会被桩替换，
 // 且无需安装 react 运行时（仅类型/测试用，react 已是根 devDep，不发布）。
@@ -54,10 +58,59 @@ describe("npm bundle metadata", () => {
     it(`${name}: files 清单固定且条条在磁盘上有货`, () => {
       // tarball 缺文件（LICENSE 合规缺失、lib 缺入口）是安装时才炸：只钉“包含谁”
       // 不够，还要钉清单本身不变 + 每条真实存在。改清单是合法需求，改这里即显式承认。
-      expect(pkg.files).toEqual(["lib", "client", "cordis.patch.yml", "README.md", "CHANGELOG.md", "LICENSE"]);
+      //
+      // 有 Remote 服务面的包必须在 files 里**逐条**列出 Typert 工件与 ./types：
+      // 官方生成器 workspace.ts 的 validateExport 用 Array.includes 逐字校验
+      // （不认目录通配，"lib" 不等于包含 lib/typert.host.js），官方发布包同样
+      // 逐个列出。少列一条 = 生成失败/发布产物缺入口。
+      const canonical = ["lib", "client", "cordis.patch.yml", "README.md", "CHANGELOG.md", "LICENSE"];
+      const expected = REMOTE_PACKAGES.has(name)
+        ? [
+            "lib",
+            "lib/typert.host.js",
+            "lib/typert.host.d.ts",
+            "lib/typert.remote-client.js",
+            "lib/typert.remote-client.d.ts",
+            "lib/types.js",
+            "lib/types.d.ts",
+            "client",
+            "cordis.patch.yml",
+            "README.md",
+            "CHANGELOG.md",
+            "LICENSE",
+          ]
+        : canonical;
+      expect(pkg.files).toEqual(expected);
       for (const entry of pkg.files as string[]) {
         expect(existsSync(join(ROOT, "packages", name, entry)), `${name}: files 里的 ${entry} 在磁盘上存在`).toBe(true);
       }
+    });
+    it(`${name}: 兼容声明用官方 engines.dsh，且与依赖基线同源`, () => {
+      // DSH 0.2.2-alpha.2 起安装/profile 启动按引擎区间判定插件兼容性
+      // （packages/boot/app-boot/src/plugin-compatibility.ts：engines.dsh 存在
+      // 时单独生效，peer 不再参与）。dsh.host 是自造旧字段，不在官方
+      // DshManifest 契约内，必须清零。
+      const dshRange = pkg.engines?.dsh;
+      expect(typeof dshRange, `${name}: engines.dsh 必须声明`).toBe("string");
+      expect(dshRange).toMatch(/^\^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
+      const depRanges = [
+        ...Object.entries(pkg.dependencies || {}),
+        ...Object.entries(pkg.devDependencies || {}),
+        ...Object.entries(pkg.peerDependencies || {}),
+        ...Object.entries(pkg.optionalDependencies || {}),
+      ].filter(([dep]) => dep.startsWith("@deepseek-ai/dsh-"));
+      expect(depRanges.length, `${name}: 至少要有一条 dsh-* 依赖供基线对照`).toBeGreaterThan(0);
+      for (const [dep, range] of depRanges) {
+        expect(range, `${name}: ${dep} 的 range 与 engines.dsh 同源`).toBe(dshRange);
+      }
+      expect(pkg.dsh?.host, `${name}: 旧字段 dsh.host 不得保留`).toBeUndefined();
+    });
+    it(`${name}: 声明 DSH 最低支持的 Node.js 版本与宿主一致`, () => {
+      // 0.2.2-alpha.2 起宿主最低 Node.js 24.9（release notes「其他变更」首条）。
+      expect(pkg.engines?.node).toBe(">=24.9.0");
+    });
+    it(`${name}: 声明 dsh.manifestVersion 1`, () => {
+      expect(pkg.dsh?.manifestVersion).toBe(1);
     });
     it(`${name}: exports 暴露 cordis.patch.yml`, () => {
       expect(pkg.exports?.["./cordis.patch.yml"]).toBe("./cordis.patch.yml");
@@ -77,30 +130,67 @@ describe("npm bundle metadata", () => {
     it(`${name}: exports 指向 client/client.cjs`, () => {
       expect(pkg.exports?.["./client"]).toBe("./client/client.cjs");
     });
-    it(`${name}: exports 指向 lib/typert.host.js`, () => {
-      expect(pkg.exports?.["./typert"]).toBe("./lib/typert.host.js");
+    it(`${name}: typert 工件导出与 Remote 服务面一致`, () => {
+      // 只有暴露 @Remote 服务面的包才需要 ./typert（宿主工件）与 ./remote
+      // （client 调用面），两者都由官方 @deepseek-ai/dsh-typert-generator 在
+      // 构建期产出；没有 Remote 的包不得保留手写空工件（旧兼容物）。
+      if (REMOTE_PACKAGES.has(name)) {
+        // 官方生成工件同时发布 types 条件：宿主 typert-loader 取 .js，
+        // 消费者与 client bundle 取 .d.ts；./types 是生成 d.ts 引用的
+        // 公开边界类型子路径（@chaoset/<pkg>/types）。
+        expect(pkg.exports?.["./typert"]).toEqual({
+          types: "./lib/typert.host.d.ts",
+          default: "./lib/typert.host.js",
+        });
+        expect(pkg.exports?.["./remote"]).toEqual({
+          types: "./lib/typert.remote-client.d.ts",
+          default: "./lib/typert.remote-client.js",
+        });
+        expect(pkg.exports?.["./types"]).toEqual({
+          types: "./lib/types.d.ts",
+          default: "./lib/types.js",
+        });
+      } else {
+        expect(pkg.exports?.["./typert"]).toBeUndefined();
+        expect(pkg.exports?.["./remote"]).toBeUndefined();
+      }
     });
-    it(`${name}: 构建产物 lib/index.js 与 lib/typert.host.js 存在`, () => {
+    it(`${name}: 构建产物齐全（入口 / 客户端 / 按需 typert）`, () => {
       // 只钉映射字符串不够：构建若静默少产出文件，字符串检查照样绿，
       // 而 tarball 会缺入口（宿主加载时才炸）。client.cjs 已有冒烟覆盖存在性。
-      for (const file of ["lib/index.js", "lib/typert.host.js"]) {
+      const required = ["lib/index.js", "client/client.cjs"];
+      if (REMOTE_PACKAGES.has(name)) {
+        required.push(
+          "lib/typert.host.js",
+          "lib/typert.host.d.ts",
+          "lib/typert.remote-client.js",
+          "lib/typert.remote-client.d.ts",
+          "lib/types.js",
+          "lib/types.d.ts",
+        );
+      }
+      for (const file of required) {
         expect(existsSync(join(ROOT, "packages", name, file)), `${name}: ${file} 已构建`).toBe(true);
+      }
+    });
+    it(`${name}: exports 只用标准键集合`, () => {
+      // 官方 package-surface 规则：exports 键集合固定，避免每包自造用途。
+      const standard = new Set([".", "./client", "./types", "./typert", "./remote", "./locale/*.json", "./cordis.patch.yml", "./package.json"]);
+      for (const key of Object.keys(pkg.exports ?? {})) {
+        expect(standard.has(key), `${name}: 非标准 exports 键 ${key}`).toBe(true);
       }
     });
   }
 });
 
 describe("共享实现一致性", () => {
-  it("config-store / typert-loader 两包 src 逐字一致", () => {
-    const read = (pkg: string, file: string) =>
-      readFileSync(join(ROOT, "packages", pkg, "src", file), "utf8");
-    // 两包刻意零运行时依赖、可独立安装，机制只能各持一份：这里逐字比较。
-    // config-store.ts：配置存储；typert-loader.ts：typert-protocol 惰性加载
-    // 与 Remote 标记机制（原 remote.ts 的共享上半部分，2026-10-08 提出）。
-    // 任何一侧改动不同步另一侧 = 本用例红灯——这正是它的用途。
-    for (const file of ["config-store.ts", "typert-loader.ts"]) {
-      expect(read("sandbox-extra-roots", file)).toBe(read("session-archive", file));
-    }
+  it("config-store 只存在于真正需要配置持久化的包", () => {
+    // config-store 只服务于「设置页写回 profile patch」：sandbox-extra-roots
+    // 有配置卡所以需要；session-archive 的配置只从 patch 读、没有保存入口，
+    // 2026-10-29 清理时删除了它的副本。两包逐字一致的旧共享锁随之作废，
+    // 这里改成断言归属，防止无消费者的副本重新长回来。
+    expect(existsSync(join(ROOT, "packages", "sandbox-extra-roots", "src", "config-store.ts"))).toBe(true);
+    expect(existsSync(join(ROOT, "packages", "session-archive", "src", "config-store.ts"))).toBe(false);
   });
 });
 
@@ -236,10 +326,10 @@ describe("client bundles", () => {
           effect: (fn: () => void) => { fn(); },
           remote: { $mount: async () => {} },
           get: () => ({}),
-          // provider-usage 用 ctx.inject 等可选服务（模型目录）就绪后再注册
-          // entry（宿主的 props 缓存按 entry × 会话绑定永久存活，过早解析的
-          // 失败结果会固化）。此处桩成"依赖已就绪"：直接交付调用方 context。
-          inject: (_deps: string[], callback: (scope: any) => unknown) => { callback(ctx); return () => {}; },
+          // provider-usage 注册期直接 ctx.resources.register 额度协议 provider
+          // （单一 resource 流通道，注册期不解析任何可选服务）。这里桩出最小
+          // register，其余包不依赖它。
+          resources: { register: () => () => {} },
         };
         // 同步包抛在调用栈、异步包（session-archive/sandbox-extra-roots）
         // 拒在微任务：包一层 async IIFE 统一成 Promise 断言，兜底后必须
@@ -271,6 +361,9 @@ describe("client bundles", () => {
     // modelDirectories 桩：验证组件渲染期经 resolveSeat 解析出目录与 lazy load。
     const directoryStub = { subscribe: () => () => {}, getSnapshot: () => ({}) };
     const directoryLoad = vi.fn(() => Promise.resolve());
+    // resources 服务桩：本包 apply 期注册协议 'provider-usage' 的 resource
+    // provider（单一数据通道）。缺它则 apply 抛错、dock 注册不会发生。
+    const registeredProtocols: string[] = [];
     const ctx = {
       slots: {
         inject: (_slot: string, fn: () => void) => { fn(); },
@@ -279,12 +372,20 @@ describe("client bundles", () => {
       locale: Object.assign(() => () => "", { bind: () => () => "", register: () => () => {} }),
       effect: (fn: () => void) => { fn(); },
       remote: { $mount: async () => {} },
+      resources: {
+        register: (provider: any) => {
+          registeredProtocols.push(provider.protocol);
+          return () => {};
+        },
+      },
       get: (svc: string) =>
         svc === "modelDirectories"
           ? { directoryFor: () => ({ store: directoryStub, load: directoryLoad }) }
           : {},
     };
     await mod.apply(ctx as any);
+    // 注册期必须完成协议 provider 注册：这是额度数据唯一来源（无轮询兜底）。
+    expect(registeredProtocols).toEqual(["provider-usage"]);
     // 与宿主自带 pill（dsh-client-ui-chat 的 activity/usage）同一形状：直接
     // ctx.slots.inject 注册，**不等**任何可选服务。等服务的写法会让 entry 的
     // 存活与目录服务生命周期耦合，而宿主对 inject 结果永久缓存、对 render 期

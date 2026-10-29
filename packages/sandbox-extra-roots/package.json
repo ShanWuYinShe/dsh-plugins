@@ -1,14 +1,21 @@
 {
   "name": "@chaoset/sandbox-extra-roots",
-  "version": "0.4.28-alpha.1",
+  "version": "0.4.28-alpha.2",
   "description": "DSH host plugin: extra writable roots for the workspace-write sandbox (Seatbelt/bwrap/Landlock profiles and the fs fence)",
   "type": "module",
   "license": "MIT",
   "engines": {
-    "node": ">=22.19.0"
+    "dsh": "^0.2.2-alpha.2",
+    "node": ">=24.9.0"
   },
   "files": [
     "lib",
+    "lib/typert.host.js",
+    "lib/typert.host.d.ts",
+    "lib/typert.remote-client.js",
+    "lib/typert.remote-client.d.ts",
+    "lib/types.js",
+    "lib/types.d.ts",
     "client",
     "cordis.patch.yml",
     "README.md",
@@ -18,34 +25,49 @@
   "exports": {
     ".": "./lib/index.js",
     "./client": "./client/client.cjs",
-    "./typert": "./lib/typert.host.js",
+    "./types": {
+      "types": "./lib/types.d.ts",
+      "default": "./lib/types.js"
+    },
+    "./typert": {
+      "types": "./lib/typert.host.d.ts",
+      "default": "./lib/typert.host.js"
+    },
+    "./remote": {
+      "types": "./lib/typert.remote-client.d.ts",
+      "default": "./lib/typert.remote-client.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "dsh": {
-    "host": "0.2.2-alpha.2",
+    "manifestVersion": 1,
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
     "client": {
       "platform": "web",
       "inject": [
-        "slots",
-        "locale",
-        "remote"
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-remotes"
       ]
     }
   },
   "optionalDependencies": {
-    "@deepseek-ai/node-addon-landlock-run": "^0.1.1"
+    "@deepseek-ai/node-addon-system": "~0.1.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.6-alpha.1",
+    "@deepseek-ai/dsh-api-remotes": "^0.2.2-alpha.2",
+    "@deepseek-ai/dsh-client-locale": "^0.2.2-alpha.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.2.2-alpha.2",
     "@deepseek-ai/dsh-sandbox": "^0.2.2-alpha.2",
     "@deepseek-ai/dsh-typert-protocol": "^0.2.2-alpha.2",
     "@types/react": "^19.3.0",
     "react": "^19.3.1",
-    "vitest": "^4.1.12"
+    "vitest": "^4.1.12",
+    "zod": "4.4.3"
   },
   "scripts": {
     "build": "node ../../scripts/build.mjs",

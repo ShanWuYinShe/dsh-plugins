@@ -195,7 +195,7 @@ export interface WorkBuddyWebCreditDay {
 export interface WorkBuddyWebCredits {
   total: number
   accounts: readonly WorkBuddyWebCreditAccount[]
-  /** 今日消耗统计；台账缺席（老宿主/域不可用/今日无样本）时省略。 */
+  /** 今日消耗统计；台账缺席（域不可用/今日无样本）时省略。 */
   today?: WorkBuddyWebCreditToday
   /** 今天之前的最近 7 天，时间正序；不足 7 天就有多少。 */
   history?: readonly WorkBuddyWebCreditDay[]

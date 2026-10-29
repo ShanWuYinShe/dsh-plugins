@@ -18,7 +18,7 @@
    而 `dsh-settings` 的 `Context.settings` 声明 augment 的是宿主选中的那份 → `typecheck` 报
    `Property 'settings' does not exist on type 'Context'`（运行时同样是两个容器）。
    判据：`ls -d node_modules/.bun/@deepseek-ai+cordis@*` 出现多个**不同版本**即重复；同版本多副本是 peer 变体解析，正常。
-3. **版本号形态必须与 `dsh.host` 一致**：alpha 线用 `-alpha.N`（prerelease Release），待命期用纯 semver。
+3. **版本号形态必须与 `engines.dsh` 一致**：alpha 线用 `-alpha.N`（prerelease Release），待命期用纯 semver。
    发布门禁会校验，待命期发 `-alpha.N` 会被直接拒绝。
 
 另：worktree 里跑 `bun run test:ci` 前必须先 `bun install`——worktree 有自己的目录，缺 `node_modules` 时 build 会报

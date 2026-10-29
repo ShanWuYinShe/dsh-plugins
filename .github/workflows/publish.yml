@@ -61,10 +61,11 @@ jobs:
       - name: Run tests
         run: bun run test:ci
 
-      # 发布基线门禁:所有 dsh-* 依赖必须是 ^<版本> 形态、基线一致、
-      # dsh.host 存在且与基线一致——发布归档的 tag 不允许带糊的状态
-      # (dsh.host 是 npm 消费者可见的适配声明,漂移/缺失此前只由每日
-      # cron 的 follow-status 非阻塞告警兜着)。规则见 scripts/dsh-baseline.mjs。
+      # 发布基线门禁:所有 dsh-* 依赖必须是 ^<版本> 形态、基线与 engines.dsh
+      # 兼容声明都齐全且彼此一致——发布归档的 tag 不允许带糊的状态
+      # (engines.dsh 是 DSH 官方 manifest 字段,宿主安装/启动据此判定兼容性;
+      # 漂移/缺失此前只由每日 cron 的 follow-status 非阻塞告警兜着)。
+      # 规则见 scripts/dsh-baseline.mjs。
       - name: Verify dsh baseline
         run: node scripts/dsh-baseline.mjs
 
@@ -97,7 +98,7 @@ jobs:
           echo "plan=$PLAN" >> "$GITHUB_OUTPUT"
 
       # 发布 = 每个待发布包 bun pm pack 出标准 npm tarball（与原 npm registry
-      # 产物同格式：lib/、client/、cordis.patch.yml、dsh.host 等字段齐全，
+      # 产物同格式：lib/、client/、cordis.patch.yml、engines.dsh 等字段齐全，
       # dsh 的 plugin add 可直接装 tarball URL），作为 GitHub
       # Release 资产上传。tag 由用户明确打出并推出，CI 绝不创建 tag——
       # gh release create 只建 Release 不建 tag；prerelease 布尔取自门禁计划

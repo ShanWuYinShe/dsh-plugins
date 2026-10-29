@@ -15,6 +15,10 @@
  *   the existing turn/usage pills, showing the current session provider's
  *   remaining quota.
  *
+ * 入口只保留 function plugin 的 Loader 面（name / inject / apply）；实现模块
+ * 的类型与值由包内相对路径导入，外部消费者经 `ctx.providerUsage` 服务面
+ * （registry.ts 的 Context augmentation）使用本包，不从入口转出。
+ *
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * - index.ts — 插件入口：注册内置 querier 与宿主路由
@@ -24,7 +28,7 @@
  *   provider-bigmodel.ts provider-minimax.ts provider-openai.ts provider-opencode.ts — 各 provider 查询器
  * - registry.ts resolve.ts route.ts — 查询器注册表与缓存、端点/凭据解析、同源路由
  * - command.ts — /usage 斜杠命令（宿主 handler 直接返回额度文本报告）
- * - types.ts typert.host.ts — 宿主与浏览器共享的类型、typert 服务面声明
+ * - types.ts — 宿主与浏览器共享的类型（额度窗口、快照、注入面契约）
  *
  * @module provider-usage
  */
@@ -53,48 +57,9 @@ export const name = 'provider-usage'
  */
 export const inject: string[] = []
 
-export {
-  ProviderUsageRegistry,
-  DEFAULT_CACHE_TTL_MS,
-  DEFAULT_ERROR_CACHE_TTL_MS,
-  DEFAULT_UNRESOLVED_TTL_MS,
-  DEFAULT_QUERY_TIMEOUT_MS,
-  safeMessage,
-} from './registry.js'
-export type { ProviderUsageRegistryOptions, ProviderUsageSnapshotOptions } from './registry.js'
-export {
-  CANONICAL_ALIASES,
-  createProviderResolver,
-  inferProviderFromBaseUrl,
-  normalizeProviderKey,
-} from './resolve.js'
-export type { ResolvedProvider } from './resolve.js'
-export {
-  BUILTIN_USAGE_QUERIERS,
-  bigmodelUsage,
-  deepseekUsage,
-  minimaxUsage,
-  moonshotUsage,
-  opencodeUsage,
-  openaiUsage,
-  openrouterUsage,
-  siliconflowUsage,
-} from './providers.js'
-export {
-  providerUsageHandler,
-  registerProviderUsageRoute,
-  type ProviderUsageRouteOptions,
-} from './route.js'
-export {
-  PROVIDER_USAGE_PATH,
-  type ProviderUsageContext,
-  type ProviderUsageQuerier,
-  type UsageSnapshot,
-  type UsageWindow,
-} from './types.js'
-
 /**
- * Mount the registry, its resolver, and the built-in queriers.
+ * Mount the registry, its resolver, the built-in queriers, the usage route,
+ * and the /usage command.
  *
  * @param ctx - the Cordis plugin context.
  * @returns nothing; the service lives with the plugin's fiber.
@@ -113,5 +78,3 @@ export function apply(ctx: Context): void {
   registerProviderUsageRoute(ctx, { registry, path: PROVIDER_USAGE_PATH })
   registerUsageCommand(ctx, registry)
 }
-
-export { usageCommand, formatUsageLine, formatUsageReport } from './command.js'

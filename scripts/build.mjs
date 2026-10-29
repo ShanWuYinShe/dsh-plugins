@@ -1,9 +1,15 @@
-// 全仓构建：每包 tsc 编译 src/ → lib/，esbuild 打包 client/index.tsx → client/client.cjs
+// 全仓构建，三段顺序固定：
+//   1) 每包 tsc 编译 src/ → lib/（含 dsh.d.ts 增强合并）
+//   2) typert 工件生成（scripts/typert.mjs → lib/typert.*）
+//   3) esbuild 打包 client/index.tsx → client/client.cjs
+// 顺序不能换：client 源码用包自引用子路径 import "@chaoset/<pkg>/remote"，
+// esbuild 解析到 lib/typert.remote-client.js，故生成必须早于 client 打包。
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { formatTypertFailure, generateTypertArtifacts, TypertGenerationError } from "./typert.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // 包列表从目录派生而非硬编码:硬编码清单在增删包时必然漂移
@@ -53,7 +59,13 @@ async function buildClient(pkgDir, pkgName, pkgId) {
     // 页面没有全局 React 就会在渲染时抛 ReferenceError（曾让侧栏徽章与
     // 设置卡片在稳定版宿主上崩溃）。
     jsx: "automatic",
-    external: ["react", "react/jsx-runtime"],
+    // zod：生成的 remote-client 工件顶部 import zod（codec 工厂用）。宿主 Web 壳的
+    // PLATFORM_MODULES（@deepseek-ai/dsh-client-web）把 zod 作为共享平台模块提供给
+    // 客户端的 require，故这里 external，让 client.cjs 的 require("zod") 取宿主单例。
+    // remote-info（@deepseek-ai/dsh-typert-protocol/remote-info）是纯 ESM 数据工厂、
+    // 无共享运行时身份，不能 external（宿主模块表里没有它），随 bundle 内置——与官方
+    // tsdown 客户端打包的 INLINE_SAFE/GENERATED_REMOTE 判定一致。
+    external: ["react", "react/jsx-runtime", "zod"],
     // 压缩产物（实测体积 -37~39%）：client.cjs 是宿主加载进浏览器的分发
     // 产物，与 npm 包发布 dist 同理不做可读性保留；调试看 client/ 源码。
     minify: true,
@@ -80,6 +92,8 @@ ${body}
   writeFileSync(join(pkgDir, "client", "client.cjs"), wrapped);
 }
 
+// ── 阶段 1：Host 源码编译（tsc 只碰 src/ → lib/*.js|d.ts，不清理 lib/） ──
+const compiled = [];
 for (const pkg of PACKAGES) {
   const pkgDir = join(ROOT, "packages", pkg);
   if (!existsSync(join(pkgDir, "src"))) {
@@ -89,8 +103,26 @@ for (const pkg of PACKAGES) {
   const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
   tsc(pkgDir);
   appendDshAugmentations(pkgDir);
+  compiled.push({ pkg, pkgDir, pkgName: pkgJson.name });
+}
+
+// ── 阶段 2：Typert 工件生成（tsc 之后、client 打包之前） ──
+// 失败必须让构建失败：client 依赖 ./remote 工件，缺失时 bundle 会以难懂的错误收场。
+try {
+  const typert = generateTypertArtifacts(ROOT);
+  const files = typert.artifacts.length * 2
+    + typert.artifacts.filter((artifact) => artifact.remote !== undefined).length * 3;
+  console.log(`typert: ${typert.artifacts.length} 个包 / ${files} 个工件文件`);
+} catch (error) {
+  if (!(error instanceof TypertGenerationError)) throw error;
+  console.error(formatTypertFailure(error));
+  process.exit(1);
+}
+
+// ── 阶段 3：Client 打包（externals 见 buildClient） ──
+for (const { pkg, pkgDir, pkgName } of compiled) {
   if (existsSync(join(pkgDir, "client", "index.tsx"))) {
-    await buildClient(pkgDir, pkg, pkgJson.name);
+    await buildClient(pkgDir, pkg, pkgName);
   }
   console.log(`built ${pkg}`);
 }

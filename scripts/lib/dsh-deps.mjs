@@ -30,13 +30,17 @@ export function baselineOf(range) {
 }
 
 /**
- * 扫描一个 package.json 对象：收集全部 dsh-* 依赖的 range 基线与 dsh.host
- * 适配声明。
- * @returns {{ baselines: string[], hosts: string[], invalid: Array<{section, name, range}> }}
+ * 扫描一个 package.json 对象：收集全部 dsh-* 依赖的 range 基线与
+ * `engines.dsh` 兼容声明（DSH 官方字段，见 @deepseek-ai/dsh-package-manifest
+ * 的 DshEnginesManifest）。
+ *
+ * 旧字段 `dsh.host` 已废弃且不在官方 manifest 契约内，出现即计入 invalid——
+ * 严格模式（dsh-baseline）据此把残留挡在发布前。
+ * @returns {{ baselines: string[], enginesDsh: string[], invalid: Array<{section, name, range}> }}
  */
 export function scanManifest(manifest) {
   const baselines = new Set();
-  const hosts = new Set();
+  const enginesDsh = new Set();
   const invalid = [];
   for (const section of DEP_SECTIONS) {
     const deps = manifest[section];
@@ -48,8 +52,17 @@ export function scanManifest(manifest) {
       else baselines.add(version);
     }
   }
-  if (typeof manifest.dsh?.host === "string" && manifest.dsh.host !== "") hosts.add(manifest.dsh.host);
-  return { baselines: [...baselines], hosts: [...hosts], invalid };
+  const engines = manifest.engines;
+  if (engines !== null && typeof engines === "object" && Object.hasOwn(engines, "dsh")) {
+    const range = engines.dsh;
+    const version = typeof range === "string" ? baselineOf(range) : null;
+    if (version === null) invalid.push({ section: "engines", name: "dsh", range });
+    else enginesDsh.add(version);
+  }
+  if (manifest.dsh !== null && typeof manifest.dsh === "object" && Object.hasOwn(manifest.dsh, "host")) {
+    invalid.push({ section: "dsh", name: "host", range: manifest.dsh.host });
+  }
+  return { baselines: [...baselines], enginesDsh: [...enginesDsh], invalid };
 }
 
 /**
@@ -59,20 +72,21 @@ export function scanManifest(manifest) {
  *   跨分支读取时由调用方传入该分支的实际路径清单（如 `git ls-tree` 枚举
  *   结果）——磁盘清单属于当前检出的分支，直接拿去 git show 另一分支会因
  *   单侧独有的包而整侧读取失败。
- * @returns {{ baseline: string, host: string|undefined, invalid: number }}
- *   baseline 为全仓共同基线；不一致时为 `[不一致: ...]` 标记（host 同理）。
+ * @returns {{ baseline: string, enginesDsh: string|undefined, invalid: number }}
+ *   baseline 为全仓共同依赖基线；enginesDsh 为全仓共同兼容声明基线；
+ *   任一不一致时对应值给出 `[不一致...]` 标记。
  */
 export function aggregateBaseline(reader, root = ROOT, paths = manifestPaths(root)) {
   const all = new Set();
-  const hosts = new Set();
+  const enginesDshValues = new Set();
   let invalidCount = 0;
   for (const path of paths) {
-    const { baselines, hosts: manifestHosts, invalid } = scanManifest(reader(path));
+    const { baselines, enginesDsh, invalid } = scanManifest(reader(path));
     for (const b of baselines) all.add(b);
-    for (const h of manifestHosts) hosts.add(h);
+    for (const h of enginesDsh) enginesDshValues.add(h);
     invalidCount += invalid.length;
   }
   const baseline = all.size > 1 ? `[不一致: ${[...all].join(" / ")}]` : [...all][0] ?? "(无 dsh 依赖)";
-  const host = hosts.size > 1 ? "[不一致]" : [...hosts][0];
-  return { baseline, host, invalid: invalidCount > 0 ? invalidCount : 0 };
+  const enginesDsh = enginesDshValues.size > 1 ? "[不一致]" : [...enginesDshValues][0];
+  return { baseline, enginesDsh, invalid: invalidCount > 0 ? invalidCount : 0 };
 }

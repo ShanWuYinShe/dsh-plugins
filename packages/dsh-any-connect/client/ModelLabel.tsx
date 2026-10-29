@@ -1,10 +1,14 @@
 import type { ReactNode } from 'react'
+import type { ModelLabelOwner } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 
-export interface ModelLabelProps {
-  provider: { id: string; name: string }
+/**
+ * Props of the `conversation.input.model.label` slot. Owner fields are taken from
+ * the slot owner's declared face（`ModelLabelOwner`）rather than re-typed here;
+ * `model` stays a loose record because this component only reads `id`/`name`
+ * (and the optional provider badge), and tests construct plain model objects.
+ */
+export type ModelLabelProps = Pick<ModelLabelOwner, 'provider' | 'placement' | 'selected'> & {
   model: { id: string; name: string; [key: string]: unknown }
-  placement: 'trigger' | 'menu' | 'option'
-  selected: boolean
 }
 
 const RATE_SEPARATOR = ' · '

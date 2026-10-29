@@ -64,7 +64,8 @@ function branchExists(branch) {
 }
 
 /** 读某分支的全部 package.json 基线并聚合成单一基线（应全仓一致）；
- *  同时收集 dsh.host 适配声明（npm 消费者的可见元数据），供一致性核对。
+ *  同时收集 engines.dsh 兼容声明（DSH 官方 manifest 字段，安装/启动据此
+ *  判定兼容性），供一致性核对。
  *  分支不可读（CI checkout 只有当前分支、本地无该分支等）时返回 unmixed
  *  的哨兵形态，由调用方按「无法读取」呈报而非裸栈崩溃。
  *  包清单按目标分支自己枚举（git ls-tree），不取磁盘列表：磁盘列表属于
@@ -82,14 +83,14 @@ function branchBaseline(ref) {
     // resolved === null 分支触发 TDZ ReferenceError，令当前分支恒报
     // 「分支不可读」（2026-09-22 实测：HEAD 分支基线永远无法读取）。
     const paths = resolved === null ? manifestPaths(ROOT) : branchManifestPaths(resolved);
-    const { baseline, host } = aggregateBaseline(read, ROOT, paths);
-    const mixed = baseline.startsWith("[不一致") || host === "[不一致]";
+    const { baseline, enginesDsh } = aggregateBaseline(read, ROOT, paths);
+    const mixed = baseline.startsWith("[不一致") || enginesDsh === "[不一致]";
     const packageDirs = paths
       .filter((p) => p.startsWith("packages/") && p.endsWith("/package.json"))
       .map((p) => p.slice("packages/".length, -"/package.json".length));
-    return { baseline, host, mixed, unreadable: false, packageDirs };
+    return { baseline, enginesDsh, mixed, unreadable: false, packageDirs };
   } catch {
-    return { baseline: "(分支不可读)", host: undefined, mixed: false, unreadable: true, packageDirs: [] };
+    return { baseline: "(分支不可读)", enginesDsh: undefined, mixed: false, unreadable: true, packageDirs: [] };
   }
 }
 
@@ -167,7 +168,7 @@ for (const branch of ["main", "alpha"]) {
       rows.push({
         branch,
         baseline: "(未创建)",
-        host: undefined,
+        enginesDsh: undefined,
         target: `(待命：等待 >${stableBase} 的新线)`,
         state: "就位(待命)",
         packageDirs: [],
@@ -177,7 +178,7 @@ for (const branch of ["main", "alpha"]) {
       rows.push({
         branch,
         baseline: "(未创建)",
-        host: undefined,
+        enginesDsh: undefined,
         target: devLine,
         state: "待从 main 创建",
         packageDirs: [],
@@ -186,7 +187,7 @@ for (const branch of ["main", "alpha"]) {
     continue;
   }
 
-  const { baseline, host, mixed, unreadable, packageDirs } = branchBaseline(branch === head ? null : branch);
+  const { baseline, enginesDsh, mixed, unreadable, packageDirs } = branchBaseline(branch === head ? null : branch);
   // 基线不是合法版本号（无 dsh 依赖 / 包间不一致 / 分支不可读）时比较
   // 无意义——NaN 会让 compareVersions 的结果静默落进「超前」分支，报出荒谬
   // 状态；这里显式归入漂移并说明原因。
@@ -216,7 +217,7 @@ for (const branch of ["main", "alpha"]) {
     const cmp = compareVersions(baseline, stable);
     state = cmp === 0 ? "就位(待命)" : cmp < 0 ? "落后" : "超前";
   }
-  rows.push({ branch, baseline, host, target, state, packageDirs });
+  rows.push({ branch, baseline, enginesDsh, target, state, packageDirs });
 }
 
 console.log(`dsh 稳定线(最新 rc) = ${stable}`);
@@ -232,12 +233,12 @@ if (devLine === null) {
   }
 }
 let problems = 0;
-for (const { branch, baseline, host, target, state } of rows) {
+for (const { branch, baseline, enginesDsh, target, state } of rows) {
   const mark = state.startsWith("就位") ? "✔" : "✖";
   console.log(`${mark} ${branch.padEnd(5)} 依赖基线 ${baseline.padEnd(16)} ↔ ${String(target).padEnd(24)} ${state}`);
-  if (typeof host === "string" && !host.startsWith("[") && host !== baseline) {
+  if (typeof enginesDsh === "string" && !enginesDsh.startsWith("[") && enginesDsh !== baseline) {
     problems++;
-    const message = `dsh 跟随: ${branch} 分支 package.json 的 dsh.host (${host}) 与依赖基线 (${baseline}) 不一致——npm 消费者看到的适配声明失真，请以依赖基线为准修正。`;
+    const message = `dsh 跟随: ${branch} 分支 package.json 的 engines.dsh (${enginesDsh}) 与依赖基线 (${baseline}) 不一致——宿主安装/启动据此判定兼容性，声明失真会导致插件被判不兼容，请以依赖基线为准修正。`;
     if (ci) console.log(`::warning::${message}`);
     console.log(`⚠ ${message}`);
   }

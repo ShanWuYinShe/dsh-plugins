@@ -241,7 +241,7 @@ Host 一发浏览器就收到（取证见 `catalog-refresh.ts` 的 `notifyCatalo
    `Property 'settings' does not exist on type 'Context'`（运行时同样是两个容器）。
    当前 alpha 线（宿主 `0.2.2-alpha.2`）要求 `cordis ~4.0.6-alpha.1`（四包同步）、`schemastery ~3.18.6-alpha.1` 与 `cordis-plugin-loader ~1.0.7-alpha.1`（`dsh-any-connect` 已同步，2026-10-28 实测）；更早的 0.2.1-alpha.1 线是 `cordis ~4.0.5-alpha.1` + `schemastery ~3.18.5-alpha.1`。
    判据：`ls -d node_modules/.bun/@deepseek-ai+cordis@*` 出现多个**不同版本**即重复（同版本多副本是 peer 变体解析，正常）。
-3. **版本号形态必须与 `dsh.host` 一致**：alpha 线用 `-alpha.N`（prerelease Release），待命期用纯 semver；发布门禁会校验，待命期发 `-alpha.N` 会被拒绝。
+3. **版本号形态必须与 `engines.dsh` 一致**：alpha 线用 `-alpha.N`（prerelease Release），待命期用纯 semver；发布门禁会校验，待命期发 `-alpha.N` 会被拒绝。
 
 **三处「已评估、有意不采用」，后续审计不要再当缺口报**：
 ① 直连 fetch 不加 `attributionHeaders()`（模拟官方客户端的 UA 本身就是网关的产品分流契约，加 attribution 会破坏功能；

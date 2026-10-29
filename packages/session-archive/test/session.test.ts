@@ -3,7 +3,9 @@ import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
-import { createArchiveHost } from "../src/index.js";
+// 入口只导出 Loader 四件套（name/inject/config/apply），测试便利值走相对路径导入
+// （官方 package-surface 规则：入口不得为测试冻结额外 API）。
+import { createArchiveHost } from "../src/archive-host.js";
 
 const prevHome = process.env.HOME;
 const prevDshHome = process.env.DSH_HOME;

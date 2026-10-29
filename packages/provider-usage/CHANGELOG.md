@@ -1,3 +1,22 @@
+## 0.2.1-alpha.4 (2026-10-29)
+
+### 优化
+
+* **适配 DSH 0.2.2-alpha.2 的清单契约**：兼容声明迁移到官方字段——`engines.dsh` = `^0.2.2-alpha.2`（替换自造的 `dsh.host`）、`engines.node` = `>=24.9.0`（宿主 0.2.2 起最低 Node.js 24.9）、补 `dsh.manifestVersion: 1`。
+* **删除旧兼容物**：移除空的手写 typert 工件 `src/typert.host.ts` 与 `exports["./typert"]`——本包没有 `@Remote` 服务面（浏览器侧走同域 HTTP 路由 + resources live 流），该工件唯一作用是满足旧校验。
+* `dsh.client.inject` 校正为实际提供服务的客户端包名：去掉没有客户端行的静态库 `@deepseek-ai/dsh-client-ui-slots`，补实际消费其服务与 `useResource` 的 `@deepseek-ai/dsh-client-resources`。
+* 宿主入口收敛为 function plugin 的 Loader 面（`name` / `inject` / `apply`），实现值与类型不再从入口转出，包外扩展统一走 `ctx.providerUsage` 服务面。
+
+### 重构
+
+* **额度取数收敛到单一官方路径**：删除「resources 服务缺席时组件内 60s 轮询 + 唤醒监听」的旧兜底分支。0.2.2 的 web-app bundle 恒装配 `@deepseek-ai/dsh-client-resources`，本包 `dsh.client.inject` 与 Cordis `inject` 都把它声明为硬依赖——缺席即插件不激活，而不是换第二条数据源。额度只经 `ResourceProvider('provider-usage')` 的 live 流 + standard kit 的 `useResource` 读取；手动刷新仍走 force 同域路由，并用短窗抑制流内旧帧。
+* **手写影子类型改用宿主官方契约**：`resolveSeat` 的目录类型改为 `ModelDirectory`（`ctx.get('modelDirectories')` 走官方服务声明）；resource 注册改用官方 `ctx.resources` / `ResourceProvider` / `RemoteResult`，并收进 `ctx.effect` 随插件 fiber 自动反注册（HMR 不再残留「协议已被占用」）。
+* 测试同步重写：注册形状、资源帧、渲染测试改由 resource 流驱动（可控 `useResource` 桩），锁住「单一数据通道」与「目录解析渲染期绝不抛错」两条回归。
+
+### 文档
+
+* README：`dsh.host` 表述改为 `engines.dsh`，补 Node.js >= 24.9 前置、单一数据通道与 ResourceProvider 说明；`UsageWindow.blocked` 补进数据结构；校正与实现不符的表述——dock 相邻的是宿主自带 activity / usage pill（而非 `stats`）、限流表补 `blocked` 行、「抽屉」改「浮层面板」、WorkBuddy 汇总行为标注为需同时安装 `dsh-any-connect`。
+
 ## 0.2.1-alpha.3 (2026-10-29)
 
 ### 修复

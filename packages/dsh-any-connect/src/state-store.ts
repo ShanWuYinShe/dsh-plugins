@@ -1,18 +1,16 @@
 /**
  * state-store.ts — 插件状态域：自有凭据副本的宿主官方持久化（storageDomain）。
  *
- * 2026-10-11 迁移：自有凭据副本从 `$DSH_HOME` 根下的散文件（`.workbuddy-auth.json`
- * 等 4 份）收敛进宿主存储域 `<DSH_HOME>/storages/dsh_any_connect/`
- * （`@deepseek-ai/dsh-storage-domain`，与 dsh-workspace / dsh-schedule 同一机制）：
+ * 2026-10-11 起自有凭据副本收敛进宿主存储域
+ * `<DSH_HOME>/storages/dsh_any_connect/`（`@deepseek-ai/dsh-storage-domain`，与
+ * dsh-workspace / dsh-schedule 同一机制）。旧位置的自动搬迁已在 DSH 0.2.2-alpha.2
+ * 适配中删除（不保留旧兼容，见 CHANGELOG「破坏性变更」）：
  *
  * - 白拿宿主的类型化校验（zod schema）、每域单写链原子写、损坏记录
  *   `backup-and-skip`、随 DSH_HOME 隔离——原 `withFileLock` +
  *   `writeFileAtomic` 的自管实现退役。
  * - 域名 `dsh_any_connect` 受 `UNIT_NAME_RE`（`/^[a-z][a-z0-9_]*$/`）约束，
  *   不能用包名的连字符拼写。
- * - 迁移（{@link migrateLegacyCredentialFiles}）：宿主启动后跑一次，读旧根文件
- *   → 写域 → 删旧文件；**先写域成功才删旧**，任何一步失败旧文件原样保留，
- *   下次启动重试。
  * - CLI（bin）没有宿主 storageDomain 服务，用
  *   {@link openStandaloneStateStore} 独立实例化同款 json backend 打开**同一**
  *   存储单元——两侧读写语义一致，logout 删域数据与插件运行时所见相同。
@@ -21,14 +19,12 @@
  * @module dsh-any-connect/state-store
  */
 
-import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { JsonStorageBackend } from '@deepseek-ai/dsh-storage-json'
 import { descriptorOf, defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { parseOwnDocument } from './auth-document.js'
 import type { WorkBuddyCredential } from './auth-types.js'
 import type { CreditLedgerPersistence, CreditLedgerState } from './credit-ledger.js'
 
@@ -177,77 +173,5 @@ export async function openStandaloneStateStore(): Promise<WorkBuddyStateStore & 
       await unit.close()
       await backend.close()
     },
-  }
-}
-
-/**
- * 旧散文件迁移：把状态域接管前的两处自有凭据副本搬进域——
- *
- * 1. 旧根布局（`$DSH_HOME` 根下的 `.workbuddy-auth.json` 等 4 份，2026-10-11 前）；
- * 2. 状态目录回落副本（`.dsh-any-connect/` 下的同名文件）：域 open 之前的回落
- *    窗口（注入前的 refresh）可能在这里落过盘，也要收编，否则成为孤儿副本。
- *
- * 只在宿主启动时跑一次；每份文件独立处理，单份失败不影响其余。**先写域成功
- * 才删源**，任何一步失败源文件原样保留、下次启动重试。两处同名时以状态目录
- * 的那份为准（它是更晚的回落写）。返回已迁移的源文件路径（诊断用）。
- */
-export async function migrateLegacyCredentialFiles(
-  state: WorkBuddyStateStore,
-  legacyPathFor: (ownFilename: string) => string,
-  fallbackPathFor: (ownFilename: string) => string,
-  onWarning?: (message: string) => void,
-): Promise<readonly string[]> {
-  const migrated: string[] = []
-  for (const ownFilename of LEGACY_OWN_FILENAMES) {
-    const variantId = ownFilenameToVariantId(ownFilename)
-    // 两处来源按「旧根在前、回落目录在后」的顺序收编：同名时后写的覆盖先写的，
-    // 正好让更新的回落副本胜出。
-    for (const sourcePath of [legacyPathFor(ownFilename), fallbackPathFor(ownFilename)]) {
-      let text: string
-      try {
-        text = await readFile(sourcePath, 'utf8')
-      } catch {
-        continue // 不存在（绝大多数用户的稳态）——安静跳过
-      }
-      const credential = parseOwnDocument(text)
-      if (credential === undefined) {
-        onWarning?.(`state-store: legacy credential file ${sourcePath} is unreadable; left in place untouched`)
-        continue
-      }
-      try {
-        await state.write(variantId, credential)
-      } catch (error: unknown) {
-        // 写域失败绝不能删源文件：源副本是唯一落盘副本（先写域成功才删源）。
-        onWarning?.(`state-store: migrating ${sourcePath} into the state domain failed (${String(error)}); the file is kept and migration retries on next start`)
-        continue
-      }
-      try {
-        await rm(sourcePath, { force: true })
-        migrated.push(sourcePath)
-      } catch (error: unknown) {
-        // 域里已经有了,删源失败只留下一个陈旧副本——下次启动重删。
-        onWarning?.(`state-store: removing the migrated legacy file ${sourcePath} failed: ${String(error)}`)
-      }
-    }
-  }
-  return migrated
-}
-
-/** 旧根布局里的自有凭据副本文件名（迁移输入；与 variants.ts 的 ownFilename 一致）。 */
-export const LEGACY_OWN_FILENAMES = [
-  '.workbuddy-auth.json',
-  '.workbuddy-ai-auth.json',
-  '.zcode-auth.json',
-  '.zcode-sp-auth.json',
-] as const
-
-/** 旧文件名 → 变体 id（迁移时决定记录落进哪条）。 */
-function ownFilenameToVariantId(ownFilename: string): VariantId {
-  switch (ownFilename) {
-    case '.workbuddy-auth.json': return 'workbuddy'
-    case '.workbuddy-ai-auth.json': return 'workbuddy-ai'
-    case '.zcode-auth.json': return 'zcode'
-    case '.zcode-sp-auth.json': return 'zcode-start-plan'
-    default: throw new Error(`state-store: unknown legacy own filename ${JSON.stringify(ownFilename)}`)
   }
 }

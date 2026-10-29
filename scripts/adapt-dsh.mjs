@@ -4,8 +4,10 @@
 //   例：node scripts/adapt-dsh.mjs 0.1.2-alpha.4
 //
 // 覆盖范围：根 package.json 与 packages/*/package.json 的 dependencies /
-// optionalDependencies / devDependencies / peerDependencies。@deepseek-ai/cordis、
-// schemastery 等非 dsh-* 包不在范围内（独立版本线，另行手工升级）。
+// optionalDependencies / devDependencies / peerDependencies，以及发布包的
+// engines.dsh 兼容声明（与依赖 range 同形 `^<版本>`，官方 manifest 字段）；
+// 同时删除废弃的旧字段 dsh.host。@deepseek-ai/cordis、schemastery 等非 dsh-*
+// 包不在范围内（独立版本线，另行手工升级）。
 //
 // 脚本不做的事（按 RELEASING.md 手工完成）：
 //   - 升各包版本号、写 CHANGELOG（发布决策）
@@ -46,12 +48,24 @@ function adaptPackageJson(path) {
       }
     }
   }
-  // dsh.host 适配声明（发布包的 package.json 声明当前适配的宿主版本，
-  // npm 消费者 `npm view <pkg> dsh.host` 可查；根 package.json 私有不
-  // 发布、无 dsh 对象，自然跳过。
-  if (json.dsh && json.dsh.host !== version) {
-    changes.push(["dsh", "host", json.dsh.host ?? "(缺省)", version]);
-    json.dsh.host = version;
+  // engines.dsh 兼容声明（DSH 官方 manifest 字段：安装与 profile 启动据此
+  // 判定插件兼容性，存在时单独生效）。写成与依赖 range 同形的 `^<版本>`，
+  // 让「依赖基线 ↔ 兼容声明」由同一命令保持同步（dsh-baseline.ts 严格核对）。
+  // 根 package.json 私有、无 engines.dsh，自然跳过。
+  const engines = json.engines !== null && typeof json.engines === "object"
+    ? json.engines
+    // 发布包至少有一条 dsh-* 依赖（changes 非空）才补 engines 对象；私有根
+    // package.json 无 dsh 依赖，不写宿主兼容声明。
+    : changes.length > 0 ? (json.engines = {}) : undefined;
+  if (engines !== undefined && engines.dsh !== `^${version}`) {
+    changes.push(["engines", "dsh", engines.dsh ?? "(缺省)", `^${version}`]);
+    engines.dsh = `^${version}`;
+  }
+  // 旧字段 dsh.host 已废弃（不在官方 DshManifest 契约内），出现即删除。
+  if (json.dsh !== null && typeof json.dsh === "object" && Object.hasOwn(json.dsh, "host")) {
+    changes.push(["dsh", "host(已废弃)", json.dsh.host, "(删除)"]);
+    delete json.dsh.host;
+    if (Object.keys(json.dsh).length === 0) delete json.dsh;
   }
   if (changes.length === 0) return;
   for (const [section, name, from, to] of changes) {

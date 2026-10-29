@@ -24,11 +24,14 @@ const SOURCE_RE = /\.tsx?$/;
 /**
  * 允许没有相对导入者的模块：
  * - index.ts / index.tsx：包入口；
- * - typert.host.ts：通过 package.json exports 的 "./typert" 暴露给宿主加载器；
  * - bin.ts：package.json 的 bin 入口（CLI）；
  * - *.d.ts：只有类型声明，运行时不存在。
+ *
+ * typert 工件不再由 src 手写：`./typert` 与 `./remote` 由官方
+ * @deepseek-ai/dsh-typert-generator 在构建期产出到 lib/，因此这里不再登记
+ * typert.host.ts（2026-10-29 清除旧兼容实现后删除了该手写工件）。
  */
-const ENTRY_MODULES = new Set(["index.ts", "index.tsx", "typert.host.ts", "bin.ts"]);
+const ENTRY_MODULES = new Set(["index.ts", "index.tsx", "bin.ts"]);
 
 function collect(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

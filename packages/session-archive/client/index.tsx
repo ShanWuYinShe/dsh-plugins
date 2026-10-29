@@ -4,6 +4,12 @@
  * 2026-10-08 从 1194 行的 client/index.tsx 拆出：样式、文案、纯逻辑与面板组件
  * 各自成模块，入口只保留注册与 re-export。
  *
+ * 2026-10-29 适配 0.2.2：远程贡献不再手写（旧 REMOTE_CONTRIBUTION +
+ * passthroughCodec 已删），改为消费官方 typert 生成器产出的 ./remote 工件
+ * （package.json 的 "./remote" 子路径，由 src/remote.ts 的 @Remote 方法生成）。
+ * 生成 d.ts 已对 TypertRemoteMap / TypertRemoteNamespaceMap 做声明合并，
+ * 客户端类型不再需要第二套手写。
+ *
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * - index.tsx — 面板入口：注册侧边栏徽标与归档面板
@@ -19,7 +25,7 @@
  * @module @chaoset/session-archive/client/index
  */
 
-import type { TypertCodec, TypertRemoteContribution, TypertSchema } from '@deepseek-ai/dsh-typert-protocol'
+import archiveRemote from '@chaoset/session-archive/remote'
 import { NS, zh, en } from './locales.js'
 import { ArchivePanel } from './ArchivePanel.js'
 
@@ -30,41 +36,6 @@ export { apply, inject }
 
 const inject = ["slots", "locale", "remote"];
 
-/**
- * 结果/参数的透传 codec 工厂（本插件的最小类型面）。
- *
- * 生成器对每个参数与结果都会产出一个 `TypertCodec`；本包的服务面两端都在
- * 同一仓内、host 侧已做严格校验（见 src/typert.host.ts 的参数 codec），
- * client 侧只需要**形状正确**的描述符让 `$mount` 能接线，因此这里用最小的
- * 显式类型给出「恒等 parse」的 schema，而不是把每个描述符都写成 `any`。
- *
- * 注意这不是省略校验：官方 `TypertSchema.parse(value: unknown): Output`
- * 契约本身就被满足（透传即 Output = unknown），且 host 方法层另有手写检查
- * （src/remote.ts）——两处语义一致的约束由测试锁住。
- */
-function passthroughCodec(typeSymbol: string): TypertCodec {
-  const schema: TypertSchema = { parse: (value: unknown): unknown => value };
-  return { mode: 'strict', typeSymbol, create: (): TypertSchema => schema };
-}
-
-const REMOTE_CONTRIBUTION: TypertRemoteContribution = {
-  package: "@chaoset/session-archive",
-  // 方法集合与 host 侧 src/remote.ts 的 markRemoteMethod 一一对应：
-  // 单侧增减即由 test/typert-codec.test.ts 的对称用例报红。
-  //
-  // 描述符保持**逐条内联字面量**（不抽工厂、不用模板拼接）：仓根的
-  // test/typert-surface-parity.test.ts 用正则从源码文本解析每条 descriptor
-  // 的 id/method/参数名，再与宿主服务面逐字比对。抽工厂或拼字符串会让静态
-  // 解析漏条目，等于悄悄废掉那条路由键回归——「少写几行」不值得这个代价。
-  // 「client 最小类型」的收窄落在 passthroughCodec 上（见上），描述符形状不动。
-  descriptors: [
-    { id: "@chaoset/session-archive#sessionArchive/list", service: "sessionArchive", namespace: "sessionArchive", method: "list", invocation: { kind: "direct" }, parameters: [], result: passthroughCodec("sessionArchive/list:result") },
-    { id: "@chaoset/session-archive#sessionArchive/count", service: "sessionArchive", namespace: "sessionArchive", method: "count", invocation: { kind: "direct" }, parameters: [], result: passthroughCodec("sessionArchive/count:result") },
-    { id: "@chaoset/session-archive#sessionArchive/detail", service: "sessionArchive", namespace: "sessionArchive", method: "detail", invocation: { kind: "direct" }, parameters: [{ name: "sessionId", wire: "sessionId", source: "json", codec: passthroughCodec("sessionArchive/detail:sessionId") }], result: passthroughCodec("sessionArchive/detail:result") },
-    { id: "@chaoset/session-archive#sessionArchive/delete", service: "sessionArchive", namespace: "sessionArchive", method: "delete", invocation: { kind: "direct" }, parameters: [{ name: "sessionIds", wire: "sessionIds", source: "json", codec: passthroughCodec("sessionArchive/delete:sessionIds") }], result: passthroughCodec("sessionArchive/delete:result") },
-    { id: "@chaoset/session-archive#sessionArchive/unarchive", service: "sessionArchive", namespace: "sessionArchive", method: "unarchive", invocation: { kind: "direct" }, parameters: [{ name: "sessionIds", wire: "sessionIds", source: "json", codec: passthroughCodec("sessionArchive/unarchive:sessionIds") }], result: passthroughCodec("sessionArchive/unarchive:result") }
-  ]
-};
 // 与 dsh-any-connect / provider-usage 同一条兜底边界：slot API 破坏时
 // 降级为 console.error（侧边栏少一个徽标），不得把异常抛给宿主 loader
 // 炸出整页红条——纯 additive 的面板没有资格打断宿主。
@@ -82,7 +53,8 @@ async function apply(ctx: any) {
       if (!message.includes("already")) console.warn("session-archive: locale dictionary registration failed: " + message);
     }
   }, "session-archive: dictionaries");
-  await ctx.remote.$mount(REMOTE_CONTRIBUTION);
+  // 贡献体来自生成工件（描述符与 codec 由官方生成器产出），本文件不再手写。
+  await ctx.remote.$mount(archiveRemote);
   const archiveService = ctx.get("remote.sessionArchive");
   if (archiveService === void 0) throw new Error("session-archive: remote.sessionArchive did not materialize after mount");
   const call = (method: any, ...args: any[]) => archiveService[method](...args).then((result: any) => {

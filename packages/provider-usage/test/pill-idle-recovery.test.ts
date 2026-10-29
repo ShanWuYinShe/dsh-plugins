@@ -5,22 +5,23 @@ import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { ProviderUsagePill } from '../client/ProviderUsagePill.js'
-import type { ProviderUsagePillProps } from '../client/ProviderUsagePill.js'
+import type { ProviderUsagePillProps } from '../client/pill-types.js'
 import type { ProviderUsageLocaleKey } from '../client/locales.js'
+import type { SnapshotAnswer } from '../client/fetch-snapshot.js'
+import { usageResourceAddress } from '../client/resource-provider.js'
 
 /**
- * 会话长期搁置与唤醒恢复回归（夜间完成任务长期搁置后第二天额度丢失缺陷）。
+ * 会话长期搁置与重连恢复回归（夜间完成任务长期搁置后第二天额度丢失缺陷）。
  *
- * 缺陷成因：
- * 1. 会话长期搁置或宿主重连（connection/reset）导致 ModelDirectory 的 current 变为 null；
- * 2. 旧实现只在 mount 调一次 load，此后 current 为 null 时既不重试 load，
- *    也将 provider 判定为 undefined 直接 return null 卸载 pill；
- * 3. 轮询与 visibilitychange 监听被 if (!provider) return 整个跳过，唤醒无法重拉；
- * 4. 修复后：
- *    - current 为 null 且不在 loading/error 时自动调 load()；
- *    - current 暂时变 null 时保持最近一次已知 provider，DOM 不卸载，保留旧值并标记过期；
- *    - 维持 60s 轮询与 visibilitychange/focus/online 唤醒监听，唤醒时 current 为 null 调 load，有 provider 调 refresh；
- *    - current 从 null 恢复到有值时立即重拉 refresh() 并消除过期状态。
+ * 额度数据唯一通道是 resources 的 live 流（见 useProviderUsage），本测试用
+ * 可控的 useResource 桩驱动资源帧，验证组件的目录/取值协作：
+ * 1. 会话长期搁置或宿主重连（connection/reset）导致 ModelDirectory 的 current
+ *    变为 null；
+ * 2. current 为 null 且不在 loading/error 时自动调 load()；
+ * 3. current 暂时变 null 时保持最近一次已知 provider，DOM 不卸载，保留旧值并
+ *    标记过期；
+ * 4. current 从 null 恢复到有值时消除过期状态，流帧值照常渲染；
+ * 5. 同一 provider 的重连抖动不闪白，真实切换 provider 才清空旧答案。
  */
 
 const t = (key: ProviderUsageLocaleKey): string => key
@@ -64,6 +65,34 @@ function makeMutableDirectory(initial: ModelDirectoryState, onLoad?: () => void)
   }
 }
 
+/** useResource 桩：按地址保存流帧值，未收到的地址是 loading。 */
+interface ResourceProbe {
+  status: 'loading' | 'live' | 'failed'
+  value: SnapshotAnswer | undefined
+  failure: undefined
+}
+
+function makeResource(): {
+  useResource: (address: string) => ResourceProbe
+  set: (address: string, value: SnapshotAnswer) => void
+  fail: (address: string) => void
+} {
+  const values = new Map<string, SnapshotAnswer>()
+  const failed = new Set<string>()
+  const useResource = (address: string): ResourceProbe => {
+    if (failed.has(address)) return { status: 'failed', value: values.get(address), failure: undefined }
+    const value = values.get(address)
+    return value === undefined
+      ? { status: 'loading', value: undefined, failure: undefined }
+      : { status: 'live', value, failure: undefined }
+  }
+  return {
+    useResource,
+    set: (address, value) => { values.set(address, value) },
+    fail: (address) => { failed.add(address) },
+  }
+}
+
 const readyDeepseek: ModelDirectoryState = {
   current: { provider: 'deepseek', model: 'deepseek-chat' } as any,
   pending: null,
@@ -84,10 +113,12 @@ const nullIdle: ModelDirectoryState = {
   error: null,
 }
 
-const goodSnapshot = {
-  provider: 'deepseek',
-  windows: [{ id: 'w1', label: 'Credits', remain: 42, limit: 100, unit: 'CNY' }],
-  fetchedAt: Date.now(),
+function snapshotOf(remain: number): SnapshotAnswer {
+  return {
+    provider: 'deepseek',
+    windows: [{ id: 'w1', label: 'Credits', remain, limit: 100, unit: 'CNY' }],
+    fetchedAt: Date.now(),
+  }
 }
 
 let root: Root | null = null
@@ -95,10 +126,6 @@ let container: HTMLDivElement
 
 beforeEach(() => {
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
-  vi.stubGlobal('fetch', vi.fn(async () => ({
-    ok: true,
-    json: async () => ({ snapshots: [goodSnapshot] }),
-  }) as unknown as Response))
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -113,16 +140,32 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('ProviderUsagePill 长期搁置与重连唤醒恢复', () => {
+/** 渲染 pill：目录经 resolveSeat 交付（与生产注入面同形），额度经 useResource 流交付。 */
+async function renderPill(parts: {
+  directory: MutableStore
+  load: () => void
+  resource: ReturnType<typeof makeResource>
+}): Promise<void> {
+  const props = {
+    t,
+    sessionId: 'session-1',
+    resolveSeat: () => ({ directory: parts.directory, load: parts.load }),
+    useResource: parts.resource.useResource,
+  } as unknown as ProviderUsagePillProps
+  await act(async () => {
+    root!.render(createElement(ProviderUsagePill, props))
+  })
+}
+
+describe('ProviderUsagePill 长期搁置与重连恢复', () => {
   it('挂载时 current 为 null：自动触发 load()，目录就绪后正常渲染额度', async () => {
     let loaded = false
     const { directory, load, loadCalls } = makeMutableDirectory(nullIdle, () => {
       loaded = true
     })
+    const resource = makeResource()
 
-    await act(async () => {
-      root!.render(createElement(ProviderUsagePill, { t, directory, load } as unknown as ProviderUsagePillProps))
-    })
+    await renderPill({ directory, load, resource })
 
     // 挂载时 current 为 null，必须触发 load()
     expect(loadCalls()).toBe(1)
@@ -131,7 +174,8 @@ describe('ProviderUsagePill 长期搁置与重连唤醒恢复', () => {
     // 此时尚未就绪，无历史 provider，渲染 null
     expect(container.querySelector('.pu-pill-btn')).toBeNull()
 
-    // 目录装载完成，切为 readyDeepseek
+    // 目录装载完成 + 流首帧到达
+    resource.set(usageResourceAddress('deepseek'), snapshotOf(42))
     await act(async () => {
       directory.set(readyDeepseek)
     })
@@ -145,10 +189,10 @@ describe('ProviderUsagePill 长期搁置与重连唤醒恢复', () => {
 
   it('会话搁置后 current 被置空：保留旧值并标过期，不从 DOM 闪烁卸载，并自动请求 load()', async () => {
     const { directory, load, loadCalls } = makeMutableDirectory(readyDeepseek)
+    const resource = makeResource()
+    resource.set(usageResourceAddress('deepseek'), snapshotOf(42))
 
-    await act(async () => {
-      root!.render(createElement(ProviderUsagePill, { t, directory, load } as unknown as ProviderUsagePillProps))
-    })
+    await renderPill({ directory, load, resource })
 
     const button = container.querySelector('.pu-pill-btn') as HTMLButtonElement
     expect(button).not.toBeNull()
@@ -172,12 +216,12 @@ describe('ProviderUsagePill 长期搁置与重连唤醒恢复', () => {
     expect(loadCalls()).toBeGreaterThan(initialLoads)
   })
 
-  it('current 从 null 恢复到有值时：立即重新拉取额度并消除过期状态', async () => {
+  it('current 从 null 恢复到有值时：流帧刷新额度并消除过期状态', async () => {
     const { directory, load } = makeMutableDirectory(readyDeepseek)
+    const resource = makeResource()
+    resource.set(usageResourceAddress('deepseek'), snapshotOf(42))
 
-    await act(async () => {
-      root!.render(createElement(ProviderUsagePill, { t, directory, load } as unknown as ProviderUsagePillProps))
-    })
+    await renderPill({ directory, load, resource })
 
     const button = container.querySelector('.pu-pill-btn') as HTMLButtonElement
     expect(button).not.toBeNull()
@@ -189,18 +233,8 @@ describe('ProviderUsagePill 长期搁置与重连唤醒恢复', () => {
     })
     expect(button.getAttribute('aria-label')).toContain('staleData')
 
-    // 新快照返回更新后的额度 88
-    const updatedSnapshot = {
-      provider: 'deepseek',
-      windows: [{ id: 'w1', label: 'Credits', remain: 88, limit: 100, unit: 'CNY' }],
-      fetchedAt: Date.now(),
-    }
-    vi.stubGlobal('fetch', vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ snapshots: [updatedSnapshot] }),
-    }) as unknown as Response))
-
-    // 目录恢复就绪
+    // 流下一帧带更新后的额度 88，目录恢复就绪
+    resource.set(usageResourceAddress('deepseek'), snapshotOf(88))
     await act(async () => {
       directory.set(readyDeepseek)
     })
@@ -210,46 +244,30 @@ describe('ProviderUsagePill 长期搁置与重连唤醒恢复', () => {
     expect(button.getAttribute('aria-label')).not.toContain('staleData')
   })
 
-  it('页面唤醒（visibilitychange / focus / online）：若处于断开态自动重试 load()，否则触发 refresh()', async () => {
-    const { directory, load, loadCalls } = makeMutableDirectory(nullIdle)
+  it('流报 failed（协议异常态）时标过期，旧值仍可见', async () => {
+    const { directory, load } = makeMutableDirectory(readyDeepseek)
+    const resource = makeResource()
+    resource.set(usageResourceAddress('deepseek'), snapshotOf(42))
 
-    await act(async () => {
-      root!.render(createElement(ProviderUsagePill, { t, directory, load } as unknown as ProviderUsagePillProps))
-    })
-    const loadsBefore = loadCalls()
+    await renderPill({ directory, load, resource })
+    const button = container.querySelector('.pu-pill-btn') as HTMLButtonElement
+    expect(button.getAttribute('aria-label')).not.toContain('staleData')
 
-    // 模拟早上切回标签页（visibilitychange）
-    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    resource.fail(usageResourceAddress('deepseek'))
     await act(async () => {
-      document.dispatchEvent(new Event('visibilitychange'))
-    })
-    expect(loadCalls(), '断开态下唤醒必须重试 load()').toBeGreaterThan(loadsBefore)
-
-    // 目录恢复
-    await act(async () => {
-      directory.set(readyDeepseek)
+      directory.set({ ...readyDeepseek })
     })
 
-    // 正常态下 window focus 唤醒应发起 refresh
-    const fetchCalls: string[] = []
-    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
-      fetchCalls.push(String(input))
-      return { ok: true, json: async () => ({ snapshots: [goodSnapshot] }) } as unknown as Response
-    }))
-    const beforeFocusFetch = fetchCalls.length
-    await new Promise(resolve => setTimeout(resolve, 1100)) // 绕过 1s 防抖
-    await act(async () => {
-      window.dispatchEvent(new Event('focus'))
-    })
-    expect(fetchCalls.length, '就绪态下唤醒必须触发额度刷新').toBeGreaterThan(beforeFocusFetch)
+    expect(button.getAttribute('aria-label')).toContain('staleData')
+    expect(button.textContent).toContain('42')
   })
 
   it('同 provider 的重连抖动不抹除答案，真实 provider 切换时才清空答案', async () => {
     const { directory, load } = makeMutableDirectory(readyDeepseek)
+    const resource = makeResource()
+    resource.set(usageResourceAddress('deepseek'), snapshotOf(42))
 
-    await act(async () => {
-      root!.render(createElement(ProviderUsagePill, { t, directory, load } as unknown as ProviderUsagePillProps))
-    })
+    await renderPill({ directory, load, resource })
     const button = container.querySelector('.pu-pill-btn') as HTMLButtonElement
     expect(button.textContent).toContain('42')
 
@@ -264,7 +282,7 @@ describe('ProviderUsagePill 长期搁置与重连唤醒恢复', () => {
     })
     expect(button.textContent).toContain('42')
 
-    // 真实切换为 minimax
+    // 真实切换为 minimax：旧地址的流值不再适用（新地址还在 loading）
     const readyMinimax: ModelDirectoryState = {
       current: { provider: 'minimax', model: 'abab6.5' } as any,
       pending: null,
@@ -274,11 +292,6 @@ describe('ProviderUsagePill 长期搁置与重连唤醒恢复', () => {
       status: 'ready',
       error: null,
     }
-    // 延迟 minimax 的响应以断言清空行为
-    let resolveMinimax: (val: any) => void
-    const pendingFetch = new Promise((resolve) => { resolveMinimax = resolve })
-    vi.stubGlobal('fetch', vi.fn(async () => pendingFetch as any))
-
     await act(async () => {
       directory.set(readyMinimax)
     })
@@ -288,12 +301,15 @@ describe('ProviderUsagePill 长期搁置与重连唤醒恢复', () => {
     expect(button.textContent).toContain('minimax')
     expect(button.textContent).toContain('loading')
 
-    // 释放响应
-    await act(async () => {
-      resolveMinimax!({
-        ok: true,
-        json: async () => ({ snapshots: [{ provider: 'minimax', windows: [], fetchedAt: Date.now() }] }),
-      })
+    // 新 provider 的流首帧到达后正常展示
+    resource.set(usageResourceAddress('minimax'), {
+      provider: 'minimax',
+      windows: [{ id: 'w1', label: 'Weekly', remain: 7, unit: 'credits' }],
+      fetchedAt: Date.now(),
     })
+    await act(async () => {
+      directory.set({ ...readyMinimax })
+    })
+    expect(button.textContent).toContain('7')
   })
 })

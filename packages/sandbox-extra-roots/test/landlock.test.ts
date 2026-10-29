@@ -1,7 +1,7 @@
 /**
- * Landlock runner 路径的测试:分支只在 process.platform === "linux" 且
- * @deepseek-ai/node-addon-landlock-run 可加载时激活,macOS/CI 环境二者
- * 都不可得——平台 getter 与 loadLandlock 双 mock 后,分支逻辑(--rw 插入
+ * Landlock runner 路径的测试:分支只在 process.platform === "linux" 且官方
+ * @deepseek-ai/node-addon-system/landlock-run 可加载时激活,macOS/CI 环境
+ * 二者都不可得——平台 getter 与官方入口双 mock 后,分支逻辑(--rw 插入
  * 位置、存在性过滤、fail-closed)可在任意平台验证。mock 独立成文件,
  * 避免泄漏到 seatbelt/bwrap 的既有用例。
  */
@@ -15,18 +15,12 @@ import { canonicalPath } from '../src/common.js'
 
 const fakePlatform = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
 
-vi.mock('../src/common.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/common.js')>()
-  return {
-    ...actual,
-    loadLandlock: async () => ({
-      launcherPath: () => '/fake/landlock-runner',
-      // 官方 grantArgs({readWrite:[root]}) === ["--rw", root](CLI 契约);
-      // mock 按同形状产出,断言继续钉 "--rw" 字面量即钉住了授权片段本身。
-      grantArgs: ({ readWrite }: { readWrite?: readonly string[] }) => (readWrite ?? []).flatMap((r) => ['--rw', r]),
-    }),
-  }
-})
+vi.mock('@deepseek-ai/node-addon-system/landlock-run', () => ({
+  launcherPath: () => '/fake/landlock-runner',
+  // 官方 grantArgs({readWrite:[root]}) === ["--rw", root](CLI 契约);
+  // mock 按同形状产出,断言继续钉 "--rw" 字面量即钉住了授权片段本身。
+  grantArgs: ({ readWrite }: { readWrite?: readonly string[] }) => (readWrite ?? []).flatMap((r) => ['--rw', r]),
+}))
 
 const WS = mkdtempSync(join(tmpdir(), "ser-ll-ws-"))
 

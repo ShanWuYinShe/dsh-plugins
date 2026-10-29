@@ -1,3 +1,23 @@
+## 0.4.28-alpha.4 (2026-10-29)
+
+### 破坏性变更
+
+* **移除旧布局迁移**：旧版平铺在 `$DSH_HOME` 根目录的自有凭据副本（`.workbuddy-auth.json` 等 4 份）与 `.dsh-any-connect/` 回落副本不再自动搬进状态域（`storages/dsh_any_connect/`）；旧位置 `$DSH_HOME/.zcode-device-mid` 的设备标识也不再兼容读取。从 ≤0.4.13 直接升级的用户会丢失插件自有凭据副本、需重新登录一次（桌面端 App 的登录态仍自动复用，不受影响）；Start Plan 的 `X-Device-Mid` 会重建为新值。
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.2` 的 manifest / 运行时契约**：
+  * 兼容声明迁到官方字段 `engines.dsh: ^0.2.2-alpha.2`，`engines.node` 提到 `>=24.9.0`（宿主新最低 Node 版本），补 `dsh.manifestVersion: 1`，删除自造 `dsh.host` 字段。
+  * 删除空的 typert 工件（`src/typert.host.ts` 与 `exports["./typert"]`）：本包没有 Remote 服务，空工件是无效兼容物。
+  * `dsh.client.inject` 校正为真实客户端模块包名：删掉无 `dsh.client` 声明的静态 seed 库 `@deepseek-ai/dsh-client-ui-slots`，补上 `conversation.input.model.label` 槽 owner `@deepseek-ai/dsh-client-ui-model-selection`。
+* **pi-ai 对齐宿主 1.3.0**：`@earendil-works/pi-ai` 由 optionalDependency（`^1.1.0`）改为 devDependency `^1.3.0`。运行时不再自带 pi-ai 副本：它随宿主 `dsh-llm-pi-ai` 的依赖闭包解析（宿主 profile runner 的 runtime resolution），与宿主共享同一实例，同时不再把整棵传递依赖装进 profile。
+* **超时抽象去掉本地回退**：`src/timeout.ts` 改为静态 import 宿主 `@deepseek-ai/dsh-timeout` 的 `deadline`，删除动态 import + 本地同语义实现（旧假设「生产安装裁掉 devDep 后静态 import 会炸」已被边界注记与 app-boot 的 runtime resolution 源码否定）。超时原因统一为宿主 `TimeoutReason`，消费方按 `reason.code` 分类的契约不变。
+* **adapter 的 `compat` 字段确认为 pi-ai 官方能力**：`Model.compat.supportsDeveloperRole = false` 只对 OpenAI 形通道声明（anthropic-messages 的 compat 类型无此字段），注释写明它用于规避 WorkBuddy 网关对 `role: "developer"` 的 400/11128 拒绝。
+
+### 测试
+
+* 新增模型容量显式声明回归（`test/capacity.test.ts`）：四个通道的兜底名单、未知模型的保守默认（200K/32K）、目录解析丢弃无容量行、`toPiModel` 容量透传与 pi-ai `compat` 甄别——确保不依赖 0.2.2 起「未声明容量默认 1M/128K」的宿主默认值。
+
 ## 0.4.28-alpha.3 (2026-10-29)
 
 ### 新增

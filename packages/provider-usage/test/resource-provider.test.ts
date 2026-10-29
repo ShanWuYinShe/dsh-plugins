@@ -1,4 +1,4 @@
-/** resource-provider:地址解析、live 流的帧纪律(首帧/值变/错误折叠/abort)与可选注册。 */
+/** resource-provider:地址解析、live 流的帧纪律(首帧/值变/错误折叠/abort)与协议注册。 */
 
 import { describe, expect, it, vi } from 'vitest'
 
@@ -16,7 +16,6 @@ function answer(overrides: Partial<UsageSnapshot> = {}): SnapshotAnswer {
   return { provider: 'acme', windows: [{ id: 'w', label: 'W', remain: 3, unit: 'credits' }], fetchedAt: 1, ...overrides }
 }
 
-/** 收集流前 n 帧(或流自然结束);测试永远不等真 60s 定时。 */
 /** 收集流前 n 帧;收够即 abort(先断流再退出,否则 for-await 挂在 60s sleep 上)。 */
 async function firstFrames(stream: AsyncIterable<unknown>, count: number, controller: AbortController): Promise<unknown[]> {
   const frames: unknown[] = []
@@ -63,34 +62,46 @@ describe('usageStream', () => {
   })
 })
 
+describe('地址解析', () => {
+  it('providerOfAddress 只认本协议且拒绝空 path', () => {
+    expect(providerOfAddress(usageResourceAddress('acme'))).toBe('acme')
+    expect(providerOfAddress(usageResourceAddress('a b'))).toBe('a b')
+    expect(providerOfAddress('dsh-resource://other/acme')).toBeUndefined()
+    expect(providerOfAddress('dsh-resource://provider-usage/')).toBeUndefined()
+    expect(providerOfAddress('https://provider-usage/acme')).toBeUndefined()
+    expect(providerOfAddress('not a url')).toBeUndefined()
+  })
+})
+
 describe('registerProviderUsageResources', () => {
-  it('resources 缺席时是 no-op 反注册器', () => {
-    const ctx = { get: () => undefined }
-    expect(registerProviderUsageResources(ctx as never)).toBeInstanceOf(Function)
-    expect(() => registerProviderUsageResources(ctx as never)()).not.toThrow()
-  })
-
-  it('get 抛错(无 get 语义的上下文)同样安全跳过', () => {
-    expect(() => registerProviderUsageResources({ get: () => { throw new Error('no inject') } } as never)).not.toThrow()
-  })
-
-  it('注册的 provider 帧是地址协议的流;反注册器来自 resources.register', async () => {
+  it('把协议 provider 注册成 ctx.effect，并暴露 open 的 live 流', async () => {
+    fetchMock.mockReset()
     fetchMock.mockResolvedValue(answer())
     let registered: { protocol: string; open: (address: string, ctx: { signal: AbortSignal }) => AsyncIterable<unknown> } | undefined
     const dispose = vi.fn()
-    const ctx = { get: () => ({ register: (p: never) => { registered = p as never; return dispose } }) }
-    const result = registerProviderUsageResources(ctx as never)
+    const effects: Array<{ body: () => () => void; label: string | undefined }> = []
+    const ctx = {
+      effect: (body: () => () => void, label?: string) => {
+        effects.push({ body, label })
+        return () => {}
+      },
+      resources: { register: (p: never) => { registered = p as never; return dispose } },
+    }
+    registerProviderUsageResources(ctx as never)
+    // 注册必须作为 effect 交付：插件 fiber 卸载/HMR 时由 Cordis 反注册。
+    expect(effects).toHaveLength(1)
+    expect(effects[0]!.label).toContain('provider-usage')
+    const disposer = effects[0]!.body()
     expect(registered!.protocol).toBe('provider-usage')
+    expect(disposer).toBe(dispose)
     const openController = new AbortController()
     const frames = await firstFrames(registered!.open(usageResourceAddress('acme'), { signal: openController.signal }), 1, openController)
     expect(frames).toHaveLength(1)
     expect(fetchMock).toHaveBeenCalledWith('acme', expect.any(AbortSignal))
-    result()
-    expect(dispose).toHaveBeenCalledTimes(1)
   })
 })
 
-// 定时节奏常量与 hook 轮询同源:改这里就同步改了抑制窗的宽度基准。
+// 定时节奏常量与 useResource 流同源:改这里就同步改了抑制窗的宽度基准。
 describe('RESOURCE_POLL_INTERVAL_MS', () => {
   it('保持 60s(与宿主 registry 缓存同量级)', () => {
     expect(RESOURCE_POLL_INTERVAL_MS).toBe(60_000)

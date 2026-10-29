@@ -1,35 +1,25 @@
-import type { Context as CordisContext } from "@deepseek-ai/cordis";
+/**
+ * 宿主 service 面的最小类型接线。
+ *
+ * @deepseek-ai/dsh-sandbox 自带 `declare module '@deepseek-ai/cordis'` 的
+ * Context 增强（`sandbox: SandboxProvider`），静态 import 该包即让插件在编译期
+ * 看到官方契约——不再手写 ctx.sandbox 形状。
+ *
+ * `sandboxPolicy` 的官方增强在 @deepseek-ai/dsh-sandbox-policy（本包未依赖该包，
+ * 避免把宿主内部实现包塞进插件依赖）：这里的 augmentation 只声明本插件实际
+ * 消费的 `resolve()`，形状逐字取自官方源码
+ * host-repo packages/sandbox/sandbox-policy/src/index.ts
+ * （`resolve(request?: SandboxPolicyRequest): SandboxExecutionPolicy`）。
+ * 官方该包被加载时两者类型一致，不会产生 declaration merge 冲突。
+ */
+import type {} from '@deepseek-ai/dsh-sandbox';
+import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox';
 
-declare module "@deepseek-ai/cordis" {
-  interface Context extends CordisContext {
-    sandbox: {
-      [key: string]: any;
-      [key: symbol]: any;
-      /** 宿主契约：dsh-sandbox-local 的 confine(argv, policy, signal?)
-       * 是异步实现，返回 Promise；宿主 terminal-bash 以
-       * `await sandbox.confine(argv, {...}, signal)` 调用。本插件的包装与之
-       * 对齐同样是 async，并把 signal 透传给原实现。 */
-      confine?: (argv: string[], policy: any, signal?: AbortSignal) => Promise<{ argv: string[]; [key: string]: any }>;
-    };
-    fs: {
-      [key: string]: any;
-      [key: symbol]: any;
-      checkedTarget?: (...args: any[]) => Promise<any>;
-    };
+declare module '@deepseek-ai/cordis' {
+  interface Context {
     sandboxPolicy: {
-      /** 宿主契约:dsh-sandbox-policy 的 resolve() 是同步调用,返回普通
-       * 对象而非 Promise。checkedTarget 包装依赖该同步性——若宿主改为
-       * 异步,包装里 policy.mode 将是 undefined,额外目录在 fs 侧静默
-       * 失效;升级 DSH 时请核对该签名。 */
-      resolve(): { mode: string; workspaceRoot?: string };
+      /** 逐调用解析沙盒策略（同步返回，见官方 SandboxPolicyService.resolve）。 */
+      resolve(request?: { session?: unknown; mode?: SandboxMode }): SandboxExecutionPolicy;
     };
-    // 宿主 settings 服务为 SettingsForms（Loader profile 条目的 Config
-    // 表单投影）。本插件不声明 Config schema，卡片经
-    // plugins.bundle.config slot 与 config gateway 读写，此处无需声明。
   }
 }
-
-// dsh-sandbox 与 node-addon-landlock-run 的类型不再手写声明：两包类型均在
-// 依赖树内可解析（devDependencies / optionalDependencies），官方 .d.ts 是唯一
-// 契约源——手写副本曾在官方漂移时把偏差藏过 typecheck（2026-10-24 审计结论）。
-

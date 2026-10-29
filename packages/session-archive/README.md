@@ -18,8 +18,9 @@
 
 ## 安装
 
-> 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段；仓库的 `dsh-v*`
-> git tag 是各次稳定版适配的归档点。
+> 适配的 DSH 版本见本包 `package.json` 的 `engines.dsh` 字段（官方兼容声明）；
+> 宿主 0.2.2 起要求 **Node.js >= 24.9**（`engines.node` 同步声明）。
+> 仓库的 `dsh-v*` git tag 是各次稳定版适配的归档点。
 
 ```bash
 dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v<版本>/chaoset-session-archive-<版本>.tgz
@@ -51,6 +52,10 @@ dsh plugin --profile web remove @chaoset/session-archive
 
 ## Remote API（`ctx.remote.sessionArchive`）
 
+> 服务面用官方 `@Remote` 标准装饰器声明（`src/remote.ts`，边界类型在
+> `src/types.ts`）；客户端消费的 `./remote` 调用面与宿主侧 `./typert` 工件
+> 由官方 `@deepseek-ai/dsh-typert-generator` 在构建期生成。
+
 | 方法 | 参数 | 返回 |
 | --- | --- | --- |
 | `list()` | — | `{ items: ArchiveRow[] }` |
@@ -79,7 +84,7 @@ dsh plugin --profile web remove @chaoset/session-archive
 
 ## 配置
 
-config 字段（`cordis.patch.yml`；0.3.x 的 `~/.dsh/plugins/session-archive/config.json` 会在启动时一次性自动迁入）：
+config 字段（`cordis.patch.yml`；配置只走官方 config-editor，旧版自建 `config.json` 迁移已删除）：
 
 - `detailMaxMessages`（默认 200）：查看时返回的最大消息条数。
 - `messagePreviewChars`（默认 2000）：单条消息预览的最大字符数。

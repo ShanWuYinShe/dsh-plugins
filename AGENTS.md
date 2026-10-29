@@ -10,14 +10,19 @@ README 面向用户，面向开发者的内容以 RELEASING.md 为准。
 
 ```bash
 bun install             # 依赖安装（切分支后 lockfile 不同，记得重新 install）
-bun run build           # tsc 编译 host + esbuild 打包 client
-bun run typecheck       # host + client 两套 tsconfig --noEmit
-bun run test            # vitest 回归（先跑 scripts/build.mjs 构建，含 tsc + esbuild 产物）
+bun run build           # 三段：tsc 编译 host → typert 工件生成 → esbuild 打包 client
+bun run typert          # 只生成 Typert 工件（./typert + ./remote，scripts/typert.mjs）
+bun run typecheck       # host + client 两套 tsconfig --noEmit（先自动生成 Typert 工件）
+bun run test            # vitest 回归（先跑 scripts/build.mjs 构建，含 typert + esbuild 产物）
 bun run test:ci         # build + typecheck + test（提交/发布前必跑）
 bun run gate            # 发布门禁干跑：只读，看哪些包会被发布/为何被跳过
 bun run dsh-status      # 两分支 dsh 依赖基线 vs dsh 最新 rc（正式版）对照（详见 RELEASING.md）
 bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览），详见 RELEASING.md
 ```
+
+构建顺序不可交换：client 源码用包自引用子路径 `import "@chaoset/<pkg>/remote"`，
+esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typert 生成必须
+在 client 打包之前。`lib/` 与 `client/client.cjs` 都是 gitignore 的构建产物。
 
 ## 分支选择铁律：动手前必跑 `bun run dsh-status`
 
@@ -40,6 +45,16 @@ bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览�
 
 ## 约定
 
+- **Typert / @Remote**：暴露给 Web client 的服务面用官方 `@Remote` 标准装饰器标在
+  `TypertRemoteService` 子类的**具体业务方法**上，参数/返回类型定义在包的
+  `src/types.ts`（对应 `package.json` 的 `./types` 子路径导出）。`./typert`（Host 工件）
+  与 `./remote`（Client 调用面）由 `@deepseek-ai/dsh-typert-generator` 在构建期生成，
+  **不要手写**；新增/修改 `@Remote` 方法后必须重新 `bun run build`。没有 Remote 服务
+  的包不要声明 `./typert` / `./remote` 导出。
+- **兼容声明**：插件对 DSH 的兼容性用官方 `engines.dsh`（`^<基线版本>`，由
+  `bun run adapt` 与依赖 range 同步维护）；不要使用已废弃的自造字段 `dsh.host`。
+- **客户端 inject**：`dsh.client.inject` 声明的是**客户端模块包名**（服务提供方包），
+  不是 cordis 服务名；`cordis` 运行时的服务依赖写在 client 入口的 `export const inject`。
 - 发布相关（分支模型、发布纪律、版本号/推送门禁）：详见 skill dsh-plugin-release；跨分支 worktree 操作：详见 skill dsh-plugin-worktree。
 - 提交信息按 skill `git-workflow` 写（全局 Commit 格式 `<分类>(<范围>): <中文描述>`），本项目惯例用
   中文分类前缀（`新增:` / `修复:` / `重构:` / `文档:` / `测试:` / `ci:` 等）。

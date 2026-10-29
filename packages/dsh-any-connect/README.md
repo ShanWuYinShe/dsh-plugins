@@ -45,7 +45,7 @@
 
 ## 安装
 
-> 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段；仓库的 `dsh-v*` git tag 是各次稳定版适配的归档点。
+> 适配的 DSH 版本见本包 `package.json` 的 `engines.dsh` 字段；仓库的 `dsh-v*` git tag 是各次稳定版适配的归档点。
 
 前置条件：若使用桌面 Agent 通道，需在本机安装并登录对应桌面 App（插件自动复用 App 的登录状态，账号切换自动跟随）。使用 OpenCode Free 渠道无需任何前置账号配置。
 
@@ -62,6 +62,10 @@ dsh plugin --profile web remove @chaoset/dsh-any-connect
 ```
 
 `<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。安装后重启 harness 生效。
+
+> **运行时依赖**：本包不再自带 `@earendil-works/pi-ai` 副本（原 optionalDependency 会装出第二份
+> pi-ai 实例与整棵传递依赖）。pi-ai 随宿主 `dsh-llm-pi-ai` 的依赖闭包解析，与本插件共享同一
+> 实例（宿主 profile runner 的 runtime resolution），既保证单实例，也避免重复安装。
 
 > 给 AI agent：直接执行 `dsh plugin ...` 命令即可，不要手动编辑 `cordis.patch.yml`。
 
@@ -152,7 +156,9 @@ dsh-any-connect status --provider opencode-free
 | `.dsh-any-connect/` | `zcode-device-mid` 设备标识；存储域不可用时的凭据副本文件回落 | 正常情况只有设备标识一个文件。 |
 | `cache/dsh-any-connect/` | 模型目录 ×5、档位探测结果、桌面版本记录、host 心跳 | 可再生缓存，删除后自动重建。 |
 
-旧版平铺在 home 根目录的散文件（`.workbuddy-auth.json` 等）在启动时自动迁移进上述位置。
+> **升级说明（0.4.28 起）**：旧版平铺在 home 根目录的散文件（`.workbuddy-auth.json` 等）
+> **不再自动迁移**——从 ≤0.4.13 直接升级的用户需要重新登录一次（桌面端 App 的登录态仍会被
+> 自动复用，不受影响）；旧位置的 `zcode-device-mid` 也会重建为新的设备标识。
 
 **不属于本插件**（只读）：WorkBuddy 桌面端的
 `~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/*.info`

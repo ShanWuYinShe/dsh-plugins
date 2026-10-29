@@ -63,7 +63,9 @@ export function createArchiveQueries(deps: HostContext) {
       // 头从句柄上取,消息逐块提取,达到上限后只计数不再拼接文本;
       // title 事件同趟收集(fold 只消费最后一个,全量物化没有必要)。
       const titleEvents: SessionEvent[] = [];
-      const messages: Array<{ role: 'user' | 'assistant'; text: string; time: unknown }> = [];
+      // time 用官方 SessionEvent.time（Unix epoch 毫秒）：边界类型 ArchiveDetailMessage
+      // 是 JSON 契约，不能用 unknown（生成器会拒绝非 JSON 类型）。
+      const messages: Array<{ role: 'user' | 'assistant'; text: string; time: number }> = [];
       let totalMessageCount = 0;
       const meta = await scanSession(persistence, id, (events) => {
         for (const event of events) {
