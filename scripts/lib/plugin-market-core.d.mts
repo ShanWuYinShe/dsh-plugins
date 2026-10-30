@@ -62,6 +62,28 @@ export interface BuildSiteInput {
   readonly expectedNames?: Readonly<Record<string, string>>;
 }
 
+/** 一条运行期依赖事实：某个插件某个版本声明了 dependencies/optionalDependencies。 */
+export interface RuntimeDependencyRecord {
+  readonly name: string;
+  readonly version: string;
+  /** Release 发布时间（Unix 秒；策略判定依据；缺失时为 -1）。 */
+  readonly publishedAt: number;
+  /** 依赖名 → 范围（键排序；已排除本仓 @chaoset 内部互引）。 */
+  readonly dependencies: Readonly<Record<string, string>>;
+}
+
+/**
+ * 运行期依赖汇总，按 RUNTIME_DEPENDENCY_POLICY_SINCE 分类：
+ * blocking = 发布时间不早于策略生效时刻（check/build 会失败）；
+ * legacy = 更早发布或时间缺失（历史 tarball 不可变，仅告警）。
+ */
+export interface RuntimeDependencySummary {
+  /** 策略生效时刻（ISO 8601），随 summary 输出便于核对。 */
+  readonly policySince: string;
+  readonly blocking: readonly RuntimeDependencyRecord[];
+  readonly legacy: readonly RuntimeDependencyRecord[];
+}
+
 /** buildSite / validateSite 的摘要。 */
 export interface SiteSummary {
   readonly plugins: number;
@@ -79,6 +101,8 @@ export interface BuiltSite {
     readonly plugins: readonly { readonly name: string; readonly versions: readonly string[] }[];
     /** 生效 engines.dsh 的来源统计：精确声明 / 范围取下界 / 旧清单 dsh.host 精确 pin。 */
     readonly rangeSources: { readonly exact: number; readonly floor: number; readonly 'dsh-host': number };
+    /** 运行期依赖事实：策略生效后发布的版本带依赖会让 check/build 失败；更早版本只告警。 */
+    readonly runtimeDependencies: RuntimeDependencySummary;
     readonly skipped: readonly { readonly tag: string; readonly reason: string }[];
   };
 }
@@ -97,6 +121,8 @@ export interface ValidateSiteInput {
 export interface ValidatedSite {
   readonly ok: boolean;
   readonly errors: string[];
+  /** 非致命告警（例如历史版本带运行期依赖）；ok 只看 errors。 */
+  readonly warnings: string[];
   readonly summary: SiteSummary;
 }
 
@@ -154,6 +180,8 @@ export type ManifestInspection =
       readonly rangeSource: 'exact' | 'floor' | 'dsh-host';
       /** 来源为 floor（声明了范围、取下界）时保留的原始声明，供离线复核。 */
       readonly declaredEnginesDsh?: string;
+      /** 该版本声明的运行期依赖（名 → 范围；已排除 @chaoset 内部互引）。 */
+      readonly runtimeDependencies: Readonly<Record<string, string>>;
     }
   | { readonly eligible: false; readonly reason: string };
 /** 判断 tarball 内 package.json 是否收录（精确 engines.dsh 原样 / 范围取下界 / 旧 dsh.host 精确 pin）。 */
@@ -164,6 +192,19 @@ export declare function inspectManifest(
 ): ManifestInspection;
 /** 把声明值（精确 SemVer 或 ^X/~X/>=X 范围）化成精确宿主版本 pin；无法判定返回 undefined。 */
 export declare function exactPinOfDeclared(declared: unknown): string | undefined;
+/** 运行期依赖策略生效时刻（ISO 8601）：该时刻之后发布的版本必须零运行期依赖。 */
+export declare const RUNTIME_DEPENDENCY_POLICY_SINCE: string;
+/** 扫描清单的运行期依赖（dependencies + optionalDependencies，排除 @chaoset 自身包；键排序）。 */
+export declare function runtimeDependenciesOf(manifest: unknown): Record<string, string>;
+/** 汇总运行期依赖事实（build/plan 的 stderr 与 summary 用；按发布时间的策略生效线分类）。 */
+export declare function runtimeDependencySummary(
+  rows: readonly {
+    readonly name: string;
+    readonly version: string;
+    readonly publishedAt: number;
+    readonly dependencies?: Readonly<Record<string, string>>;
+  }[],
+): RuntimeDependencySummary;
 /** 读取 tarball 内的 package/package.json（不安装、不执行）。 */
 export declare function readPackageJsonFromTarball(bytes: Uint8Array): Record<string, unknown>;
 /** npm tarball 的 sha512 SRI integrity。 */

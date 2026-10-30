@@ -220,6 +220,9 @@ export function normalizeRegistryUrl(value) {
   if (url.search !== '' || url.hash !== '') {
     throw new MarketInputError('registry URL 不能带查询串或片段: ' + JSON.stringify(value))
   }
+  if (url.username !== '' || url.password !== '') {
+    throw new MarketInputError('registry URL 不能带用户名密码（会被写进索引）: ' + JSON.stringify(value))
+  }
   const href = url.href.endsWith('/') ? url.href : url.href + '/'
   return href
 }
@@ -287,6 +290,92 @@ export function exactPinOfDeclared(declared) {
     if (match !== null) return match[1]
   }
   return undefined
+}
+
+/**
+ * tarball 清单里会进入「运行期依赖」的字段。
+ * 外部插件的运行期依赖必须为空（只放 devDependencies）：DSH 安装索引版本时执行
+ * pnpm add <spec> --registry=<静态 registry>，pnpm 会按 tarball 自带的 package.json 去静态
+ * registry 解析 dependencies/optionalDependencies 并 404；运行期依赖由宿主 profile runner 的
+ * runtime resolution 供给（官方外部插件机制）。排除本仓自身 @chaoset 包的内部互引。
+ */
+const RUNTIME_DEPENDENCY_SECTIONS = ['dependencies', 'optionalDependencies']
+/** 本仓插件包作用域：内部互引不算外部运行期依赖。 */
+const OWN_PACKAGE_SCOPE = '@chaoset/'
+
+/**
+ * 运行期依赖策略的生效时刻（ISO 8601，含时区）。该时刻**之后发布**的插件版本必须运行期零依赖
+ * （`dependencies`/`optionalDependencies` 为空，宿主依赖只放 `devDependencies`，运行期由宿主
+ * runtime resolution 供给）；该时刻**之前**发布的 tarball 不可变，只告警。
+ *
+ * 按发布时间而不是「最新版本」判定，是为了不让索引侧校验依赖发布顺序：策略生效前的历史 latest
+ * 带运行期依赖时仍能重新生成站点，等新的零依赖版本发布后自然落入阻断范围。
+ */
+export const RUNTIME_DEPENDENCY_POLICY_SINCE = '2026-10-30T00:00:00Z'
+/** RUNTIME_DEPENDENCY_POLICY_SINCE 的 Unix 秒（策略判定用；必须是合法整数时刻）。 */
+const RUNTIME_DEPENDENCY_POLICY_SINCE_EPOCH = Math.floor(Date.parse(RUNTIME_DEPENDENCY_POLICY_SINCE) / 1000)
+if (!Number.isInteger(RUNTIME_DEPENDENCY_POLICY_SINCE_EPOCH)) {
+  throw new Error('RUNTIME_DEPENDENCY_POLICY_SINCE 不是合法的 ISO 时刻: ' + JSON.stringify(RUNTIME_DEPENDENCY_POLICY_SINCE))
+}
+
+/** Unix 秒 → ISO 8601（整秒；告警/错误文案用）。 */
+function isoSecondsOf(unixSeconds) {
+  return new Date(unixSeconds * 1000).toISOString().replace(/\.000Z$/, 'Z')
+}
+
+/** 发布时间是否不早于运行期依赖策略生效时刻（时间缺失/非法视为不阻断，只告警）。 */
+function isRuntimeDependencyBlocking(publishTimestamp) {
+  return Number.isInteger(publishTimestamp) && publishTimestamp >= RUNTIME_DEPENDENCY_POLICY_SINCE_EPOCH
+}
+
+/** 名 → 值的普通对象：键排序，保证序列化确定性。 */
+function sortedRecord(record) {
+  const result = {}
+  for (const key of Object.keys(record).sort()) result[key] = record[key]
+  return result
+}
+
+/**
+ * 扫描一个 tarball 内 package.json 的运行期依赖声明（dependencies + optionalDependencies，
+ * 排除 @chaoset 自身包）。只读取声明，不解析版本范围。
+ * @param manifest - tarball 内的 package.json。
+ * @returns 名 → 范围（键排序）；不是对象或声明非法时为空对象。
+ */
+export function runtimeDependenciesOf(manifest) {
+  const result = {}
+  if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) return result
+  for (const section of RUNTIME_DEPENDENCY_SECTIONS) {
+    const declared = manifest[section]
+    if (declared === null || typeof declared !== 'object' || Array.isArray(declared)) continue
+    for (const [name, range] of Object.entries(declared)) {
+      if (typeof name !== 'string' || name === '' || name.startsWith(OWN_PACKAGE_SCOPE)) continue
+      if (typeof range !== 'string' || range.trim() === '') continue
+      if (!Object.hasOwn(result, name)) result[name] = range
+    }
+  }
+  return sortedRecord(result)
+}
+
+/**
+ * 汇总「运行期依赖」事实，供 build/plan 的 stderr 与 summary 呈报。
+ * 按 RUNTIME_DEPENDENCY_POLICY_SINCE 分类：发布时间不早于策略生效时刻 → blocking（check/build
+ * 会失败）；更早或时间缺失 → legacy（历史 tarball 不可变，仅告警）。输出顺序即入参顺序（确定性）。
+ * @param rows - { name, version, publishedAt, dependencies } 数组（插件展示顺序 × 版本降序）；
+ *   publishedAt 是 Release 发布时间（Unix 秒）。
+ * @returns { policySince, blocking, legacy }。
+ */
+export function runtimeDependencySummary(rows) {
+  const blocking = []
+  const legacy = []
+  for (const row of rows) {
+    const dependencies = sortedRecord(row.dependencies === undefined ? {} : row.dependencies)
+    if (Object.keys(dependencies).length === 0) continue
+    const publishedAt = Number.isInteger(row.publishedAt) ? row.publishedAt : -1
+    const record = { name: row.name, version: row.version, publishedAt, dependencies }
+    if (isRuntimeDependencyBlocking(publishedAt)) blocking.push(record)
+    else legacy.push(record)
+  }
+  return { policySince: RUNTIME_DEPENDENCY_POLICY_SINCE, blocking, legacy }
 }
 
 /**
@@ -386,10 +475,12 @@ export function collectCandidates(releases, options = {}) {
  *     无法判定则 fail-safe 跳过（invalid-engines-dsh）；
  *  3. 没有 engines.dsh 但旧字段 dsh.host 是精确版本 → 原样使用；非精确则跳过（invalid-dsh-host-pin）；
  *  4. 两者都没有 → 跳过（missing-engines-dsh）。
+ * 另外扫描运行期依赖（见 runtimeDependenciesOf）：外部插件它必须为空，check 对每个插件的
+ * 最高版本仍带运行期依赖会失败；历史版本只在 build/check 里告警（tarball 不可变）。
  * @param manifest - tarball 内 package.json 解析结果。
  * @param candidate - collectCandidates 的条目。
  * @param expectedName - 该目录对应的 npm 包名。
- * @returns { eligible: true, enginesDsh, rangeSource } 或 { eligible: false, reason }。
+ * @returns { eligible: true, enginesDsh, rangeSource, runtimeDependencies } 或 { eligible: false, reason }。
  */
 export function inspectManifest(manifest, candidate, expectedName) {
   if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) {
@@ -407,11 +498,12 @@ export function inspectManifest(manifest, candidate, expectedName) {
   }
   const engines = manifest.engines
   const declared = engines !== null && typeof engines === 'object' && typeof engines.dsh === 'string' ? engines.dsh : undefined
+  const runtimeDependencies = runtimeDependenciesOf(manifest)
   if (declared !== undefined) {
     const pin = exactPinOfDeclared(declared)
     if (pin === undefined) return { eligible: false, reason: 'invalid-engines-dsh: ' + JSON.stringify(declared) }
-    if (pin === declared.trim()) return { eligible: true, enginesDsh: pin, rangeSource: 'exact' }
-    return { eligible: true, enginesDsh: pin, rangeSource: 'floor', declaredEnginesDsh: declared }
+    if (pin === declared.trim()) return { eligible: true, enginesDsh: pin, rangeSource: 'exact', runtimeDependencies }
+    return { eligible: true, enginesDsh: pin, rangeSource: 'floor', declaredEnginesDsh: declared, runtimeDependencies }
   }
   if (Object.hasOwn(dsh, 'host')) {
     // 旧字段 dsh.host 只接受精确版本 pin（brief：旧 dsh.host 精确 pin → 原样；范围/非法跳过）。
@@ -419,7 +511,7 @@ export function inspectManifest(manifest, candidate, expectedName) {
     if (host === undefined || !VERSION_RE.test(host)) {
       return { eligible: false, reason: 'invalid-dsh-host-pin: ' + JSON.stringify(dsh.host) }
     }
-    return { eligible: true, enginesDsh: host, rangeSource: 'dsh-host' }
+    return { eligible: true, enginesDsh: host, rangeSource: 'dsh-host', runtimeDependencies }
   }
   return { eligible: false, reason: 'missing-engines-dsh' }
 }
@@ -591,9 +683,12 @@ export function packumentPath(name) {
  *
  * 只收录 inspectManifest 判定 eligible 的版本；不满足的进 summary.skipped（带原因）。
  * 输出对同一输入完全确定（不含时间戳、无随机与枚举顺序依赖）。
+ * 运行期依赖事实（见 runtimeDependenciesOf）汇总进 summary.runtimeDependencies：
+ * 每个插件最高版本仍带运行期依赖时进 latest（check/build 会失败），历史版本进 historical（告警）。
  * @param input - { repo, baseUrl, registryUrl, candidates, manifests, expectedNames }
  *   manifests 是 Map<candidate.tag, package.json>；缺失的候选按 missing-manifest 跳过。
- * @returns { files: Map<相对路径,文本>, summary: { plugins, versionCount, skipped, digest } }
+ * @returns { files: Map<相对路径,文本>, summary: { plugins, versionCount, rangeSources, skipped,
+ *   runtimeDependencies, digest } }
  */
 export function buildSite(input) {
   const repo = input.repo === undefined ? DEFAULT_GITHUB_REPO : input.repo
@@ -626,6 +721,7 @@ export function buildSite(input) {
       enginesDsh: inspection.enginesDsh,
       rangeSource: inspection.rangeSource,
       declaredEnginesDsh: inspection.declaredEnginesDsh,
+      runtimeDependencies: inspection.runtimeDependencies,
     }
     const versions = byDir.get(candidate.dir)
     if (versions === undefined) byDir.set(candidate.dir, [entry])
@@ -634,10 +730,20 @@ export function buildSite(input) {
   const orderedDirs = Object.keys(PACKAGE_DISPLAY).filter(dir => byDir.has(dir))
   const plugins = []
   const files = new Map()
+  /** 运行期依赖呈报行：插件展示顺序 × 版本降序。 */
+  const runtimeDependencyRows = []
   for (const dir of orderedDirs) {
     const display = PACKAGE_DISPLAY[dir]
     const entries = byDir.get(dir)
     entries.sort((left, right) => compareVersions(right.candidate.version, left.candidate.version))
+    for (const entry of entries) {
+      runtimeDependencyRows.push({
+        name: expectedNames[dir],
+        version: entry.candidate.version,
+        publishedAt: entry.candidate.publishedAt,
+        dependencies: entry.runtimeDependencies,
+      })
+    }
     const versions = entries.map(entry => ({
       version: entry.candidate.version,
       publishTimestamp: entry.candidate.publishedAt,
@@ -652,11 +758,12 @@ export function buildSite(input) {
       description: display.description,
       icon: iconPath,
       author: 'chaoset',
-      homepage: normalizeHomepage(entries[0].manifest.homepage),
-      repository: repositoryOf(entries[0].manifest),
+      homepage: requireHomepage(entries[0].manifest.homepage),
+      repository: requireRepository(entries[0].manifest),
       metadata: {
         category: display.category,
-        keywords: keywordsOf(entries[entries.length - 1].manifest),
+        // 索引级元数据统一取最高版本（与 description/license/homepage/repository 一致）。
+        keywords: keywordsOf(entries[0].manifest),
         labels: display.labels.slice(),
         sortKeys: { order: display.order },
       },
@@ -689,6 +796,7 @@ export function buildSite(input) {
       plugins: plugins.map(plugin => ({ name: plugin.name, versions: plugin.versions.map(version => version.version) })),
       versionCount,
       rangeSources,
+      runtimeDependencies: runtimeDependencySummary(runtimeDependencyRows),
       skipped,
       digest: siteDigest(files),
     },
@@ -720,7 +828,7 @@ function packumentOf(dir, name, entries, registryUrl) {
     name,
     description: entryDescription(entries),
     license: entryLicense(entries),
-    homepage: normalizeHomepage(entries[0].manifest.homepage),
+    homepage: requireHomepage(entries[0].manifest.homepage),
     'dist-tags': { latest: latestStable === undefined ? latestAny : latestStable },
     versions,
     time,
@@ -730,6 +838,16 @@ function packumentOf(dir, name, entries, registryUrl) {
 /** 组单版本 packument 记录（字段顺序固定，保证确定性）。 */
 function packumentVersion(entry, registryUrl) {
   const manifest = entry.manifest
+  // dshMarket 是本站点自有的来源记录（npm 客户端忽略未知字段），check 据此离线复核：
+  //  - 范围取整版本保留原声明，验算精确 pin；
+  //  - 声明了运行期依赖的版本保留依赖清单，供 check 判定「最新版本必须零运行期依赖」。
+  const provenance = {}
+  if (entry.rangeSource === 'floor') {
+    provenance.source = 'engines-range'
+    provenance.declaredEnginesDsh = entry.declaredEnginesDsh
+  }
+  const runtimeDependencies = entry.runtimeDependencies === undefined ? {} : entry.runtimeDependencies
+  if (Object.keys(runtimeDependencies).length > 0) provenance.runtimeDependencies = sortedRecord(runtimeDependencies)
   const record = {
     name: manifest.name,
     version: manifest.version,
@@ -738,8 +856,8 @@ function packumentVersion(entry, registryUrl) {
     // 生效 engines.dsh 永远是单个精确宿主版本：新清单原样、历史范围清单取下界、
     // 旧 dsh.host 精确 pin 原样。DSH 安装/启动按精确匹配严格判定（宿主升级需重新发布）。
     engines: { ...(manifest.engines === null || typeof manifest.engines !== 'object' ? {} : manifest.engines), dsh: entry.enginesDsh },
-    homepage: normalizeHomepage(manifest.homepage),
-    repository: repositoryOf(manifest),
+    homepage: requireHomepage(manifest.homepage),
+    repository: requireRepository(manifest),
     keywords: keywordsOf(manifest),
     // 刻意不写 dependencies / optionalDependencies / peerDependencies：
     // DSH 安装索引版本时执行 pnpm add <spec> --registry=<静态 registry>，--registry 作用于
@@ -749,10 +867,8 @@ function packumentVersion(entry, registryUrl) {
     // 反向校验见 validateSite：packument 版本记录出现依赖段即报错。
     bin: manifest.bin,
     dsh: manifest.dsh,
-    // 映射版本保留原始声明供离线复核（check 会据此验算精确 pin）；非映射版本不写。
-    ...entry.rangeSource === 'floor'
-      ? { dshMarket: { source: 'engines-range', declaredEnginesDsh: entry.declaredEnginesDsh } }
-      : {},
+    // 来源记录（映射声明 / 运行期依赖清单）保留供离线复核；两者都没有时不写。
+    ...Object.keys(provenance).length > 0 ? { dshMarket: provenance } : {},
     dist: {
       tarball: entry.candidate.asset.browserDownloadUrl,
       integrity: requireDigest(entry.candidate, 'integrity'),
@@ -789,19 +905,96 @@ function keywordsOf(manifest) {
   return manifest.keywords.filter(keyword => typeof keyword === 'string')
 }
 
-/** package.json#homepage → 索引里的 homepage（相对/非法值丢弃）。 */
-function normalizeHomepage(value) {
-  return typeof value === 'string' && URL.canParse(value) ? value : undefined
+/**
+ * package.json#homepage → 索引里的 homepage。官方 `homepageUrl` 规则：必须是 http(s) 绝对 URL
+ * （查询串/片段可以保留，npm 的 homepage 常带 #readme）。声明了却非法时 fail-fast：
+ * 写进索引会被官方 parseMarketIndex 拒绝，build 自校验会失败，不如在生成处报清楚。
+ * @param value - 清单里的 homepage。
+ * @returns 原始 URL 文本；未声明/空串 → undefined。
+ * @throws {MarketInputError} 声明了但不是 http(s) 绝对 URL、或带凭据。
+ */
+function requireHomepage(value) {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string') throw new MarketInputError('package.json homepage 必须是字符串: ' + JSON.stringify(value))
+  const text = value.trim()
+  if (text === '') return undefined
+  let url
+  try {
+    url = new URL(text)
+  } catch {
+    throw new MarketInputError('package.json homepage 不是绝对 URL: ' + JSON.stringify(value))
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new MarketInputError('package.json homepage 必须是 http(s)（官方索引规则）: ' + JSON.stringify(value))
+  }
+  if (url.username !== '' || url.password !== '') {
+    throw new MarketInputError('package.json homepage 不能带凭据: ' + JSON.stringify(value))
+  }
+  return text
 }
 
-/** package.json#repository → 索引里的 repository（仓库 URL 去掉 git+ 前缀与 .git 后缀）。 */
-function repositoryOf(manifest) {
+/** 官方 `packagePath` 规则：URL 安全路径段。 */
+const REPOSITORY_PATH_SEGMENT = /^[A-Za-z0-9._@+-]+$/
+
+/**
+ * package.json#repository.directory → 索引里的 repository.directory。
+ * 官方 `packagePath` 规则：相对 POSIX 目录，分段只能是 [A-Za-z0-9._@+-] 且不能是 . / ..。
+ * @param value - 清单里的 repository.directory。
+ * @returns 去掉开头 ./ 的相对目录；未声明/空串 → undefined。
+ * @throws {MarketInputError} 声明了但不是合法相对目录。
+ */
+function requireRepositoryDirectory(value) {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string') throw new MarketInputError('package.json repository.directory 必须是字符串: ' + JSON.stringify(value))
+  const text = value.replace(/^\.\//, '')
+  if (text === '') return undefined
+  for (const segment of text.split('/')) {
+    if (segment === '.' || segment === '..' || !REPOSITORY_PATH_SEGMENT.test(segment)) {
+      throw new MarketInputError('package.json repository.directory 必须是合法相对目录（官方 packagePath 规则）: ' + JSON.stringify(value))
+    }
+  }
+  return text
+}
+
+/**
+ * package.json#repository → 索引里的 repository。官方 `repository` 规则：url 必须是 http(s)
+ * 绝对 URL、不含凭据/查询串/片段；directory 走 packagePath 规则。仓库地址去掉 git+ 前缀与
+ * .git 后缀（展示用，写坏会被官方校验器拒绝，因此在这里 fail-fast）。
+ * @param manifest - tarball 内的 package.json。
+ * @returns { url, directory? } 或 undefined。
+ * @throws {MarketInputError} 声明了 repository 但字段不合官方规则。
+ */
+function requireRepository(manifest) {
   const repository = manifest.repository
-  if (repository === null || typeof repository !== 'object') return undefined
-  if (typeof repository.url !== 'string') return undefined
-  const url = repository.url.replace(/^git\+/, '').replace(/\.git$/, '')
-  if (!URL.canParse(url)) return undefined
-  const directory = typeof repository.directory === 'string' ? repository.directory.replace(/^\.\//, '') : undefined
+  if (repository === undefined || repository === null) return undefined
+  if (typeof repository !== 'object' || Array.isArray(repository)) {
+    throw new MarketInputError('package.json repository 必须是对象: ' + JSON.stringify(repository))
+  }
+  let url = undefined
+  if (repository.url !== undefined && repository.url !== null) {
+    if (typeof repository.url !== 'string' || repository.url.trim() === '') {
+      throw new MarketInputError('package.json repository.url 必须是非空字符串: ' + JSON.stringify(repository.url))
+    }
+    const stripped = repository.url.replace(/^git\+/, '').replace(/\.git$/, '')
+    let parsed
+    try {
+      parsed = new URL(stripped)
+    } catch {
+      throw new MarketInputError('package.json repository.url 不是绝对 URL: ' + JSON.stringify(repository.url))
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new MarketInputError('package.json repository.url 必须是 http(s)（官方索引规则）: ' + JSON.stringify(repository.url))
+    }
+    if (parsed.username !== '' || parsed.password !== '') {
+      throw new MarketInputError('package.json repository.url 不能带凭据: ' + JSON.stringify(repository.url))
+    }
+    if (parsed.search !== '' || parsed.hash !== '') {
+      throw new MarketInputError('package.json repository.url 不能带查询串或片段: ' + JSON.stringify(repository.url))
+    }
+    url = stripped
+  }
+  const directory = requireRepositoryDirectory(repository.directory)
+  if (url === undefined) return undefined
   return directory === undefined ? { url } : { url, directory }
 }
 
@@ -836,10 +1029,13 @@ function renderIcon(display) {
  *   3. 用官方 parseMarketIndex 校验格式，并与展示元数据（名称/顺序/图标/子路径）对齐；
  *   4. 索引与静态 registry 交叉一致：registry 常量、版本集合、engines.dsh（必须是单个精确
  *      宿主版本 pin，映射版本还能由保留的来源字段离线复核）、publishTimestamp、
- *      dist.integrity/shasum 形态，以及每条 dist.tarball 精确等于该版本的 Release 资产 URL。
+ *      dist.integrity/shasum 形态，以及每条 dist.tarball 精确等于该版本的 Release 资产 URL；
+ *   5. 运行期依赖：每个插件的最新版本必须在 packument 的来源记录里零运行期依赖（否则
+ *      error——索引安装后同 profile 的后续 pnpm 操作会去静态 registry 解析它们而 404）；
+ *      历史版本带运行期依赖（tarball 不可变）只进 warnings。
  * @param input - { files: Map<相对路径,文本>, repo?, baseUrl?, registryUrl?, expectedNames?,
  *   parseIndex: (json, indexUrl) => MarketIndex }
- * @returns { ok, errors, summary: { plugins, versionCount, digest } }
+ * @returns { ok, errors, warnings, summary: { plugins, versionCount, digest } }；ok 只看 errors。
  */
 export function validateSite(input) {
   const repo = input.repo === undefined ? DEFAULT_GITHUB_REPO : input.repo
@@ -849,6 +1045,7 @@ export function validateSite(input) {
   if (typeof input.parseIndex !== 'function') throw new MarketInputError('validateSite 需要注入官方 parseMarketIndex')
   const files = input.files instanceof Map ? input.files : new Map(Object.entries(input.files))
   const errors = []
+  const warnings = []
   const indexUrl = baseUrl + '/index.json'
   const index = (function () {
     const text = files.get('index.json')
@@ -907,7 +1104,7 @@ export function validateSite(input) {
       if (seenNames.has(plugin.name)) errors.push('索引插件重复: ' + plugin.name)
       seenNames.add(plugin.name)
       const display = PACKAGE_DISPLAY[dir]
-      validatePlugin({ index, plugin, position, dir, display, baseUrl, registryUrl, files, errors, seenTarballs })
+      validatePlugin({ index, plugin, position, dir, display, baseUrl, registryUrl, files, errors, warnings, seenTarballs })
       versionCount += plugin.versions.length
     })
     for (const name of Object.values(expectedNames)) {
@@ -918,6 +1115,7 @@ export function validateSite(input) {
   return {
     ok: errors.length === 0,
     errors,
+    warnings,
     summary: { plugins: seenNames.size, versionCount, digest: siteDigest(files) },
   }
 }
@@ -947,7 +1145,7 @@ const TARBALL_RE = /^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/download\/[^
 
 /** 校验单个插件（索引条目 + 图标 + packument 交叉一致）。 */
 function validatePlugin(context) {
-  const { plugin, position, dir, display, baseUrl, registryUrl, files, errors, seenTarballs } = context
+  const { plugin, position, dir, display, baseUrl, registryUrl, files, errors, warnings, seenTarballs } = context
   const label = 'plugins[' + String(position) + '] ' + plugin.name
   const expectedIcon = baseUrl + '/icons/' + display.slug + '.svg'
   if (plugin.icon !== expectedIcon) errors.push(label + '.icon 期望 ' + expectedIcon + '，实际 ' + String(plugin.icon))
@@ -1001,17 +1199,58 @@ function validatePlugin(context) {
     }
     const packedVersion = packument.versions[version]
     if (packedVersion === null || typeof packedVersion !== 'object') continue
-    // 映射来源必须保留在 packument 里供离线复核并据此验算精确 pin：
-    // 范围清单 → dshMarket 记录原范围；旧 dsh.host → dsh.host 本身。
+    // 来源记录必须保留在 packument 里供离线复核：
+    //  - 范围清单 → dshMarket.source = 'engines-range' + 原范围（旧 dsh.host → dsh.host 本身）；
+    //  - 声明了运行期依赖的版本 → dshMarket.runtimeDependencies（名 → 范围）。
     const provenance = packedVersion.dshMarket
+    let declaredRuntimeDependencies = undefined
     if (provenance !== undefined) {
-      const declared = provenance === null || typeof provenance !== 'object' ? undefined : provenance.declaredEnginesDsh
-      if (provenance === null || typeof provenance !== 'object' || provenance.source !== 'engines-range' || typeof declared !== 'string') {
-        errors.push('packument ' + plugin.name + '@' + version + ' 的 dshMarket 来源字段形态非法（应为 { source: "engines-range", declaredEnginesDsh }）')
+      if (provenance === null || typeof provenance !== 'object' || Array.isArray(provenance)) {
+        errors.push('packument ' + plugin.name + '@' + version + ' 的 dshMarket 形态非法（应为对象）')
       } else {
-        const pin = exactPinOfDeclared(declared)
-        if (pin === undefined) errors.push('packument ' + plugin.name + '@' + version + ' 的 dshMarket.declaredEnginesDsh ' + JSON.stringify(declared) + ' 无法推出精确 pin')
-        else if (pin !== entry.engines.dsh) errors.push('packument ' + plugin.name + '@' + version + ' 的 engines.dsh 应等于声明范围的下界 ' + pin + '，实际 ' + String(entry.engines.dsh))
+        const declared = provenance.declaredEnginesDsh
+        if (provenance.source !== undefined || declared !== undefined) {
+          if (provenance.source !== 'engines-range' || typeof declared !== 'string') {
+            errors.push('packument ' + plugin.name + '@' + version + ' 的 dshMarket 来源字段形态非法（应为 { source: "engines-range", declaredEnginesDsh }）')
+          } else {
+            const pin = exactPinOfDeclared(declared)
+            if (pin === undefined) errors.push('packument ' + plugin.name + '@' + version + ' 的 dshMarket.declaredEnginesDsh ' + JSON.stringify(declared) + ' 无法推出精确 pin')
+            else if (pin !== entry.engines.dsh) errors.push('packument ' + plugin.name + '@' + version + ' 的 engines.dsh 应等于声明范围的下界 ' + pin + '，实际 ' + String(entry.engines.dsh))
+          }
+        }
+        const runtimeDependencies = provenance.runtimeDependencies
+        if (runtimeDependencies !== undefined) {
+          if (runtimeDependencies === null || typeof runtimeDependencies !== 'object' || Array.isArray(runtimeDependencies)) {
+            errors.push('packument ' + plugin.name + '@' + version + ' 的 dshMarket.runtimeDependencies 必须是对象（名 → 范围）')
+          } else {
+            const names = Object.keys(runtimeDependencies)
+            if (names.length === 0) errors.push('packument ' + plugin.name + '@' + version + ' 的 dshMarket.runtimeDependencies 不能是空对象（无依赖时不写）')
+            for (const name of names) {
+              const range = runtimeDependencies[name]
+              if (typeof range !== 'string' || range.trim() === '') errors.push('packument ' + plugin.name + '@' + version + ' 的 dshMarket.runtimeDependencies[' + JSON.stringify(name) + '] 必须是非空字符串范围')
+            }
+            declaredRuntimeDependencies = runtimeDependencies
+          }
+        }
+      }
+    }
+    // 运行期依赖：按发布时间而不是「最新版本」判定，避免发布顺序死锁——
+    // RUNTIME_DEPENDENCY_POLICY_SINCE 之后发布的版本必须为零（否则索引安装后同 profile 后续 pnpm
+    // 操作会 404）；该时刻之前的 tarball 不可变，只告警；时间缺失同样只告警。
+    const dependencyNames = declaredRuntimeDependencies === undefined ? [] : Object.keys(declaredRuntimeDependencies)
+    if (dependencyNames.length > 0) {
+      const detail = dependencyNames.map(name => name + '@' + declaredRuntimeDependencies[name]).join(', ')
+      if (!Number.isInteger(entry.publishTimestamp)) {
+        warnings.push('插件 ' + plugin.name + ' 的版本 ' + version + ' 声明运行期依赖（' + detail + '），但索引缺少可用的发布时间（无法判定策略范围），仅告警')
+      } else if (isRuntimeDependencyBlocking(entry.publishTimestamp)) {
+        errors.push('插件 ' + plugin.name + ' 的版本 ' + version + '（发布于 ' + isoSecondsOf(entry.publishTimestamp) + '）不早于运行期依赖策略生效时刻 '
+          + RUNTIME_DEPENDENCY_POLICY_SINCE + '，仍声明运行期依赖（' + detail + '）：'
+          + 'DSH 用 pnpm add --registry=<静态 registry> 安装，pnpm 会按 tarball 清单去静态 registry 解析它们而 404，'
+          + '装过这样的插件后同 profile 的后续包操作会失败；运行期依赖必须只放 devDependencies（由宿主 runtime resolution 供给）')
+      } else {
+        warnings.push('插件 ' + plugin.name + ' 的版本 ' + version + '（发布于 ' + isoSecondsOf(entry.publishTimestamp) + '）早于运行期依赖策略生效时刻 '
+          + RUNTIME_DEPENDENCY_POLICY_SINCE + '，声明运行期依赖（' + detail + '）：历史 tarball 不可变，仅告警；'
+          + '索引安装该版本后同 profile 的后续包操作可能 404，排障见 README')
       }
     }
     const packedDsh = packedVersion.dsh
@@ -1126,6 +1365,19 @@ function reconstructedEngines(packed) {
   return engines
 }
 
+/**
+ * 由 packument 的来源记录还原 dependencies（--previous 重建用）。
+ * packument 本身不写依赖段；声明过运行期依赖的版本把清单留在 dshMarket.runtimeDependencies，
+ * 还原后 buildSite 会重新算出同样的来源记录，站点字节保持不变。
+ */
+function runtimeDependenciesFromPackument(packed) {
+  const provenance = packed.dshMarket
+  if (provenance === null || typeof provenance !== 'object' || Array.isArray(provenance)) return packed.dependencies
+  const runtimeDependencies = provenance.runtimeDependencies
+  if (runtimeDependencies === null || typeof runtimeDependencies !== 'object' || Array.isArray(runtimeDependencies)) return packed.dependencies
+  return { ...runtimeDependencies }
+}
+
 /** 由 packument 记录还原 buildSite 需要的 package.json 子集（字段齐全时与原始清单等价）。 */
 function manifestFromPackument(packed, packument) {
   const manifest = {
@@ -1143,7 +1395,7 @@ function manifestFromPackument(packed, packument) {
       ? undefined
       : { type: 'git', url: packed.repository.url, directory: packed.repository.directory },
     keywords: packed.keywords,
-    dependencies: packed.dependencies,
+    dependencies: runtimeDependenciesFromPackument(packed),
     optionalDependencies: packed.optionalDependencies,
     peerDependencies: packed.peerDependencies,
     peerDependenciesMeta: packed.peerDependenciesMeta,

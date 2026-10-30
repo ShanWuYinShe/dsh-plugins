@@ -63,13 +63,17 @@ const USAGE = [
   '  --concurrency <n>        下载并发（默认 6）',
   '  --previous <dir>         复用既有站点（market/ 目录内容）里历史版本的摘要/元数据，',
   '                           只下载新增版本的 tarball（CI 增量生成用）',
+  '  --allow-partial          build 时允许部分 tarball 下载/解析失败（会逐条告警；',
+  '                           CI 默认严格：任一失败即非零退出，不写站点）',
 ].join('\n')
 
 /** 参数解析：支持 --flag value 与 --flag=value；只接受已知 flag。 */
 const FLAGS = new Set(['out', 'cache', 'repo', 'base-url', 'registry-url', 'concurrency', 'previous'])
+/** 布尔开关（不带取值）。 */
+const BOOLEAN_FLAGS = new Set(['allow-partial'])
 
 /**
- * 解析命令行参数。
+ * 解析命令行参数：--flag value / --flag=value，布尔开关只写 --flag。
  * @param argv - 进程参数（不含 node 与脚本路径）。
  * @returns { command, options }
  * @throws {MarketInputError} 未知子命令/参数。
@@ -87,7 +91,13 @@ function parseArguments(argv) {
     if (!argument.startsWith('--')) throw new UsageError('未知参数: ' + argument)
     const eq = argument.indexOf('=')
     const name = eq === -1 ? argument.slice(2) : argument.slice(2, eq)
-    if (!FLAGS.has(name)) throw new UsageError('未知参数: --' + name)
+    if (!FLAGS.has(name) && !BOOLEAN_FLAGS.has(name)) throw new UsageError('未知参数: --' + name)
+    if (BOOLEAN_FLAGS.has(name)) {
+      if (eq !== -1) throw new UsageError('--' + name + ' 不接受取值')
+      if (Object.hasOwn(options, name)) throw new UsageError('--' + name + ' 重复出现')
+      options[name] = true
+      continue
+    }
     let value
     if (eq !== -1) value = argument.slice(eq + 1)
     else {
@@ -187,6 +197,38 @@ function errorText(error) {
   if (error === null || typeof error !== 'object') return String(error)
   const stderr = typeof error.stderr === 'string' || Buffer.isBuffer(error.stderr) ? String(error.stderr).trim() : ''
   return stderr === '' ? String(error.message === undefined ? error : error.message) : stderr
+}
+
+/** 依赖名 → 范围的可读清单（名@范围，逗号分隔）。 */
+function formatRuntimeDependencies(dependencies) {
+  return Object.keys(dependencies).map(name => name + '@' + dependencies[name]).join(', ')
+}
+
+/** 逐条打印 tarball 下载/解析失败（build 严格模式下这些失败会直接非零退出）。 */
+function reportFailures(failures) {
+  for (const failure of failures) {
+    process.stderr.write('plugin-market: 失败: ' + failure.tag + '（' + failure.reason + '）\n')
+  }
+}
+
+/**
+ * 打印运行期依赖事实：blocking（发布时间不早于策略生效时刻）会阻断 check/build；
+ * legacy（策略生效前发布或时间缺失）只告警。
+ * @param runtimeDependencies - buildSite/plan 汇总出的 { policySince, blocking, legacy }。
+ */
+function reportRuntimeDependencies(runtimeDependencies) {
+  for (const record of runtimeDependencies.blocking) {
+    process.stderr.write('plugin-market: 运行期依赖阻断: ' + record.name + '@' + record.version
+      + ' 声明 ' + formatRuntimeDependencies(record.dependencies)
+      + '（发布于 ' + new Date(record.publishedAt * 1000).toISOString()
+      + '，不早于策略生效时刻 ' + runtimeDependencies.policySince + '；必须零运行期依赖，见 RELEASING.md「收录规则」）\n')
+  }
+  for (const record of runtimeDependencies.legacy) {
+    process.stderr.write('plugin-market: 运行期依赖告警: ' + record.name + '@' + record.version
+      + ' 声明 ' + formatRuntimeDependencies(record.dependencies)
+      + '（发布于 ' + (record.publishedAt < 0 ? '未知时间' : new Date(record.publishedAt * 1000).toISOString())
+      + '，早于策略生效时刻 ' + runtimeDependencies.policySince + '；历史 tarball 不可变，仅告警）\n')
+  }
 }
 
 /** 缓存目录内单个资产的路径。 */
@@ -372,7 +414,7 @@ function readSite(out) {
   return files
 }
 
-/** 解析出本次运行的有效配置（repo/baseUrl/registryUrl/cacheDir）。 */
+/** 解析出本次运行的有效配置（repo/baseUrl/registryUrl/cacheDir/allowPartial）。 */
 function resolveConfig(options) {
   const repo = repoOf(options)
   const baseUrl = typeof options['base-url'] === 'string' ? options['base-url'] : undefined
@@ -383,7 +425,8 @@ function resolveConfig(options) {
   const previousDir = typeof options.previous === 'string' ? resolve(options.previous) : undefined
   const concurrency = options.concurrency === undefined ? 6 : Number(options.concurrency)
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32) throw new UsageError('--concurrency 必须是 1..32 的整数')
-  return { repo, baseUrl, registryUrl, cacheDir, previousDir, concurrency }
+  const allowPartial = options['allow-partial'] === true
+  return { repo, baseUrl, registryUrl, cacheDir, previousDir, concurrency, allowPartial }
 }
 
 /**
@@ -419,13 +462,14 @@ async function main(argv) {
         expectedNames,
         parseIndex: parseMarketIndex,
       })
+      for (const warning of result.warnings) process.stderr.write('plugin-market: check 告警: ' + warning + '\n')
       if (!result.ok) {
         for (const error of result.errors) process.stderr.write('plugin-market: check 失败: ' + error + '\n')
-        process.stdout.write(JSON.stringify({ ok: false, errors: result.errors.length, summary: result.summary }) + '\n')
+        process.stdout.write(JSON.stringify({ ok: false, errors: result.errors.length, warnings: result.warnings.length, summary: result.summary }) + '\n')
         return 1
       }
-      process.stderr.write('plugin-market: check 通过（' + String(result.summary.plugins) + ' 个插件 / ' + String(result.summary.versionCount) + ' 个版本，digest ' + result.summary.digest + '）\n')
-      process.stdout.write(JSON.stringify({ ok: true, summary: result.summary }) + '\n')
+      process.stderr.write('plugin-market: check 通过（' + String(result.summary.plugins) + ' 个插件 / ' + String(result.summary.versionCount) + ' 个版本，' + String(result.warnings.length) + ' 条告警，digest ' + result.summary.digest + '）\n')
+      process.stdout.write(JSON.stringify({ ok: true, warnings: result.warnings.length, summary: result.summary }) + '\n')
       return 0
     }
     const releases = await loadReleases(config.repo)
@@ -455,6 +499,7 @@ async function main(argv) {
           ? {
               enginesDsh: verdict.enginesDsh,
               rangeSource: verdict.rangeSource,
+              runtimeDependencies: verdict.runtimeDependencies,
               ...verdict.declaredEnginesDsh === undefined ? {} : { declaredEnginesDsh: verdict.declaredEnginesDsh },
             }
           : { reason: verdict.reason },
@@ -469,21 +514,41 @@ async function main(argv) {
     const included = entries.filter(entry => entry.eligible)
     const excluded = entries.filter(entry => !entry.eligible)
     if (command === 'plan') {
+      // 运行期依赖事实：按发布时间与策略生效时刻分类（blocking/legacy），与 check/build 一致。
+      const planRows = included.map(entry => ({
+        name: entry.name,
+        version: entry.version,
+        publishedAt: entry.publishedAt,
+        dependencies: entry.runtimeDependencies,
+      }))
+      const runtimeDependencies = runtimeDependencySummary(planRows)
       process.stdout.write(JSON.stringify({
         repo: config.repo,
         baseUrl: config.baseUrl,
         registryUrl: config.registryUrl,
         included,
         excluded,
+        runtimeDependencies,
         metadataSkipped: collected.skipped,
       }, null, 2) + '\n')
+      reportFailures(failures)
+      reportRuntimeDependencies(runtimeDependencies)
       const exactCount = included.filter(entry => entry.rangeSource === 'exact').length
       const floorCount = included.filter(entry => entry.rangeSource === 'floor').length
       const hostCount = included.filter(entry => entry.rangeSource === 'dsh-host').length
-      process.stderr.write('plugin-market: plan 完成：收录 ' + String(included.length) + ' 个版本（精确声明 ' + String(exactCount) + ' / 范围取下界 ' + String(floorCount) + ' / dsh.host pin ' + String(hostCount) + '，复用历史站点 ' + String(reusedCount) + ' 个），排除 ' + String(excluded.length + collected.skipped.length) + ' 个\n')
+      process.stderr.write('plugin-market: plan 完成：收录 ' + String(included.length) + ' 个版本（精确声明 ' + String(exactCount) + ' / 范围取下界 ' + String(floorCount) + ' / dsh.host pin ' + String(hostCount) + '，复用历史站点 ' + String(reusedCount) + ' 个），排除 ' + String(excluded.length + collected.skipped.length) + ' 个'
+        + (failures.length === 0 ? '' : '，下载/解析失败 ' + String(failures.length) + ' 个') + '\n')
       return 0
     }
     if (options.out === undefined) throw new UsageError('build 需要 --out <dir>')
+    // tarball 下载/解析失败默认严格失败：跳过一个版本却 exit 0 会让 CI 提交缺版本的站点（静默退化）。
+    reportFailures(failures)
+    if (failures.length > 0 && config.allowPartial !== true) {
+      process.stdout.write(JSON.stringify({ ok: false, failures }, null, 2) + '\n')
+      process.stderr.write('plugin-market: build 严格失败：' + String(failures.length)
+        + ' 个 tarball 下载/解析失败，未写站点（确认可容忍时加 --allow-partial）\n')
+      return 1
+    }
     const site = buildSite({
       repo: config.repo,
       baseUrl: config.baseUrl,
@@ -492,10 +557,28 @@ async function main(argv) {
       manifests,
       expectedNames,
     })
+    // 写盘前用官方 parseMarketIndex 自校验：坏产物不落盘（URL/字段规则与官方契约一致）。
+    const validation = validateSite({
+      files: site.files,
+      repo: config.repo,
+      baseUrl: config.baseUrl,
+      registryUrl: config.registryUrl,
+      expectedNames,
+      parseIndex: parseMarketIndex,
+    })
+    reportRuntimeDependencies(site.summary.runtimeDependencies)
+    for (const warning of validation.warnings) process.stderr.write('plugin-market: build 告警: ' + warning + '\n')
+    if (!validation.ok) {
+      for (const error of validation.errors) process.stderr.write('plugin-market: build 自校验失败: ' + error + '\n')
+      process.stdout.write(JSON.stringify({ ok: false, errors: validation.errors.length }, null, 2) + '\n')
+      process.stderr.write('plugin-market: build 自校验失败，未写站点（不会把官方校验器拒绝的索引落盘）\n')
+      return 1
+    }
     writeSite(options.out, site.files)
-    const summary = { ...site.summary, out: resolve(options.out), files: site.files.size, reused: reusedCount }
+    const summary = { ...site.summary, out: resolve(options.out), files: site.files.size, reused: reusedCount, failures, warnings: validation.warnings }
     process.stdout.write(JSON.stringify(summary, null, 2) + '\n')
-    process.stderr.write('plugin-market: build 完成：' + String(summary.plugins.length) + ' 个插件 / ' + String(summary.versionCount) + ' 个版本（精确声明 ' + String(summary.rangeSources.exact) + ' / 范围取下界 ' + String(summary.rangeSources.floor) + ' / dsh.host pin ' + String(summary.rangeSources['dsh-host']) + '）/ ' + String(summary.files) + ' 个文件，digest ' + summary.digest + '\n')
+    process.stderr.write('plugin-market: build 完成：' + String(summary.plugins.length) + ' 个插件 / ' + String(summary.versionCount) + ' 个版本（精确声明 ' + String(summary.rangeSources.exact) + ' / 范围取下界 ' + String(summary.rangeSources.floor) + ' / dsh.host pin ' + String(summary.rangeSources['dsh-host']) + '）/ ' + String(summary.files) + ' 个文件，'
+      + String(summary.warnings.length) + ' 条告警，digest ' + summary.digest + '\n')
     return 0
   } catch (error) {
     if (error instanceof UsageError) {

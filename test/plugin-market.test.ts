@@ -33,6 +33,8 @@ import {
   rawMarketBaseUrl,
   readPackageJsonFromTarball,
   releaseTagFor,
+  RUNTIME_DEPENDENCY_POLICY_SINCE,
+  runtimeDependenciesOf,
   serializeJson,
   sha256Hex,
   siteDigest,
@@ -207,7 +209,15 @@ function fixture(): { releases: Record<string, unknown>[]; manifests: Map<string
   ];
   const manifests = new Map<string, Record<string, unknown>>();
   manifests.set(releaseTagFor("dsh-any-connect", "0.4.28-alpha.5"), manifestOf("dsh-any-connect", "0.4.28-alpha.5"));
-  manifests.set(releaseTagFor("dsh-any-connect", "0.4.28-alpha.4"), manifestOf("dsh-any-connect", "0.4.28-alpha.4"));
+  // 历史版本声明运行期依赖（模拟真实事故：any-connect 的 tarball 声明 zod）：
+  // 只允许告警；@chaoset 自身包的互引不算外部运行期依赖，必须被扫描排除。
+  manifests.set(
+    releaseTagFor("dsh-any-connect", "0.4.28-alpha.4"),
+    manifestOf("dsh-any-connect", "0.4.28-alpha.4", {
+      dependencies: { zod: "4.4.3", "@chaoset/provider-usage": "^0.2.1" },
+      optionalDependencies: { "@chaoset/session-archive": "0.3.32" },
+    }),
+  );
   manifests.set(
     releaseTagFor("dsh-any-connect", "0.4.27"),
     legacyManifestOf("dsh-any-connect", "0.4.27", "0.2.1-rc.3"),
@@ -329,6 +339,38 @@ function checkSite(files: ReadonlyMap<string, string>) {
   return validateSite({ files, repo: REPO, baseUrl: BASE_URL, registryUrl: REGISTRY_URL, expectedNames: EXPECTED, parseIndex: parseMarketIndex });
 }
 
+/** 构造一个候选版本（URL / 元数据规则用例用）。 */
+function candidateOf(dir: string, version: string): MarketCandidate {
+  const tag = releaseTagFor(dir, version);
+  return {
+    dir,
+    version,
+    tag,
+    publishedAt: Date.parse("2026-10-29T00:00:00Z") / 1000,
+    asset: {
+      name: assetNameFor(dir, version),
+      size: 1,
+      browserDownloadUrl: "https://github.com/" + REPO + "/releases/download/" + tag + "/" + assetNameFor(dir, version),
+    },
+    fallbackAsset: false,
+    prerelease: true,
+    integrity: computeIntegrity(Buffer.from(tag)),
+    shasum: computeShasum(Buffer.from(tag)),
+  };
+}
+
+/** 用给定版本清单生成站点（只输出列出的包目录；URL / 元数据规则用例用）。 */
+function buildSiteOf(versions: readonly { dir: string; version: string; overrides?: Record<string, unknown> }[]) {
+  const candidates = versions.map(entry => candidateOf(entry.dir, entry.version));
+  const manifests = new Map(versions.map((entry, index) => {
+    const candidate = candidates[index] as MarketCandidate;
+    return [candidate.tag, manifestOf(entry.dir, entry.version, entry.overrides)] as const;
+  }));
+  const expectedNames: Record<string, string> = {};
+  for (const entry of versions) expectedNames[entry.dir] = nameOf(entry.dir);
+  return buildSite({ repo: REPO, registryUrl: REGISTRY_URL, candidates, manifests, expectedNames });
+}
+
 describe("类型声明与实现一致", () => {
   it("plugin-market-core.d.mts 的导出面与实现一致（防止声明漂移）", async () => {
     const actual = Object.keys(await import("../scripts/lib/plugin-market-core.mjs")).sort();
@@ -448,6 +490,7 @@ describe("tarball 读取与收录判定", () => {
       enginesDsh: "0.2.2-alpha.2",
       rangeSource: "floor",
       declaredEnginesDsh: "^0.2.2-alpha.2",
+      runtimeDependencies: {},
     });
     // 新 tarball 已写精确版本 → 原样使用。
     expect(
@@ -456,7 +499,7 @@ describe("tarball 读取与收录判定", () => {
         candidate,
         nameOf("provider-usage"),
       ),
-    ).toEqual({ eligible: true, enginesDsh: "0.2.2-alpha.2", rangeSource: "exact" });
+    ).toEqual({ eligible: true, enginesDsh: "0.2.2-alpha.2", rangeSource: "exact", runtimeDependencies: {} });
     // 无法判定精确版本（* / latest / || 组合）→ fail-safe 跳过，原因里带上原值。
     expect(
       reasonOf(inspectManifest(manifestOf("provider-usage", "0.2.1-alpha.4", { engines: { dsh: "*" } }), candidate, nameOf("provider-usage"))),
@@ -474,6 +517,7 @@ describe("tarball 读取与收录判定", () => {
       eligible: true,
       enginesDsh: "0.2.1-rc.3",
       rangeSource: "dsh-host",
+      runtimeDependencies: {},
     });
     // pin 不是精确版本（range/非法）→ fail-safe 跳过，原因里带上原值便于排查。
     expect(reasonOf(inspectManifest(legacyManifestOf("dsh-any-connect", "0.4.27", "^0.2.1"), candidate, nameOf("dsh-any-connect")))).toBe('invalid-dsh-host-pin: "^0.2.1"');
@@ -538,11 +582,18 @@ describe("buildSite", () => {
           expect(packed.dshMarket).toBeUndefined();
         } else if (packed.dshMarket !== undefined) {
           // 历史范围清单：精确 pin = 声明范围的下界，原声明保留在 dshMarket。
-          expect(packed.dshMarket).toEqual({ source: "engines-range", declaredEnginesDsh: "^0.2.2-alpha.2" });
+          expect(packed.dshMarket.source).toBe("engines-range");
+          expect(packed.dshMarket.declaredEnginesDsh).toBe("^0.2.2-alpha.2");
           expect(packed.engines.dsh).toBe(exactPinOfDeclared("^0.2.2-alpha.2"));
         } else {
           // 精确声明的新版本：原样使用，不带来源字段。
           expect(packed.engines.dsh).toBe("0.2.2-alpha.2");
+        }
+        // 运行期依赖只以 dshMarket.runtimeDependencies 记录（packument 本身不写依赖段）。
+        if (version.version === "0.4.28-alpha.4") {
+          expect(packed.dshMarket.runtimeDependencies).toEqual({ zod: "4.4.3" });
+        } else {
+          expect(packed.dshMarket?.runtimeDependencies).toBeUndefined();
         }
         expect(packed.engines.node).toBeTruthy();
         expect(packed.dist.tarball).toBe(
@@ -650,33 +701,172 @@ describe("版本区分（稳定线 / 预览线）", () => {
     function compatible(host: string, plugin: any): any[] {
       return plugin.versions.filter((version: any) => satisfies(host, version.engines.dsh));
     }
-    /** 复刻宿主 discover：兼容版本里优先最高稳定版；没有则回退 versions[0]（索引降序首条）。 */
-    function recommend(host: string, plugin: any): string {
-      const list = compatible(host, plugin);
-      const stable = list.filter((version: any) => !version.version.includes("-"));
-      if (stable.length > 0) return stable[0].version;
-      return list.length > 0 ? list[0].version : plugin.versions[0].version;
+    /**
+     * 复刻官方 reader 的默认版本规则（@deepseek-ai/dsh-plugin-market 0.2.2-alpha.2
+     * lib/types/index.js:456-457）：只有当插件整体没有稳定版时，预发布版才参与默认版本；
+     * 插件存在稳定版时 defaultVersion 只取「兼容的稳定版」，没有则 undefined。
+     * 发现页随后按 presentedVersion = defaultVersion ?? versions[0] 展示/安装（官方
+     * ui-plugin-market client 的 presentedVersion）。
+     */
+    function defaultVersionOf(host: string, plugin: any): string | undefined {
+      const compatibleVersions = compatible(host, plugin);
+      const hasStable = plugin.versions.some((version: any) => !version.version.includes("-"));
+      return compatibleVersions.find((version: any) => !hasStable || !version.version.includes("-"))?.version;
+    }
+    function presentedVersionOf(host: string, plugin: any): string {
+      const defaultVersion = defaultVersionOf(host, plugin);
+      return plugin.versions.find((version: any) => version.version === defaultVersion)?.version ?? plugin.versions[0].version;
     }
     for (const plugin of index.plugins as any[]) {
       // 0.2.2-alpha.2 宿主：只见精确 pin = 0.2.2-alpha.2 的预览版；稳定线历史版本不可见。
       const previewVisible = compatible("0.2.2-alpha.2", plugin).map((version: any) => version.version);
       expect(previewVisible.length, plugin.name).toBeGreaterThan(0);
       expect(previewVisible.every((version: string) => version.includes("-")), plugin.name).toBe(true);
-      expect(recommend("0.2.2-alpha.2", plugin), plugin.name).toBe(previewVisible[0]);
-      // 0.2.1-rc.3 宿主：只见精确 pin 到 rc.3 的稳定线历史版本。
+      // 插件历史里存在稳定版，但兼容版本全是预发布版 → 官方规则不给 defaultVersion（卡片不打「默认」），
+      // 发现页回退 versions[0]（索引降序首条 = 该宿主兼容的最高版本）。README 已如实披露该代价。
+      expect(defaultVersionOf("0.2.2-alpha.2", plugin), plugin.name).toBeUndefined();
+      expect(presentedVersionOf("0.2.2-alpha.2", plugin), plugin.name).toBe(previewVisible[0]);
+      expect(presentedVersionOf("0.2.2-alpha.2", plugin), plugin.name).toBe(plugin.versions[0].version);
+      // 0.2.1-rc.3 宿主：只见精确 pin 到 rc.3 的稳定线历史版本 → defaultVersion 取最高兼容稳定版。
       const stableVisible = compatible("0.2.1-rc.3", plugin).map((version: any) => version.version);
       expect(stableVisible.length, plugin.name).toBeGreaterThan(0);
       expect(stableVisible.every((version: string) => !version.includes("-")), plugin.name).toBe(true);
-      expect(recommend("0.2.1-rc.3", plugin), plugin.name).toBe(stableVisible[0]);
+      expect(defaultVersionOf("0.2.1-rc.3", plugin), plugin.name).toBe(stableVisible[0]);
+      expect(presentedVersionOf("0.2.1-rc.3", plugin), plugin.name).toBe(stableVisible[0]);
       // 0.2.1-rc.5（当前稳定参考）：历史 pin 是 rc.3 → 无任何兼容版本，宿主回退 versions[0]，
       // 发现页不会显示旧稳定版可安装。这是「精确匹配、不误导」的已知代价。
       expect(compatible("0.2.1-rc.5", plugin), plugin.name).toEqual([]);
-      expect(recommend("0.2.1-rc.5", plugin), plugin.name).toBe(plugin.versions[0].version);
+      expect(defaultVersionOf("0.2.1-rc.5", plugin), plugin.name).toBeUndefined();
+      expect(presentedVersionOf("0.2.1-rc.5", plugin), plugin.name).toBe(plugin.versions[0].version);
       // 0.2.2-rc.1 / 0.2.2 正式版：与精确 pin 0.2.2-alpha.2 不同 → 同样无兼容版本。
       for (const host of ["0.2.2-rc.1", "0.2.2"]) {
         expect(compatible(host, plugin), host + " " + plugin.name).toEqual([]);
+        expect(defaultVersionOf(host, plugin), host + " " + plugin.name).toBeUndefined();
       }
     }
+  });
+});
+
+describe("运行期依赖（安装链根因：pnpm 会按 tarball manifest 去静态 registry 解析）", () => {
+  it("runtimeDependenciesOf 扫描 dependencies/optionalDependencies 并排除 @chaoset 自身包", () => {
+    const manifest = manifestOf("provider-usage", "0.2.1-alpha.4", {
+      dependencies: { zod: "4.4.3", "@chaoset/provider-usage": "^0.2.1" },
+      optionalDependencies: { "@chaoset/session-archive": "0.3.32", "@deepseek-ai/node-addon-system": "^0.1.0" },
+    });
+    expect(runtimeDependenciesOf(manifest)).toEqual({
+      "@deepseek-ai/node-addon-system": "^0.1.0",
+      zod: "4.4.3",
+    });
+    expect(runtimeDependenciesOf(null)).toEqual({});
+    expect(runtimeDependenciesOf({ dependencies: "not-an-object" })).toEqual({});
+  });
+
+  it("buildSite 汇总：按发布时间的策略生效线分类，并写进 packument 来源记录（不写依赖段）", () => {
+    const { site } = buildFixtureSite();
+    // fixture 里的带依赖版本发布于 2026-10-29，早于策略生效时刻 → legacy（只告警）。
+    expect(site.summary.runtimeDependencies).toEqual({
+      policySince: RUNTIME_DEPENDENCY_POLICY_SINCE,
+      blocking: [],
+      legacy: [{
+        name: nameOf("dsh-any-connect"),
+        version: "0.4.28-alpha.4",
+        publishedAt: Date.parse("2026-10-29T13:23:16Z") / 1000,
+        dependencies: { zod: "4.4.3" },
+      }],
+    });
+    const packument = JSON.parse(mustFile(site.files, packumentPath(nameOf("dsh-any-connect"))));
+    expect(packument.versions["0.4.28-alpha.4"].dshMarket).toEqual({
+      source: "engines-range",
+      declaredEnginesDsh: "^0.2.2-alpha.2",
+      runtimeDependencies: { zod: "4.4.3" },
+    });
+    expect(packument.versions["0.4.28-alpha.5"].dshMarket.runtimeDependencies).toBeUndefined();
+  });
+
+  it("策略生效前发布的版本带运行期依赖 → 只告警，不阻断（避免发布顺序死锁）", () => {
+    const { site } = buildFixtureSite();
+    const result = checkSite(site.files);
+    expect(result.ok).toBe(true);
+    expect(result.warnings.join("\n")).toMatch(/早于运行期依赖策略生效时刻/);
+    expect(result.warnings.join("\n")).toMatch(/0\.4\.28-alpha\.4/);
+  });
+
+  it("策略生效时刻之后发布的版本带运行期依赖 → check 失败（防回归）", () => {
+    const { site } = buildFixtureSite();
+    // 把 latest 版本的发布时间改到策略生效时刻（2026-10-30T00:00:00Z）之后，并声明运行期依赖。
+    const postPolicy = Date.parse(RUNTIME_DEPENDENCY_POLICY_SINCE) / 1000;
+    const withTime = mutateJson(site.files, "index.json", (index: any) => {
+      const plugin = index.plugins.find((candidate: any) => candidate.name === nameOf("dsh-any-connect"));
+      plugin.versions.find((version: any) => version.version === "0.4.28-alpha.5").publishTimestamp = postPolicy;
+    });
+    const files = mutateJson(withTime, packumentPath(nameOf("dsh-any-connect")), (packument: any) => {
+      packument.versions["0.4.28-alpha.5"].dshMarket = { runtimeDependencies: { zod: "4.4.3" } };
+      packument.time["0.4.28-alpha.5"] = new Date(postPolicy * 1000).toISOString();
+    });
+    const result = checkSite(files);
+    expect(result.ok).toBe(false);
+    expect(result.errors.join("\n")).toMatch(/不早于运行期依赖策略生效时刻/);
+    expect(result.errors.join("\n")).toMatch(/0\.4\.28-alpha\.5/);
+    expect(result.errors.join("\n")).toMatch(/devDependencies/);
+  });
+
+  it("--previous 重建保留运行期依赖来源记录（字节不变由回环用例断言）", () => {
+    const { site } = buildFixtureSite();
+    const previous = previousManifests({ files: site.files, expectedNames: EXPECTED });
+    const prior = previous.get(releaseTagFor("dsh-any-connect", "0.4.28-alpha.4"));
+    expect(prior?.manifest.dependencies).toEqual({ zod: "4.4.3" });
+  });
+});
+
+describe("URL 规则（官方校验器契约，fail-fast）", () => {
+  it("homepage 只接受 http(s) 绝对 URL（查询串/片段保留）", () => {
+    const site = buildSiteOf([{ dir: "provider-usage", version: "0.2.1-alpha.4", overrides: { homepage: "https://example.com/landing?x=1#readme" } }]);
+    const index = JSON.parse(mustFile(site.files, "index.json"));
+    expect(index.plugins[0].homepage).toBe("https://example.com/landing?x=1#readme");
+    for (const homepage of ["ftp://example.com/x", "mailto:a@b.c", "not a url"]) {
+      expect(
+        () => buildSiteOf([{ dir: "provider-usage", version: "0.2.1-alpha.4", overrides: { homepage } }]),
+        "homepage: " + homepage,
+      ).toThrow(MarketInputError);
+    }
+  });
+
+  it("repository 只接受 http(s) URL 与合法相对目录（官方 repository/packagePath 规则）", () => {
+    const site = buildSiteOf([{
+      dir: "provider-usage",
+      version: "0.2.1-alpha.4",
+      overrides: { repository: { type: "git", url: "git+https://github.com/a/b.git", directory: "./packages/x" } },
+    }]);
+    const index = JSON.parse(mustFile(site.files, "index.json"));
+    expect(index.plugins[0].repository).toEqual({ url: "https://github.com/a/b", directory: "packages/x" });
+    for (const url of ["ssh://git@github.com/a/b.git", "git+ssh://git@github.com/a/b.git", "https://user:pass@github.com/a/b", "https://github.com/a/b?x=1"]) {
+      expect(
+        () => buildSiteOf([{ dir: "provider-usage", version: "0.2.1-alpha.4", overrides: { repository: { url } } }]),
+        "repository.url: " + url,
+      ).toThrow(MarketInputError);
+    }
+    for (const directory of ["../escape", "packages/../x", "packages/x y", "packages/x/"]) {
+      expect(
+        () => buildSiteOf([{ dir: "provider-usage", version: "0.2.1-alpha.4", overrides: { repository: { url: "https://github.com/a/b", directory } } }]),
+        "repository.directory: " + directory,
+      ).toThrow(MarketInputError);
+    }
+  });
+
+  it("registry URL 拒绝用户名密码（会被写进索引）", () => {
+    expect(() => normalizeRegistryUrl("https://user:pass@example.com/npm/")).toThrow(MarketInputError);
+  });
+
+  it("索引级 keywords 取最高版本（不再取最旧版本）", () => {
+    const site = buildSiteOf([
+      { dir: "provider-usage", version: "0.2.1-alpha.4", overrides: { keywords: ["newest"] } },
+      { dir: "provider-usage", version: "0.2.1-alpha.3", overrides: { keywords: ["oldest"] } },
+    ]);
+    const index = JSON.parse(mustFile(site.files, "index.json"));
+    expect(index.plugins[0].metadata.keywords).toEqual(["newest"]);
+    const packument = JSON.parse(mustFile(site.files, packumentPath(nameOf("provider-usage"))));
+    expect(packument.versions["0.2.1-alpha.4"].keywords).toEqual(["newest"]);
+    expect(packument.versions["0.2.1-alpha.3"].keywords).toEqual(["oldest"]);
   });
 });
 
@@ -686,6 +876,8 @@ describe("validateSite（check 的正向与反向）", () => {
     const result = checkSite(site.files);
     expect(result.errors).toEqual([]);
     expect(result.ok).toBe(true);
+    // fixture 里有一个策略生效前发布、带运行期依赖的版本：历史 tarball 不可变，只告警不阻断。
+    expect(result.warnings.join("\n")).toMatch(/早于运行期依赖策略生效时刻/);
     expect(result.summary.digest).toBe(siteDigest(site.files));
     expect(result.summary.plugins).toBe(4);
     expect(result.summary.versionCount).toBe(10);

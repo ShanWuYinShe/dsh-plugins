@@ -549,13 +549,27 @@ packument 的 `dist.tarball` 直接指向对应 GitHub Release 资产（标准 n
   不为旧 tarball 重打包补 `engines.dsh`（Release 不可变），严格化只发生在索引/registry 侧；
   安装期检查对历史版本仍宽松（CLI 仍可强制装旧包），发现页不误导由索引保证。
 - `publishTimestamp` 取 Release `published_at`；同一版本重复出现时取发布时间较新的那条。
-- **静态 registry 的 packument 不声明 `dependencies`/`optionalDependencies`/`peerDependencies`**：
-  DSH 安装索引版本时执行 `pnpm add <spec> --registry=<静态 registry>`，`--registry` 作用于整条
-  命令；若 packument 声明了宿主依赖（`zod`、`@deepseek-ai/node-addon-system` 等），pnpm 会
-  去静态 registry 解析它们并 404。这些依赖由宿主 profile runner 的 runtime resolution 从宿主
-  安装闭包补齐（官方外部插件机制），所以用索引安装的插件依赖来自宿主，而不是 profile 的
-  `node_modules`——与直接装 tarball（依赖从常规 registry 安装）在“依赖落地位置”上不同，但插件
-  运行行为一致。`check` 会拒绝带依赖段的 packument。
+- **外部插件的运行期依赖必须为空**：`dependencies` / `optionalDependencies` 里不能有宿主
+  包（`zod`、`@deepseek-ai/*` 等），只能放 `devDependencies`；本仓 `@chaoset/*` 之间互引不计。
+  原因（2026-10-30 实测，pnpm 11.28.5 / 12.4.2）：DSH 安装索引版本时执行
+  `pnpm add <spec> --registry=<静态 registry>`，pnpm 不只读 packument，还会按 tarball 自带的
+  `package.json` 解析依赖；**装过一个带运行期依赖的版本后，同 profile 的下一次 `pnpm add` 会对
+  既有 lockfile 条目重新解析**，去静态 registry 请求 `zod` 之类并 `ERR_PNPM_FETCH_404`，安装链
+  断掉（已发版本无法回改）。运行期依赖由宿主 profile runner 的 runtime resolution 从宿主安装闭包
+  补齐（官方外部插件机制），因此运行期零依赖既正确也必要；与直接装 tarball（依赖从常规 registry
+  安装到 profile）在“依赖落地位置”上不同，但插件运行行为一致。
+- 索引侧对运行期依赖的强制（策略生效时刻 `RUNTIME_DEPENDENCY_POLICY_SINCE =
+  "2026-10-30T00:00:00Z"`，定义在 `plugin-market-core.mjs`；**按发布时间而不是「最新版本」判定**，
+  避免等待新版本发布造成发布顺序死锁）：
+  - 生成器扫描每个收录版本 tarball manifest 的 `dependencies`/`optionalDependencies`（排除
+    `@chaoset/*` 自身包），在 `plan`/`build` 的 stderr 与 summary（`runtimeDependencies`）里
+    逐条呈报；
+  - packument 仍**不写** `dependencies`/`optionalDependencies`/`peerDependencies`（写了 pnpm
+    同样会去静态 registry 解析并 404；`check` 拒绝带依赖段的 packument）；曾声明的运行期依赖以
+    `dshMarket: { runtimeDependencies: { 名: 范围 } }` 记录，供离线复核与 `--previous` 重建；
+  - `check` / build 自校验对**策略生效时刻之后发布**的版本仍带运行期依赖时 **fail**（防未来
+    回归）；该时刻**之前**发布的 tarball 不可变，只进 `warnings` 不阻断；发布时间缺失同样只告警。
+    汇总里对应 `runtimeDependencies.blocking` / `.legacy` 两组，排障与变通见 README「常见安装排障」。
 
 新增发布包必须同时补 `scripts/lib/plugin-market-core.mjs` 的 `PACKAGE_DISPLAY`
 （标题/描述/分类/图标/排序），否则 `bun run market:build` 直接报错，不会静默漏收录。
@@ -570,10 +584,19 @@ bun run market:check   # 离线校验站点（官方 parseMarketIndex + 索引/r
 
 等价 CLI：`node scripts/plugin-market.mjs <plan|build|check>`；`build/check` 需要 `--out`，
 并支持 `--repo`、`--cache`、`--base-url`、`--registry-url`、`--concurrency`；`build --previous <dir>`
-复用既有站点里历史版本的摘要与元数据、只下载新增版本的 tarball（CI 增量生成用）。
+复用既有站点里历史版本的摘要与元数据、只下载新增版本的 tarball（CI 增量生成用）；
+`build --allow-partial` 仅为本地排障放行 tarball 失败（CI 不传）。
 生成器只下载并读取 tarball 内 `package.json`，从不安装或执行包代码；输出确定性——同一批
 Releases 重复 build 逐字节相同，`check` 输出的 `digest` 可直接对比。缓存与站点目录都在
 gitignore 的 `.workwork/` 下。
+
+`build` 的失败语义（2026-10-30 起）：任一 tarball 下载/解析失败即**非零退出且不写站点**
+（`--allow-partial` 例外），避免「跳过一个版本却 exit 0 → CI 提交缺版本的站点」这种静默退化；
+写盘前还会用官方 `parseMarketIndex` 自校验（等价 `validateSite`），不把官方校验器拒绝的索引
+落盘。`check` 与 build 自校验把「策略生效时刻（2026-10-30T00:00:00Z）之后发布且带运行期依赖」
+记为错误、把「更早发布（或时间缺失）且带运行期依赖」记为告警；summary 携带
+`runtimeDependencies`（`policySince`/`blocking`/`legacy`）/`failures`/`warnings`，stderr
+逐条打印，CI 日志可直接看到。
 
 `check` 的判据：文件集合恰为上述布局；JSON 为规范序列化（手改会被发现，README 内容必须与
 生成器内置一致）；官方 `parseMarketIndex` 接受；每个版本的 registry 常量、版本集合、
@@ -596,7 +619,8 @@ node scripts/plugin-market.mjs build --out /tmp/market-site --registry-url http:
 2. 用 `actions/cache` 缓存 `.workwork/plugin-market-cache`；
 3. `git fetch --depth=1 origin <ref>` 并 `git archive FETCH_HEAD market` 取出既有 `market/`
    站点 → `build --previous`；
-4. `check`（显式传 `--base-url`/`--registry-url`，与索引里声明的 URL 一致）；
+4. `check`（显式传 `--base-url`/`--registry-url`，与索引里声明的 URL 一致；build 自身也已
+   严格失败 + 官方 `parseMarketIndex` 自校验，check 是第二道复核）；
 5. 用临时 worktree 检出 `origin/<ref>` 当前头 → 把站点写入 `market/` → `git add -A -- market`
    → `write-tree`/`commit-tree` → `git push origin <commit>:refs/heads/<ref>`。只提交
    `market/` 子树的变化（树不变则跳过，幂等）；并发推送导致 non-fast-forward 时重取最新头、

@@ -146,7 +146,7 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
      provider-usage / sandbox-extra-roots / session-archive 把包名替换成 `@chaoset/<包名>` 即可。
 5. 卸载：`dsh plugin --profile web remove @chaoset/<包名>`。
 
-索引只提供元数据与安装来源（npm 包名 + 静态 registry），安装/更新仍走 DSH 自带的 pnpm 安装与 bundle 对账流程；索引收录的每个版本都对应本仓的一个 GitHub Release 资产。用索引安装时，插件的宿主运行时依赖由宿主 profile runner 的 runtime resolution 提供（不写入 profile 的 `node_modules`）；需要把依赖装进 profile 时请用下面的 tarball 方式。
+索引只提供元数据与安装来源（npm 包名 + 静态 registry），安装/更新仍走 DSH 自带的 pnpm 安装与 bundle 对账流程；索引收录的每个版本都对应本仓的一个 GitHub Release 资产。用索引安装时，插件的宿主运行时依赖由宿主 profile runner 的 runtime resolution 提供（不写入 profile 的 `node_modules`）；需要把依赖装进 profile 时请用下面的 tarball 方式。**因此本仓插件发布的 tarball 运行期零依赖**（`dependencies`/`optionalDependencies` 为空，宿主依赖只放 `devDependencies`）——否则 pnpm 会按 tarball 里的依赖声明去静态 registry 解析它们而 `ERR_PNPM_FETCH_404`，装过一个带运行期依赖的版本后，同一 profile 再装/更新其它插件会失败。
 
 > 当前索引随 `alpha` 适配线发布；收敛合入 `main` 后索引源 URL 的 `alpha` 段会换成 `main`，
 > 届时会公告提醒已添加索引的用户一次性更新 URL。
@@ -156,6 +156,13 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 > 历史代价（如实说明）：0.2.2 适配线之前发布的 tarball 里 `engines.dsh` 是范围，索引按规则把它们 pin 到发布时适配的精确宿主版本（如 `0.2.1-rc.3`）。所以当前稳定参考 `0.2.1-rc.5` 的宿主不会看到旧稳定版可安装——这是「精确匹配、不误导」的代价，收敛期发布对应版本后恢复。已发布 tarball 不可变，索引侧严格、安装期检查对历史版本仍宽松（CLI 仍可强制装旧包）。
 
 > 注：预览线宿主（如 0.2.2-alpha.2）下兼容版本可能全是预发布版，而 DSH 的「默认」标签只从兼容的正式版里选，因此卡片可能不打「默认」；「安装」按钮仍指向该宿主兼容的最高版本，功能正常。
+
+> 运行期依赖的历史代价（如实说明，2026-10-30 实测）：2026-10-30T00:00:00Z 之前发布的旧 tarball
+> 里仍带 `dependencies`（例如 `zod`），这些版本按「策略生效前只告警」的规则保留在索引里。若你
+> 安装过这类旧版本，之后在同一 profile 再装/更新其它插件可能报 `ERR_PNPM_FETCH_404`（去静态
+> registry 找 `zod` 等宿主依赖）。变通：先装好其它插件、把这类旧版本放在最后装；或改用「方式二」
+> 的 tarball URL 安装旧版本（tarball 方式从常规 registry 解析依赖，不受影响）。这类版本无法回改，
+> 但**策略生效之后发布的所有版本都强制运行期零依赖**（索引侧 check/build 自校验拦截）。
 
 ### 方式二：tarball URL（手动）
 
@@ -196,6 +203,11 @@ dsh plugin --profile web remove @chaoset/session-archive
   3. 将刚发布的 `@chaoset/*@<版本>` 加入 `minimumReleaseAgeExclude` 列表；
   4. **重新执行一次 `dsh plugin add` 命令**（首次失败时 bundle 对账未完成，必须重跑以完成注册）。
   > ⚠️ 不要直接用 `pnpm add` 或手动写 profile 的 `package.json`：这样跳过了 bundle 对账，web 启动时会报 `pending (waiting for service: remote.xxx)`。
+
+- **索引安装后，同 profile 再装/更新插件报 `ERR_PNPM_FETCH_404`（宿主依赖，如 `zod`）**：索引安装走静态 registry，pnpm 会按已装 tarball 的 `dependencies` 声明去该 registry 解析依赖；装过「历史版本仍带运行期依赖」的插件后，后续包操作就可能命中 404（详见上文「运行期依赖的历史代价」）。变通：
+  1. 把该历史版本**放到最后装**（先装/更新其它插件），或直接改用「方式二」的 tarball URL 安装它；
+  2. 若失败发生在 `dsh plugin add` 的 bundle 对账之后，删除该 profile 的 `node_modules` 后按同一顺序重装（见下一条「pnpm store 漂移」的删掉重装做法）；
+  3. 策略生效时刻（2026-10-30T00:00:00Z）之后发布的版本运行期零依赖，不会再触发；发布侧由 `check`/build 自校验强制（该时刻之后发布的版本带运行期依赖即失败，见 `RELEASING.md`「收录规则」）。
 
 - **pnpm store 漂移（宿主升级后安装报错，全部 profile 通用）**：宿主升级若更换了内置 pnpm 的大版本，**每一个**旧 profile 的 `node_modules` 都是上一版 pnpm 安装的——只要该 profile 执行过 `dsh plugin add` 就会报 `ERR_PNPM_UNEXPECTED_STORE`（use the new store location …）：node_modules 里的 `.modules.yaml` 记录着旧 store 位置，与新 pnpm 解析出的不一致。**逐 profile 修复**，对每个受影响的 profile 各做一遍：
 
