@@ -690,4 +690,70 @@ describe('WorkBuddy shim', () => {
     })
     expect(cancelled).toBe(true)
   })
+  it('redacts token-like material in credential-resolution errors (401 bodies)', async () => {
+    // 回归：resolve() 的报错可能引用刷新响应里的凭据碎片，401 错误体必须过
+    // safeMessage（此前直接 String(error) 写回）。两条 SDK 路由同口径。
+    const shim = createWorkBuddyShim({
+      kind: 'workbuddy',
+      store: {
+        async resolve(): Promise<never> {
+          throw new Error('refresh failed: access_token=SECRET-abc&api_key=KEY-xyz')
+        },
+      },
+      catalog: new WorkBuddyCatalog(),
+      client: {
+        async chatStream(): Promise<WorkBuddyChatResult> { throw new Error('must not reach upstream') },
+      },
+    })
+    await shim.ready
+    CLEANUP.push(() => shim.close())
+    const origin = shim.baseUrl()
+
+    const openai = await fetch(`${origin}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${shim.token()}` },
+      body: JSON.stringify({ model: 'auto', messages: [] }),
+    })
+    expect(openai.status).toBe(401)
+    const openaiText = await openai.text()
+    expect(openaiText).not.toContain('SECRET-abc')
+    expect(openaiText).not.toContain('KEY-xyz')
+    expect(openaiText).toContain('access_token=[redacted]')
+
+    const anthropic = await fetch(`${origin}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': shim.token() },
+      body: JSON.stringify({ model: 'auto', messages: [] }),
+    })
+    expect(anthropic.status).toBe(401)
+    const anthropicText = await anthropic.text()
+    expect(anthropicText).not.toContain('SECRET-abc')
+    expect(anthropicText).toContain('authentication_error')
+  })
+  it('redacts token-like material in the internal-error fallback (500 body)', async () => {
+    // 兜底 catch 的 500 错误体同样过 safeMessage：catalog 故障抛出的文本不得
+    // 原样带回浏览器。
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.c2lnbmF0dXJl'
+    const shim = createWorkBuddyShim({
+      kind: 'workbuddy',
+      store: {
+        async resolve(): Promise<never> { throw new Error('unused') },
+      },
+      catalog: {
+        current(): never { throw new Error(`catalog exploded with ${jwt}`) },
+      } as unknown as WorkBuddyCatalog,
+      client: {
+        async chatStream(): Promise<WorkBuddyChatResult> { throw new Error('must not reach upstream') },
+      },
+    })
+    await shim.ready
+    CLEANUP.push(() => shim.close())
+    const response = await fetch(`${shim.baseUrl()}/v1/models`, {
+      headers: { authorization: `Bearer ${shim.token()}` },
+    })
+    expect(response.status).toBe(500)
+    const text = await response.text()
+    expect(text).not.toContain('eyJ')
+    expect(text).toContain('[redacted token]')
+  })
 })

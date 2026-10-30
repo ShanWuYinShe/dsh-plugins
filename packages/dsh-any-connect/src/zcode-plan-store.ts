@@ -4,8 +4,7 @@
  * ZCode Coding Plan 与 ZCode Start Plan 在本插件里是**两个独立的变体**（各自
  * 的模型分组、模型名单、额度池与通道），不是一个连接的两种模式。本模块只做
  * 一件事：把变体固定的计划语义折进读出的凭据，使 `credential.zcodePlan` 恒为
- * 该变体的计划——模型路由（专属 vs 普通通道）、额度来源、夜免资格都只看这
- * 一个字段。
+ * 该变体的计划——模型路由（专属 vs 普通通道）与额度来源都只看这一个字段。
  *
  * 2026-09-30 用户口径：两个计划的额度绝不混用。Start Plan 走专属通道
  * （`zcode-plan/anthropic` + 账号 JWT），扣其专属额度（一次性、有效期以
@@ -47,12 +46,4 @@ export function applyZCodePlanOverride<C extends { zcodePlan?: ZCodePlanKind }>(
   if (effective === 'start-plan') return { ...credential, zcodePlan: 'start-plan' }
   if (credential.zcodePlan === 'individual-coding-plan' || credential.zcodePlan === 'team-coding-plan') return credential
   return { ...credential, zcodePlan: 'individual-coding-plan' }
-}
-
-/**
- * Whether the plan in force gets the night-free window (a Coding Plan
- * benefit, never granted to Start Plan).
- */
-export function isNightFreeEligiblePlan(plan: ZCodePlanKind | 'coding-plan' | undefined): boolean {
-  return plan !== 'start-plan'
 }

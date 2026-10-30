@@ -14,7 +14,9 @@
  * - CLI（bin）没有宿主 storageDomain 服务，用
  *   {@link openStandaloneStateStore} 独立实例化同款 json backend 打开**同一**
  *   存储单元——两侧读写语义一致，logout 删域数据与插件运行时所见相同。
- * - 域 open 失败时插件运行时 fail loud：静默回落文件会造成域与文件双写分裂。
+ * - 域 open 失败时插件运行时记一条 error 日志后继续走文件回落（见 index.ts 的
+ *   storageDomain inject）：模型代理主链路不因持久化层故障整体不可用，域就绪后
+ *   以域为准。
  *
  * @module dsh-any-connect/state-store
  */

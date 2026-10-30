@@ -12,7 +12,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { WorkBuddyAuthStatus, WorkBuddyCredential } from './auth.js'
 import type { WorkBuddyCredits } from './upstream.js'
 import { normalizeCredits } from './upstream.js'
-import { errorMessage } from './values.js'
+import { safeMessage } from './values.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import type { CreditLedgerSummary } from './credit-ledger.js'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
@@ -76,19 +76,6 @@ export interface WorkBuddyStatusRouteOptions {
   rateLimit?: () => WorkBuddyWebRateLimit | undefined
   /** Route path; one per variant. */
   path: string
-}
-
-/** Redact token-like content before it crosses to the browser.
- * 导出供 probe-route 的 500 兜底复用:同包内错误文本过线前脱敏必须同一
- * 口径,两份手抄曾在本仓其他包发生过规则漂移。
- */
-export function safeMessage(error: unknown): string {
-  return errorMessage(error)
-    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted token]')
-    // api_?key= 与 provider-usage 的 safeMessage 规则集对齐:跨包独立发布
-    // 不能互 import,但脱敏规则集应保持等价。
-    .replace(/(\b(?:code|token|refresh_token|access_token|api_?key)=)[^&\s]+/giu, '$1[redacted]')
-    .slice(0, 500)
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {

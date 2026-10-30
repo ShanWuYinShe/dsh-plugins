@@ -138,7 +138,7 @@ describe('Provider model parameter & billing isolation', () => {
     expect(codingPlan.billing?.badges).not.toContain('夜间免费')
 
     // Start Plan：走普通通道，150% 额度，不带夜免徽标。
-    const startPlan = modelWithCurrentPromotion(flash, nightTime, 'zcode', false)
+    const startPlan = modelWithCurrentPromotion(flash, nightTime, 'zcode')
     expect(startPlan.billing?.free).toBe(false)
     expect(startPlan.billing?.credits).toBe('x0.06')
     expect(startPlan.billing?.badges).not.toContain('夜间免费')

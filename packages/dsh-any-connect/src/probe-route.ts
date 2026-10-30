@@ -26,7 +26,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
-import { safeMessage } from './web-status.js'
+import { safeMessage } from './values.js'
 import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_PROBE_PATH } from './status-paths.js'
 import type { WorkBuddyProbeAction } from './status-paths.js'
 

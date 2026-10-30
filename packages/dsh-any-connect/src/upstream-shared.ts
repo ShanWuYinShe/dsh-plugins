@@ -118,7 +118,6 @@ export function modelWithCurrentPromotion(
   model: WorkBuddyUpstreamModel,
   now = Date.now(),
   variantKind?: 'workbuddy' | 'zcode' | 'opencode',
-  nightFreeEligible = true,
 ): WorkBuddyUpstreamModel {
 
   // Determine if this model belongs to ZCode (either explicitly marked or by ZCode-specific privilege badges)

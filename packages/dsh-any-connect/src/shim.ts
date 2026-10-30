@@ -26,6 +26,7 @@ import { prepareChatBody, WorkBuddyUpstreamClient, type UpstreamErrorKind } from
 import { isJsonContentType, KIND_STATUS, writeJson, writeOpenAIError, writeAnthropicError, RequestBodyTooLarge, readBody, upstreamFailureMessage } from './shim-http.js'
 import { observeRateLimit } from './rate-limit.js'
 import type { RateLimitObservation } from './rate-limit.js'
+import { safeMessage } from './values.js'
 
 /** Minimal logger surface the plugin context already provides. */
 export interface ShimLogger {
@@ -99,8 +100,11 @@ export interface RateLimitRecorder {
 
 
 /**
- * Start the loopback endpoint. Requests carry any bearer; the loopback bind
- * is the boundary, and the upstream credential comes from the store alone.
+ * Start the loopback endpoint. Every request must present the per-process
+ * shared secret minted below (`Authorization: Bearer` or `x-api-key`); the
+ * loopback bind only limits who can reach the port — the secret is the
+ * authentication boundary, and a missing or wrong secret gets a 401. The
+ * upstream credential comes from the store alone, never from the request.
  */
 export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShim {
   const logger = options.logger
@@ -271,7 +275,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         return
       }
       if (!res.headersSent) {
-        writeOpenAIError(res, 500, 'internal', String(error))
+        writeOpenAIError(res, 500, 'internal', safeMessage(error))
       } else {
         res.end()
       }
@@ -287,7 +291,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     try {
       credential = await store.resolve()
     } catch (error: unknown) {
-      writeOpenAIError(res, 401, 'not_signed_in', String(error))
+      writeOpenAIError(res, 401, 'not_signed_in', safeMessage(error))
       return
     }
 
@@ -366,7 +370,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     try {
       credential = await store.resolve()
     } catch (error: unknown) {
-      writeAnthropicError(res, 401, 'authentication_error', String(error))
+      writeAnthropicError(res, 401, 'authentication_error', safeMessage(error))
       return
     }
 

@@ -414,16 +414,6 @@ export class WorkBuddyCatalog {
   private models: readonly WorkBuddyModelInfo[]
   private visible = true
   private readonly kind?: VariantKind
-  /**
-   * Whether this account is entitled to ZCode's 23:00–09:00 free window.
-   *
-   * The window is a Coding Plan benefit. Start Plan accounts run on the
-   * ordinary ZCode channel with the 150% quota and no night window at all, so
-   * showing them `夜间免费` (or a `x0.00` rate) would advertise a discount the
-   * account cannot get. Defaults to true, which is the Coding Plan behavior
-   * and the historical one.
-   */
-  private nightFreeEligible = true
   private excludedModelIds: ReadonlySet<string> = new Set()
 
   constructor(
@@ -432,11 +422,6 @@ export class WorkBuddyCatalog {
   ) {
     this.models = initial
     this.kind = kind
-  }
-
-  /** Set whether the signed-in account may use the night-free window. */
-  setNightFreeEligible(eligible: boolean): void {
-    this.nightFreeEligible = eligible
   }
 
   /** Set the excluded model ids (filtered out from current()). */
@@ -467,7 +452,7 @@ export class WorkBuddyCatalog {
   excludedModels(): readonly WorkBuddyModelInfo[] {
     return this.models
       .filter(model => this.excludedModelIds.has(model.id))
-      .map(model => modelWithCurrentPromotion(model, Date.now(), this.kind, this.nightFreeEligible))
+      .map(model => modelWithCurrentPromotion(model, Date.now(), this.kind))
   }
 
   /** Raw un-filtered models list. */
@@ -486,7 +471,7 @@ export class WorkBuddyCatalog {
     if (!this.visible) return []
     return this.models
       .filter(model => !this.excludedModelIds.has(model.id))
-      .map(model => modelWithCurrentPromotion(model, Date.now(), this.kind, this.nightFreeEligible))
+      .map(model => modelWithCurrentPromotion(model, Date.now(), this.kind))
   }
 
   /** Replace the list; the adapter's `getModels` reads the live catalog, so

@@ -214,11 +214,6 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
       if (signedIn === undefined || isStopped()) return
       const identity = credentialIdentity(signedIn)
       if (identity === runtime.lastIdentity) return
-      // 夜免资格与 refreshCatalog 同判（transform 已把 zcodePlan 固定为该变体
-      // 的语义）：saved/fallback 的徽标在采用那一刻就要带对，不能等 live 改写。
-      if (runtime.variant.kind === 'zcode') {
-        runtime.catalog.setNightFreeEligible(signedIn.zcodePlan !== 'start-plan')
-      }
       // 预热阶段的 publish 没有注册句柄可通知（notifyCatalogChanged 静默跳过），
       // 但它会把指纹记进 publishedCatalog——注册自身会广播 adapters-updated，
       // 客户端重拉时读到的正是这份已采用的目录，语义完整。
@@ -270,11 +265,6 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
         // WorkBuddy 凭据带 uid/enterpriseId；RuntimeStore 的结构最小化类型
         // 只承诺 accessToken，这里按 kind 已分流的前提下还原完整形状。
         const identity = credentialIdentity(credential)
-        // 夜间免费是 Coding Plan 的权益，Start Plan 不享受。两个 ZCode 变体
-        // 是独立产品，各自的凭据 transform 已固定 zcodePlan，资格随之而定。
-        if (variant.kind === 'zcode') {
-          catalog.setNightFreeEligible(credential.zcodePlan !== 'start-plan')
-        }
         if (identity !== runtime.lastIdentity) await adoptIdentity(runtime, identity, publishCatalog)
         const generation = runtime.lastIdentity
         const models = await runtime.client.fetchModels(credential)
