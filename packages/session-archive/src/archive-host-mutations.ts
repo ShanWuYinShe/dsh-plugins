@@ -60,6 +60,12 @@ export function createArchiveMutations(deps: HostContext) {
      * 'unenumerable' 文件存在但持久化枚举不到（首行损坏的孤儿），或无法
      * 确认文件已消失的 ghost id；'reappeared' 删除后被生成流重建、二次
      * 删除仍压不掉；其余为底层删除错误消息。
+     *
+     * 目录/旧代际清理失败同样计入 failed：removeSessionDirIfOwned 在降级路径
+     * （目录归属校验不通过、或目录里还有他者日志）会逐文件清理本会话的
+     * session[.vN].jsonl[.zstd] 旧代际，清理后仍有残留（删除失败、被重建、
+     * 或归属无法确认）时抛错——此处 catch 把真实原因记入 failed，绝不把
+     * 「仍有本会话数据残留」的 id 记成 deleted。
      */
     async deleteArchived(sessionIds: string[]): Promise<ArchiveDeleteResult> {
       const unique = [...new Set(sessionIds)];

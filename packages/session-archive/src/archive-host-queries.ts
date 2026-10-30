@@ -9,6 +9,7 @@
 
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import { foldSessionTitle } from '@deepseek-ai/dsh-session-title'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { scanSession, limitedConcurrency, messageText } from './session-scan.js'
 import type { HostContext } from './archive-host-context.js'
 import type {
@@ -59,10 +60,12 @@ export function createArchiveQueries(deps: HostContext) {
     },
 
     /** 读取一个归档会话的只读详情（标题 + 文本消息）。仅归档会话可读：
-     * detail 是对外暴露的远程端点,不校验成员资格就能读到任意未归档会话。 */
+     * detail 是对外暴露的远程端点,不校验成员资格就能读到任意未归档会话。
+     * 拒绝走官方 RemoteError：稳定 code + 类型化 details（types.ts 的
+     * RemoteErrorDetailsMap 合并扩展），Client 按 code 判别而非 instanceof。 */
     async detail(sessionId: string): Promise<ArchiveDetailResult> {
       if (!archivedSet().has(sessionId)) {
-        throw Object.assign(new Error('session not archived: ' + sessionId), { code: 'NOT_ARCHIVED' });
+        throw new RemoteError('session-archive/not-archived', 'session not archived: ' + sessionId, { sessionId });
       }
       const id = sessionId as SessionId;
       // 事件流分块消费（readSession 时代 read(0) 一次性物化全部事件）:

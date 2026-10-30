@@ -8,7 +8,7 @@
  */
 
 import { readdir, rm } from 'node:fs/promises'
-import { basename, dirname } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { foldSessionTitle } from '@deepseek-ai/dsh-session-title'
@@ -21,43 +21,114 @@ export const BUSY_WRITE_WINDOW_MS = 60_000;
 /** 复验前的沉降等待：活跃写入方重建路径的典型间隔。 */
 export const REAPPEAR_SETTLE_MS = 300;
 
+/** 官方 jsonl 后端的会话日志代际命名：session.jsonl / session.vN.jsonl /
+ * session.jsonl.zstd / session.vN.jsonl.zstd。官方布局「一会话一目录」下，
+ * 目录内该命名族文件都是同一会话的历史代际，不算他者日志。 */
+function isGenerationFile(entry: string): boolean {
+  return entry.startsWith('session.') && (entry.endsWith('.jsonl') || entry.endsWith('.jsonl.zstd'));
+}
+
+/** 读取目录条目；目录不存在返回 null（无可清理残留），其余错误上抛——
+ * 无法确认残留是否存在时 fail-closed，由调用方把该 id 记 failed。 */
+async function readdirOrNull(dir: string): Promise<string[] | null> {
+  try {
+    return await readdir(dir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
 /**
- * 删除会话文件后清理其所属目录。官方布局(dsh-session-persistence-jsonl)
+ * 只清理本会话代际命名族文件（不动他者日志、不递归），复扫确认没有残留。
+ * 返回仍残留的条目：rm 失败、或删除窗口内被写入方重建的，都算残留——
+ * 调用方据此把该会话记 failed，不得谎报「已彻底删除」。
+ * @param dir - 会话日志所在目录。
+ * @param ownFile - 调用方已单独删除的文件名（本助手不代删，保持原契约）。
+ * @param warn - 宿主 logger 告警通道。
+ * @returns 仍残留的代际文件条目（空数组即清理干净）。
+ */
+async function clearGenerationResidue(dir: string, ownFile: string, warn: (message: string) => void): Promise<string[]> {
+  const entries = await readdirOrNull(dir);
+  if (entries === null) return [];
+  const residue = new Set<string>();
+  for (const entry of entries) {
+    if (entry === ownFile || !isGenerationFile(entry)) continue;
+    try {
+      await rm(join(dir, entry), { force: true });
+    } catch (error) {
+      residue.add(entry);
+      warn(`session-archive: failed to remove stale session generation "${entry}" in "${dir}": ${String(error)}`);
+    }
+  }
+  // 复扫确认：rm 成功后仍可能被迁移/重建（rename 型格式迁移的临时文件族），
+  // 或以目录形态占位导致 rm 实际未删（EISDIR 等）。
+  const remaining = await readdirOrNull(dir);
+  if (remaining !== null) {
+    for (const entry of remaining) {
+      if (entry !== ownFile && isGenerationFile(entry)) residue.add(entry);
+    }
+  }
+  return [...residue];
+}
+
+/**
+ * 删除会话文件后清理其所属目录/残留代际。官方布局(dsh-session-persistence-jsonl)
  * 是"一会话一目录":目录名 = encodeSegment(sessionId),目录归该会话独占。
- * 删除目录前做两道归属校验,任何一道不过就只删文件、保留目录(fail-safe:
- * 宁可留下空壳目录,不可递归多删——布局契约一旦变化,rm -recursive 会
- * 不可逆地连带其他会话的数据):
+ * 删除目录前做两道归属校验,不通过时绝不递归删目录(fail-safe:布局契约一旦
+ * 变化,rm -recursive 会不可逆地连带其他会话的数据):
  *   1. 目录名包含 sessionId 原文字面:官方 encodeSegment 对 UUID 的全部
  *      字符([0-9a-f-],均在保留集内)原样保留;若未来目录名改用哈希等
- *      不含 id 的方案,校验失败,自动降级为仅删文件;
+ *      不含 id 的方案,校验失败,降级为只清理本会话代际命名族文件;
  *   2. 目录内容不含其他会话的 .jsonl(.zstd) 文件——防御"多会话共目录"
- *      的未来布局。
+ *      的未来布局。命中时同样降级为逐文件清理本会话代际。
+ *
+ * 降级路径必须清掉本会话全部旧代际（session[.vN].jsonl[.zstd]）：只删
+ * stat 定位到的那一个文件会让同会话旧代际残留在磁盘上，而调用方却把该 id
+ * 记成 deleted。清理后仍有残留（删除失败/被重建，或目录名归属失败且目录里
+ * 还有他者日志、无法确认代际文件归属）就抛错，由调用方把该 id 记 failed
+ * ——宁可报失败，不谎报「已彻底删除」。
  */
 export async function removeSessionDirIfOwned(sessionId: string, filePath: string, warn: (message: string) => void): Promise<void> {
   const dir = dirname(filePath);
   if (dir === '' || dir === '.' || dir === '/') return;
   const base = basename(dir);
-  if (!base.includes(sessionId)) {
+  const ownedByName = base.includes(sessionId);
+  if (!ownedByName) {
     warn(`session-archive: session directory "${base}" does not reference session ${sessionId}; keeping it (layout contract changed?)`);
-    return;
   }
   let entries: string[];
   try {
     entries = await readdir(dir);
-  } catch {
-    return; // 目录不存在或不可读:无需清理
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return; // 目录已不存在:无残留
+    throw new Error(`session-archive: cannot inspect session directory "${base}" for ${sessionId}: ${String(error)}`);
   }
   const ownFile = basename(filePath);
-  for (const entry of entries) {
-    if (entry === ownFile) continue;
-    // session*.jsonl(.zstd) 是本会话自己的历史代际(官方代际命名 session[.vN]
-    // .jsonl[.zstd],目录归属校验已确认整个目录属于该会话),不算他者日志;
-    // 其余 .jsonl 一律视为他者。
-    if (entry.startsWith('session.') && (entry.endsWith('.jsonl') || entry.endsWith('.jsonl.zstd'))) continue;
-    if (entry.endsWith('.jsonl') || entry.endsWith('.jsonl.zstd')) {
-      warn(`session-archive: session directory "${base}" holds other session logs; keeping it`);
-      return;
+  const otherLogs = entries.filter((entry) => entry !== ownFile && !isGenerationFile(entry)
+    && (entry.endsWith('.jsonl') || entry.endsWith('.jsonl.zstd')));
+  if (!ownedByName) {
+    // 目录名归属校验失败：不递归删目录。只有在目录里没有他者日志时，才能
+    // 把代际命名族文件视为本会话残留（一会话一目录假设）；有他者日志时
+    // 归属无法确认，fail-closed。
+    if (otherLogs.length > 0) {
+      throw new Error(`session-archive: cannot confirm stale file ownership in "${base}" for ${sessionId} (other session logs: ${otherLogs.join(', ')})`);
     }
+    const residue = await clearGenerationResidue(dir, ownFile, warn);
+    if (residue.length > 0) {
+      throw new Error(`session-archive: stale session files remain for ${sessionId} in "${base}": ${residue.join(', ')}`);
+    }
+    return;
+  }
+  if (otherLogs.length > 0) {
+    // 目录里躺着别的会话日志：目录保留（防递归多删），但本会话的代际残留
+    // 仍要逐个清掉，否则「已彻底删除」的会话数据还留在磁盘上。
+    warn(`session-archive: session directory "${base}" holds other session logs; keeping it`);
+    const residue = await clearGenerationResidue(dir, ownFile, warn);
+    if (residue.length > 0) {
+      throw new Error(`session-archive: stale session files remain for ${sessionId} in "${base}": ${residue.join(', ')}`);
+    }
+    return;
   }
   await rm(dir, { recursive: true, force: true });
 }

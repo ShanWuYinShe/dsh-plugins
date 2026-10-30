@@ -110,3 +110,18 @@ export interface ArchiveUnarchiveResult {
   /** 实际移出归档集合的条数。 */
   readonly removedFromArchive: number;
 }
+
+/**
+ * 本插件的 Remote 业务失败码（typert-protocol 的 RemoteErrorDetailsMap 合并
+ * 扩展，官方 dsh-session 的 "session/not-found" 同款做法）：Host 在失败点抛
+ * RemoteError，Client 按 code 判别（不要用 instanceof）。
+ */
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface RemoteErrorDetailsMap {
+    /** detail 的目标会话不在归档集合：非归档成员拒绝读取（防止读到任意未归档会话）。 */
+    'session-archive/not-archived': {
+      /** 被拒绝读取的会话 id。 */
+      readonly sessionId: string;
+    };
+  }
+}

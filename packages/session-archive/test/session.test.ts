@@ -3,6 +3,7 @@ import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
+import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 // 入口只导出 Loader 四件套（name/inject/config/apply），测试便利值走相对路径导入
 // （官方 package-surface 规则：入口不得为测试冻结额外 API）。
 import { createArchiveHost } from "../src/archive-host.js";
@@ -274,10 +275,18 @@ describe("session-archive host", () => {
       && delForeign.failed[0]!.reason === "not-archived"
       && fs.existsSync(sessionPath("live-unarchived"))).toBe(true);
 
-    // detail:同样只对归档成员开放。
+    // detail:同样只对归档成员开放；拒绝走官方 RemoteError（稳定 code + 类型化
+    // details），调用方按 code 判别而非 instanceof。
     let threw: any = null;
     try { await archiveHost.detail("live-unarchived"); } catch (error) { threw = error; }
-    expect(threw !== null && threw.code === "NOT_ARCHIVED").toBe(true);
+    const detailFailure = remoteErrorOf(threw);
+    expect(detailFailure?.code).toBe("session-archive/not-archived");
+    if (detailFailure?.code === "session-archive/not-archived") {
+      expect(detailFailure.details.sessionId).toBe("live-unarchived");
+      expect(detailFailure.message).toContain("session not archived");
+    } else {
+      throw new Error("expected session-archive/not-archived RemoteError");
+    }
     expect((await archiveHost.detail("a1")).title === "T-a1").toBe(true);
   });
 
@@ -399,11 +408,80 @@ describe("session-archive host", () => {
     const archiveHost2 = createArchiveHost(f2.ctx, baseCfg);
     writeSession("s-y", []);
     fs.writeFileSync(path.join(saRoot, "--proj--", "s-y", "other-session.jsonl"), "[]");
+    // 同目录还躺着本会话旧代际：目录保留但旧代际必须清掉，否则「已彻底删除」
+    // 的会话数据仍在磁盘上。
+    fs.writeFileSync(path.join(saRoot, "--proj--", "s-y", "session.v1.jsonl"), "[]");
     const out2 = await archiveHost2.deleteArchived(["s-y"]);
     expect(out2.deleted.includes("s-y")).toBe(true);
-    expect(fs.existsSync(sessionPath("s-y"))).toBe(false); // 本会话文件已删
+    expect(fs.existsSync(sessionPath("s-y"))).toBe(false); // 本会话当前代际已删
+    expect(fs.existsSync(path.join(saRoot, "--proj--", "s-y", "session.v1.jsonl"))).toBe(false); // 旧代际已清
     expect(fs.existsSync(path.join(saRoot, "--proj--", "s-y", "other-session.jsonl"))).toBe(true); // 他者日志保留
     expect(fs.existsSync(path.join(saRoot, "--proj--", "s-y"))).toBe(true); // 目录保留
+
+    // 场景 3:目录归属校验失败 + 同会话多代际并存——降级路径必须清掉本会话
+    // 全部旧代际（不能只删 stat 定位到的那一个），目录本身保留。
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-own3-"));
+    const f3 = makeFixture({
+      archived: ["s-z"],
+      headers: [{ id: "s-z", cwd: "/proj/z", createdAt: 3000 }],
+    });
+    const archiveHost3 = createArchiveHost(f3.ctx, baseCfg);
+    writeSession("s-z", []);
+    const hashDir3 = path.join(saRoot, "--proj--", "feedface");
+    fs.mkdirSync(hashDir3, { recursive: true });
+    fs.writeFileSync(path.join(hashDir3, "session.jsonl"), "[]"); // 当前代际（location 指向它）
+    fs.writeFileSync(path.join(hashDir3, "session.v1.jsonl"), "[]"); // 旧代际
+    fs.writeFileSync(path.join(hashDir3, "session.v2.jsonl.zstd"), "x"); // 旧代际（zstd）
+    const realStat3 = f3.persistenceMock.stat.bind(f3.persistenceMock);
+    f3.persistenceMock.stat = async (id: string) => {
+      const snapshot = await realStat3(id);
+      if (id === "s-z" && snapshot !== undefined) {
+        return { ...snapshot, location: { kind: "jsonl", path: path.join(hashDir3, "session.jsonl") } };
+      }
+      return snapshot;
+    };
+    const out3 = await archiveHost3.deleteArchived(["s-z"]);
+    expect(out3.deleted.includes("s-z")).toBe(true);
+    expect(fs.existsSync(path.join(hashDir3, "session.jsonl"))).toBe(false);
+    expect(fs.existsSync(path.join(hashDir3, "session.v1.jsonl"))).toBe(false);
+    expect(fs.existsSync(path.join(hashDir3, "session.v2.jsonl.zstd"))).toBe(false);
+    expect(fs.existsSync(hashDir3)).toBe(true); // 目录仍保留（fail-safe）
+
+    // 场景 4:降级路径无法清掉旧代际（以目录形态占位使 rm 失败）——该 id 必须
+    // 记 failed 而不是 deleted（磁盘上仍有本会话数据，不得谎报成功）。
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-own4-"));
+    const f4 = makeFixture({
+      archived: ["s-w"],
+      headers: [{ id: "s-w", cwd: "/proj/w", createdAt: 4000 }],
+    });
+    const archiveHost4 = createArchiveHost(f4.ctx, baseCfg);
+    writeSession("s-w", []);
+    const hashDir4 = path.join(saRoot, "--proj--", "cafebabe");
+    fs.mkdirSync(hashDir4, { recursive: true });
+    // 目录占位（先建、mtime 更旧）使清理阶段 rm 以 EISDIR 失败 → 残留；
+    // 当前代际 session.jsonl 必须最后写，确保 resolveGenerationFile 选中它
+    // 而不是这个同名族目录。
+    const staleGeneration = path.join(hashDir4, "session.v1.jsonl");
+    fs.mkdirSync(staleGeneration);
+    fs.writeFileSync(path.join(hashDir4, "session.jsonl"), "[]");
+    // 显式把残留条目的 mtime 拨旧：resolveGenerationFile 按最新 mtime 选代际，
+    // 不能依赖文件系统的 readdir 顺序/时间戳精度。
+    const staleTime = new Date(Date.now() - 60_000);
+    fs.utimesSync(staleGeneration, staleTime, staleTime);
+    const realStat4 = f4.persistenceMock.stat.bind(f4.persistenceMock);
+    f4.persistenceMock.stat = async (id: string) => {
+      const snapshot = await realStat4(id);
+      if (id === "s-w" && snapshot !== undefined) {
+        return { ...snapshot, location: { kind: "jsonl", path: path.join(hashDir4, "session.jsonl") } };
+      }
+      return snapshot;
+    };
+    const out4 = await archiveHost4.deleteArchived(["s-w"]);
+    expect(out4.deleted).toEqual([]);
+    expect(out4.failed).toHaveLength(1);
+    expect(out4.failed[0]!.sessionId).toBe("s-w");
+    expect(out4.failed[0]!.reason).toContain("stale session files remain");
+    expect(f4.registryState.archivedSessionIds.includes("s-w")).toBe(true);
   });
 
   it("unarchive:恢复仍存在文件的会话、拒绝 ghost", async () => {

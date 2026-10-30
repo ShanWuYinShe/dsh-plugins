@@ -162,4 +162,60 @@ describe('removeSessionDirIfOwned', () => {
     await removeSessionDirIfOwned(sessionId, 'sess-1.jsonl', warn)
     expect(warn).not.toHaveBeenCalled()
   })
+
+  it('目录名归属失败时清掉本会话全部旧代际、保留目录（多代际并存）', async () => {
+    // 审计 P2：降级路径只删 stat 定位到的那一个文件会让同会话旧代际
+    // （session[.vN].jsonl[.zstd]）残留，调用方却记 deleted。
+    const root = tempDir()
+    const sessionId = '11111111-2222-3333-4444-555555555555'
+    const dir = join(root, 'hashed-dir-name')
+    mkdirSync(dir)
+    writeFileSync(join(dir, 'session.v1.jsonl'), '{}')
+    writeFileSync(join(dir, 'session.v2.jsonl.zstd'), 'x')
+    const warn = vi.fn()
+    // 调用方已删除 stat 定位到的当前代际（session.jsonl）。
+    await removeSessionDirIfOwned(sessionId, join(dir, 'session.jsonl'), warn)
+    expect(existsSync(join(dir, 'session.v1.jsonl'))).toBe(false)
+    expect(existsSync(join(dir, 'session.v2.jsonl.zstd'))).toBe(false)
+    expect(existsSync(dir)).toBe(true) // 归属校验失败不递归删目录
+    expect(String(warn.mock.calls[0]?.[0])).toContain('does not reference session')
+  })
+
+  it('目录名归属成功但含他者日志时，只清本会话旧代际、保留他者数据', async () => {
+    const root = tempDir()
+    const sessionId = '11111111-2222-3333-4444-555555555555'
+    const dir = join(root, 'sessions-' + sessionId)
+    mkdirSync(dir)
+    writeFileSync(join(dir, 'other-session.jsonl'), '{}')
+    writeFileSync(join(dir, 'session.v1.jsonl'), '{}')
+    const warn = vi.fn()
+    await removeSessionDirIfOwned(sessionId, join(dir, 'session.jsonl'), warn)
+    expect(existsSync(join(dir, 'session.v1.jsonl'))).toBe(false)
+    expect(existsSync(join(dir, 'other-session.jsonl'))).toBe(true)
+    expect(existsSync(dir)).toBe(true)
+    expect(String(warn.mock.calls[0]?.[0])).toContain('holds other session logs')
+  })
+
+  it('旧代际删不掉（目录占位导致 EISDIR）时抛错，让调用方记 failed', async () => {
+    const root = tempDir()
+    const sessionId = '11111111-2222-3333-4444-555555555555'
+    const dir = join(root, 'hashed-dir-name')
+    mkdirSync(dir)
+    mkdirSync(join(dir, 'session.v1.jsonl')) // rm 非递归删目录 → EISDIR，模拟无法删除的残留
+    const warn = vi.fn()
+    await expect(removeSessionDirIfOwned(sessionId, join(dir, 'session.jsonl'), warn))
+      .rejects.toThrow(/stale session files remain/)
+    expect(existsSync(join(dir, 'session.v1.jsonl'))).toBe(true)
+    expect(warn).toHaveBeenCalled()
+  })
+
+  it('目录名归属失败且目录里有他者日志时无法确认归属：抛错（fail-closed）', async () => {
+    const root = tempDir()
+    const sessionId = '11111111-2222-3333-4444-555555555555'
+    const dir = join(root, 'hashed-dir-name')
+    mkdirSync(dir)
+    writeFileSync(join(dir, 'other-session.jsonl'), '{}')
+    await expect(removeSessionDirIfOwned(sessionId, join(dir, 'session.jsonl'), vi.fn()))
+      .rejects.toThrow(/cannot confirm stale file ownership/)
+  })
 })
