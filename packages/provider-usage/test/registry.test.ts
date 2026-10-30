@@ -566,6 +566,57 @@ describe('ProviderUsageRegistry', () => {
   })
 })
 
+describe('querier 返回形状校验（第三方扩展点不得让 client 渲染期抛错）', () => {
+  /** 一个「答什么都行」的注册表：用于把畸形答案喂进公开扩展点。 */
+  function registryAnswering(answer: unknown): ProviderUsageRegistry {
+    const { registry } = makeRegistry()
+    registry.register('acme', async () => answer as UsageSnapshot)
+    return registry
+  }
+
+  it('windows 不是数组：折叠成带原因的失败快照，不透传给 client', async () => {
+    const snapshot = await registryAnswering({ provider: 'acme', windows: 'nope', fetchedAt: 0 }).snapshot('acme')
+    expect(snapshot?.windows).toEqual([])
+    expect(snapshot?.error).toContain('invalid snapshot')
+    expect(snapshot?.error).toContain('windows is not an array')
+  })
+
+  it('窗口字段类型错误：同样折叠成失败快照', async () => {
+    const snapshot = await registryAnswering({
+      provider: 'acme',
+      windows: [{ id: 'w', label: 'W', unit: 'credits', remain: '3' }],
+      fetchedAt: 0,
+    }).snapshot('acme')
+    expect(snapshot?.windows).toEqual([])
+    expect(snapshot?.error).toContain('windows[0].remain is not a finite number')
+  })
+
+  it('resetsAt 不是可解析时刻：折叠成失败快照', async () => {
+    const snapshot = await registryAnswering({
+      provider: 'acme',
+      windows: [{ id: 'w', label: 'W', unit: 'credits', remain: 1, resetsAt: 'not-a-date' }],
+      fetchedAt: 0,
+    }).snapshot('acme')
+    expect(snapshot?.windows).toEqual([])
+    expect(snapshot?.error).toContain('windows[0].resetsAt is not a parseable instant')
+  })
+
+  it('畸形答案的刷新保留上次成功窗口并标 degraded（不空白、不触发 abdicate）', async () => {
+    const { registry, advance } = makeRegistry({ ttlMs: 100 })
+    let malformed = false
+    registry.register('acme', async (): Promise<UsageSnapshot> => malformed
+      ? { provider: 'acme', windows: null as never, fetchedAt: 0 }
+      : { provider: 'acme', windows: [{ id: 'a', label: 'A', remain: 9, unit: 'credits' }], fetchedAt: 0 })
+    await registry.snapshot('acme')
+    malformed = true
+    advance(101)
+    const snapshot = await registry.snapshot('acme')
+    expect(snapshot?.windows).toEqual([{ id: 'a', label: 'A', remain: 9, unit: 'credits' }])
+    expect(snapshot?.degraded).toBe(true)
+    expect(snapshot?.error).toContain('invalid snapshot')
+  })
+})
+
 describe('safeMessage', () => {
   it('redacts jwt-shaped and sk-shaped secrets and query parameters', () => {
     const message = safeMessage(new Error('a eyJhbGciOi.eyJzdWIi.sig b sk-0123456789abcdef c ?access_token=zzz'))

@@ -42,7 +42,10 @@ export const openaiUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signa
       ...resetsAt !== undefined ? { resetsAt } : {},
     })
   } else if (hardLimit !== undefined) {
-    let usageCost = 0
+    // 用量接口失败时不得把 hard_limit 当余额：那会把「已用掉一部分」显示成
+    // 「满额」，与「不猜值」的口径相反。拿不到用量就只报上限——remain 缺席
+    // 表示「余额未知」，client 已按该语义渲染（不画进度条、不显示 0）。
+    let usageCost: number | undefined
     try {
       const now = new Date()
       const startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
@@ -50,16 +53,14 @@ export const openaiUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signa
       const usageRes = await getJson(`${root}/dashboard/billing/usage?start_date=${startDate}&end_date=${endDate}`, headers, signal)
         .catch(() => getJson(`${root}/v1/dashboard/billing/usage?start_date=${startDate}&end_date=${endDate}`, headers, signal))
       const totalUsageCents = num(usageRes['total_usage'])
-      if (totalUsageCents !== undefined) {
-        usageCost = totalUsageCents / 100
-      }
+      if (totalUsageCents !== undefined) usageCost = totalUsageCents / 100
     } catch {
-      // Usage endpoint unavailable, balance equals hardLimit
+      // Usage endpoint unavailable: remain stays absent rather than claiming hardLimit.
     }
     windows.push({
       id: 'balance',
       label: 'Balance',
-      remain: Math.max(0, hardLimit - usageCost),
+      ...usageCost === undefined ? {} : { remain: Math.max(0, hardLimit - usageCost) },
       limit: hardLimit,
       unit: 'usd',
       ...resetsAt !== undefined ? { resetsAt } : {},

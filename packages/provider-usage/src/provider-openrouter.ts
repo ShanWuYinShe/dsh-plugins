@@ -46,7 +46,9 @@ export const openrouterUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, s
     windows.push({
       id: 'account',
       label: 'Account credits',
-      remain: Math.max(0, total - (used ?? 0)),
+      // 用量字段缺席时不能按 0 假定（那会把已花费显示成满额）：只报上限，
+      // remain 缺席 = 余额未知。
+      ...used === undefined ? {} : { remain: Math.max(0, total - used) },
       unit: 'credits',
       limit: total,
     })

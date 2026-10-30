@@ -21,6 +21,26 @@ const QUOTA_ROOT_DEFAULT = 'https://open.bigmodel.cn'
 /** 订阅回退的公网兜底（默认根或回退无果时才用）。 */
 const SUBSCRIPTION_PUBLIC_URL = 'https://bigmodel.cn/api/biz/subscription/list'
 
+/**
+ * 上游订阅 `expireTime` 的绝对时刻（ISO-8601），只在字符串自带时区时给出。
+ *
+ * 上游返回的常见形态是 `YYYY-MM-DD HH:mm:ss`（不带时区）：按宿主本地时区或
+ * UTC 解释都会偏最多一个时区差，而 `UsageWindow.resetsAt` 的契约要求绝对时刻
+ * （types.ts），所以时区不确定时宁可不输出——界面按「未提供恢复时间」处理，
+ * 比显示一个可能错几小时的时间诚实。
+ *
+ * @param value - upstream `expireTime` text, when reported.
+ * @returns the ISO instant, or undefined when the text names no absolute instant.
+ */
+function absoluteInstant(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  const text = value.trim()
+  // 只有自带 Z / ±hh:mm 偏移的形态才代表绝对时刻；无时区的本地时刻不猜。
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/u.test(text)) return undefined
+  const at = new Date(text)
+  return Number.isNaN(at.getTime()) ? undefined : at.toISOString()
+}
+
 export const bigmodelUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
   if (apiKey === undefined) return snapshotOf('bigmodel', [])
   const root = trimBase(baseURL ?? QUOTA_ROOT_DEFAULT)
@@ -65,14 +85,16 @@ export const bigmodelUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, sig
         for (const item of list) {
           const status = str(item['status'])
           const productName = str(item['productName']) ?? 'Subscription'
-          const expireTime = str(item['expireTime'])
           if (status === 'VALID') {
             plan = productName
+            const resetsAt = absoluteInstant(str(item['expireTime']))
             windows.push({
               id: `sub-${productName.toLowerCase().replace(/\s+/g, '-')}`,
               label: productName,
-              unit: 'VALID',
-              ...expireTime !== undefined ? { resetsAt: expireTime } : {},
+              // 订阅有效性不是额度：没有 remain/limit，也就没有计量单位
+              // （空串 = 无单位；client 与 /usage 都按「无单位」渲染）。
+              unit: '',
+              ...resetsAt === undefined ? {} : { resetsAt },
             })
           }
         }

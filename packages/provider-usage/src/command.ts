@@ -13,15 +13,26 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { normalizeProviderKey } from './resolve.js'
 import type { ProviderUsageRegistry } from './registry.js'
-import type { UsageSnapshot } from './types.js'
+import type { UsageSnapshot, UsageWindow } from './types.js'
+
+/**
+ * 一行窗口文本:"label 余量 单位"。
+ *
+ * remain 在契约里可选（余额型窗口只有上限、订阅有效性窗口只有标签），直接插值
+ * 会输出 "undefined"；缺余量时用 "—" 占位。unit 也可能是空串（没有计量单位的
+ * 有效性窗口），此时不留尾随空格。
+ */
+function formatWindow(window: UsageWindow): string {
+  const remaining = window.remain === undefined ? '—' : `${window.remain}`
+  return window.unit === '' ? `${window.label} ${remaining}` : `${window.label} ${remaining} ${window.unit}`
+}
 
 /** 一行额度文本:displayName(registry 把注册期 displayName 回填进答案，缺省回 provider 键)+ 逐窗口 "label remain unit"。 */
 export function formatUsageLine(snapshot: UsageSnapshot): string {
   const name = snapshot.displayName ?? snapshot.provider
   if (snapshot.error !== undefined) return `${name}: error — ${snapshot.error}`
   if (snapshot.windows.length === 0) return `${name}: the provider reported no usable balance`
-  const windows = snapshot.windows.map((w) => `${w.label} ${w.remain} ${w.unit}`).join(', ')
-  return `${name}: ${windows}`
+  return `${name}: ${snapshot.windows.map(formatWindow).join(', ')}`
 }
 
 /** 整份报告:每 provider 一行,顺序与查询顺序一致。 */

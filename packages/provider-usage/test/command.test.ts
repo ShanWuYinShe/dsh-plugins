@@ -44,6 +44,15 @@ describe('formatUsageLine', () => {
     expect(formatUsageLine(snapshot({ error: 'HTTP 502' }))).toBe('acme: error — HTTP 502')
     expect(formatUsageLine(snapshot({ windows: [] }))).toBe('acme: the provider reported no usable balance')
   })
+
+  it('缺 remain 的窗口用 — 占位（不输出 undefined），空单位不留尾随空格', () => {
+    expect(formatUsageLine(snapshot({
+      windows: [
+        { id: 'plan', label: 'OpenCode Free', unit: '' },
+        { id: 'tokens', label: 'Token limit', limit: 100, unit: 'tokens' },
+      ],
+    }))).toBe('acme: OpenCode Free —, Token limit — tokens')
+  })
 })
 
 describe('formatUsageReport', () => {

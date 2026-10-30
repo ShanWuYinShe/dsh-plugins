@@ -22,7 +22,7 @@
  * @module provider-usage/resolve
  */
 
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { credentialRef, isCredentialRefName } from '@deepseek-ai/dsh-credentials'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AccountClientMetadata, AccountDetails, AccountWallet } from '@deepseek-ai/dsh-deepseek-account'
 import { str } from './provider-shared.js'
@@ -233,7 +233,12 @@ export function createProviderResolver(ctx: Context): (provider: string, signal:
       baseURL = str(profile?.['baseURL'])
       const apiKeyEnv = str(profile?.['apiKeyEnv'])
 
-      if (apiKeyEnv !== undefined && credentials !== undefined) {
+      // apiKeyEnv 来自用户可编辑的 profile：先按官方判据确认它是合法的
+      // credential reference name（POSIX 标识符），再 brand + resolve。直接
+      // credentialRef() 会在名字非法时抛 TypeError，把一处配置笔误变成每次
+      // 查询都复现的失败；官方 dsh-credentials 对 isCredentialRefName 的文档
+      // 明确要求对来自 settings/hook 的外部名字先做这一步，非法名按未配置处理。
+      if (apiKeyEnv !== undefined && credentials !== undefined && isCredentialRefName(apiKeyEnv)) {
         const resolved = await credentials.resolve(credentialRef(apiKeyEnv))
         if (signal.aborted) return baseOnly()
         apiKey = resolved?.value

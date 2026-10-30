@@ -13,6 +13,16 @@ import type { ProviderUsageLocaleKey } from './locales.js'
 type PillCopy = (key: ProviderUsageLocaleKey, params?: Record<string, unknown>) => string
 
 /**
+ * 单位后缀：unit 可能为空串（订阅有效性窗口没有计量单位），此时不留多余空格/冒号。
+ *
+ * @param unit - the window's unit.
+ * @returns " unit", or "" when the window names no unit.
+ */
+function unitSuffix(unit: string): string {
+  return unit === '' ? '' : ` ${unit}`
+}
+
+/**
  * 头行文案：7 个分支（loading / noQuerier / rateLimited / failed / noWindows /
  * label形 / 额度形）+ stale 后缀。
  *
@@ -40,8 +50,8 @@ export function headlineText(answer: SnapshotAnswer | undefined, provider: strin
     /** 多个窗口只在头行报第一个，「 +N」提示展开还有更多。 */
     const more = snapshot.windows.length > 1 ? ` +${snapshot.windows.length - 1}` : ''
     headline = first.remain === undefined
-      ? `${first.label}: ${first.unit}${more}`
-      : `${formatAmount(first.remain)} ${first.unit} ${t('remaining')}${more}`
+      ? `${first.label}${first.unit === '' ? '' : `: ${first.unit}`}${more}`
+      : `${formatAmount(first.remain)}${unitSuffix(first.unit)} ${t('remaining')}${more}`
   }
   return stale ? `${headline} · ${t('staleData')}` : headline
 }

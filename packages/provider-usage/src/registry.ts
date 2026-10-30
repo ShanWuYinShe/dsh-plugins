@@ -124,6 +124,66 @@ async function underDeadline<T>(timeoutMs: number, timeoutMessage: string, run: 
   }
 }
 
+/** One querier-answer shape defect, named for the provider that returned it. */
+function invalidSnapshot(provider: string, reason: string): Error {
+  return new Error(`provider-usage: querier for "${provider}" returned an invalid snapshot: ${reason}`)
+}
+
+/**
+ * Validate one querier answer before it reaches the browser.
+ *
+ * A querier is a public extension point, so a third-party implementation can
+ * return anything at runtime. The client renders `windows` and `rateLimit`
+ * directly, so a malformed answer would throw inside the pill's render — and
+ * the host turns a render throw into a permanent entry abdication (the pill
+ * disappears until a page reload). Folding the defect into the ordinary failure
+ * path keeps the surface alive and reports which provider returned what.
+ *
+ * Fields the registry itself overwrites (`provider`, `fetchedAt`) are not
+ * validated; every field the surface renders is.
+ *
+ * @param provider - provider route key the answer belongs to (for the message).
+ * @param value - the querier's raw answer.
+ */
+function assertQuerierSnapshot(provider: string, value: unknown): void {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw invalidSnapshot(provider, 'not an object')
+  const snapshot = value as Record<string, unknown>
+  const windows = snapshot['windows']
+  if (!Array.isArray(windows)) throw invalidSnapshot(provider, 'windows is not an array')
+  for (const [index, item] of windows.entries()) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) throw invalidSnapshot(provider, `windows[${index}] is not an object`)
+    const window = item as Record<string, unknown>
+    for (const key of ['id', 'label', 'unit'] as const) {
+      if (typeof window[key] !== 'string') throw invalidSnapshot(provider, `windows[${index}].${key} is not a string`)
+    }
+    if (window['id'] === '') throw invalidSnapshot(provider, `windows[${index}].id is empty`)
+    for (const key of ['remain', 'limit'] as const) {
+      const amount = window[key]
+      if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount))) {
+        throw invalidSnapshot(provider, `windows[${index}].${key} is not a finite number`)
+      }
+    }
+    const resetsAt = window['resetsAt']
+    if (resetsAt !== undefined && (typeof resetsAt !== 'string' || Number.isNaN(new Date(resetsAt).getTime()))) {
+      throw invalidSnapshot(provider, `windows[${index}].resetsAt is not a parseable instant`)
+    }
+    if (window['blocked'] !== undefined && typeof window['blocked'] !== 'boolean') {
+      throw invalidSnapshot(provider, `windows[${index}].blocked is not a boolean`)
+    }
+  }
+  for (const key of ['plan', 'error'] as const) {
+    if (snapshot[key] !== undefined && typeof snapshot[key] !== 'string') throw invalidSnapshot(provider, `${key} is not a string`)
+  }
+  const rateLimit = snapshot['rateLimit']
+  if (rateLimit !== undefined) {
+    if (typeof rateLimit !== 'object' || rateLimit === null || Array.isArray(rateLimit)) throw invalidSnapshot(provider, 'rateLimit is not an object')
+    const resetAt = (rateLimit as Record<string, unknown>)['resetAt']
+    if (resetAt !== undefined && (typeof resetAt !== 'number' || !Number.isFinite(resetAt))) {
+      throw invalidSnapshot(provider, 'rateLimit.resetAt is not a finite number')
+    }
+  }
+}
+
 /**
  * Registrations, resolution, and the cache, as the `ctx.providerUsage`
  * service. One instance serves the whole host; registrations are disposed with
@@ -325,6 +385,9 @@ export class ProviderUsageRegistry extends Service {
     }
     try {
       const snapshot = await this.withDeadline(provider, registration.querier)
+      // 公开扩展点：第三方 querier 的形状缺陷在越过 wire 之前折叠成失败快照，
+      // 绝不让 client 在渲染期抛错（宿主会把该 entry 永久 abdicate）。
+      assertQuerierSnapshot(provider, snapshot)
       return {
         ...base,
         ...snapshot.plan === undefined ? {} : { plan: snapshot.plan },
