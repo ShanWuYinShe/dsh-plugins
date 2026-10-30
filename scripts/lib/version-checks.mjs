@@ -67,6 +67,23 @@ export function isStable(version) {
   return !isPrerelease(version);
 }
 
+/** 发布包的运行期依赖清单（dependencies ∪ optionalDependencies）。
+ * 插件索引的静态 registry 只托管本仓发布包，packument 按设计省略依赖段；
+ * pnpm 在后续包操作里会按已装 tarball 的 manifest 重新解析这两个字段，去
+ * 静态 registry 请求就 404（2026-10-30 实测：装过带 zod 的 any-connect 后
+ * 装第二个插件必失败）。因此发布包必须零运行期依赖：宿主依赖放
+ * devDependencies，运行期由宿主 profile runner 的 runtime resolution 供给。
+ * 本函数供发布门禁（scripts/publish-gate.mjs）判定，纯函数、不读盘。 */
+export function runtimeDependenciesOf(manifest) {
+  const dependencies = manifest?.dependencies
+  const optional = manifest?.optionalDependencies
+  const names = [
+    ...(dependencies !== null && typeof dependencies === "object" ? Object.keys(dependencies) : []),
+    ...(optional !== null && typeof optional === "object" ? Object.keys(optional) : []),
+  ]
+  return [...new Set(names)].sort()
+}
+
 /** CHANGELOG 小节标题（`## <版本>` 或 `## <版本> `开头）在 lines 中的行
  * 索引；-1 表示没有该版本的小节。发布门禁与 Release 说明提取共用这一
  * 判定（带空格边界：不会把 0.4.5-beta 误判为 0.4.5 的小节）。 */

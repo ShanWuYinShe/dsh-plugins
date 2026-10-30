@@ -42,6 +42,19 @@ describe("npm bundle metadata", () => {
     const patch = readFileSync(patchFile, "utf8");
     const scopedName = `@chaoset/${name}`;
 
+    it(`${name}: 发布产物不得声明任何运行期依赖（插件索引安装链的前提）`, () => {
+      // 自定义插件索引的静态 registry 只托管本仓的发布包，packument 按设计
+      // 省略依赖段；pnpm 在后续包操作里会按已装 tarball 的 manifest 重新
+      // 解析 dependencies/optionalDependencies，去静态 registry 请求就会
+      // ERR_PNPM_FETCH_404（2026-10-30 实测：装过 any-connect 后装第二个
+      // 插件必失败，根因是 tarball 里的 zod）。
+      //
+      // 因此发布包必须**零运行期依赖**：宿主包只进 devDependencies，运行期
+      // 由宿主 profile runner 的 runtime resolution 从宿主安装闭包供给
+      // （外部插件机制），第三方库如 zod 也走同一条路（typert 工件先例）。
+      expect(pkg.dependencies ?? {}, `${name}: dependencies 必须为空`).toEqual({});
+      expect(pkg.optionalDependencies ?? {}, `${name}: optionalDependencies 必须为空`).toEqual({});
+    });
     it(`${name}: 声明 dsh.bundle.patch`, () => {
       expect(pkg.dsh?.bundle?.patch).toBe("./cordis.patch.yml");
     });

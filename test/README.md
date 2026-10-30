@@ -35,7 +35,7 @@
 | `locale-keys.test.ts` | 文案 key 都有引用；同一包内 en 与 zh 的键集完全一致 |
 | `css-classes.test.ts` | 样式表里的每个类名都在本包 client 源码里出现 |
 | `css-tokens.test.ts` | 插件手写的样式只引用宿主真实存在的 CSS 变量 |
-| `bundle.test.ts` | 构建产物与元数据：manifest 契约（engines.dsh / manifestVersion / client inject / exports 标准键）、Typert 工件导出与产物齐全、client bundle 冒烟、四个包的兜底边界、files 清单有货 |
+| `bundle.test.ts` | 构建产物与元数据：manifest 契约（engines.dsh / manifestVersion / client inject / exports 标准键）、**零运行期依赖**（插件索引安装链前提）、Typert 工件导出与产物齐全、client bundle 冒烟、四个包的兜底边界、files 清单有货 |
 | `loopback-parity.test.ts` | 两个包各自持有的回环守卫不许静默分叉；差异须逐项登记在根 test 的真值表里——当前是 provider-usage 委托宿主后的 4 项放宽 + 空串 Origin 这一处收紧 |
 | `skill-facts.test.ts` | 技能文档里引用的标识符在实现里真实存在（外部事实走 `EXTERNAL_FACTS` 白名单） |
 | `wait-for-budget.test.ts` | 每个 `vi.waitFor` 都显式声明 timeout（默认 1s 而 testTimeout 是 30s） |

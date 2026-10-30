@@ -9,6 +9,7 @@ import {
   findChangelogSection,
   isPrerelease,
   isStable,
+  runtimeDependenciesOf,
 } from "../scripts/lib/version-checks.mjs";
 
 /**
@@ -113,6 +114,22 @@ describe("isPrerelease / isStable", () => {
     expect(isStable("0.4.14-rc.1")).toBe(false)
   })
 })
+
+describe("runtimeDependenciesOf（发布门禁的零运行期依赖判据）", () => {
+  it("dependencies 与 optionalDependencies 合并、去重、排序", () => {
+    expect(runtimeDependenciesOf({ dependencies: { zod: "4.4.3", a: "1" }, optionalDependencies: { zod: "4.4.3", "@deepseek-ai/node-addon-system": "~0.1.2" } })).toEqual([
+      "@deepseek-ai/node-addon-system",
+      "a",
+      "zod",
+    ]);
+  });
+
+  it("缺失或非对象字段按空处理（不做隐式推断）", () => {
+    expect(runtimeDependenciesOf({})).toEqual([]);
+    expect(runtimeDependenciesOf({ dependencies: null, optionalDependencies: [] })).toEqual([]);
+    expect(runtimeDependenciesOf({ devDependencies: { zod: "4.4.3" }, peerDependencies: { x: "1" } })).toEqual([]);
+  });
+});
 
 describe("findChangelogSection", () => {
   const lines = ["# 更新日志", "", "## 0.4.14-alpha.4", "- 修复", "## 0.4.5-beta", "## 1.0.0 ", "- 正式"];

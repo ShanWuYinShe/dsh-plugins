@@ -1,5 +1,9 @@
 name: Test
 
+# 只读工作流：显式声明最小权限，不依赖仓库默认 token 权限。
+permissions:
+  contents: read
+
 # 测试链路：分支推送只跑测试、永远不发布（发版只由 tag 推送触发，见
 # publish.yml）；PR 同样跑测试。tag 推送的测试由 publish.yml 顺带完成，
 # 这里不监听 tags，避免双跑。
@@ -17,6 +21,7 @@ on:
       - 'vitest.config.ts'
       - 'tsconfig*.json'
       - '.github/workflows/*'
+      - '.agents/**'
   pull_request:
     branches:
       - main
@@ -30,6 +35,7 @@ on:
       - 'vitest.config.ts'
       - 'tsconfig*.json'
       - '.github/workflows/*'
+      - '.agents/**'
 
 # 同一 ref 连续推送时取消旧的测试，只跑最新代码。
 concurrency:

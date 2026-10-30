@@ -26,3 +26,8 @@ export declare function isStable(version: string): boolean;
 
 /** CHANGELOG 小节标题所在行索引；-1 表示没有该版本的小节。 */
 export declare function findChangelogSection(lines: readonly string[], version: string): number;
+
+/** 发布包的运行期依赖清单（dependencies ∪ optionalDependencies，去重后排序）。
+ * 发布门禁用它执行「零运行期依赖」规则：插件索引的静态 registry 不托管这些
+ * 依赖，pnpm 后续包操作会按 tarball manifest 去 registry 解析并 404。 */
+export declare function runtimeDependenciesOf(manifest: object | null | undefined): string[];
