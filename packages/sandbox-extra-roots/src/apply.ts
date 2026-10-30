@@ -49,7 +49,6 @@ export async function apply(ctx: Context, config?: Partial<SandboxExtraRootsConf
       checkedProfile: false,
       profileDrifted: false,
     }))
-    sandboxState.mounts += 1
     const fsState = mountState<MountState>(rawFs, () => ({
       mounts: 0,
       extraRoots: [],
@@ -59,13 +58,18 @@ export async function apply(ctx: Context, config?: Partial<SandboxExtraRootsConf
       original: null,
       installed: null,
     }))
-    fsState.mounts += 1
-
-    // 卸载计数：在继续初始化之前登记，后续 setup 失败也由本 fiber 负责递减；
-    // 最后一次退出才还原包装。
-    ctx.effect(() => () => {
-      releaseMount(rawSandbox, sandboxState, 'confine')
-      releaseMount(rawFs, fsState, 'checkedTarget')
+    // 卸载计数在 effect 体内递增，且 effect 先于后续初始化登记：
+    //   - ctx.effect 的 execute 在注册时立即执行（cordis 契约），递增与注册
+    //     同一步完成；注册本身抛错时不会留下"已递增、但永不 dispose"的计数
+    //     （旧实现先 +1 后注册——注册失败 = 计数永久泄漏，包装再也无法还原）。
+    //   - 后续 setup 失败由本 fiber 负责递减；最后一次退出才还原包装。
+    ctx.effect(() => {
+      sandboxState.mounts += 1
+      fsState.mounts += 1
+      return () => {
+        releaseMount(rawSandbox, sandboxState, 'confine')
+        releaseMount(rawFs, fsState, 'checkedTarget')
+      }
     })
 
     const warn = (message: string) => ctx.logger?.warn?.(message)

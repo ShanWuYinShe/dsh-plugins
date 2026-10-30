@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { apply } from "../src/index.js";
 import { canonicalPath, writableRoots } from "../src/common.js";
+import { STATE } from "../src/roots.js";
 
 const prevHome = process.env.HOME;
 const prevDshHome = process.env.DSH_HOME;
@@ -195,6 +196,38 @@ describe("sandbox-extra-roots host (多挂载点引用计数)", () => {
       rmSync(fakeHome2, { recursive: true, force: true });
     }
   });
+
+  it("effect 注册抛错不泄漏挂载计数:随后 apply/dispose 仍能正确还原包装", async () => {
+    // 旧实现先 mounts += 1、后 ctx.effect 登记卸载:注册抛错时计数永久
+    // 泄漏(该挂载点永远不会 dispose),同一底层实例后续 apply 的计数从
+    // 泄漏值起算,最后一次退出也还原不了包装。这里用 effect 注册抛错模拟。
+    const sandboxMock = makeSandboxMock();
+    const fsMock = makeFsMock();
+    const brokenCtx = makeCtx(sandboxMock, fsMock);
+    brokenCtx.effect = () => {
+      throw new Error("effect registration failed");
+    };
+    const warnings: string[] = [];
+    brokenCtx.logger.warn = (message: string) => warnings.push(message);
+    await apply(brokenCtx, { extraWritableRoots: [] });
+    expect(warnings.some((w) => w.includes("init failed"))).toBe(true);
+    // 计数没有残留(旧实现这里会是 2)
+    expect((sandboxMock as any)[STATE]?.mounts ?? 0).toBe(0);
+    expect((fsMock as any)[STATE]?.mounts ?? 0).toBe(0);
+
+    // 同一底层实例上正常 apply:计数从 0 起算,dispose 必须还原原方法
+    const originalConfine = sandboxMock.confine;
+    const originalCheckedTarget = fsMock.checkedTarget;
+    const ctx2 = makeCtx(sandboxMock, fsMock);
+    await apply(ctx2, { extraWritableRoots: [] });
+    expect(sandboxMock.confine).not.toBe(originalConfine);
+    expect(fsMock.checkedTarget).not.toBe(originalCheckedTarget);
+    ctx2.disposeAll();
+    expect(sandboxMock.confine).toBe(originalConfine);
+    expect(fsMock.checkedTarget).toBe(originalCheckedTarget);
+    expect((sandboxMock as any)[STATE]).toBeUndefined();
+    expect((fsMock as any)[STATE]).toBeUndefined();
+  });
 });
 describe("sandbox-extra-roots host (bwrap)", () => {
   it("bwrap 只授予存在的额外目录", async () => {
@@ -297,6 +330,134 @@ describe("sandbox-extra-roots 运行期符号链接重定向(逃逸防护)", () 
       expect(bindArgs).not.toContain("--bind");
     } finally {
       rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it("extra root 被换成指向普通目录的符号链接:身份校验剔除且同一根只告警一次", async () => {
+    // 攻击模型补充:把根换成指向"任意其它目录"(不一定是 / 或 home)的符号
+    // 链接,危险根复查看不见(classifyRoot 判它是正常业务根),只有运行期
+    // 身份校验能挡住——官方 additionalRoot 对额外根正是 realpath !== resolve
+    // 即拒绝,这里保持同一姿态:不跟随、不授予。
+    const base = mkdtempSync(join(tmpdir(), "ser-swap4-"));
+    const root = join(base, "cache");
+    const decoy = join(base, "decoy");
+    mkdirSync(root, { recursive: true });
+    mkdirSync(decoy, { recursive: true });
+    const sandboxMock = makeSandboxMock();
+    const fsMock = makeFsMock();
+    const warnings: string[] = [];
+    const ctx = makeCtx(sandboxMock, fsMock);
+    ctx.logger.warn = (message: string) => warnings.push(message);
+    const configured = canonicalPath(root);
+    const decoyPhysical = canonicalPath(decoy);
+    try {
+      await apply(ctx, { extraWritableRoots: [root] });
+      swapToSymlink(root, decoy);
+      const outputs = [
+        await sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS }),
+        await sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS }),
+      ];
+      for (const out of outputs) {
+        // 既不跟随链接目标,也不授予被替换后的原拼写
+        expect(out.argv[2]).not.toContain(`(subpath "${decoyPhysical}")`);
+        expect(out.argv[2]).not.toContain(`(subpath "${configured}")`);
+      }
+      // fs 侧 fail-closed:链接目标下的路径不因"换了张脸"被放行
+      await expect(fsMock.checkedTarget({ displayPath: join(decoyPhysical, "file") })).rejects.toThrow("FS_SANDBOX_DENIED");
+      // 同一侧同一根只告警一次(身份校验每次调用都跑,不能按调用刷屏):
+      // 两次 confine 只产生一条 bash 侧告警,一次 fs 检查只产生一条 fs 侧告警。
+      expect(warnings.filter((w) => w.includes("no longer the physical path") && w.includes(configured) && w.includes("bash commands"))).toHaveLength(1);
+      expect(warnings.filter((w) => w.includes("no longer the physical path") && w.includes(configured) && w.includes("the fs fence"))).toHaveLength(1);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it("extra root 被换成指向 home 下敏感目录(嵌套形态)的符号链接后剔除", async () => {
+    // home 的后代本身不在 classifyRoot 的 reject/filter 名单里(home 本体
+    // 与 home 的词法祖先才危险),旧实现跟随重定向后会照常授予 ~/.ssh 这类
+    // 敏感目录;运行期身份校验必须在危险根复查之前挡住这种嵌套形态。
+    const base = mkdtempSync(join(tmpdir(), "ser-swap5-"));
+    const root = join(base, "cache");
+    const sensitive = join(fakeHome, ".ssh");
+    mkdirSync(root, { recursive: true });
+    mkdirSync(sensitive, { recursive: true });
+    const sandboxMock = makeSandboxMock();
+    const fsMock = makeFsMock();
+    const ctx = makeCtx(sandboxMock, fsMock);
+    try {
+      await apply(ctx, { extraWritableRoots: [root] });
+      swapToSymlink(root, sensitive);
+      const out = await sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+      expect(out.argv[2]).not.toContain(`(subpath "${canonicalPath(sensitive)}")`);
+      await expect(fsMock.checkedTarget({ displayPath: join(canonicalPath(sensitive), "id_rsa") })).rejects.toThrow("FS_SANDBOX_DENIED");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it("根自身的祖先被换成符号链接:身份校验同样检出(不跟随)", async () => {
+    // 攻击面不限于根这一个节点:根拼写不变、但它的祖先目录被换成符号链接
+    // (如把 /tmp/x 换成指向别处的链接),realpath 同样会落到新目标。
+    const base = mkdtempSync(join(tmpdir(), "ser-swap6-"));
+    const nested = join(base, "nested");
+    const root = join(nested, "cache");
+    const elsewhere = join(base, "elsewhere");
+    mkdirSync(root, { recursive: true });
+    mkdirSync(join(elsewhere, "cache"), { recursive: true });
+    const sandboxMock = makeSandboxMock();
+    const fsMock = makeFsMock();
+    const ctx = makeCtx(sandboxMock, fsMock);
+    try {
+      await apply(ctx, { extraWritableRoots: [root] });
+      rmSync(nested, { recursive: true, force: true });
+      symlinkSync(elsewhere, nested, "dir");
+      const out = await sandboxMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+      expect(out.argv[2]).not.toContain(`(subpath "${canonicalPath(join(elsewhere, "cache"))}")`);
+      await expect(fsMock.checkedTarget({ displayPath: join(canonicalPath(elsewhere), "cache", "file") })).rejects.toThrow("FS_SANDBOX_DENIED");
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("sandbox-extra-roots fs 包装 fail-closed 硬化", () => {
+  it("官方 checkedTarget 不是函数:不安装包装、不新增属性,只告警一次", async () => {
+    // checkedTarget 是官方 dsh-fs-sandbox 的 private 面:宿主升级后可能改名/
+    // 移除。此时不包装(不凭空新增属性—那会把官方 fail-closed 换成插件异常),
+    // 保持官方行为,只告警一次。
+    const sandboxMock = makeSandboxMock();
+    const fsMock: any = {
+      async resolve(displayPath: string) { return { targetKey: displayPath }; },
+    };
+    const warnings: string[] = [];
+    const ctx = makeCtx(sandboxMock, fsMock);
+    ctx.logger.warn = (message: string) => warnings.push(message);
+    await apply(ctx, { extraWritableRoots: [] });
+    expect(Object.hasOwn(fsMock, "checkedTarget")).toBe(false);
+    // 同一底层实例再次挂载:仍不新增属性,告警不重复
+    await apply(ctx, { extraWritableRoots: [] });
+    expect(Object.hasOwn(fsMock, "checkedTarget")).toBe(false);
+    expect(warnings.filter((w) => w.includes("checkedTarget is not a function"))).toHaveLength(1);
+  });
+
+  it("fs fence 返回不透明 targetKey(非本地绝对路径)时保持官方拒绝并只告警一次", async () => {
+    // 官方 FsTarget.targetKey 是不透明身份(消费者不得假设是本地绝对路径)。
+    // 契约漂移时本包装不能按不透明 key 猜包含关系,必须保持官方拒绝。
+    mkdirSync(EXTRA, { recursive: true });
+    const sandboxMock = makeSandboxMock();
+    const fsMock = makeFsMock();
+    fsMock.resolve = async () => ({ targetKey: "opaque:workspace/foo" });
+    const warnings: string[] = [];
+    const ctx = makeCtx(sandboxMock, fsMock);
+    ctx.logger.warn = (message: string) => warnings.push(message);
+    try {
+      await apply(ctx, { extraWritableRoots: [EXTRA] });
+      await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/foo" })).rejects.toThrow("FS_SANDBOX_DENIED");
+      await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/foo" })).rejects.toThrow("FS_SANDBOX_DENIED");
+      expect(warnings.filter((w) => w.includes("non-local opaque targetKey"))).toHaveLength(1);
+    } finally {
+      rmSync(EXTRA, { recursive: true, force: true });
     }
   });
 });

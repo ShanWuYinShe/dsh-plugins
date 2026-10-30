@@ -54,9 +54,6 @@
       ]
     }
   },
-  "optionalDependencies": {
-    "@deepseek-ai/node-addon-system": "~0.1.2"
-  },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.6-alpha.1",
     "@deepseek-ai/dsh-api-remotes": "^0.2.2-alpha.2",
@@ -64,6 +61,7 @@
     "@deepseek-ai/dsh-client-ui-renderer": "^0.2.2-alpha.2",
     "@deepseek-ai/dsh-sandbox": "^0.2.2-alpha.2",
     "@deepseek-ai/dsh-typert-protocol": "^0.2.2-alpha.2",
+    "@deepseek-ai/node-addon-system": "~0.1.2",
     "@types/react": "^19.3.0",
     "react": "^19.3.1",
     "vitest": "^4.1.12",

@@ -6,18 +6,20 @@
  * 状态挂在被包装的底层实例的 STATE symbol 上（同一底层实例被多个挂载点共享时
  * 引用计数），最后一个挂载点退出才还原原方法。
  *
- * 本模块只做装配；argv 改写与危险根复查在 confine-runners.ts，路径规范/分类在
- * roots.ts / config-validate.ts。
+ * 本模块只做装配；argv 改写、运行期根身份校验与危险根复查在
+ * confine-runners.ts，路径规范/分类在 roots.ts / config-validate.ts。
  *
  * @module @chaoset/sandbox-extra-roots/wrap
  */
 
+import { isAbsolute } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ConfinedArgv, SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { isPathUnder, seatbeltProfileArgs } from './common.js'
-import { bindMountArgv, bindMountGrant, safeRuntimeRoots, seatbeltArgv, type ConfineRunnerDeps } from './confine-runners.js'
+import { bindMountArgv, bindMountGrant, stableRuntimeRoots, seatbeltArgv, type ConfineRunnerDeps } from './confine-runners.js'
 import { existingDirectoryRoots } from './roots-filter.js'
-import { STATE, canon } from './roots.js'
+import { STATE } from './roots.js'
+import type { HostSandboxPolicy } from './dsh.js'
 import type { LandlockRuntime } from './landlock-exec.js'
 
 /** 被包装的宿主服务实例（方法面按实例字符串/符号键访问：confine / checkedTarget / resolve / STATE）。 */
@@ -27,7 +29,7 @@ export type WrappedService = Record<string | symbol, any>
 export interface MountState {
   /** 当前挂载点数量（Loader 热切换时新旧 entry 会短暂并存）。 */
   mounts: number
-  /** 当前生效的额外可写根（canonical、去重、已过滤危险根）。 */
+  /** 当前生效的额外可写根（配置期 canonical、去重、已过滤危险根；运行期每次调用再做身份校验）。 */
   extraRoots: string[]
   /** 同一 key 只告警一次。 */
   warned: Set<string>
@@ -113,12 +115,11 @@ export function installConfineWrapper(target: WrappedService, deps: ConfineWrapD
     const wrapped: ConfinedArgv = await state.original.call(this, argv, policy, signal)
     if (policy?.mode !== 'workspace-write') return wrapped
     if (state.extraRoots.length === 0) return wrapped
-    // 每次调用重新 canonical 化（与官方 writableRoots 对 workspaceRoot 的
-    // 姿态一致）：符号链接重定向后，下一次 confine 立即跟随新目标，不必等
-    // 配置重新加载。跟随之后必须复查危险根：重定向目标可能是 "/" 或
-    // homedir（沙盒内符号链接交换），运行期一律剔除。
-    const roots = safeRuntimeRoots(
-      [...new Set(state.extraRoots.map(canon))],
+    // 每次调用重新校验根的运行期身份：配置期已 canonical 化，physical 拼写与
+    // 配置拼写不一致即说明根被替换（符号链接重定向，含祖先被换），此时不跟随、
+    // 不授予；身份未变的根再复查危险根（两层都保留）。见 stableRuntimeRoots。
+    const roots = stableRuntimeRoots(
+      [...new Set(state.extraRoots)],
       state.warned,
       'bash commands',
       warn,
@@ -198,8 +199,18 @@ export interface FsWrapDeps {
  */
 export function installFsWrapper(service: WrappedService, deps: FsWrapDeps): void {
   const { ctx, state, warn } = deps
+  const warnOnce = warnOnceFactory(ctx, state.warned)
   state.hadOwn = Object.hasOwn(service, 'checkedTarget')
   state.original = service.checkedTarget
+  // 宿主服务面漂移防御：checkedTarget 不在官方稳定服务面里（@deepseek-ai/
+  // dsh-fs-sandbox 把它标记为 private），宿主升级后可能改名/移除。此时**不
+  // 安装包装**：凭空给实例新增同名属性会把官方路径的 fail-closed 拒绝换成
+  // 插件自己的异常，且卸载还原无从谈起（从未存在过原方法）。保持官方行为
+  // （没有检查方法 = 该后端不做围栏，或由宿主新面接管）并告警一次。
+  if (typeof state.original !== 'function') {
+    warnOnce('fs-checked-target-missing', '[sandbox-extra-roots] ctx.fs.checkedTarget is not a function on this host; fs-fence extra writable roots cannot be granted (official behavior kept unchanged)')
+    return
+  }
   const installedCheckedTarget = async function checkedTargetWithExtraRoots(
     this: unknown,
     target: ResolvedFsTarget,
@@ -217,7 +228,9 @@ export function installFsWrapper(service: WrappedService, deps: FsWrapDeps): voi
       // 原始 FS_SANDBOX_DENIED，绝不让插件内部异常盖过沙盒拒绝。
       let policy: SandboxExecutionPolicy
       try {
-        policy = sandboxPolicy ?? ctx.sandboxPolicy.resolve()
+        // 宿主服务面按实例取用：本包不依赖官方 @deepseek-ai/dsh-sandbox-policy，
+        // 也不在 dsh.d.ts 里增强 Context（见该文件：双份官方类型会 TS2717）。
+        policy = sandboxPolicy ?? (ctx as unknown as { sandboxPolicy: HostSandboxPolicy }).sandboxPolicy.resolve()
       } catch {
         throw error
       }
@@ -230,24 +243,30 @@ export function installFsWrapper(service: WrappedService, deps: FsWrapDeps): voi
       // 整体兜底 rethrow 原始 FS_SANDBOX_DENIED，失败姿态保持 fail-closed。
       try {
         const fresh: ResolvedFsTarget = await service.resolve.call(service, target.displayPath)
+        // 官方 FsTarget.targetKey 是不透明身份（@deepseek-ai/dsh-fs 契约原话：
+        // "Opaque key for stale guards and target lookup"，消费者不得解析它、
+        // 不得假设是本地绝对路径；当前 LocalFileSystem 恰好传 realpath，但那是
+        // 实现细节而非契约）。本包装把它当本地路径做包含判断，因此在这里对
+        // 契约做防御：非字符串或非本地绝对路径时保持官方拒绝（fail-closed），
+        // 不按不透明 key 猜测。长期应改走官方的 policy.additionalWritableRoots
+        // （政策级额外根），不再包装这个私有面。
+        const targetKey: unknown = (fresh as { targetKey?: unknown } | null | undefined)?.targetKey
+        if (typeof targetKey !== 'string' || !isAbsolute(targetKey)) {
+          warnOnce('fs-opaque-target-key', '[sandbox-extra-roots] fs fence returned a non-local opaque targetKey; refusing to grant fs-fence extra writable roots (keeping the official denial)')
+          throw error
+        }
         // 与 bash 侧（bwrap/Landlock）对齐：只对当前真实存在的目录放行，
-        // 消除"文件工具放行、bash 拒绝"或反向的分叉；每次调用重新
-        // canonical 化，符号链接重定向后立即跟随（同 confine 路径）。
-        // 跟随之后同样复查危险根（bash 侧 safeRuntimeRoots 的镜像，
-        // 沙盒内符号链接交换不能让 fs 侧单侧放行全盘）。
+        // 消除"文件工具放行、bash 拒绝"或反向的分叉；运行期根身份校验与
+        // 危险根复查同 bash 侧（stableRuntimeRoots），沙盒内符号链接交换
+        // 不能让 fs 侧单侧放行。
         const roots = existingDirectoryRoots(
-          safeRuntimeRoots(
-            [...new Set(state.extraRoots.map(canon))],
-            state.warned,
-            'the fs fence',
-            warn,
-          ),
+          stableRuntimeRoots([...new Set(state.extraRoots)], state.warned, 'the fs fence', warn),
           state.warned,
           'the fs fence',
           warn,
         )
         for (const root of roots) {
-          if (await isPathUnder(fresh.targetKey, root)) return fresh
+          if (await isPathUnder(targetKey, root)) return fresh
         }
       } catch (innerError) {
         if (innerError === error) throw error

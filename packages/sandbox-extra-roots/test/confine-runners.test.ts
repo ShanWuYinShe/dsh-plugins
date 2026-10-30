@@ -5,12 +5,13 @@
  * 平台相关值全部取自运行时（mkdtemp 真实目录、canonicalPath），用例平台无关。
  */
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply } from '../src/index.js'
 import { canonicalPath, seatbeltProfileArgs } from '../src/common.js'
+import { stableRuntimeRoots } from '../src/confine-runners.js'
 
 const fakePlatform = vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
 
@@ -137,6 +138,29 @@ describe('confine runner fail-closed 分支', () => {
     } finally {
       rmSync(fakeHome, { recursive: true, force: true })
       rmSync(existing, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('stableRuntimeRoots 运行期两层校验', () => {
+  it('身份不一致的根被身份层剔除;身份一致但危险的根被危险层剔除', () => {
+    // P0 回归锁:运行期先做"physical 拼写必须等于配置拼写"的身份校验(官方
+    // additionalRoot 姿态),身份一致的根再走原有危险根复查——两层都保留。
+    const base = canonicalPath(mkdtempSync(join(tmpdir(), 'ser-sr-')))
+    const decoy = join(base, 'decoy')
+    mkdirSync(decoy, { recursive: true })
+    const link = join(base, 'link')
+    symlinkSync(decoy, link, 'dir')
+    const warned = new Set<string>()
+    const messages: string[] = []
+    try {
+      const roots = stableRuntimeRoots([base, link, '/'], warned, 'unit-side', (message) => messages.push(message))
+      expect(roots).toEqual([base])
+      expect(messages.some((m) => m.includes('no longer the physical path') && m.includes(link))).toBe(true)
+      expect(messages.some((m) => m.includes('dangerous root') && m.includes('/'))).toBe(true)
+      expect(messages).toHaveLength(2)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
     }
   })
 })

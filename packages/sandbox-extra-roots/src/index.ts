@@ -9,7 +9,7 @@
  * - index.ts — 插件入口：name/inject 与 re-export
  * - apply.ts — 插件主体：配置解析、包装装配与 Remote 服务注册
  * - wrap.ts — sandbox/fs 包装安装与共享挂载生命周期（引用计数/还原）
- * - confine-runners.ts — confine 按 runner 改写 + 运行期危险根复查（纯函数）
+ * - confine-runners.ts — confine 按 runner 改写 + 运行期根身份校验/危险根复查（纯函数）
  * - roots-filter.ts config-validate.ts — 真实存在目录过滤（带 TTL 缓存）与配置校验/规范化
  * - roots.ts — 额外根目录规范化、分类与授予集合
  * - plugin-config.ts — 插件身份（name/inject）与配置默认值
