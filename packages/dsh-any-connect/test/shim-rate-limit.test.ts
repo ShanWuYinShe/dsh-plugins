@@ -92,6 +92,28 @@ describe('shim 把上游限流写进台账', () => {
     expect(active!.resetAtMs).toBeGreaterThanOrEqual(before + 89_000)
   })
 
+  it('429 + WorkBuddy code:6004 文案里的 UTC+8 恢复时刻 → 台账记录', async () => {
+    const resetAt = new Date(Date.now() + 2 * 3_600_000)
+    // 文案里的时刻按 UTC+8 书写（WorkBuddy 实测口径），秒级精度。
+    const beijing = new Date(resetAt.getTime() + 8 * 3_600_000)
+    const pad = (value: number): string => String(value).padStart(2, '0')
+    const stamp = `${beijing.getUTCFullYear()}-${pad(beijing.getUTCMonth() + 1)}-${pad(beijing.getUTCDate())}`
+      + ` ${pad(beijing.getUTCHours())}:${pad(beijing.getUTCMinutes())}:${pad(beijing.getUTCSeconds())}`
+    const body = JSON.stringify({
+      code: 6004,
+      msg: `usage exceeds frequency limit, but don't worry, your usage will reset at ${stamp} UTC+8,`
+        + ' alternatively, you can switch to the other models to continue using it.',
+      requestId: '46d4c00997bb45d1aa9aa9806bd1cbea',
+    })
+    const harness = await startShim(() => ({ ok: false, status: 429, kind: 'soft_rate', message: body }))
+    await postChat(harness)
+
+    const active = harness.ledger.activeFor('workbuddy')
+    expect(active).toBeDefined()
+    // 文案只到秒，允许 2s 内的截断误差。
+    expect(Math.abs(active!.resetAtMs! - resetAt.getTime())).toBeLessThan(2_000)
+  })
+
   it('429 但没有恢复头 → 记录「被限了」，不编造恢复时刻', async () => {
     const harness = await startShim(() => ({ ok: false, status: 429, kind: 'soft_rate', message: 'slow down' }))
     await postChat(harness)

@@ -10,6 +10,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { UpstreamErrorKind } from './upstream.js'
 import { httpStatusLabel } from './upstream-shared.js'
+import { parseResetHeader, parseResetMessage } from './rate-limit.js'
 
 const REQUEST_BODY_LIMIT = 64 * 1024 * 1024
 
@@ -59,20 +60,73 @@ export function upstreamFailureMessage(
   kind: string,
   status: number,
   message: string,
+  headers?: { get(name: string): string | null },
 ): string {
   const suffix = `${variantId} upstream ${kind} (${httpStatusLabel(status)}): ${message.slice(0, 400)}`
-  const isOpenCode = variantId.includes('opencode')
-    || message.includes('FreeTierError')
-    || message.toLowerCase().includes('free tier can only be used from within opencode')
-  if (isOpenCode) {
-    return `OpenCode 官方免费通道当前触发上游频次限流或临时风控（FreeTierError：官方服务端拒绝了本次免费模型请求）。`
-      + `官方免费通道对并发与调用频次有严格限制，请稍候片刻重试，或切换到其他可用免费模型（如 big-pickle 等）。原文：${suffix}`
+  const lower = message.toLowerCase()
+  const isOpenCodeVariant = variantId.includes('opencode')
+  // 上游的两种拒绝必须分开说：FreeUsageLimitError 是免费额度用完（有额度窗口），
+  // FreeTierError 是网关只认官方客户端形状（与额度无关）。旧文案把两者连同
+  // 传输错误都套成「频次限流」，用户只会反复重试一个根本不会恢复的请求。
+  const isFreeQuota = message.includes('FreeUsageLimitError')
+  const isFreeTierGate = message.includes('FreeTierError')
+    || lower.includes('free tier can only be used from within opencode')
+  const resetHint = formatResetHint(headers, message)
+  if (isOpenCodeVariant && isFreeQuota) {
+    return `OpenCode 免费模型额度已用尽（上游 FreeUsageLimitError）：该额度按账号/IP 计算，不是 API 密钥失效，也不是短时并发限流。`
+      + `${resetHint}可改用 OpenCode Go 订阅（https://opencode.ai/go）、在 DSH 中切换其他模型，或等免费额度重置后再试。原文：${suffix}`
+  }
+  if (isFreeTierGate) {
+    return `OpenCode 官方网关拒绝了本次免费模型请求（FreeTierError）：该网关只接受官方客户端形状的请求，与额度、密钥均无关。`
+      + `插件已注入 read 工具守卫；若持续出现，请检查请求是否被代理或网关改写。原文：${suffix}`
+  }
+  if (isOpenCodeVariant && status === 429 && kind === 'soft_rate') {
+    return `OpenCode 官方免费通道触发了上游限流（HTTP 429）：免费模型对并发与调用频次有严格限制。`
+      + `${resetHint}请稍后重试，或切换到其他可用免费模型（如 big-pickle 等）。原文：${suffix}`
+  }
+  if (status === 429 && kind === 'soft_rate') {
+    // 其余上游（WorkBuddy 6004、智谱 1302/1305 等）：恢复时刻可能在响应头，
+    // 也可能像 WorkBuddy 一样写在错误体里。两处都没有才说「未提供」。
+    const resetAtMs = resolveResetAtMs(headers, message, Date.now())
+    const when = resetAtMs === undefined
+      ? '上游未提供恢复时间。'
+      : `上游表示 ${formatResetAt(resetAtMs)}（本地时间）恢复。`
+    return `上游限流（${httpStatusLabel(429)}）。${when}原文：${suffix}`
   }
   if (status === 403) {
     return `上游拒绝了本次请求（授权未通过 / auth_forbidden，非密钥失效、非内容审核）。`
       + `若同账号在官方客户端也无法对话，属账号权益问题。原文：${suffix}`
   }
   return suffix
+}
+
+/** 恢复时刻的两个来源：响应头优先，其次是错误体里明写的带时区时刻。 */
+function resolveResetAtMs(
+  headers: { get(name: string): string | null } | undefined,
+  message: string,
+  nowMs: number,
+): number | undefined {
+  return parseResetHeader(headers?.get('retry-after'), nowMs)
+    ?? parseResetHeader(headers?.get('x-ratelimit-reset'), nowMs)
+    ?? parseResetMessage(message, nowMs)
+}
+
+/** 把恢复时刻写成人话；没有就明说「没给」，不推算。 */
+function formatResetHint(
+  headers?: { get(name: string): string | null },
+  message?: string,
+): string {
+  const resetAtMs = resolveResetAtMs(headers, message ?? '', Date.now())
+  if (resetAtMs === undefined) return '本次响应未给出恢复时间，请稍后再试。'
+  return `上游给出的恢复时间为 ${formatResetAt(resetAtMs)}（本地时间）。`
+}
+
+/** 本地时区的 `YYYY-MM-DD HH:mm`，只用于错误文案。 */
+function formatResetAt(atMs: number): string {
+  const at = new Date(atMs)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
+    + ` ${pad(at.getHours())}:${pad(at.getMinutes())}`
 }
 
 export function writeOpenAIError(res: ServerResponse, status: number, kind: string, message: string): void {

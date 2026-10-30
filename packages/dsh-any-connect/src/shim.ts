@@ -178,7 +178,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
    * Never throws: bookkeeping must not turn a model answer into an error.
    */
   function trackRateLimit(
-    result: { ok: false; status: number; kind: string; headers?: Headers } | { ok: true },
+    result: { ok: false; status: number; kind: string; message?: string; headers?: Headers } | { ok: true },
     model?: string,
   ): void {
     if (rateLimits === undefined) return
@@ -193,6 +193,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         kind: result.kind,
         ...model === undefined || model === '' ? {} : { model },
         ...result.headers === undefined ? {} : { headers: result.headers },
+        ...result.message === undefined ? {} : { body: result.message },
       })
       if (observation !== undefined) rateLimits.record(observation)
     } catch (error: unknown) {
@@ -321,7 +322,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         res,
         KIND_STATUS[result.kind],
         result.kind,
-        upstreamFailureMessage(options.kind, result.kind, result.status, result.message),
+        upstreamFailureMessage(options.kind, result.kind, result.status, result.message, result.headers),
       )
       return
     }
@@ -394,7 +395,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         res,
         KIND_STATUS[result.kind],
         result.kind === 'hard_credit' ? 'billing_error' : 'api_error',
-        upstreamFailureMessage(options.kind, result.kind, result.status, result.message),
+        upstreamFailureMessage(options.kind, result.kind, result.status, result.message, result.headers),
       )
       return
     }

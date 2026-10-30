@@ -57,6 +57,11 @@ describe('classifyUpstreamError：既有口径不回退', () => {
     expect(classifyUpstreamError(403, 'FreeTierError: free tier limited')).toBe('soft_rate')
   })
 
+  it('OpenCode FreeUsageLimitError 的 429 归为限流（额度会重置，不是欠费）', () => {
+    const body = '{"type":"error","error":{"type":"FreeUsageLimitError","message":"Free usage limit reached."}}'
+    expect(classifyUpstreamError(429, body)).toBe('soft_rate')
+  })
+
   it('普通 403 仍是授权拒绝', () => {
     expect(classifyUpstreamError(403, '{"code":11140}')).toBe('auth_forbidden')
   })

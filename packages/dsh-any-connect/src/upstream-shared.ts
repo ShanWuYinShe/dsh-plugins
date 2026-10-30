@@ -187,9 +187,10 @@ export function classifyUpstreamError(status: number, body: string): UpstreamErr
   for (const marker of SESSION_DEAD_MARKERS) {
     if (body.includes(marker)) return 'session_dead'
   }
-  // OpenCode 的 FreeTierError 虽然上游 HTTP 返回 403，但属于官方免费通道的频次/并发安全风控限流，
-  // 绝非账号授权失败或 API 密钥失效，归类为 soft_rate（限流重试）以触发正确的重试/限流语义，
-  // 避免宿主按 401/403 误判为 AUTH 授权封禁或账号权益问题。
+  // OpenCode 的 FreeTierError 虽然上游 HTTP 返回 403，但语义是「网关只接受官方客户端
+  // 形状的请求」，绝非账号授权失败或 API 密钥失效；归类为 soft_rate 以触发重试/限流
+  // 语义，避免宿主按 401/403 误判为 AUTH 授权封禁或账号权益问题。
+  // FreeUsageLimitError 走 429 的 soft_rate 通道（免费额度会重置，不是欠费）。
   if (body.includes('FreeTierError') || lower.includes('free tier can only be used from within opencode')) {
     return 'soft_rate'
   }

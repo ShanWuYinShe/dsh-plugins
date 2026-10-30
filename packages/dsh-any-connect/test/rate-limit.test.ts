@@ -5,6 +5,7 @@ import {
   isRateLimitActive,
   observeRateLimit,
   parseResetHeader,
+  parseResetMessage,
 } from '../src/rate-limit.js'
 
 /**
@@ -59,6 +60,41 @@ describe('parseResetHeader', () => {
   })
 })
 
+describe('parseResetMessage', () => {
+  // 用户实际收到的 WorkBuddy code:6004 文案（2026-10-30 实测）。
+  const WORKBUDDY_6004 = '{"code":6004,"msg":"usage exceeds frequency limit, but don\'t worry,'
+    + ' your usage will reset at 2026-10-30 14:20:02 UTC+8, alternatively,'
+    + ' you can switch to the other models to continue using it.","requestId":"46d4c00997bb45d1aa9aa9806bd1cbea"}'
+  const NOW = Date.UTC(2026, 9, 30, 3, 0, 0)
+
+  it('解析 WorkBuddy code:6004 的 reset at <时间> UTC+8', () => {
+    // 14:20:02 UTC+8 = 06:20:02 UTC。
+    expect(parseResetMessage(WORKBUDDY_6004, NOW)).toBe(Date.UTC(2026, 9, 30, 6, 20, 2))
+  })
+
+  it('支持 UTC+08:00 时区写法', () => {
+    expect(parseResetMessage('will reset at 2026-10-30 14:20:02 UTC+08:00', NOW))
+      .toBe(Date.UTC(2026, 9, 30, 6, 20, 2))
+  })
+
+  it('没有显式时区不解析（不猜上游时区）', () => {
+    expect(parseResetMessage('will reset at 2026-10-30 14:20:02', NOW)).toBeUndefined()
+  })
+
+  it('日历上不存在的日期不解析（02-30 不能被顺延成 03-02）', () => {
+    expect(parseResetMessage('reset at 2026-02-30 14:20:02 UTC+8', NOW)).toBeUndefined()
+  })
+
+  it('明显过去的时刻不算恢复时刻', () => {
+    expect(parseResetMessage(WORKBUDDY_6004, Date.UTC(2026, 10, 2))).toBeUndefined()
+  })
+
+  it('空值与不含该文案的正文返回 undefined', () => {
+    expect(parseResetMessage(undefined, NOW)).toBeUndefined()
+    expect(parseResetMessage('rate limited', NOW)).toBeUndefined()
+  })
+})
+
 describe('observeRateLimit', () => {
   it('429 归类为限流并保留上游给的重置时刻', () => {
     const observation = observeRateLimit({
@@ -81,6 +117,30 @@ describe('observeRateLimit', () => {
     const observation = observeRateLimit({ provider: 'zcode', status: 429, kind: 'soft_rate', nowMs: 1_000 })
     expect(observation).toBeDefined()
     expect('resetAtMs' in observation!).toBe(false)
+  })
+
+  it('响应头没给时，采纳错误体里明写的恢复时刻', () => {
+    const observation = observeRateLimit({
+      provider: 'workbuddy',
+      status: 429,
+      kind: 'soft_rate',
+      body: '{"code":6004,"msg":"usage exceeds frequency limit, but don\'t worry,'
+        + ' your usage will reset at 2026-10-30 14:20:02 UTC+8"}',
+      nowMs: Date.UTC(2026, 9, 30, 3, 0, 0),
+    })
+    expect(observation!.resetAtMs).toBe(Date.UTC(2026, 9, 30, 6, 20, 2))
+  })
+
+  it('响应头的恢复时刻优先于错误体文案', () => {
+    const observation = observeRateLimit({
+      provider: 'workbuddy',
+      status: 429,
+      kind: 'soft_rate',
+      headers: headersOf({ 'retry-after': '60' }),
+      body: 'will reset at 2026-10-30 14:20:02 UTC+8',
+      nowMs: 1_000_000,
+    })
+    expect(observation!.resetAtMs).toBe(1_060_000)
   })
 
   it('X-RateLimit-Reset 优先于缺失的 Retry-After', () => {

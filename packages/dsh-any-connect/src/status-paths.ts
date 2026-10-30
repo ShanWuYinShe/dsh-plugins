@@ -257,8 +257,9 @@ export interface WorkBuddyWebRateLimit {
   /** 最近一次仍被限的时刻，epoch ms。 */
   lastSeenAt: number
   /**
-   * 上游明示的恢复时刻，epoch ms。**只有**响应头给了才存在
-   * （`Retry-After` / `X-RateLimit-Reset`）；缺失即「上游没说」。
+   * 上游明示的恢复时刻，epoch ms。**只有**上游真的说了才存在：
+   * 响应头（`Retry-After` / `X-RateLimit-Reset`）或错误体里带时区的显式时刻
+   * （如 WorkBuddy `reset at <时间> UTC+8`）；缺失即「上游没说」。
    */
   resetAt?: number
   /** 上游状态码（429；OpenCode FreeTierError 为 403）。 */

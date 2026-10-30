@@ -23,11 +23,16 @@
  *   第 2 类**有确定的恢复时刻**，但它走额度通道而不是 429——由
  *   zcode-quota.ts 的 `nextResetTime` 上报，与本模块的 `resetAt` 各管一段：
  *   本模块只管 429 这条通道，额度窗口的恢复时间由窗口自带的 `resetsAt` 表达。
- * - WorkBuddy / OpenCode 免费通道：没有公开的限流窗口文档，只有实测的
- *   FreeTierError 频次/并发风控（见 upstream-shared 的分类注释）。
+ * - WorkBuddy / OpenCode 免费通道：没有公开的限流窗口文档。OpenCode 的
+ *   FreeUsageLimitError（HTTP 429）在响应头带 `Retry-After`；FreeTierError
+ *   （HTTP 403）是官方客户端形状校验，不带恢复时刻。WorkBuddy `code:6004`
+ *   把恢复时刻写在错误体（`reset at <时间> UTC+8`）。
  *
- * 因此本模块的契约是：`resetAt` 只来自上游响应头；拿不到就只报「何时被限」，
- * 让界面如实说「恢复时间未知」，而不是给一个会骗人的倒计时。
+ * 因此本模块的契约是：`resetAt` 只来自上游**明说**的事实——响应头
+ * （`Retry-After` / `X-RateLimit-Reset`）或错误体里带时区的显式时刻
+ * （如 WorkBuddy `code:6004` 的 `reset at 2026-10-30 14:20:02 UTC+8`）；
+ * 两者都没有就只报「何时被限」，让界面如实说「恢复时间未知」，
+ * 而不是给一个会骗人的倒计时。
  *
  * @module dsh-any-connect/rate-limit
  */
@@ -41,8 +46,9 @@ export interface RateLimitObservation {
   /** 最近一次观测到限流的时刻（毫秒 epoch）。 */
   lastSeenAtMs: number
   /**
-   * 上游明示的恢复时刻（毫秒 epoch）。**只有**上游通过响应头给了才存在：
-   * `Retry-After`（秒或 HTTP-date）、`X-RateLimit-Reset`（秒或毫秒 epoch）。
+   * 上游明示的恢复时刻（毫秒 epoch）。**只有**上游真的说了才存在：
+   * 响应头 `Retry-After`（秒或 HTTP-date）/ `X-RateLimit-Reset`（秒或毫秒 epoch），
+   * 或错误体里的显式时刻（如 WorkBuddy `reset at <时间> UTC+8`）。
    * 拿不到就是 undefined——界面必须如实说「恢复时间未知」。
    */
   resetAtMs?: number
@@ -108,6 +114,51 @@ export function parseResetHeader(value: string | null | undefined, nowMs: number
   return parsed
 }
 
+/** 错误体里带时区的显式重置时刻：WorkBuddy `code:6004` 实测形态。 */
+const RESET_MESSAGE_PATTERN =
+  /\breset(?:s)?\s+at\s+(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})\s*(?:UTC|GMT)\s*([+-])(\d{1,2})(?::?(\d{2}))?/iu
+
+/**
+ * 解析错误体里明写的恢复时刻，统一成毫秒 epoch。
+ *
+ * 只认**带显式时区**的 `reset at YYYY-MM-DD HH:mm:ss UTC±N`（WorkBuddy
+ * `code:6004` 的实测文案）。没有时区的裸时刻不解析——那需要猜上游用哪个
+ * 时区，猜错就是给用户一个假的倒计时。日期字段做日历回滚校验（`02-30`
+ * 之类不能悄悄变成 3 月 2 日），过去超过一天的时刻也不当恢复时刻。
+ *
+ * @param value - 上游错误体原文。
+ * @param nowMs - 解析基准时刻（用于拒绝明显过去的时刻）。
+ * @returns 毫秒 epoch；无法可靠解析时为 undefined。
+ */
+export function parseResetMessage(value: string | null | undefined, nowMs: number): number | undefined {
+  if (value === null || value === undefined) return undefined
+  const match = RESET_MESSAGE_PATTERN.exec(value)
+  if (match === null) return undefined
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, sign, offsetHourText, offsetMinuteText] = match
+  const year = Number(yearText)
+  const month = Number(monthText)
+  const day = Number(dayText)
+  const hour = Number(hourText)
+  const minute = Number(minuteText)
+  const second = Number(secondText)
+  const offsetHour = Number(offsetHourText)
+  const offsetMinute = Number(offsetMinuteText ?? '0')
+  if (month < 1 || month > 12 || day < 1 || day > 31
+    || hour > 23 || minute > 59 || second > 59
+    || offsetHour > 14 || offsetMinute > 59) return undefined
+  const offsetMs = (sign === '+' ? 1 : -1) * (offsetHour * 60 + offsetMinute) * 60_000
+  const utcMs = Date.UTC(year, month - 1, day, hour, minute, second) - offsetMs
+  if (!Number.isFinite(utcMs)) return undefined
+  // 日历回滚校验：2 月 30 日会被 Date.UTC 顺延成 3 月 2 日，那不是上游写的时刻。
+  const check = new Date(utcMs + offsetMs)
+  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day
+    || check.getUTCHours() !== hour || check.getUTCMinutes() !== minute || check.getUTCSeconds() !== second) {
+    return undefined
+  }
+  if (utcMs < nowMs - 86_400_000) return undefined
+  return utcMs
+}
+
 /**
  * 从一次失败响应里抽取限流观测；不是限流就返回 undefined。
  *
@@ -123,6 +174,8 @@ export function observeRateLimit(input: {
   kind: string
   model?: string
   headers?: { get(name: string): string | null }
+  /** 上游错误体原文：部分上游把恢复时刻写在文案里而不是响应头。 */
+  body?: string
   nowMs?: number
 }): RateLimitObservation | undefined {
   const nowMs = input.nowMs ?? Date.now()
@@ -131,8 +184,10 @@ export function observeRateLimit(input: {
   // soft_rate 之外的状态码不算限流（例如 500 也被某些上游说成「稍后重试」，
   // 但那是服务端故障，不是额度节奏）。
   if (input.kind !== 'soft_rate' && !RATE_LIMIT_STATUSES.has(input.status)) return undefined
+  // 响应头优先（机器可读、无歧义）；没有才看错误体里明写的带时区时刻。
   const resetAtMs = parseResetHeader(input.headers?.get('retry-after'), nowMs)
     ?? parseResetHeader(input.headers?.get('x-ratelimit-reset'), nowMs)
+    ?? parseResetMessage(input.body, nowMs)
   return {
     provider: input.provider,
     blockedAtMs: nowMs,

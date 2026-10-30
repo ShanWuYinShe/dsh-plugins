@@ -145,10 +145,12 @@ dsh-any-connect status --provider opencode-free
 后续请求。请求是否放行完全由上游决定——插件的职责只是把上游说过的话显示出来，
 不是替上游做决定。成功请求会自动清除台账（解除由上游事实驱动，不靠推算）。
 
-口径只有一条：**恢复时刻只来自上游响应头**。
+口径只有一条：**恢复时刻只来自上游明说的事实**。
 
 - `Retry-After`（相对秒 / HTTP-date）与 `X-RateLimit-Reset`（秒或毫秒 epoch）
   能解析出恢复时刻 → 显示「{时间} 恢复」；
+- 错误体里带显式时区的时刻也算（WorkBuddy `code:6004` 的
+  `reset at 2026-10-30 14:20:02 UTC+8`）；没有时区不猜；
 - 上游没给 → 显示「已被限 {时长}，上游未提供恢复时间」，并给出被拒次数与模型名。
   **绝不按固定窗口推算倒计时**。
 
@@ -158,8 +160,8 @@ dsh-any-connect status --provider opencode-free
 | --- | --- | --- |
 | GLM Coding Plan（`zcode`） | 按订阅档位的**并发数**，平台动态调整；另有每 5 小时 / 每周**积分**额度 | 并发限流**不给**；积分额度走额度通道，由窗口自带的 `resetsAt` 表达（5 小时积分按消耗时刻滚动刷新） |
 | ZCode Start Plan | 一次性 token 池（按模型分池） | 池子的 `expiredAt` 走额度窗口 |
-| OpenCode Free | 官方免费通道频次/并发风控（`FreeTierError`，HTTP 403） | 不给 |
-| WorkBuddy | 计费包积分制，无公开限流文档 | 不给 |
+| OpenCode Free | 免费模型额度（`FreeUsageLimitError`，HTTP 429；按账号/IP 计算）；官方客户端形状校验（`FreeTierError`，HTTP 403） | 429 给 `Retry-After`；403 不给 |
+| WorkBuddy | 计费包积分制，无公开限流文档；频率超限（`code:6004`）在错误体里写恢复时刻 | 6004 给 `reset at <时间> UTC+8` |
 
 配套的错误分类修正：智谱把欠费（`1113`）、套餐到期（`1309`）、无模型权限
 （`1311`）、风控封禁（`1313`）和**真限流**（`1302`/`1305`）全都塞进 HTTP 429，
