@@ -1,3 +1,14 @@
+## 0.2.1-alpha.7 (2026-10-30)
+
+### 变更
+
+* **扩展 Seam 类型可达**：新增 `src/dsh.d.ts`，构建时并入 `lib/index.d.ts`，按 README 的 `import type {} from '@chaoset/provider-usage'` 现在能拿到 `ctx.providerUsage` 的 Context 增强（此前 augmentation 只落在未导出的 `lib/registry.d.ts`，消费者编译不过）。
+* **第三方 querier 返回形状校验**：畸形快照（`windows` 非数组、字段类型错误、`resetsAt` 不可解析等）在 registry 出口折叠为 error 快照（保留上一次结果 + degraded），不再透传给 client——渲染期抛错会被宿主永久 abdicate，表现为 pill 消失到刷新为止。
+* bigmodel 订阅回退窗口：`resetsAt` 只在字符串自带时区时输出 ISO 绝对时刻（无时区不猜），`unit` 不再承载 `VALID` 状态词；client 与 `/usage` 支持空单位。
+* `/usage` 对无 `remain` 的窗口输出「—」，不再出现 `undefined`。
+* `apiKeyEnv` 先按官方 `isCredentialRefName` 校验，非法名字按未配置处理（不再每次查询抛 TypeError，把一处配置笔误变成持久错误）。
+* openai/openrouter 用量字段缺席时省略 `remain`（只报上限），不再把 hard_limit 当余额、把已花费显示成满额。
+
 ## 0.2.1-alpha.6 (2026-10-30)
 
 ### 破坏性变更

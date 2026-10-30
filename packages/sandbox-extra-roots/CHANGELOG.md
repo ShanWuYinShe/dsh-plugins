@@ -1,3 +1,16 @@
+## 0.4.28-alpha.6 (2026-10-30)
+
+### 破坏性变更
+
+* **运行期额外根改为身份校验，符号链接重定向一律拒绝**：配置期已 canonical 化的根，运行期若 `canon(root)` 与配置的物理路径不一致（目录或祖先被换成符号链接）即剔除并告警、不再跟随重定向；身份一致的根再做危险根复查。此前实现会跟随重定向、只复查危险根：若额外根位于 agent 可写区（/tmp、workspace、或嵌套在另一个已授权根下），沙盒内 agent 可把它换成指向 `~/.ssh` 等 home 敏感目录的链接，下一次沙盒调用就会被追加写权限（条件性沙盒逃逸，与官方 `dsh-sandbox` 对额外根「realpath !== resolve 即拒绝」的姿态不一致）。**若你配置的额外根本身位于符号链接路径下，升级后该根会被拒绝授予——请改配真实物理路径（绝对且无链接的路径不受影响）。**
+
+### 变更
+
+* fs fence 包装 fail-closed 硬化：官方 `checkedTarget` 不是函数时不再安装包装（不凭空新增属性）；返回的 `targetKey` 不是本地绝对路径时保持官方 `FS_SANDBOX_DENIED`（官方契约明确 `FsTargetKey` 是不透明身份、消费者不得解析），不再按不透明 key 猜测放行。
+* 移除对官方 `Context.sandboxPolicy` 的自写类型增强（与官方 `SandboxPolicyService` 属性类型不同，消费者同时看到两份官方类型会 TS2717），改为局部类型 + 使用点取用，并新增 host-contract 锁。
+* mounts 引用计数移入 `ctx.effect` 注册体内：effect 注册失败不再留下永不回收的计数（此前会导致卸载不还原包装）。
+* 发布产物零运行期依赖：`@deepseek-ai/node-addon-system` 由 `optionalDependencies` 移入 `devDependencies`（运行期由宿主 runtime resolution 供给），配合插件索引安装链修复。
+
 ## 0.4.28-alpha.5 (2026-10-30)
 
 ### 破坏性变更

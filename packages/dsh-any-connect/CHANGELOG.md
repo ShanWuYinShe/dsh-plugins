@@ -1,3 +1,13 @@
+## 0.4.28-alpha.8 (2026-10-30)
+
+### 变更
+
+* **发布产物零运行期依赖（修复插件索引安装链）**：`zod` 由 `dependencies` 移入 `devDependencies`，运行期由宿主 profile runner 的 runtime resolution 从宿主安装闭包供给（与宿主包、Typert 工件同一纪律）。此前 tarball 声明了 `zod`，而插件索引静态 registry 的 packument 按设计省略依赖段：pnpm 在后续包操作里会按已装 tarball manifest 去 registry 解析 `zod` 并 404，表现为「用索引装过本插件后再装第二个插件必失败」（2026-10-30 实测，宿主内置 pnpm 11.28.5 / 12.4.2 复现）。**用索引安装的用户请升级到本版本；旧版本仍带该缺陷，排障见根 README。**
+* bin 自包含闭包补直接 devDependency 声明 `@deepseek-ai/dsh-storage ^0.2.2-alpha.2`：此前缺直接声明，bun.lock 解析到旧线 0.2.1-rc.3，与 storage-domain/json 的精确 peer 不一致（当前两版库代码相同，属构建期 hygiene 风险）。
+* 清理已下线「夜免」活动的死代码链路（`modelWithCurrentPromotion` 未读取的形参、catalog/catalog-refresh 的字段与 setter、`isNightFreeEligiblePlan` 及测试断言），行为不变。
+* 错误脱敏口径统一：`safeMessage`（JWT/`key=` 脱敏 + 500 截断）抽到共享叶模块，shim 的未登录 401 与 500 internal 错误体与浏览器侧同口径，不再直出原始 `String(error)`。
+* 修正 3 处与实现相反的注释（存储降级语义、已删除的旧布局迁移、shim 的共享密钥鉴权描述）。
+
 ## 0.4.28-alpha.7 (2026-10-30)
 
 ### 破坏性变更

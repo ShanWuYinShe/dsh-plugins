@@ -1,3 +1,15 @@
+## 0.3.32-alpha.6 (2026-10-30)
+
+### 破坏性变更
+
+* **批量删除/恢复的 `@Remote` 声明 session 资源**：`delete`/`unarchive` 增加 resources reader，把批量 `sessionIds` 逐项声明为 session 资源。官方访问控制不会检查方法未声明的资源——此前批量删除/恢复在非 owner 调用下按 global 判定，可绕过会话级授权；现在按每个会话逐项授权（owner 正常使用不受影响）。
+
+### 变更
+
+* detail 的「非归档成员」错误改用官方 `RemoteError`（稳定 code `session-archive/not-archived` + details），调用方不再只拿到 gateway/internal 折叠错误。
+* 彻底删除的降级路径清理同目录同会话的旧代际文件（`session[.vN].jsonl[.zstd]`）：仍有残留或归属无法确认时该 id 记 `failed` 而非 `deleted`，不再出现「报告已删除、旧代际仍留在磁盘」。
+* 新增 `test/remote-resources.test.ts`，用官方反射 API 钉住各 Remote 方法的资源声明与端点集合。
+
 ## 0.3.32-alpha.5 (2026-10-30)
 
 ### 破坏性变更
