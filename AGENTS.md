@@ -51,3 +51,12 @@ bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览�
   建议在 Linux 容器实测一遍（`node:24` 镜像 + tar 管道传入源码跑
   `bun run test:ci`；macOS 打 tar 要带 `COPYFILE_DISABLE=1 --no-xattrs`，
   否则 `._*` AppleDouble 文件会被 vitest 当测试文件收集）。
+
+## 按需加载的 skill（`.agents/skills/`）
+
+| skill | 何时加载 |
+|---|---|
+| `dsh-plugin-release` | 分支模型、发布纪律、版本号与推送门禁 |
+| `dsh-plugin-worktree` | 跨分支 worktree 操作 |
+| `dsh-plugin-tag` | 打发版 tag 的具体步骤（详见 RELEASING.md） |
+| `dsh-any-connect-zcode` | 接入 zcode / 其他 AI 客户端的连接适配 |
