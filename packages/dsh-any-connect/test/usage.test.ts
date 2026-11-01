@@ -84,7 +84,9 @@ afterEach(async () => {
   vi.unstubAllGlobals()
   await context?.fiber.dispose()
   context = undefined
-  if (root !== undefined) await rm(root, { recursive: true, force: true })
+  // maxRetries 只是兜底（主修复见 boot 的默认 fetch 桩 + runtime.dispose 等待
+  // 在途心跳写）：清理本身不再依赖「此刻恰好没有在途写」。
+  if (root !== undefined) await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   root = undefined
   vi.unstubAllEnvs()
 })
@@ -93,6 +95,11 @@ afterEach(async () => {
 async function boot(options: { signedIn: boolean }): Promise<{ registry: StubUsageRegistry; authFile: string }> {
   root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-usage-'))
   vi.stubEnv('DSH_HOME', root)
+  // 插件启动会真的触网（opencode 免费通道即使未登录也会拉目录）。本文件只测
+  // usage 查询，启动刷新应**确定地失败**：否则后台成功落盘的目录缓存会与
+  // afterEach 删临时 DSH_HOME 的 rm 竞态（实测 ENOTEMPTY）。各用例随后按需
+  // 覆盖成自己的 fetch 响应。
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('upstream unavailable in tests', { status: 503 })))
   const authFile = join(root, 'workbuddy-desktop.info')
   await writeFile(authFile, options.signedIn ? authDocument() : JSON.stringify({ auth: {} }))
   // The international variant reads its own file; without it the AI querier

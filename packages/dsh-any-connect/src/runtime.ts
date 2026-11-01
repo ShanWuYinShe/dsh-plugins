@@ -68,6 +68,13 @@ export function createVariantRuntimeSet(deps: {
 }): VariantRuntimeSet {
   const { ctx, client, current } = deps
   let stopped = false
+  /**
+   * 注册后写心跳是 fire-and-forget（不能拖慢注册），但卸载必须等这些写**落定**
+   * 之后再清文件：在途写会在 clearHostHeartbeat 之后把心跳写回来（宿主退出后
+   * 残留一条 CLI 可见的心跳），测试里则表现为删临时 DSH_HOME 时与在途
+   * mkdir/write 的清理竞态（实测 ENOTEMPTY）。
+   */
+  const heartbeatWrites: Promise<void>[] = []
   // 上游 429 观测台账（进程内）：shim 写入，provider 卡片与 pill 读取。
   // 一个实例服务全部变体，按 provider 键分开记——用户切模型组时看到的是
   // 「这一条通道被限了多久、什么时候恢复」。
@@ -274,6 +281,8 @@ export function createVariantRuntimeSet(deps: {
         ctx.logger?.warn?.(`dsh-any-connect: shim close failed: ${error}`)
       }
     }))
+    // 先等在途心跳写完再清；顺序反过来会让最后一次写把文件"复活"。
+    await Promise.all(heartbeatWrites)
     await clearHostHeartbeat()
   }
 
@@ -355,7 +364,8 @@ export function createVariantRuntimeSet(deps: {
           // The host bundle is live: write a heartbeat so the status CLI can
           // report host health without a browser. Cleared on disposal; a stale
           // heartbeat after a crash is detected by PID in the reader.
-          void writeHostHeartbeat()
+          // 记录 promise 以便 dispose 等它落定（见 heartbeatWrites 的注释）。
+          heartbeatWrites.push(writeHostHeartbeat())
         } catch (error: unknown) {
           ctx.logger.error('dsh-any-connect: provider registration failed', error)
           return
