@@ -5,7 +5,7 @@
 // package.json，输出是确定性的站点文件内容映射（相对路径 → 文本）。规则来源：
 // .workwork/market/brief.md 与官方索引格式 @deepseek-ai/dsh-plugin-market-index（format 1）。
 //
-// 站点布局（发行分支根的 market/ 目录，由 CI 生成；默认 alpha，收敛后 main）：
+// 站点布局（独立发布产物分支 market 的根目录，由 CI 生成；分支根即站点根）：
 //   index.json                     格式 1 索引，用户把它当「索引源」添加
 //   icons/<slug>.svg               索引里相对引用的图标
 //   npm/<name>                     静态 npm registry 的 packument（scoped 名为嵌套目录）
@@ -17,11 +17,11 @@ import { compareVersions, isStable, VERSION_RE } from './version-checks.mjs'
 /** 默认 GitHub 仓库（owner/name）；CI 里由 GITHUB_REPOSITORY 覆盖。 */
 export const DEFAULT_GITHUB_REPO = 'ShanWuYinShe/dsh-plugins'
 
-/** 站点目录名：住在发行分支（alpha/main）根下，由 CI 生成，禁止手工编辑。 */
-export const MARKET_DIR = 'market'
+/** 发布产物分支名：站点住在该分支根目录（CI 生成，禁止手工编辑），与 alpha/main 发布体系正交。 */
+export const MARKET_BRANCH = 'market'
 
-/** 默认引用名：站点随 alpha 适配线发布；收敛合入 main 后由 CI 按实际分支覆盖。 */
-export const DEFAULT_MARKET_REF = 'alpha'
+/** 默认站点引用名：固定为发布产物分支，不随 alpha/main 切换（索引源 URL 因此永久有效）。 */
+export const DEFAULT_MARKET_REF = MARKET_BRANCH
 
 /** 索引整体的标题与说明（LocalizedText，必须含 en）。 */
 export const MARKET_TITLE = Object.freeze({
@@ -59,14 +59,15 @@ export const MARKET_SORT_KEYS = Object.freeze({
   order: { title: { en: 'Order', zh: '排序' }, order: 'asc' },
 })
 
-/** 发行分支根 market/ 目录的说明文件（CI 生成，因此内容固定）。 */
+/** 发布产物分支 market 根目录的说明文件（CI 生成，因此内容固定）。 */
 export const MARKET_README = [
   '# dsh-plugins 插件索引与静态 npm registry（自动生成）',
   '',
-  '本目录由 CI 从 GitHub Releases 生成，**请勿手工编辑**；生成器、站点布局与校验方式见主仓',
+  '本分支由 CI 从 GitHub Releases 生成，**请勿手工编辑**；生成器、站点布局与校验方式见主仓',
   '`RELEASING.md` 的「插件索引与静态 registry」一节。',
   '',
-  '当前随 alpha 适配线发布；收敛合入 main 后，索引源 URL 会随之换成 main 路径。',
+  '这里是长期存在的发布产物分支，与 alpha/main 双分支发布体系正交：任一条线发版都会更新',
+  '本分支的索引，索引源 URL 永久固定，不随发行分支切换。',
   '',
   '- `index.json`：DSH「自定义插件索引」要添加的索引源',
   '- `icons/`：索引里相对引用的插件图标',
@@ -169,10 +170,10 @@ export class MarketInputError extends Error {
 }
 
 /**
- * 站点原始内容根 URL（发行分支根下的 market/ 目录）。
- * 默认 ref=alpha：站点随 alpha 适配线发布；收敛合入 main 后 CI 会用 main 覆盖。
+ * 站点原始内容根 URL（发布产物分支 market 的根目录；分支根即站点根）。
+ * ref 固定为发布产物分支，不随 alpha/main 切换，因此索引源 URL 永久有效。
  * @param repo - owner/name。
- * @param ref - 发行分支/引用名（CI 里由 tag 所属分支推导）。
+ * @param ref - 发布产物分支/引用名（默认 market）。
  * @returns raw.githubusercontent 上的站点根（无尾斜杠）。
  * @throws {MarketInputError} ref 为空或含空白/查询串等非法字符。
  */
@@ -180,7 +181,7 @@ export function rawMarketBaseUrl(repo = DEFAULT_GITHUB_REPO, ref = DEFAULT_MARKE
   if (typeof ref !== 'string' || ref.trim() === '' || /[\s?#]/.test(ref)) {
     throw new MarketInputError('站点 ref 不合法: ' + JSON.stringify(ref))
   }
-  return 'https://raw.githubusercontent.com/' + repo + '/' + ref + '/' + MARKET_DIR
+  return 'https://raw.githubusercontent.com/' + repo + '/' + ref
 }
 
 /**

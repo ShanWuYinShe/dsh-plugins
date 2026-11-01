@@ -21,7 +21,7 @@ import {
   defaultIndexUrl,
   defaultRegistryUrl,
   DEFAULT_MARKET_REF,
-  MARKET_DIR,
+  MARKET_BRANCH,
   MARKET_README,
   expectedNamesFromDisplay,
   exactPinOfDeclared,
@@ -394,18 +394,19 @@ describe("发布 tag 与资产命名", () => {
     expect(parseReleaseTag(42, DIRS)).toBeUndefined();
   });
 
-  it("默认站点 URL 指向发行分支根的 market/ 目录（默认 alpha，收敛后 main）", () => {
+  it("默认站点 URL 指向固定发布产物分支 market 的根目录（不随 alpha/main 切换）", () => {
     const root = "https://raw.githubusercontent.com/" + REPO;
-    expect(MARKET_DIR).toBe("market");
-    expect(DEFAULT_MARKET_REF).toBe("alpha");
-    expect(rawMarketBaseUrl(REPO)).toBe(root + "/alpha/market");
-    expect(defaultIndexUrl(REPO)).toBe(root + "/alpha/market/index.json");
-    expect(defaultRegistryUrl(REPO)).toBe(root + "/alpha/market/npm/");
-    expect(rawMarketBaseUrl(REPO, "main")).toBe(root + "/main/market");
-    expect(defaultIndexUrl(REPO, "main")).toBe(root + "/main/market/index.json");
-    expect(defaultRegistryUrl(REPO, "main")).toBe(root + "/main/market/npm/");
+    expect(MARKET_BRANCH).toBe("market");
+    expect(DEFAULT_MARKET_REF).toBe(MARKET_BRANCH);
+    expect(rawMarketBaseUrl(REPO)).toBe(root + "/market");
+    expect(defaultIndexUrl(REPO)).toBe(root + "/market/index.json");
+    expect(defaultRegistryUrl(REPO)).toBe(root + "/market/npm/");
+    // ref 可被显式覆盖（本地端到端用），但默认值恒为发布产物分支。
+    expect(rawMarketBaseUrl(REPO, "local")).toBe(root + "/local");
+    expect(defaultIndexUrl(REPO, "local")).toBe(root + "/local/index.json");
+    expect(defaultRegistryUrl(REPO, "local")).toBe(root + "/local/npm/");
     // ref 为空/含空白/查询串一律拒绝（CI 传入错误值时 fail-fast，不生成坏 URL）。
-    for (const bad of ["", "  ", "alpha beta", "alpha?x=1", "a#b"]) {
+    for (const bad of ["", "  ", "market beta", "market?x=1", "a#b"]) {
       expect(() => rawMarketBaseUrl(REPO, bad), "非法 ref: " + JSON.stringify(bad)).toThrow(MarketInputError);
     }
   });
@@ -626,13 +627,13 @@ describe("buildSite", () => {
     }
   });
 
-  it("market/ 目录带固定 README（说明由 CI 生成，markdown 无相对链接）", () => {
+  it("market 分支根带固定 README（说明由 CI 生成，markdown 无相对链接）", () => {
     const { site } = buildFixtureSite();
     expect(mustFile(site.files, "README.md")).toBe(MARKET_README);
     expect(MARKET_README).toContain("请勿手工编辑");
-    expect(MARKET_README).toContain("alpha 适配线");
-    // 站点 README 会作为 alpha 分支里的普通 markdown 被仓库文档锁扫描：不允许出现
-    // 相对链接（它指向的是分支根，而非 market/ 目录，容易解析失败），URL 一律用行内代码。
+    expect(MARKET_README).toContain("不随发行分支切换");
+    // 站点 README 住在发布产物分支根目录：相对链接会解析成 raw 上的同级路径而非站点目录，
+    // 容易失效，因此 URL 一律用行内代码写绝对地址。
     expect(MARKET_README).not.toMatch(/\]\([^)]*\)/);
     expect(site.files.size).toBe(10);
   });
@@ -1048,24 +1049,26 @@ describe("摘要工具", () => {
   });
 });
 
-describe("CI 契约：发布后把站点提交到发行分支的 market/ 目录", () => {
+describe("CI 契约：发布后把站点提交到独立的发布产物分支 market", () => {
   const workflow = readFileSync(join(ROOT, ".github/workflows/publish.yml"), "utf8");
 
-  it("推送到发行分支 + market/ 前缀 + 幂等 + 并发重试", () => {
-    // 目标分支由「tag 所属发行分支」推导（tag 触发时 ref_name 是 tag 名，不能直接用）。
-    expect(workflow).toContain("Resolve market target ref");
-    expect(workflow).toContain("for candidate in main alpha");
-    expect(workflow).toContain('git push origin "$COMMIT:refs/heads/$REF"');
-    // 站点必须带 market/ 前缀提交（不能落在分支根、也不能再推独立的 market 分支）。
-    expect(workflow).toContain("--out .workwork/plugin-market-commit/market");
-    expect(workflow).toContain("git -C \"$WORKTREE\" add -A -- market");
-    expect(workflow).not.toContain("refs/heads/market");
-    // 只提交子树变化（树不变跳过）+ non-fast-forward 重试至多 3 次。
+  it("推送到固定 market 分支根 + 幂等 + 并发重试", () => {
+    // 目标分支固定为发布产物分支 market：不再由 tag 所属发行分支推导，URL 因此与 alpha/main 切换无关。
+    expect(workflow).not.toContain("Resolve market target ref");
+    expect(workflow).toContain("MARKET_BRANCH: market");
+    expect(workflow).toContain('git push origin "$COMMIT:refs/heads/$MARKET_BRANCH"');
+    // 站点提交在分支根（分支根即站点根），不再带 market/ 前缀、也不再提交到发行分支。
+    expect(workflow).toContain("--out .workwork/plugin-market-commit ");
+    expect(workflow).toContain('cp -R "$SITE"/. "$WORKTREE"/');
+    expect(workflow).not.toContain("-- market");
+    expect(workflow).not.toContain("/${REF}/market");
+    // 只提交站点树变化（树不变跳过）+ non-fast-forward 重试至多 3 次。
     expect(workflow).toContain("diff-index --cached --quiet");
     expect(workflow).toContain("for attempt in 1 2 3");
-    // base/registry URL 由目标分支派生，并显式传给 build/check。
-    expect(workflow).toContain("/${REF}/market");
+    // base/registry URL 固定为 market 分支根，并显式传给 build/check。
+    expect(workflow).toContain("BASE_URL: https://raw.githubusercontent.com/${{ github.repository }}/market");
     expect(workflow).toContain('--registry-url "$BASE_URL/npm/"');
+    expect(workflow).not.toContain("steps.market-target");
   });
 });
 

@@ -133,9 +133,9 @@ export declare class MarketInputError extends Error {
 
 /** 默认 GitHub 仓库（owner/name）。 */
 export declare const DEFAULT_GITHUB_REPO: string;
-/** 站点目录名（发行分支根下，默认 alpha：market/）。 */
-export declare const MARKET_DIR: string;
-/** 默认站点引用名（alpha；收敛合入 main 后由 CI 传 main）。 */
+/** 发布产物分支名（站点住在该分支根目录，与 alpha/main 发布体系正交）。 */
+export declare const MARKET_BRANCH: string;
+/** 默认站点引用名（固定为发布产物分支 market）。 */
 export declare const DEFAULT_MARKET_REF: string;
 /** 索引标题。 */
 export declare const MARKET_TITLE: LocalizedRecord;
@@ -152,7 +152,7 @@ export declare const PACKAGE_DISPLAY: Readonly<Record<string, PackageDisplay>>;
 /** market 分支根目录的说明文件内容（CI 生成，内容固定）。 */
 export declare const MARKET_README: string;
 
-/** 站点原始内容根 URL（发行分支根下的 market/ 目录，无尾斜杠）。 */
+/** 站点原始内容根 URL（发布产物分支 market 的根目录，无尾斜杠）。 */
 export declare function rawMarketBaseUrl(repo?: string, ref?: string): string;
 /** 索引源 URL。 */
 export declare function defaultIndexUrl(repo?: string, ref?: string): string;
