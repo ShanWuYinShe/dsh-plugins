@@ -51,12 +51,13 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   与 `./remote`（Client 调用面）由 `@deepseek-ai/dsh-typert-generator` 在构建期生成，
   **不要手写**；新增/修改 `@Remote` 方法后必须重新 `bun run build`。没有 Remote 服务
   的包不要声明 `./typert` / `./remote` 导出。
-- **插件索引 / `market/` 目录**：`market/` 是 CI 生成的发布产物目录，住在发行分支
-  根下（当前 `alpha`，收敛后 `main`）——DSH「自定义插件索引」的索引 + 静态 npm registry，
-  布局与 URL 见 RELEASING.md「插件索引与静态 registry」。**禁止手工编辑**；只由
-  `scripts/plugin-market.mjs` 产出，publish workflow 在发布后自动更新（workflow_dispatch
-  可回填/修复）。新增发布包必须在 `scripts/lib/plugin-market-core.mjs` 的 `PACKAGE_DISPLAY`
-  补展示元数据，否则 `bun run market:build` 直接报错。
+- **插件索引 / `market` 分支**：站点由长期存在的发布产物分支 `market` 承载，该分支根目录
+  即站点根（`index.json`、`README.md`、`icons/`、`npm/`）——DSH「自定义插件索引」的索引
+  + 静态 npm registry，布局与 URL 见 RELEASING.md「插件索引与静态 registry」。**禁止手工编辑**；
+  只由 `scripts/plugin-market.mjs` 产出，publish workflow 在任一发版 tag 发布后自动更新到
+  `market` 分支（workflow_dispatch 可回填/修复）；它与 `alpha`/`main` 的双分支发布体系正交。
+  新增发布包必须在 `scripts/lib/plugin-market-core.mjs` 的 `PACKAGE_DISPLAY` 补展示元数据，
+  否则 `bun run market:build` 直接报错。
 - **兼容声明**：插件对 DSH 的兼容性用官方 `engines.dsh`，且必须写**精确宿主版本**
   （如 `0.2.2-alpha.2`，不写 `^` / `~` / `>=`）；依赖 range 仍是 `^X`，由
   `bun run adapt` 同步维护，`dsh-baseline` 严格核对「range 的 `^X` ↔ `engines.dsh`

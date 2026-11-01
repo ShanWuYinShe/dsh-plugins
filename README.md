@@ -123,7 +123,7 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 
 ## 安装与使用
 
-本仓库通过 **GitHub Releases 分发**（Release 资产是标准 npm tarball），并额外提供 DSH 官方的「自定义插件索引」：索引与静态 npm registry 由 CI 从每个 Release 生成，发布在发行分支（当前 `alpha`，收敛后 `main`）根下的 `market/` 目录。下面两种方式任选，**推荐方式一**。
+本仓库通过 **GitHub Releases 分发**（Release 资产是标准 npm tarball），并额外提供 DSH 官方的「自定义插件索引」：索引与静态 npm registry 由 CI 从每个 Release 生成，作为站点发布在独立的发布产物分支 `market` 上（该分支根目录即站点根，URL 固定）。下面两种方式任选，**推荐方式一**。
 
 ### 方式一：插件索引（推荐，发现页一键安装）
 
@@ -131,7 +131,7 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 2. **发现** → **添加索引源**，填入：
 
    ```text
-   https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/alpha/market/index.json
+   https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
    ```
 
 3. 在**发现**页浏览本仓四个插件并点**安装**（卡片显示的即与你当前 DSH 版本精确匹配的最高版本）；进入插件页的**版本**列表可以安装历史版本（与你的宿主版本不匹配的会标「不兼容」并禁用安装）。
@@ -140,7 +140,7 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
    - **重启 DSH 后**：用 CLI 把插件更新到指定版本（`<版本>` 见「发现」页或 Releases 页）：
 
      ```bash
-     dsh plugin --profile web add @chaoset/dsh-any-connect@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/alpha/market/npm/
+     dsh plugin --profile web add @chaoset/dsh-any-connect@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
      ```
 
      provider-usage / sandbox-extra-roots / session-archive 把包名替换成 `@chaoset/<包名>` 即可。
@@ -148,8 +148,8 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 
 索引只提供元数据与安装来源（npm 包名 + 静态 registry），安装/更新仍走 DSH 自带的 pnpm 安装与 bundle 对账流程；索引收录的每个版本都对应本仓的一个 GitHub Release 资产。用索引安装时，插件的宿主运行时依赖由宿主 profile runner 的 runtime resolution 提供（不写入 profile 的 `node_modules`）；需要把依赖装进 profile 时请用下面的 tarball 方式。**因此本仓插件发布的 tarball 运行期零依赖**（`dependencies`/`optionalDependencies` 为空，宿主依赖只放 `devDependencies`）——否则 pnpm 会按 tarball 里的依赖声明去静态 registry 解析它们而 `ERR_PNPM_FETCH_404`，装过一个带运行期依赖的版本后，同一 profile 再装/更新其它插件会失败。
 
-> 当前索引随 `alpha` 适配线发布；收敛合入 `main` 后索引源 URL 的 `alpha` 段会换成 `main`，
-> 届时会公告提醒已添加索引的用户一次性更新 URL。
+> 索引 URL 固定，添加一次永久有效：任一发布线（`alpha`、`rc`、正式版）发版后，同一个索引
+> 都会自动更新，无需重新添加索引源。
 
 索引里的每个版本都**精确声明它所匹配的 DSH 版本**（`engines.dsh` 是精确版本，不是范围），DSH 按精确匹配判定兼容：只有与你当前 DSH 版本完全一致的插件版本会显示可安装，其余版本在列表里标「不兼容」。因此 **DSH 每次升级（含同线 alpha→rc→正式版）后，请安装为那个新版本重新发布的插件版本**。
 
