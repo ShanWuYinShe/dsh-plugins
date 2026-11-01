@@ -7,6 +7,7 @@ import LlmRuntime from '@deepseek-ai/dsh-llm'
 import * as AnyConnect from '../src/index.js'
 import { signedInDocument, catalogRow } from './catalog-harness.js'
 import type { WorkBuddyModelInfo } from '../src/catalog.js'
+import { WorkBuddyCatalogStore } from '../src/catalog-store.js'
 import { WorkBuddyUpstreamClient } from '../src/upstream.js'
 
 /**
@@ -102,6 +103,22 @@ async function servedIds(provider = 'workbuddy'): Promise<string[]> {
   return (await context!.llm.listModels(provider)).map(model => model.id).sort()
 }
 
+/**
+ * 「这一轮目录刷新的广播决策已落定」的结构化完成信号。
+ *
+ * 依据生产代码里的固定顺序（src/catalog-refresh.ts）：唯一的内容比较点
+ * publishCatalog（决定要不要 `emit('llm/models-updated')`）**同步先于**
+ * `catalogStore.save` 执行，之后本轮才继续写落盘与探针。所以 save 被调用
+ * ⇔ 这一轮"变没变、要不要广播"已经成定局。
+ *
+ * 用它替代「先睡 200/250ms 再断言没有广播」的墙钟窗口：等的是一个顺序事实，
+ * 不是一段时间——慢机器只会让 waitFor 多等几拍，不会把负向断言漏成假绿。
+ */
+function trackRefreshCompletions(): { saves: () => number } {
+  const spy = vi.spyOn(WorkBuddyCatalogStore.prototype, 'save')
+  return { saves: () => spy.mock.calls.length }
+}
+
 describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
   it('名单变化才广播：内容相同的刷新一次都不多播', async () => {
     // 同一份名单先服务两次，再换成另一份，最后清空。核心断言是第二次（内容与
@@ -112,16 +129,21 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
     // registerConfigurableProviders 各一次，实测），插件自己再加 1 次目录发布。
     // 这里只关心"增量"，所以先记下基线再比差值，不写死绝对数。
     const roster: WorkBuddyModelInfo[][] = [[catalogRow('alpha')], [catalogRow('alpha')], [catalogRow('beta')], []]
+    const { saves } = trackRefreshCompletions()
     const { publishes, events } = await installPlugin({ models: async () => roster.shift() ?? [] })
 
     await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) }, { timeout: 5000 })
-    // 等第一轮目录发布落定（下面按"本变体的发布次数"记基线，见 publishes）。
-    await new Promise(resolve => setTimeout(resolve, 200))
+    // 等第一轮刷新的广播决策落定（save 严格在 publishCatalog 之后）再记基线：
+    // 固定睡眠既不保证够长（慢机器漏判），也白等（快机器）。
+    await vi.waitFor(() => { expect(saves()).toBeGreaterThanOrEqual(1) }, { timeout: 5000 })
     const settled = publishes()
+    const savesBefore = saves()
 
     // 上游这一拍答的仍是内容相同的 [alpha]：本变体不得再广播——核心断言。
     context!.fiber.ctx.emit('loader/volatile-update', [])
-    await new Promise(resolve => setTimeout(resolve, 250))
+    // 等这一轮同样走到 save（即已越过广播决策点）再断言"没有广播"：
+    // 断言的是决策结果，不再依赖 250ms 窗口里"来得及/来不及"。
+    await vi.waitFor(() => { expect(saves()).toBeGreaterThan(savesBefore) }, { timeout: 5000 })
     expect(await servedIds()).toEqual(['alpha'])
     expect(publishes()).toBe(settled)
 
@@ -206,6 +228,7 @@ describe('目录通知不会打断刷新链路', () => {
     //   1) 每次内容变化恰好发一次，且发的是本变体的 provider id；
     //   2) 即使有监听器抛错，也不得被 refreshCatalog 的泛捕获误判成「上游目录
     //      不可用」而触发重试风暴、打吓人的 warn。
+    const { saves } = trackRefreshCompletions()
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-refresh-notify-'))
     const desktop = join(root, 'workbuddy-desktop.info')
     await writeFile(desktop, signedInDocument())
@@ -221,6 +244,10 @@ describe('目录通知不会打断刷新链路', () => {
 
     await ctx.plugin(AnyConnect, { authFile: desktop, authFileAI: join(root, 'no-such-ai-file.info') })
     await vi.waitFor(async () => { expect(await servedIds()).toEqual(['alpha']) }, { timeout: 5000 })
+    // 首轮 live 刷新必须先**整轮落定**再记基线：save 被调用 ⇔ 首轮的广播决策
+    // 与 fetchModels 都已发生。否则在并发负载下，首轮在途的 fetchModels 会迟到
+    // 落进下面这段测量窗口，把"这一轮只多取一次上游"误判成 2（实测复现）。
+    await vi.waitFor(() => { expect(saves()).toBeGreaterThanOrEqual(1) }, { timeout: 5000 })
 
     // 换一份**内容不同**的名单，确保这一轮一定走到 publishCatalog → notifyCatalogChanged。
     vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
@@ -231,11 +258,15 @@ describe('目录通知不会打断刷新链路', () => {
     })
     const seenBefore = seen.length
     const callsBefore = modelsCall
+    const savesBefore = saves()
 
     ctx.fiber.ctx.emit('loader/volatile-update', [])
     await vi.waitFor(async () => { expect(await servedIds()).toEqual(['beta']) }, { timeout: 5000 })
     // 通知真的发了，且带的是本变体的 provider id。
     await vi.waitFor(() => { expect(seen.length).toBeGreaterThan(seenBefore) }, { timeout: 5000 })
+    // 等这一轮走到 save（越过广播决策点）再数上游请求：计数口径覆盖整轮刷新，
+    // 不是"通知刚发出那一刻"的瞬时快照。
+    await vi.waitFor(() => { expect(saves()).toBeGreaterThan(savesBefore) }, { timeout: 5000 })
     expect(seen).toContain('workbuddy')
 
     // 没有误判成「上游目录不可用」：泛捕获若把通知异常当拉取失败，会打这条 warn

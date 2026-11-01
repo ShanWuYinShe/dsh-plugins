@@ -11,7 +11,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { normalizeRoots, validateSandboxConfig } from '../src/config-validate.js'
 import { clearDirExistCache, existingDirectoryRoots, isExistingDirCached } from '../src/roots-filter.js'
 
@@ -106,10 +106,18 @@ describe('existingDirectoryRoots', () => {
   it('clearDirExistCache 后按当前文件系统立即判定（不沿用旧 TTL）', () => {
     const dir = tempDir()
     const late = join(dir, 'late')
-    expect(isExistingDirCached(late)).toBe(false)
-    mkdirSync(late)
-    expect(isExistingDirCached(late)).toBe(false) // 仍在 TTL 内，沿用旧结论
-    clearDirExistCache()
-    expect(isExistingDirCached(late)).toBe(true)
+    // 冻结 Date：TTL 缓存按 Date.now() 判定，真实墙钟下两次调用之间一旦
+    // 超过 TTL（高负载/CI 慢机上可能），缓存会自然过期，断言便红绿不定。
+    // 冻结后「同一时刻必在 TTL 内」由产品常量保证，不再依赖机器速度。
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      expect(isExistingDirCached(late)).toBe(false)
+      mkdirSync(late)
+      expect(isExistingDirCached(late)).toBe(false) // 同一冻结时刻 → 沿用旧结论
+      clearDirExistCache()
+      expect(isExistingDirCached(late)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -10,9 +10,15 @@ const prevHome = process.env.HOME;
 const prevDshHome = process.env.DSH_HOME;
 
 let fakeHome: string;
+/** 额外可写根的真实目录：每个用例一份全新的 mkdtemp。
+ * 此前硬编码 "/tmp/extra"——这是全局共享可变状态：两个 vitest 进程并行
+ * （如两个 worktree 同时跑测试）会互删对方目录；机器上碰巧存在同名目录时
+ * 还会被测试删除。改用运行时唯一目录后，结果只由本进程本用例决定。 */
+let EXTRA: string;
 
 beforeEach(() => {
   fakeHome = mkdtempSync(join(tmpdir(), "ser-fh-"));
+  EXTRA = mkdtempSync(join(tmpdir(), "ser-extra-"));
   process.env.HOME = fakeHome;
   process.env.DSH_HOME = fakeHome;
 });
@@ -21,10 +27,10 @@ afterEach(() => {
   process.env.HOME = prevHome;
   process.env.DSH_HOME = prevDshHome;
   rmSync(fakeHome, { recursive: true, force: true });
+  rmSync(EXTRA, { recursive: true, force: true });
 });
 
 const WS = "/ws";
-const EXTRA = "/tmp/extra";
 
 function sbpl(roots: string[]): string {
   const forms = ["(version 1)", "(allow default)", "(deny file-write*)", '(allow file-write* (literal "/dev/null"))'];
@@ -103,17 +109,13 @@ describe("sandbox-extra-roots host (Seatbelt)", () => {
   let ctx: any;
 
   beforeEach(async () => {
-    // EXTRA 必须真实存在:fs 侧包装与 bash 侧(bwrap/Landlock)一样只对
-    // 当前存在的目录生效(两侧对齐,不再放行缺失根);Seatbelt 不受限。
-    mkdirSync(EXTRA, { recursive: true });
+    // EXTRA 由文件级 beforeEach 以真实 mkdtemp 目录提供:fs 侧包装与 bash 侧
+    // (bwrap/Landlock)一样只对当前存在的目录生效(两侧对齐,不再放行缺失根);
+    // Seatbelt 不受限。
     sandboxMock = makeSandboxMock();
     fsMock = makeFsMock();
     ctx = makeCtx(sandboxMock, fsMock);
     await apply(ctx, { extraWritableRoots: [EXTRA] });
-  });
-
-  afterEach(() => {
-    rmSync(EXTRA, { recursive: true, force: true });
   });
 
   it("seatbelt 额外目录+官方根", async () => {
@@ -444,21 +446,16 @@ describe("sandbox-extra-roots fs 包装 fail-closed 硬化", () => {
   it("fs fence 返回不透明 targetKey(非本地绝对路径)时保持官方拒绝并只告警一次", async () => {
     // 官方 FsTarget.targetKey 是不透明身份(消费者不得假设是本地绝对路径)。
     // 契约漂移时本包装不能按不透明 key 猜包含关系,必须保持官方拒绝。
-    mkdirSync(EXTRA, { recursive: true });
     const sandboxMock = makeSandboxMock();
     const fsMock = makeFsMock();
     fsMock.resolve = async () => ({ targetKey: "opaque:workspace/foo" });
     const warnings: string[] = [];
     const ctx = makeCtx(sandboxMock, fsMock);
     ctx.logger.warn = (message: string) => warnings.push(message);
-    try {
-      await apply(ctx, { extraWritableRoots: [EXTRA] });
-      await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/foo" })).rejects.toThrow("FS_SANDBOX_DENIED");
-      await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/foo" })).rejects.toThrow("FS_SANDBOX_DENIED");
-      expect(warnings.filter((w) => w.includes("non-local opaque targetKey"))).toHaveLength(1);
-    } finally {
-      rmSync(EXTRA, { recursive: true, force: true });
-    }
+    await apply(ctx, { extraWritableRoots: [EXTRA] });
+    await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/foo" })).rejects.toThrow("FS_SANDBOX_DENIED");
+    await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/foo" })).rejects.toThrow("FS_SANDBOX_DENIED");
+    expect(warnings.filter((w) => w.includes("non-local opaque targetKey"))).toHaveLength(1);
   });
 });
 
@@ -534,41 +531,36 @@ describe("sandbox-extra-roots 危险根校验", () => {
 
 describe("sandbox-extra-roots 卸载/重装回路", () => {
   it("dispose 还原原方法,再 apply 重新包装且功能正常", async () => {
-    mkdirSync(EXTRA, { recursive: true });
     const sandboxMock = makeSandboxMock();
     const fsMock = makeFsMock();
     const origConfine = sandboxMock.confine;
     const origCheckedTarget = fsMock.checkedTarget;
     const ctx = makeCtx(sandboxMock, fsMock);
     const canonicalExtra = canonicalPath(EXTRA);
-    try {
-      // 第一次 apply:包装安装、功能生效
-      await apply(ctx, { extraWritableRoots: [EXTRA] });
-      expect(sandboxMock.confine).not.toBe(origConfine);
-      expect(fsMock.checkedTarget).not.toBe(origCheckedTarget);
-      const out = await sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS });
-      expect(out.argv[2]).toContain(`(subpath "${canonicalExtra}")`);
-      await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/f" })).resolves.toMatchObject({ targetKey: EXTRA + "/f" });
+    // 第一次 apply:包装安装、功能生效
+    await apply(ctx, { extraWritableRoots: [EXTRA] });
+    expect(sandboxMock.confine).not.toBe(origConfine);
+    expect(fsMock.checkedTarget).not.toBe(origCheckedTarget);
+    const out = await sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS });
+    expect(out.argv[2]).toContain(`(subpath "${canonicalExtra}")`);
+    await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/f" })).resolves.toMatchObject({ targetKey: EXTRA + "/f" });
 
-      // 卸载:原方法逐字还原,包装行为消失
-      ctx.disposeAll();
-      expect(sandboxMock.confine).toBe(origConfine);
-      expect(fsMock.checkedTarget).toBe(origCheckedTarget);
-      await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/f" })).rejects.toThrow("FS_SANDBOX_DENIED");
+    // 卸载:原方法逐字还原,包装行为消失
+    ctx.disposeAll();
+    expect(sandboxMock.confine).toBe(origConfine);
+    expect(fsMock.checkedTarget).toBe(origCheckedTarget);
+    await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/f" })).rejects.toThrow("FS_SANDBOX_DENIED");
 
-      // 再 apply:重新包装,功能恢复;再卸载仍然干净
-      await apply(ctx, { extraWritableRoots: [EXTRA] });
-      expect(sandboxMock.confine).not.toBe(origConfine);
-      expect(fsMock.checkedTarget).not.toBe(origCheckedTarget);
-      const out2 = await sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS });
-      expect(out2.argv[2]).toContain(`(subpath "${canonicalExtra}")`);
-      await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/f" })).resolves.toMatchObject({ targetKey: EXTRA + "/f" });
-      ctx.disposeAll();
-      expect(sandboxMock.confine).toBe(origConfine);
-      expect(fsMock.checkedTarget).toBe(origCheckedTarget);
-    } finally {
-      rmSync(EXTRA, { recursive: true, force: true });
-    }
+    // 再 apply:重新包装,功能恢复;再卸载仍然干净
+    await apply(ctx, { extraWritableRoots: [EXTRA] });
+    expect(sandboxMock.confine).not.toBe(origConfine);
+    expect(fsMock.checkedTarget).not.toBe(origCheckedTarget);
+    const out2 = await sandboxMock.confine(["bash"], { mode: "workspace-write", workspaceRoot: WS });
+    expect(out2.argv[2]).toContain(`(subpath "${canonicalExtra}")`);
+    await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/f" })).resolves.toMatchObject({ targetKey: EXTRA + "/f" });
+    ctx.disposeAll();
+    expect(sandboxMock.confine).toBe(origConfine);
+    expect(fsMock.checkedTarget).toBe(origCheckedTarget);
   });
 });
 
@@ -577,7 +569,6 @@ describe("sandbox-extra-roots 漂移自检 fail-closed", () => {
     // 回归:漂移自检曾是 warn-only——检出官方 profile 形状变化后仍用本
     // 插件可能过时的模板整体替换官方 profile,官方新增的限制项会被静默
     // 丢掉(fail-open)。现在必须保持官方 argv 原样,告警注明 bash 侧失效。
-    mkdirSync(EXTRA, { recursive: true });
     const driftedMock = {
       async confine(argv: string[], policy: any) {
         const roots = writableRoots(policy);
@@ -589,37 +580,28 @@ describe("sandbox-extra-roots 漂移自检 fail-closed", () => {
     const warnings: string[] = [];
     const ctx = makeCtx(driftedMock, fsMock);
     ctx.logger.warn = (message: string) => warnings.push(message);
-    try {
-      await apply(ctx, { extraWritableRoots: [EXTRA] });
-      const out = await driftedMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
-      // 官方 argv 原样保留:官方新增的限制项还在,额外根没有被注入。
-      expect(out.argv[2]).toContain("(deny network*)");
-      expect(out.argv[2]).not.toContain('(subpath "' + canonicalPath(EXTRA) + '")');
-      expect(warnings.some((w) => w.includes("refusing to rebuild"))).toBe(true);
-      // fs 侧放行不受漂移影响。
-      const granted = await fsMock.checkedTarget({ displayPath: EXTRA + "/foo" });
-      expect(granted.targetKey).toBe(EXTRA + "/foo");
-    } finally {
-      rmSync(EXTRA, { recursive: true, force: true });
-    }
+    await apply(ctx, { extraWritableRoots: [EXTRA] });
+    const out = await driftedMock.confine(["bash", "-c", "x"], { mode: "workspace-write", workspaceRoot: WS });
+    // 官方 argv 原样保留:官方新增的限制项还在,额外根没有被注入。
+    expect(out.argv[2]).toContain("(deny network*)");
+    expect(out.argv[2]).not.toContain('(subpath "' + canonicalPath(EXTRA) + '")');
+    expect(warnings.some((w) => w.includes("refusing to rebuild"))).toBe(true);
+    // fs 侧放行不受漂移影响。
+    const granted = await fsMock.checkedTarget({ displayPath: EXTRA + "/foo" });
+    expect(granted.targetKey).toBe(EXTRA + "/foo");
   });
 
   it("fs 侧内部异常不外泄:resolve 抛错回落官方 FS_SANDBOX_DENIED", async () => {
     // 回归:0.4.11 修过解绑调用 TypeError 盖过官方拒绝文本,resolve 本身
     // 的异常(契约漂移、祖先链 EACCES)是同源残留,现在同样兜底 rethrow
     // 官方拒绝。
-    mkdirSync(EXTRA, { recursive: true });
     const sandboxMock = makeSandboxMock();
     const fsMock = makeFsMock();
     fsMock.resolve = async () => {
       throw new Error("EACCES: ancestor unreachable");
     };
     const ctx = makeCtx(sandboxMock, fsMock);
-    try {
-      await apply(ctx, { extraWritableRoots: [EXTRA] });
-      await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/foo" })).rejects.toThrow("FS_SANDBOX_DENIED");
-    } finally {
-      rmSync(EXTRA, { recursive: true, force: true });
-    }
+    await apply(ctx, { extraWritableRoots: [EXTRA] });
+    await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/foo" })).rejects.toThrow("FS_SANDBOX_DENIED");
   });
 });

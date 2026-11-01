@@ -21,6 +21,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // 兜底：用例超时/中断时测试体内的 finally 可能不执行，fake timers 绝不能
+  // 泄漏给同文件后续用例（泄漏会让后续 await delay(...) 永远不 resolve，
+  // 一条用例的失败放大成整片红——历史上三条失败正是这种级联）。
+  vi.useRealTimers();
   process.env.HOME = prevHome;
   process.env.DSH_HOME = prevDshHome;
   fs.rmSync(fakeHome, { recursive: true, force: true });
@@ -68,6 +72,10 @@ function makeFixture(options: {
   /** sessionQuery 标题索引桩：map 给 fulfilled 标题（缺席=无标题）、
    * reject 列单行 rejected、throwAll 整单抛错。不传=无该服务（回退直读）。 */
   titles?: { map?: Record<string, string>; reject?: string[]; throwAll?: boolean };
+  /** 观测点：ctx.sessions.get 每次被调用时回调。删除路径只在 exclusive
+   * 临界区内部调它，用例据此获得「删除已持锁」的确定性同步点，不再靠
+   * delay(50) 之类的墙钟窗口。 */
+  onSessionGet?: (sessionId: string) => void;
 } = {}) {
   const registryState = {
     initialized: true,
@@ -167,7 +175,7 @@ function makeFixture(options: {
   const services: Record<string, unknown> = {
     workspaceRegistry: archiveRegistry,
     sessionPersistence: persistenceMock,
-    sessions: { get: (id: string) => sessions.get(id) },
+    sessions: { get: (id: string) => { options.onSessionGet?.(id); return sessions.get(id); } },
     ...(sessionQuery === undefined ? {} : { sessionQuery }),
   };
   const ctx = {
@@ -179,7 +187,12 @@ function makeFixture(options: {
 
 const baseCfg = { detailMaxMessages: 50, messagePreviewChars: 500, titleReadConcurrency: 2 };
 
-const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/** 手动闸门：把「某个异步操作已进入临界区」变成可 await 的确定性同步点。 */
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 // ── 用例 ─────────────────────────────────────────────────────────────
 
@@ -522,48 +535,72 @@ describe("session-archive host", () => {
     writeSession("r1", []);
     writeSession("r2", []);
 
-    // 单次重建:生成流恰在删除窗口内落盘(100ms 后写回,早于 300ms 复验点)
-    // → 复验发现重现、再删一次,最终计入 deleted 且文件确实不在。
-    const recreate = setTimeout(() => {
-      try { writeSession("r1", []); } catch {}
-    }, 100);
-    const once = await archiveHost.deleteArchived(["r1"]);
-    clearTimeout(recreate);
-    expect(once.deleted.includes("r1") && !fs.existsSync(sessionPath("r1"))).toBe(true);
-
-    // 持续重建(确定性):冻结宿主 delay(fake timers 只伪装 setTimeout/
-    // clearTimeout,setImmediate 与真实 fs 保持原样),测试在「rm 落定 →
-    // 复验 stat」两个同步点之间显式写回——stat 执行时文件必然存在,不再
-    // 与真实时钟竞速(50ms 定时器在 CI 慢机上可被饿满 300ms settle 窗口,
-    // 曾致 publish 流水两次假红)。若同步点推断有误,断言会带完整结果对象
-    // 明确失败,不会偶发翻转。
+    // 确定性版本(不依赖墙钟):冻结宿主 delay(fake timers 只伪装 setTimeout/
+    // clearTimeout,setImmediate 与真实 fs 保持原样),「重建」只发生在
+    // 「rm 文件 + rmdir 会话目录整体落定」与「复验 stat」两个可观测同步点
+    // 之间——stat 执行时文件必然存在。单次重建与持续重建因此都被实际验证,
+    // 不再像旧的 100ms 定时器那样在慢机上可能整个落空(测试看似绿、语义
+    // 已失效),也不再出现 rm→rmdir 间隙写入导致的 ENOTEMPTY 假红。
+    //
+    // 关键同步点:目录/文件的 OS 状态可见早于 fs 回调投递,「目录已消失」
+    // 并不保证宿主 delay 的定时器已经入队。此时若直接 advance(300),假时钟
+    // 会空转到窗口末端,随后才入队的定时器要再等一个窗口——测试便永远等不到
+    // 复验结果(历史「偶发挂死 → 后续用例连锁红」的真实根因;机器越忙越容易
+    // 命中)。因此每次 advance 前都先等「复验定时器恰好 1 个在队」,把推进假
+    // 时钟变成有前置条件的确定性操作,而不是碰运气。
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
+      const sessionDirOf = (id: string) => path.dirname(sessionPath(id));
       /** 等 impl 的「rm 文件 + rmdir 会话目录」整体落定(目录消失)。同步到
        * 目录级而非文件级:写回若落在 rm 与 rmdir 的间隙里,rmdir 会以
        * ENOTEMPTY 失败(实测即 CI 假红的真实 reason)。setImmediate 保持
-       * 真实,轮询推进真实 fs 操作;迭代上限防御挂死。 */
-      const sessionDir = path.dirname(sessionPath("r2"));
-      const waitRm = async () => {
-        for (let i = 0; i < 10000 && fs.existsSync(sessionDir); i++) {
+       * 真实,轮询推进真实 fs 操作;迭代上限只是防挂死护栏,不参与断言。 */
+      const waitSessionDirGone = async (id: string) => {
+        const dir = sessionDirOf(id);
+        for (let i = 0; i < 100000 && fs.existsSync(dir); i++) {
           await new Promise((resolve) => setImmediate(resolve));
         }
-        expect(fs.existsSync(sessionDir)).toBe(false);
+        expect(fs.existsSync(dir), "impl 未清理会话目录: " + dir).toBe(false);
       };
-      const recreate = () => {
-        fs.mkdirSync(sessionDir, { recursive: true });
-        fs.writeFileSync(sessionPath("r2"), "{}");
+      /** 等这一次删除复验的宿主 delay 真正入队(恰好一个未决定时器),再推进
+       * 假时钟——见上方「关键同步点」。 */
+      const waitCheckTimerQueued = async (stage: string) => {
+        for (let i = 0; i < 100000 && vi.getTimerCount() === 0; i++) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        expect(vi.getTimerCount(), "复验定时器未按预期入队: " + stage).toBe(1);
       };
-      const pending = archiveHost.deleteArchived(["r2"]);
-      await waitRm();                              // rm#1 + rmdir#1 落定
-      recreate();                                  // 删除窗口内第一次重建
+      const recreate = (id: string) => {
+        fs.mkdirSync(sessionDirOf(id), { recursive: true });
+        fs.writeFileSync(sessionPath(id), "{}");
+      };
+
+      // 单次重建:删除窗口内重建一次 → 复验发现重现、再删一次 → 最终 deleted。
+      const onceP = archiveHost.deleteArchived(["r1"]);
+      await waitSessionDirGone("r1");              // rm#1 + rmdir#1 落定
+      await waitCheckTimerQueued("r1-checkA");     // 复验定时器入队
+      recreate("r1");                              // 删除窗口内写入
       await vi.advanceTimersByTimeAsync(300);      // 复验 stat#1 → 存在 → rm#2
-      await waitRm();                              // rm#2 + rmdir#2 落定
-      recreate();                                  // 第二次重建
-      await vi.advanceTimersByTimeAsync(300);      // 复验 stat#2 → 存在
-      const repeated = await pending;
-      expect(repeated.deleted).toEqual([]);
-      expect(repeated.failed).toEqual([{ sessionId: "r2", reason: "reappeared" }]);
+      await waitSessionDirGone("r1");              // rm#2 + rmdir#2 落定
+      await waitCheckTimerQueued("r1-checkB");     // 复验定时器入队
+      await vi.advanceTimersByTimeAsync(300);      // 复验 stat#2 → 不存在 → deleted
+      expect(await onceP).toEqual({ deleted: ["r1"], failed: [], removedFromArchive: 0, needsRestart: [] });
+      expect(fs.existsSync(sessionPath("r1"))).toBe(false);
+      // 删除已完结:不应残留未决定时器(fake timers 语义:悬空 timer = 没跑完)。
+      expect(vi.getTimerCount()).toBe(0);
+
+      // 持续重建:两次复验前都重建 → 两次 rm 都压不掉 → reappeared。
+      const repeatedP = archiveHost.deleteArchived(["r2"]);
+      await waitSessionDirGone("r2");              // rm#1 + rmdir#1 落定
+      await waitCheckTimerQueued("r2-checkA");     // 复验定时器入队
+      recreate("r2");                              // 删除窗口内第一次重建
+      await vi.advanceTimersByTimeAsync(300);      // 复验 stat#1 → 存在 → rm#2
+      await waitSessionDirGone("r2");              // rm#2 + rmdir#2 落定
+      await waitCheckTimerQueued("r2-checkB");     // 复验定时器入队
+      recreate("r2");                              // 第二次重建
+      await vi.advanceTimersByTimeAsync(300);      // 复验 stat#2 → 存在 → reappeared
+      expect(await repeatedP).toEqual({ deleted: [], failed: [{ sessionId: "r2", reason: "reappeared" }], removedFromArchive: 0, needsRestart: [] });
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -704,26 +741,34 @@ describe("session-archive host", () => {
     // 排队等到删除完成后 confirm → absent → 拒绝恢复。没有互斥时 confirm
     // 可在沉降窗口内探到 located,unarchiveSession 会把 id 移出集合——文件没了、
     // 归档标记也没了,内存会话重回侧边栏。
+    // 同步点用 ctx.sessions.get 回调:impl 只在 exclusive 临界区内部调它,
+    // 因此「删除已持锁」是可等待的事件,不再依赖 delay(50) 这类墙钟窗口
+    // (机器一慢,50ms 内删除可能还没进临界区,恢复反而抢到锁,断言随机红绿)。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-mx1-"));
+    const deleteInCritical = deferred();
     const f = makeFixture({
       archived: ["m1"],
       headers: [{ id: "m1", cwd: "/proj/a", createdAt: 1000 }],
+      onSessionGet: (sessionId) => {
+        if (sessionId === "m1") deleteInCritical.resolve();
+      },
     });
     writeSession("m1", []);
     f.sessions.set("m1", {});
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const delP = archiveHost.deleteArchived(["m1"]);
-    await delay(50);
-    const unP = archiveHost.unarchive(["m1"]);
+    await deleteInCritical.promise;              // 删除已持锁(仍处沉降窗口)
+    const unP = archiveHost.unarchive(["m1"]);   // 恢复的临界区必然排在删除之后
     const [del, un] = await Promise.all([delP, unP]);
-    expect(del.deleted.includes("m1")).toBe(true);
-    expect(un.restored.length === 0).toBe(true);
+    expect(del).toEqual({ deleted: ["m1"], failed: [], removedFromArchive: 0, needsRestart: ["m1"] });
+    expect(un).toEqual({ restored: [], failed: [{ sessionId: "m1", reason: "not-restorable" }], removedFromArchive: 0 });
     expect(!fs.existsSync(sessionPath("m1"))).toBe(true);
     // ghost id 留在集合,由存在性过滤隐藏。
     expect(f.registryState.archivedSessionIds.includes("m1")).toBe(true);
 
-    // 变体 B:恢复先落地,删除随后 → 锁内复验归档成员资格失败,拒绝删除,
-    // 文件保持原状。
+    // 变体 B:恢复先持锁落地,删除随后发起 → 锁内复验归档成员资格失败,
+    // 拒绝删除,文件保持原状。用 registry.unarchiveSession 闸门把「恢复
+    // 进行中」钉成可等待状态,再发起删除,同样不依赖墙钟延时。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-mx2-"));
     const f2 = makeFixture({
       archived: ["m2"],
@@ -731,15 +776,24 @@ describe("session-archive host", () => {
     });
     writeSession("m2", []);
     const archiveHost2 = createArchiveHost(f2.ctx, baseCfg);
+    const unarchiveInCritical = deferred();
+    const releaseUnarchive = deferred();
+    const registry = f2.ctx.workspaceRegistry;
+    const realUnarchiveSession = registry.unarchiveSession.bind(registry);
+    registry.unarchiveSession = async (sessionId) => {
+      unarchiveInCritical.resolve();             // confirm 已通过、恢复仍持锁
+      await releaseUnarchive.promise;
+      return realUnarchiveSession(sessionId);
+    };
     const unP2 = archiveHost2.unarchive(["m2"]);
-    await delay(50);
-    const delP2 = archiveHost2.deleteArchived(["m2"]);
+    await unarchiveInCritical.promise;
+    const delP2 = archiveHost2.deleteArchived(["m2"]); // 必然排在恢复之后
+    releaseUnarchive.resolve();
     const [un2, del2] = await Promise.all([unP2, delP2]);
-    expect(un2.restored.includes("m2")).toBe(true);
-    expect(del2.deleted.length === 0
-      && del2.failed.length === 1
-      && del2.failed[0]!.reason === "not-archived"
-      && fs.existsSync(sessionPath("m2"))).toBe(true);
+    expect(un2).toEqual({ restored: ["m2"], failed: [], removedFromArchive: 1 });
+    expect(del2).toEqual({ deleted: [], failed: [{ sessionId: "m2", reason: "not-archived" }], removedFromArchive: 0, needsRestart: [] });
+    expect(fs.existsSync(sessionPath("m2"))).toBe(true);
+    expect(f2.registryState.archivedSessionIds.includes("m2")).toBe(false);
   });
 
   it("detail:畸形 assistant 事件(缺 message)不炸整个请求", async () => {
