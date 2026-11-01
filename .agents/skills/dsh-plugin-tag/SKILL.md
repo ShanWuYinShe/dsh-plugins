@@ -50,10 +50,10 @@ git tag -v <tag>   # 自验签名
 pending → tag3 排队**把 tag2 顶掉** → tag4 排队**把 tag3 顶掉**——中间的流水被
 取消，对应 Release 永远不建，而推送命令照样全部「成功」。
 
-2026-09-24 实测印证（4 个 tag 同推）：Actions 里**零条 push 流水**，
+实测印证（4 个 tag 同推）：Actions 里**零条 push 流水**，
 `dsh-any-connect-v0.4.2`、`provider-usage-v0.1.1`、`sandbox-extra-roots-v0.4.14`、
-`session-archive-v0.3.16` 的 4 个 Release 全是事后手工 `workflow_dispatch` 补出。
-手工补发那批同样印证连推会被顶掉：
+`session-archive-v0.3.16` 的 4 个 Release 只能手工 `workflow_dispatch` 补；
+补发时连推同样被顶掉（同一并发组）：
 
 | run | 创建 | 结束 | 结果 |
 |---|---|---|---|
@@ -84,10 +84,10 @@ gh run list --workflow=publish.yml --branch <tag> \
   --jq 'map(select(.event=="push")) | .[0].databaseId // empty'
 ```
 
-**tag 的目标提交必须显式给出，并在推送前回验哈希。** 实测踩坑（2026-10-11）：
-写成 `git tag -a T -m M <旧提交> 2>/dev/null || git tag -a T -m M HEAD` 时，前半段
-在旧提交上**成功**，`||` 根本不触发，tag 静默指向上一个版本的提交；因为推送前用
-`git rev-parse <tag>^{commit}` 和 `HEAD` 比过哈希才发现（若直接推就会把错版发出去）。
+**tag 的目标提交必须显式给出，并在推送前回验哈希。** 反例：
+写成 `git tag -a T -m M <错误提交> 2>/dev/null || git tag -a T -m M HEAD` 时，前半段
+在错误提交上**成功**，`||` 根本不触发，tag 静默指向上一个版本的提交（不比对哈希
+直接推就会把错版发出去）。
 两条规则：① 目标提交一律显式写（`HEAD` 或具体哈希），不用「失败再兜底」的写法；
 ② 打完立刻 `git rev-parse <tag>^{commit}` 与发布提交逐字符比对。另：tag 命令上的
 `2>/dev/null` 会吞掉失败原因，不要加。
@@ -128,14 +128,14 @@ done
   流水被取消，Release 必然没建，删掉重来即可——重推同一个 tag 不会补触发。
   删远程 tag 同样受"一批 3 个"限制（通用纪律见全局 `git-workflow`），也要一个一个删。
 - **C. Release 已建**：永不删、不移动该 tag。升版本号打新 tag 发一版
-  覆盖叙事（CHANGELOG 写明替代关系），旧版本号就地作废。
+  覆盖叙事（CHANGELOG 写明替代关系），原版本号就地停用、不得复用。
 
 ## 不可变铁律
 
 1. 已推的发布 tag 永不 `-f` 移动、不删除重建——tag 即归档，动了等于改历史。
-2. 版本号用过即作废：即使删了 tag（情形 B），同一版本号也不得用于第二次
+2. 版本号用过即不可复用：即使删了 tag（情形 B），同一版本号也不得用于第二次
    发布之外的内容；重打只允许 tag 内容逐字节一致的原样重打。
-3. 历史遗留的轻量 tag（2026-09 前的 88 个）只读不碰：不重写、不补签名，
+3. 现存的轻量 tag（`git cat-file -t <tag>` 显示 commit 的那些）只读不碰：不重写、不补签名，
    只在门禁比较版本时引用。
 
 ## 保护（仓库设置，一次配好）

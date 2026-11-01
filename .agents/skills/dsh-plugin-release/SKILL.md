@@ -63,15 +63,14 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    # ↑ bun 默认拦截 postinstall，不 trust 这两个包宿主起不来/子进程 spawn helper 缺失
    DSH_HOME=/tmp/dsh-verify/home node node_modules/@deepseek-ai/dsh/lib/bin.js --profile web --port 3181 --no-open
    ```
-   （2026-09-25 实测：0.1.7-rc.2 验证即用此法；根路径探测返回 401 属正常——服务在跑、只是要 token。）
+   （根路径探测返回 401 属正常——服务在跑、只是要 token。）
 
-   **隔离 home 必须是全新目录，宿主启动后必须核对 URL 行（2026-10-11 实测）**：
+   **隔离 home 必须是全新目录，宿主启动后必须核对 URL 行**：
 
    - 复用旧验证 home 会混入用户全局配置的残留（`cordis.patch.yml` 的
      agent-default-model/welcomeNotice patch、旧 `.credentials.yaml` 等），
      表象是**宿主正常监听、插件心跳也在写，但 `dsh web:` URL 行永远不打印、
-     页面 401**——极像插件把宿主搞挂。重建全新 home 后同样操作一切正常。
-     判定法：`ls -la <DSH_HOME>`，发现早于本次会话时间戳的文件即为污染，整目录删掉重建。
+     页面 401**——极像插件把宿主搞挂。判定法：`ls -la <DSH_HOME>`，发现早于本次会话时间戳的文件即为污染，整目录删掉重建。
    - 宿主**端口被占（EADDRINUSE）时静默退出、无任何输出**——起宿主后必须
      同时确认 `lsof -iTCP:<port> -sTCP:LISTEN` 有监听**且**日志/终端里出现了
      `dsh web: http://…token=` 行，二者齐备才算启动成功。
@@ -79,17 +78,16 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
      后台起宿主用双重 fork（`( nohup … >log 2>&1 & )`）——普通 `… &` 会让
      bash 等待整棵进程树直到超时。
 
-   **沙盒下 bun 装包（2026-10-14 起可直接跑）**：`~/.bun/install/cache` 已由
-   sandbox-extra-roots 插件放行并实测，`bun install` 无需任何重定向。历史记录
-   （未配插件的机器，2026-09-30 实测）：`workspace-write` 下报 `error: bun is unable
-   to write files to tempdir: EPERM`——报错有误导，真因是默认缓存目录不可写
-   （重定向 `TMPDIR` 无效），解法是给它一个工作区内的缓存目录：
+   **沙盒下 bun 装包**：`~/.bun/install/cache` 已由 sandbox-extra-roots 插件放行，
+   `bun install` 无需任何重定向。反例（默认缓存目录不可写时）：`workspace-write`
+   下报 `error: bun is unable to write files to tempdir: EPERM`——报错有误导，
+   真因是默认缓存目录不可写（重定向 `TMPDIR` 无效），解法是给它一个工作区内的缓存目录：
 
    ```bash
    BUN_INSTALL_CACHE_DIR=<repo>/.workwork/bun-cache bun install
    ```
 
-   **新 alpha 线刚发布时 npmmirror 会同步滞后（2026-10-14 实测，0.2.1-alpha.3）**：
+   **新 alpha 线刚发布时 npmmirror 会同步滞后**：
    在 `.workwork/dsh-host` 装目标宿主时 `bun add` 报个别子包 404（如
    `@deepseek-ai/dsh-api-remote-access@0.2.1-alpha.3 failed to resolve`，本机
    npm/bun 默认走 npmmirror），漏的恰是宿主刚新增/刚发版的子包。解法是单次
@@ -107,8 +105,8 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    （如 `@earendil-works/pi-ai`），会出现两版并存、同名类型互不兼容，`typecheck`
    报一大段 `TS2322 ... is not assignable to ...`（报错里能看到两个版本号路径）。
    解法：把插件的 range 提到宿主依赖的同一版本，`bun install` 后确认
-   `node_modules/.bun` 下只剩一份。2026-09-30 rc.2 适配即为此（pi-ai `^0.85.1`
-   → `^0.87.1`，宿主 `dsh-llm-pi-ai` 依赖后者）。
+   `node_modules/.bun` 下只剩一份（例：pi-ai `^0.85.1` → `^0.87.1`，宿主
+   `dsh-llm-pi-ai` 依赖后者）。
 
    插件用本地路径安装（`dsh plugin --profile web add /abs/path/to/packages/<pkg>`，
    符号链接即装；`--profile` 以各包 README 的用户口径为准），**验证的是工作树
@@ -141,23 +139,22 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
 
    多包同发时顺序固定为：**先推分支**（`git push`，只跑测试）→ **再逐个 tag
    推送并逐条确认**（完整循环脚本见 skill dsh-plugin-tag「标准流程」）。
-6. **验证通过即推发（2026-10-10 用户授权的常设约定）**：改动在**独立 dsh 测试
+6. **验证通过即推发（常设约定）**：改动在**独立 dsh 测试
    实例**（独立 `DSH_HOME`、link 装待发产物、真实宿主版本与适配目标一致）中
    完成端到端验证且无问题后，**自动继续推送分支并打 tag 发版**，无需每次再向
    用户确认——第 2 步的实例验证本身就是发版授权。要点：
    - 「实例验证」的标准：真实宿主跑起来、覆盖本次改动的核心链路（如设置页
      读写、卡片读回、迁移）、控制台与宿主日志零异常。`test:ci` 全绿只是前置，
-     **不算**实例验证——产物级行为（minify/打包）只有实例能暴露（2026-10-10
-     端到端核查据此抓到 build.mjs 缩进污染 bug）。
+     **不算**实例验证——产物级行为（minify/打包）只有实例能暴露（实例验证能
+     抓到 build.mjs 缩进污染这类产物级 bug）。
    - 待发产物必须与验证产物同源（第 3 步已约定），验证通过后不再改任何影响
      产物的代码；若改了，重走第 2 步再发。
    - 范围边界：本条覆盖本 skill 定义的常规迭代发版（含多包各自 bump 逐个
      tag）；跨线收敛合 `main`、以及积压多包的批量清账式发版，仍按当次用户
      指示定范围。
 
-历史反例（先发布再验证连发 6+ 版本、发布产物缺字段多发一版）见
-RELEASING.md「日常发布流程」——工作未完成期间代码可以本地 commit（worktree
-隔离），分支推送只跑测试；**不要打 tag**——推 tag 即发版。
+工作未完成期间代码可以本地 commit（worktree 隔离），分支推送只跑测试；
+**不要打 tag**——推 tag 即发版。
 
 ## 版本与推送约定
 
@@ -173,6 +170,6 @@ RELEASING.md「日常发布流程」——工作未完成期间代码可以本�
   （通用纪律见全局 `git-workflow`「打 tag 与推送纪律」，本仓库流程见 skill
   dsh-plugin-tag「标准流程」）。门禁规则（打 tag 发版时强制
   执行）：版本号**严格低于**已归档版本会直接红；「改了代码没升版本号」
-  不再是 CI 红灯——那种推送只跑测试，想发版就升版本打新 tag。版本与已归档
+  不是 CI 红灯——分支推送只跑测试，想发版就升版本打新 tag。版本与已归档
   tag 相同则幂等跳过。任何情况下不满足发布条件的包不会出现在 Release 资产里。
 - **待命期版本形态约束**：待命期发版必须为纯 semver 正式版，严禁发布 `-alpha.N` 预发布版本。发布门禁会校验 `dsh.host` 与版本形态的一致性：若宿主声明未适配到新 alpha 预发布线（仍为稳定线 rc），带 `-alpha` 后缀的包会被门禁直接拒绝。

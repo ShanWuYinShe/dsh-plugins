@@ -5,7 +5,7 @@ description: dsh-any-connect 的 ZCode 通道事实与排障：Coding Plan 与 S
 
 # dsh-any-connect × ZCode
 
-实测日期 2026-09-29，ZCode 桌面 3.14.4 / 内置 agent `zcode.cjs` 0.16.9 / DSH 0.2.0-rc.1。
+验证环境：ZCode 桌面 3.14.4 / 内置 agent `zcode.cjs` 0.16.9 / DSH 0.2.0-rc.1。
 所有结论均由本机取证得出，复现脚本见 `.workwork/zcode-startplan/`（不入库）。
 
 ## 一、凭据与账号选择（最容易踩的坑）
@@ -19,7 +19,7 @@ zcodejwttoken                      # 账号计划（Start Plan / off-peak）用�
 oauth:bigmodel:access_token / oauth:active_provider / zcodejwttoken ...
 ```
 
-- **不要按对象顺序取第一个**：历史实现取"第一个含 `coding-plan` 的条目"，本机实测会
+- **不要按对象顺序取第一个**：取"第一个含 `coding-plan` 的条目"，本机实测会
   取到 **team** 那把（插入顺序决定），而客户端实际用的是 individual。
 - 正确做法：读**同目录的 `setting.json`**（无密钥，可安全读）：
   `providerFamilyDomain` 给当前 family，`providerFamilyConnectionSelections.<family>.kind`
@@ -27,12 +27,11 @@ oauth:bigmodel:access_token / oauth:active_provider / zcodejwttoken ...
   按 family+kind 精确匹配 key。
 - **计划归属以 selection 为准，不是"选中的 key"**：账号计划在凭据里**没有**对应的
   api-key 条目，accessToken 只能回落到别的账号的 key。把回落的 key 当计划会让额度
-  读到别的账号上去（本机实测一开始就这样错）。
+  读到别的账号上去（本机实测会这样错）。
 - `enc:v1:<iv>.<tag>.<ct>` = AES-256-GCM（base64url 三段），密钥 =
   SHA-256(`zcode-credential-fallback:<platform>:<homedir>:<username>`)，或 env
   `ZCODE_CREDENTIAL_SECRET`。
-- **双计划口径（2026-09-30 用户定，推翻早先「统一走普通通道」与后续的「单卡片
-  选择器」方案）**：**Start Plan 与 Coding Plan 是完全不同的两个产品**，在插件
+- **双计划口径**：**Start Plan 与 Coding Plan 是完全不同的两个产品**，在插件
   里是两个独立变体（`zcode` / `zcode-start-plan`），各自有模型分组、模型名单、
   额度池与通道，互不掺用：
   * `zcode`（Coding Plan）：普通通道 `open.bigmodel.cn/api/anthropic` + V4 签名
@@ -48,17 +47,17 @@ oauth:bigmodel:access_token / oauth:active_provider / zcodejwttoken ...
   `zcodejwttoken`+`deviceMid`），但文件、路由、卡片、名单全部互异。
 - **计划标识与发请求用的 key 解耦**：`zcodePlan`（客户端选择）标识账号，
   `accessToken`（实际 key）用于签名；不要把前者从后者推断出来。
-- **权益差异（2026-09-30 用户确认）**：
+- **权益差异**：
   * **Start Plan = 普通通道 + 150% 额度，且不享受夜间免费**（23:00–09:00 免费窗
     是 Coding Plan 专属权益）。
   * 因此**不能只看模型行上的「夜间免费」徽标**决定要不要走夜免逻辑——那会让
     start-plan 账号在夜间被标成「夜间免费 (生效中)」并把费率改写成 `x0.00`，
-    展示一个它拿不到的折扣（本机实测复现，见 0.4.9）。资格必须由账号计划决定：
+    展示一个它拿不到的折扣（本机实测复现）。资格必须由账号计划决定：
     `catalog.setNightFreeEligible(zcodePlan !== 'start-plan')`。
 
 ## 二、Start Plan 额度（可用；是 Start Plan 档的额度展示来源）
 
-**2026-09-30 口径更新**：Start Plan 选中时，额度展示**就来自这个端点**——
+**Start Plan 选中时，额度展示就来自这个端点**——
 专属余额（token 数、当日过期）与 Coding Plan 订阅（`subscription/list`）是两个
 独立的池子，绝不混报。端点鉴权用 `zcodejwttoken`（凭据文档里的
 `zcodejwttoken` 条目，`enc:v1` 加密，同套 AES-GCM 解密）+ `X-Device-Mid`
@@ -76,36 +75,34 @@ GET https://zcode.z.ai/api/v1/zcode-plan/billing/balance[?app_version=<ver>]
   `remaining_units` / `expires_at` / `period_start` / `period_end`，单位是
   **token**，不是积分）。本机实测：`ZCode Trust Build`，GLM-5.3-Flash
   100,000,000 tokens。
-- **2026-10-24 结构修正：一个活动按模型拆多份 entitlement，额度按模型分池**。
+- **一个活动按模型拆多份 entitlement，额度按模型分池**。
   实测 `ZCode 1024 Dev Day`（`plan_id: zcode-v3-start-plan-1024`）：两个
   entitlements（GLM-5.3-Flash 300M / GLM-5.3 200M），`balances[]` 每个模型一个
   bucket，`capabilities` 绑定各自模型（`model:glm-5.3-flash` /
   `model:glm-5.3`）——**池子互不通用，消费哪个模型只扣它的池**。推论：
   ①任何"取第一个有余额的池"的展示逻辑会吞掉其余池子；②把多池求和成一个
-  "哪个模型都能用"的总额度是错误语义。上面 Trust Build 的"单池"只是当年活动
-  恰好只有一个 entitlement。插件已改为每池一条窗口（`startPlanWindows`，
+  "哪个模型都能用"的总额度是错误语义。上面 Trust Build 的"单池"只说明该活动
+  恰好只有一个 entitlement。插件按每池一条窗口（`startPlanWindows`，
   id `plan:<池名小写>`，撞名追加序号）+ CLI 每池一行 + 配置卡片逐池额度行
-  （commit `6f87d51` 0.4.20 / `ec696db` 0.4.21）。
-  **教训（0.4.20 栽过）**：额度展示面有三处——额度 pill、配置页变体卡片、
-  CLI——修展示层 bug 时必须三处一起排查改齐。0.4.20 只修了 pill 与 CLI，
-  卡片仍「取第一个有余额的池」，用户在页面上看到 GLM-5.3 的 200M 像不存在，
-  被迫多发一版（0.4.21 补齐）。
+  实现（commit `6f87d51` / `ec696db`）。
+  **注意**：额度展示面有三处——额度 pill、配置页变体卡片、CLI——
+  展示层问题必须三处一起排查改齐；只改 pill 与 CLI 会漏掉卡片（仍「取第一个
+  有余额的池」），页面上 GLM-5.3 的 200M 会像不存在。
 - **额度是每日一次性池子，不结转**：entitlement 的 `period: "one_time"`，
   `used_units` 只增不减，响应里没有结转字段。所以卡片/pill 报的是"这个池子
-  此刻还剩多少"，并显式声明没用完就作废（`WorkBuddyCreditAccount.sameDay`）
+  此刻还剩多少"，并显式声明没用完即失效（`WorkBuddyCreditAccount.sameDay`）
   ——把它显示成可累积余额会让用户按不存在的额度做计划。
-  `expires_at` **不是"当日"硬规则**：2026-09-30 样本恰为当日 16:00Z，但
-  2026-10-24 的 1024 活动是三天后（10-26 01:00Z）——`sameDay` 按到期时刻是否
-  落在本地今日动态判定，不硬编码（插件自 0.4.10 前后已如此实现）。
+  `expires_at` **不是"当日"硬规则**：有的活动当天到期（样本 16:00Z），有的三天后
+  才到期——`sameDay` 按到期时刻是否落在本地今日动态判定，不硬编码。
 - **`X-Device-Mid` 是硬要求**：不给 / 每请求随机 → `400 code 3001` 或 `429`。
   取值优先级：`~/.zcode/v2/telemetry-state.json` 的 `deviceMid` →
   `$DSH_HOME/.zcode-device-mid`（自生成并持久化）。
 - 同族端点都可读：`billing/current`、`billing/preview`；`billing/claim` 需要
-  阿里云验证码（无码 → `400 code 3007 captcha verify failed`，2026-10-04 复现）。
+  阿里云验证码（无码 → `400 code 3007 captcha verify failed`）。
 
 ### 2.1 每日领取（preview / claim）——**全自动领取不可能，这是硬约束**
 
-2026-10-04 从 `app.asar` 偏移 **271347225**（`claimManualPlan`）取证并实测：
+从 `app.asar` 偏移 **271347225**（`claimManualPlan`）取证并实测：
 
     GET  /api/v1/zcode-plan/billing/preview?app_version=<v>&platform=<p>
          Authorization: Bearer <zcodejwttoken>          # 纯 HTTP，无需 captcha
@@ -131,18 +128,18 @@ GET https://zcode.z.ai/api/v1/zcode-plan/billing/balance[?app_version=<ver>]
 
 ## 三、plan 模型通道：Start Plan 的生产通道，**拦的是请求体指纹（已被破解）**
 
-**2026-09-30 日志取证修正**：这条通道就是真客户端 Start Plan 的日常通道，且当天
+**日志取证**：这条通道就是真客户端 Start Plan 的日常通道，客户端日志显示
 全程可用——客户端内置 provider 目录（zcode-server.cjs）明确 `account:bigmodel-start-plan`
 （providerName "Start Plan"，access `{type:"zhipu-account", mode:"start-plan"}`，
 api `anthropic-messages` @ `https://zcode.z.ai/api/v1/zcode-plan/anthropic`，
 模型 GLM-5.3-Flash / GLM-5.2 / GLM-5-Turbo）；coding plan（individual/team）同型但
-baseUrl 是 `https://open.bigmodel.cn/api/anthropic`。当日客户端日志：
+baseUrl 是 `https://open.bigmodel.cn/api/anthropic`。客户端日志：
 Trust Build 09:11 激活（used_units=0）→ 10:03 已用 5.7M，期间 WSL 会话的
 model-request 全部走 providerId `account:bigmodel-start-plan`，**零次 3012**
 （日志里 "3012" 字样只是内存统计子串）。桌面端在该链路中负责给请求套
 provider runtime headers（captcha-diagnostics `headersApplied:true`）。
 
-**2026-09-30 破解修正**：拦的不是"客户端指纹"这种不可控的东西，而是**请求体里
+**拦的不是"客户端指纹"这种不可控的东西，而是请求体里
 一个可精确满足的常量**——`system` 必须以官方客户端的固定提示词开头：
 
 * 第 0 块恒等 `"You are ZCode, an interactive coding agent"`；
@@ -157,15 +154,15 @@ provider runtime headers（captcha-diagnostics `headersApplied:true`）。
 实现见 `packages/dsh-any-connect/src/zcode-plan-prompt.ts`（常量 + `prepareStartPlanBody`），
 边界与结构由 `test/zcode-plan-prompt.test.ts` 钉住。
 
-`POST https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`：带上述前缀 → **200**（2026-09-30 记录）；
+`POST https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`：带上述前缀 → **200**；
 不带 → **HTTP 405 `{"code":3012,"msg":"request has been blocked due to unusual activity."}`**。
 
-**2026-10-25 现状更新：上游网关对高额突发消耗账号实施风控拦截（官方客户端实测亦被阻断）**。
-实测与用户在 ZCode 官方客户端（3.16.3）内交叉验证确认：
-- 用户在 1024 开发者日活动期间消耗了超 1.77 亿 tokens（`used_units: 177937068`），触发了智谱上游网关针对活动套餐的异常突发用量风控（Abuse / Burst Detection）。
+**现状：上游网关对高额突发消耗账号实施风控拦截（官方客户端同样被阻断）**。
+本机实测与 ZCode 官方客户端（3.16.3）交叉验证确认：
+- 1024 开发者日活动期间消耗超 1.77 亿 tokens（`used_units: 177937068`），触发了智谱上游网关针对活动套餐的异常突发用量风控（Abuse / Burst Detection）。
 - 上游针对该账号直接返回 `HTTP 405 {"code":3012,"msg":"request has been blocked due to unusual activity."}`。
 - **用户在官方 ZCode 客户端实机测试，同样确定性报错无法使用 Start Plan**；官方客户端源码逆向亦证实 `start-plan` 走的是 unsigned fetch，客户端内并未对 3012 做特殊处理（仅对 3007 处理了阿里云无感验证码重试）。
-- 该拦截不消耗任何额度，且完全隔离于 Coding Plan 订阅。用户应使用 Coding Plan（`zcode` 变体）继续日常工作。
+- 该拦截不消耗任何额度，且完全隔离于 Coding Plan 订阅。此时使用 Coding Plan（`zcode` 变体）继续日常工作。
 
 同页多路 relay 也都不通：`/api/v1/ultra/anthropic`、`/api/v1/ultra-zai/anthropic`
 （自造 header 会返回 `401 code 1002`，说明这些端点主要在验收特殊的鉴权形状）；
@@ -174,7 +171,7 @@ off-peak 通道**取票可用**（`POST /api/v1/off-peak/ticket` 需
 `POST /api/v1/off-peak/anthropic/v1/messages` 一律 `400 code 3001 parameter error`
 ——参数形状与服务端校验不一致，尚未逆出。
 
-已排除的变量（2026-09-29/30 全部实测仍 3012，因此都不是判据）：HTTP/1.1 与 HTTP/2、
+已排除的变量（全部实测仍 3012，因此都不是判据）：HTTP/1.1 与 HTTP/2、
 curl 与 undici、stream 与否、阿里云验证码头、阿里云 cookie（`acw_tc`/`cdn_sec_tc`/
 `visitor_id`）、浏览器形态 UA、**浏览器内同源页面 fetch**、完整 attribution 头集
 （`x-request-id` / `x-session-id` / `x-query-id` / `x-zcode-trace-id` /
@@ -214,7 +211,7 @@ const res = await fetch('https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messa
 `400 code 3006 model not allowed`。所以注册名单必须由 entitlements 派生
 （`src/zcode-plan-models.ts`）。
 
-**2026-10-04 修正：「拿不到授权就退回兜底名单」是个会骗人的坑。** 必须区分三态，
+**「拿不到授权就退回兜底名单」是个会骗人的坑。** 必须区分三态，
 否则会在"过期/今日未领取"时显示出根本不授权的模型（用户选中即 400 code 3006）：
 
 | 状态 | 判据 | 正确返回 |
@@ -252,9 +249,9 @@ curl -sS "http://127.0.0.1:8932/plugins/dsh-any-connect/zcode-sp/status" -H "Hos
 - 想验证"客户端选了 start-plan"的分支：把真实 `credentials.json` 复制到临时目录，旁边放一份
   `setting.json`（`providerFamilyConnectionSelections.bigmodel.kind = start-plan`），用
   `ZCODE_AUTH_FILE` 指过去。**不要改用户真实的 `~/.zcode/v2/setting.json`。**
-- 浏览器侧用 `/Users/liyou/.local/bin/agent-browser`（全路径，PATH 顺序不保证）。现行方案
-  （2026-10-14 晚起）：受限会话对该命令申请 `danger-full-access` 提权原生启动——
-  wrapper 不再注入 `--no-sandbox`、不再重定向目录（插件有意不放行 `~/.agent-browser`，
+- 浏览器侧用 `/Users/liyou/.local/bin/agent-browser`（全路径，PATH 顺序不保证）。现行方案：
+  受限会话对该命令申请 `danger-full-access` 提权原生启动——
+  wrapper 不注入 `--no-sandbox`、不重定向目录（插件有意不放行 `~/.agent-browser`，
   靠硬失败引导提权）。若报 `SingletonLock: File exists`，按报错里的实际 profile 路径
   （现行默认 `~/.agent-browser/profiles/main`）删 `Singleton*` 再开。
 - 真客户端的行为可用 `node /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs --help` 观察；
@@ -262,7 +259,7 @@ curl -sS "http://127.0.0.1:8932/plugins/dsh-any-connect/zcode-sp/status" -H "Hos
 
 ### 4.1 已知测试 flake：`usage.test.ts` 的 ENOTEMPTY（**与本插件改动无关**）
 
-2026-10-04 实测：全量 `vitest run` 偶发
+全量 `vitest run` 偶发
 
     FAIL packages/dsh-any-connect/test/usage.test.ts
     Error: ENOTEMPTY: directory not empty, rmdir '.../dsh-any-connect-usage-XXXX'
@@ -272,12 +269,12 @@ curl -sS "http://127.0.0.1:8932/plugins/dsh-any-connect/zcode-sp/status" -H "Hos
   `rm(root, {recursive:true, force:true})`，插件的异步收尾可能仍在写该目录 → 竞态。
 - 单跑该文件 3/3 通过；全量**串行**连跑 5/5 通过。
 - **在未改动的 pristine `main`（git stash 全部改动）上，两个 vitest 进程并行跑时同样复现**
-  ——证明是仓库既有竞态，不是本次改动引入。
+  ——说明是仓库既有竞态，与具体改动无关。
 - 结论：遇到它先单跑该文件确认，再串行重跑全量；不要为此改业务代码。
 
-## 五、模型目录「自动更新」与选择框实时刷新（2026-10-04 实测）
+## 五、模型目录「自动更新」与选择框实时刷新
 
-用户需求是「所有 provider 都自动更新 + 聊天页选择框实时更新」。查这部分时先分清
+需求口径：所有 provider 都自动更新 + 聊天页选择框实时更新。查这部分时先分清
 **两条独立的链**，它们坏起来表现一样（"名单是旧的"），但修法完全不同。
 
 ### 5.1 拉取链：定时刷新（插件侧主动拉）
@@ -285,18 +282,17 @@ curl -sS "http://127.0.0.1:8932/plugins/dsh-any-connect/zcode-sp/status" -H "Hos
 - 启动时 `refreshCatalog(runtime, 'startup')`；每 **60s** `sweep` 做身份核对
   （身份变了才真拉，稳态零上游请求）；每 **60 分钟** `catalogTimer` 全量重拉。
 - 四个变体（workbuddy / workbuddy-ai / zcode / zcode-start-plan）**都**接上了这三条，
-  没有变体被条件跳过（audit 实测确认）。
+  没有变体被条件跳过（audit 确认）。
 
-**🔴 陷阱一：`ZCodeUpstreamClient.fetchModels` 的 coding 分支曾是"假自动更新"。**
-原实现三个分支全部 `return this.models`，上游 `json.data` 只用来判断非空随后丢弃
-——该 provider 每小时刷新的唯一效果是"证明凭据还活着"，名单永远是编译期常量
-`FALLBACK_ZCODE_MODELS`。2026-10-04 已改为**并集 join**：上游给 id、本地给已验证参数
+**🔴 陷阱一：`ZCodeUpstreamClient.fetchModels` 的 coding 分支若只 `return this.models`，就是"假自动更新"。**
+上游 `json.data` 只用来判断非空随后丢弃——该 provider 每小时刷新的唯一效果是"证明凭据还活着"，
+名单永远是编译期常量 `FALLBACK_ZCODE_MODELS`。正确做法是**并集 join**：上游给 id、本地给已验证参数
 （128K / 费率 / 徽章），未收录 id 走 `defaultZCodeModelInfo` 保守默认（200K/32K）。
-实测收益：上游真实列表 11 个模型，此前只有 2 个可见，**9 个永远看不到**。
-> 写这类"采用上游名单"的测试时注意：若本地目录恰好等于上游名单，旧实现也能碰巧通过
+实测收益：上游真实列表 11 个模型，只返回编译期常量时仅 2 个可见，**9 个完全看不到**。
+> 写这类"采用上游名单"的测试时注意：若本地目录恰好等于上游名单，只返回常量的实现也能碰巧通过
 > ——用例必须用**与编译期常量不同**的本地目录，并断言顺序与数量，否则是假绿。
 
-**🔴 但并集的来源选错了目录（2026-10-06 取证并已修复）：`/api/paas/v4/models` 是
+**🔴 并集的来源目录不能用 `/api/paas/v4/models`：它是
 BigModel 开放平台 API 的模型目录，不是 Coding Plan 订阅的产品面。** 实测该端点对
 coding-plan key 返回 11 个 id（glm-4.5 / glm-4.5-air / glm-4.6 / glm-4.7 / glm-5 /
 glm-5-turbo / glm-5.1 / glm-5.2 / glm-5.3 / glm-5.3-flash / glm-5.3-flashx），而官方
@@ -308,7 +304,7 @@ GLM-5-Turbo。那 7 个多余模型（glm-4.5/4.5-air/4.6/4.7/5/5.1/5.3-flashx�
 API 余额而非订阅）——「分组里出现」本身就是一个未经验证的主张，与 Start Plan
 三态纪律（名单必须来自授权真源）同一条红线。
 
-**修复（2026-10-06，`zcode-builtin-catalog.ts`）**：名单真源改为读本机客户端的
+**名单真源（`zcode-builtin-catalog.ts`）**：读本机客户端的
 `zcode-builtin.json`（权威来源，随客户端发版更新），`fetchModels` 先取白名单再
 过滤上游并集**和本地保留行**；白名单不可得（客户端未装/文件不可读/结构演进）时
 回退已注册名单且**不发上游请求**（白名单是闸门，不是事后过滤器）。实测收敛
@@ -322,12 +318,11 @@ rules 绑定的模型 id，一行改动。
 今日未领取 → 空名单 → 分组隐藏；用户领取后要等**最长 60 分钟**（小时刷新）才恢复，
 因为 60s sweep 只比对凭据身份，领取不改变身份。
 
-**⚠️ 空名单的第二个来源：上游间歇性答空活动清单（2026-10-07 实测）。** 隔离实例
+**⚠️ 空名单的第二个来源：上游间歇性答空活动清单。** 隔离实例
 的 catalog 拉得 `live/empty` 的同一时刻，直调同端点却有 active 活动 +
 entitlements 模型授权，余额也正常（93M/100M）——即插件逻辑无错，是上游偶发
 给出空 plans。后果：分组诚实隐藏，但唯一恢复路径是小时刷新，且卡片同时显示
-「93M tokens 额度」与「今日没有有效的 Start Plan 活动」自相矛盾。修法（commit
-`103097a`）：sweep 里对「目录空 + 领取探测无翻转 + 距上次拉取 ≥ 5 分钟」再拉一拍
+「93M tokens 额度」与「今日没有有效的 Start Plan 活动」自相矛盾。现行做法：sweep 里对「目录空 + 领取探测无翻转 + 距上次拉取 ≥ 5 分钟」再拉一拍
 （拉取无论结果都前移 `catalogFetchedAtMs`，不会打环），自愈压到分钟级；文案改
 中性表述不再断言「无活动」。
 
@@ -396,7 +391,7 @@ handle.replace([providerId])           // 同路由替换 = 广播"拓扑变了"
    交付前必须真跑 `bun run test:ci`（它含 build + typecheck + test），
    只跑 `vitest` 会漏掉这一类。
 
-### 5.4 UNKNOWN_MODEL「插件重载窗口」：transport 抖动被升级成整轮失败（2026-10-27 取证）
+### 5.4 UNKNOWN_MODEL「插件重载窗口」：transport 抖动被升级成整轮失败
 
 **症状**：聊天页「本轮运行失败 pi-ai provider "workbuddy" has no configured model "hy4-preview"（UNKNOWN_MODEL）」，
 同一毫秒另一会话 zcode 变体报同样错误；几分钟后一切自愈（或重启后正常）。
@@ -432,14 +427,14 @@ profiles 静态构造 + replace 复用同一 provider id，不会产生。稳态
 模型时 UNKNOWN_MODEL 持续且诚实（选择框同步隐藏该行）。saved 目录前移的修法只能消掉
 UNKNOWN_MODEL 面孔；NO_ADAPTER 面孔窗口为 loopback 绑定的毫秒级，遇上了等一秒重发即可。
 
-**修复（2026-10-27 已实施，`primeCatalogForRegistration`）**：saved/fallback 目录采用
+**现行做法（`primeCatalogForRegistration`）**：saved/fallback 目录采用
 （纯本地读：凭据身份 + saved catalog 文件，`current()` 不触网）挪到 `registerAdapter`
 **之前 await 完成**，上游 fetchModels 仍注册后异步——登录用户的启动窗口归零，重试落窗
 内也能正常解析模型（凭据由 shim 按请求解析；真未登录得到诚实的 auth 错误而非
 UNKNOWN_MODEL）。未登录/区域错配保持隐藏（判定与 refreshCatalog 前半段同构）；
 回归测试 `test/catalog-prime.test.ts`（fetchModels 挂起状态下注册完成即有名单）。
 
-## 六、宿主线适配（`bun run adapt`）的三个已知缺口（2026-10-04 实测）
+## 六、宿主线适配（`bun run adapt`）的三个已知缺口
 
 适配 DSH 新预发布线时 `adapt` **只改 `@deepseek-ai/dsh-*` 的 range**，以下三处要手工补，
 否则 `bun install` 或 `typecheck` 直接失败。先跑 `adapt --dry-run` 看它打算改什么。
@@ -464,9 +459,9 @@ UNKNOWN_MODEL）。未登录/区域错配保持隐藏（判定与 refreshCatalog
 > 缺 `node_modules` 时 build 会报 `spawnSync .../node_modules/.bin/tsc ENOENT`。
 > 沙盒下装包要带 `BUN_INSTALL_CACHE_DIR=<repo>/.workwork/bun-cache`。
 
-### 宿主接口审计结论：三处「已评估、有意不采用」（2026-10-04，防重复报缺口）
+### 宿主接口审计结论：三处「已评估、有意不采用」（防重复报缺口）
 
-对 0.2.1-alpha.1 的接口使用做过完整审计，以下三项**是有意不做**，后续审计不要再当缺口报：
+对其他候选接口的审计结论：以下三项**是有意不做**，后续审计不要再当缺口报：
 
 1. **直连 fetch 不加 `attributionHeaders()`**。宿主契约（`LlmAdapter` 类文档）要求 provider
    HTTP 请求带 attribution——这一跳由 pi-ai 覆盖（chat 路径 `lib/index.js` 的 `requestHeaders()`、
@@ -481,7 +476,7 @@ UNKNOWN_MODEL）。未登录/区域错配保持隐藏（判定与 refreshCatalog
    会落进 `DISCOVERY_UNSUPPORTED`。不注册是正确行为。
 3. **四变体合在一张 `plugins.bundle.config` 卡内，不拆 `plugins.row.config`**。
    两种 slot 都合法（slot-contract 明示 bundle 配置归属两者之一），用户拍板保持现形态
-   （一张包卡内四张变体卡，2026-10-04 实测截图确认观感）。
+   （一张包卡内四张变体卡，实测截图确认观感）。
 
 
 ## 七、反编译取证手法（比 grep 全文快得多）
@@ -501,7 +496,7 @@ node -e "const fs=require('fs');const fd=fs.openSync(process.argv[1],'r');const 
 `baseUrl` / `access.mode`，是"端点属于哪条通道"的权威来源）。
 
 
-## 八、Coding Plan 窗口额度（pill 的 5 小时 / 7 天来源，2026-10-08 取证）
+## 八、Coding Plan 窗口额度（pill 的 5 小时 / 7 天来源）
 
 ZCode 客户端自己显示「5 小时 / 7 天」窗口额度，用的是：
 
@@ -533,13 +528,13 @@ GET https://bigmodel.cn/api/monitor/usage/quota/limit
 实现：`src/zcode-quota.ts`（解析 + 映射）+ `ZCodeUpstreamClient.fetchCodingPlanQuota`；
 端点不可用或形状不符一律 `undefined` → 查询器回退订阅有效性窗口，绝不编数字。
 
-### 8.1 三个 pill / 升级相关的坑（2026-10-08 实测）
+### 8.1 三个 pill / 升级相关的坑
 
-1. **saved 目录可能是旧版本写的**：`catalogStore` 存的是「上次成功拉取的名单」，升级前
-   （白名单上线前）写进去的是**上游并集**（实测某升级用户的 saved 里躺着 11 个 Coding Plan
+1. **saved 目录可能是白名单过滤前的版本写的**：`catalogStore` 存的是「上次成功拉取的名单」，
+   那类版本写进去的是**上游并集**（实测某用户的 saved 里躺着 11 个 Coding Plan
    模型）。启动时 saved 先于 live 发布 → 用户先看到一整屏越界模型。修法：发布 saved 前用
    同一份白名单过滤（`filterByCodingPlanWhitelist`，白名单不可得则原样返回）。
-2. **Start Plan 跨天后 accounts 为空**：每日 00:00 后旧池子作废、新池子未发放/未领取时
+2. **Start Plan 跨天后 accounts 为空**：每日 00:00 后旧池子清零、新池子未发放/未领取时
    `billing/balance` 的 `balances` 为空。pill 若回落到通用的「该 provider 不上报额度」
    会让人以为额度功能坏了——`startPlanWindows` 此时如实回「Start Plan: 今日待领取」。
 3. **Plugins 页显示的版本号来自磁盘 package.json，不代表运行中的进程**：`dsh plugin add`
@@ -548,9 +543,9 @@ GET https://bigmodel.cn/api/monitor/usage/quota/limit
    （`~/.dsh/.zcode-catalog.json`）内容：若是旧行为的特征就说明进程没重启。**重启必须完全
    退出 dsh 进程**（刷新浏览器页面不算）；`lsof -p <pid>` 可确认进程打开的 DSH_HOME 文件。
 
-## 九、workbuddy-ai（海外版）凭据"能用但 chat 被拒"（2026-10-08 取证）
+## 九、workbuddy-ai（海外版）凭据"能用但 chat 被拒"
 
-**症状**：用户报「dsh-any-connect 无法使用 workbuddy.ai 的凭据」。典型误判是「凭据没读到」，
+**症状**：dsh-any-connect 无法使用 workbuddy.ai 的凭据。典型误判是「凭据没读到」，
 但实测凭据链路**完全正常**——必须分清「凭据问题」与「chat 授权问题」。
 
 ### 9.1 实测：凭据、目录、账单三条全通，只有 chat 被拒
@@ -620,14 +615,14 @@ function isAuthRequiredLikeError(L,ei,ea,es){
 
 `app.asar` 头部是 `[8B pickle][4B headerSize][header JSON]`；**文件表里带
 `unpacked:true` 的条目内容不在 asar 里**，要去 `app.asar.unpacked/` 同名路径读
-（本机 `cli/dist/codebuddy-headless.js` 就是 unpacked）。踩坑记录：
+（本机 `cli/dist/codebuddy-headless.js` 就是 unpacked）。易错点：
 - 顺序累加 offset 定位内嵌文件时，unpacked 条目的 size 会被计入导致偏移全错——
   先看 `meta.unpacked`，是就去 unpacked 目录按原路径读。
 - macOS 上跑官方 CLI 会因沙盒写 `~/.codebuddy/local_storage` 报 EPERM；用
   `HOME=$PWD/.workwork/cb-home` 重定向（**但重定向后它读不到真实登录态**，会报
   "Authentication required"，所以它无法直接充当 chat 对照）。
 
-### 9.6 结论：服务端按会话/权益拦截，**与客户端实现无关**（2026-10-08 定论）
+### 9.6 结论：服务端按会话/权益拦截，**与客户端实现无关**
 
 **判定依据（最重要的一条）**：**官方 WorkBuddy AI 客户端在同一账号、同一网络上得到完全相同的
 报错**。官方自己的客户端都被拒 ⇒ 不可能是本插件的请求构造问题。
@@ -643,9 +638,9 @@ function isAuthRequiredLikeError(L,ei,ea,es){
 同一凭据访问 `/v3/config` 却是 200（同样带正确的 `x-user-id`）⇒ 不是 token 无效，
 而是服务端按业务规则拒绝 chat。
 
-### 9.6.1 ⚠️ 本条曾写错，已更正（留作反面教材）
+### 9.6.1 ⚠️ 反面教材：不要从 packageName 推断权限
 
-本节最初写成"**账号是 Free Plan，所以没有 chat 权益**"——**这是错的**，两个反证：
+把"**账号是 Free Plan，所以没有 chat 权益**"当成结论是错的，两个反证：
 
 1. 服务端 `/v3/config` 里该模型明写 `credits: "x0.00"`（费率为 0）；
 2. 官方 UI 截图里 **Deepseek-V4.1-Flash 标着 "Free now"，并注明
@@ -653,14 +648,14 @@ function isAuthRequiredLikeError(L,ei,ea,es){
    另有 `deepseek-v4.1-flash-sg` 是 `x0.03`（收费）。
 
 **教训**：不要从 `packageName`（如 "Free Plan Subscription"）这类**间接字段**推断权限结论——
-要去看**权威字段**（模型自身的 `credits` 费率、官方 UI 的明确标识）。我当时的推断越过了证据，
-属于把"额度账户名"当成了"权限判定"。写进 skill 的结论必须是**被直接证据支撑**的。
+要去看**权威字段**（模型自身的 `credits` 费率、官方 UI 的明确标识）。把"额度账户名"
+当成"权限判定"就是越过证据；写进 skill 的结论必须是**被直接证据支撑**的。
 
 ### 9.6.2 已排除的全部假设（都做过实测，别再重复）
 
 | 假设 | 验证结果 |
 |---|---|
-| 凭据读不到 | ✗ doctor signed-in；token 1374 字符；有效期剩 365 天；官方 app 今天刚刷新 |
+| 凭据读不到 | ✗ doctor signed-in；token 1374 字符；有效期剩 365 天；官方 app 刚刷新 |
 | 密钥无效 | ✗ 伪造 token → **401**，真实 token → **403**（网关认这份 token） |
 | 模型没权限 | ✗ `deepseek-v4.1-flash` 服务端 `credits: "x0.00"`，官方 UI 标 "Free now" |
 | 请求体缺字段 | ✗ 试过 `reasoning_summary` / `reasoning:{effort,summary}` / `max_tokens` / `temperature` |
@@ -669,7 +664,7 @@ function isAuthRequiredLikeError(L,ei,ea,es){
 | 路径不对 | ✗ 只有 `/v2/chat/completions` 存在；`/v3`、`/v1`、`/v2/messages`、`/v2/plugin/…` 全 404 |
 | 是我们的代码坏了 | ✗ CN 变体同机/同网络/同代码 → **200 正常** |
 | 网络或地域被封 | ✗ 同上，CN 通；且 `/v3/config`、credits 都通 |
-| 是插件问题 | ✗ **官方 app 同样失败**（用户实测确认） |
+| 是插件问题 | ✗ **官方 app 同样失败** |
 
 对照实验（同一端点、同一 body，只换凭据）：
 
@@ -713,12 +708,12 @@ POST /billing/meter/get-user-resource  // 返回 accounts 与 proTrialStatus
 - **插件的替代路径**：换用别的 provider（`provider-usage` 支持 DeepSeek / OpenAI / Moonshot /
   MiniMax 等，自备 API key）。
 
-### 9.7 插件侧已做的改进（commit 0589841）
+### 9.7 插件侧失败文案映射（commit 0589841）
 
-原实现把上游状态码**裸写**进失败文案（`(http 403)`），而宿主 `dsh-llm-pi-ai` 的
-`classifyPiAiError` 用**文本正则**分类：`/\b(?:401|403)\b/` 命中即判 `AUTH`，
+上游状态码**不能裸写**进失败文案（`(http 403)`）：宿主 `dsh-llm-pi-ai` 的
+`classifyPiAiError` 用**文本正则**分类，`/\b(?:401|403)\b/` 命中即判 `AUTH`，
 `dsh-client-ui-chat` 随后**丢弃我们的 message** 换成固定文案「API 密钥无效」——
-于是与密钥无关的 11140 被显示成密钥失效，用户被误导去重新登录。修法：
+与密钥无关的 11140 会被显示成密钥失效，让人误以为要重新登录。现行做法：
 
 - `upstream-shared.httpStatusLabel()`：状态码渲染为 `HTTP_403`。
   **`HTTP-403` 无效**（`-` 是非词字符，403 两侧仍是 `\b`，实测照样命中）；
@@ -730,13 +725,13 @@ POST /billing/meter/get-user-resource  // 返回 accounts 与 proTrialStatus
 **通用教训**：给宿主写错误文案时，**不要裸写 401/403/429/400/5xx 等状态码数字**——
 宿主会按文本重新分类，轻则分类错误、重则整条文案被替换掉。
 
-## 十、WorkBuddy 积分与消耗台账（2026-10-26 取证与实现）
+## 十、WorkBuddy 积分与消耗台账
 
 **WorkBuddy 积分是「裂变包」制，这是「总额/剩余天天跳动」的根因**。实测 `get-user-resource`
 返回 33 个包：主体系 `CodeBuddy个人版国内运营裂变包`，**上游每天发一个新包**（每个 100 积分、
 `CycleEndTime` = 发放时刻 +30 天，发放时刻每天不同：00:xx / 09:xx / 12:xx / 20:02 都出现过），
 旧包到期**整包消失**。因此「剩余总额」每天双向跳动（新包 +100、消耗 −N、到期 −整包），
-单看任何时刻的数字读不出「今天花了多少」——用户 2026-10-26 报的「总额度总是刷新」即此。
+单看任何时刻的数字读不出「今天花了多少」——常见的「总额度总是刷新」反馈即此。
 
 - **上游没有按日消耗明细**：`get-user-resource` 只有包级快照（`CycleCapacityRemain`/
   `CycleCapacityUsed` 是包整个生命周期 30 天的口径，不是今日）。消耗统计只能插件侧**采样差分**：
@@ -746,7 +741,7 @@ POST /billing/meter/get-user-resource  // 返回 accounts 与 proTrialStatus
   样本，两次采样间「发放+消耗」抵消会被低估，samples 随数据透出；②**跨天首观测不计差分**
   （跨夜窗口的消耗无法归属到哪一天，宁少不虚记）；③只统计积分制变体（kind `workbuddy`），
   ZCode 的 token 池/订阅有效性不是这个语义，绝不混进台账。
-- **展示面三处齐改**（与 0.4.20 教训同一条红线）：额度 pill（`totalCreditsWindows` 追加
+- **展示面三处齐改**（与额度展示面三处同一条红线）：额度 pill（`totalCreditsWindows` 追加
   「今日已用」窗口，折叠态仍只渲染 windows[0] 总计）、配置页卡片（`credits.today`/`history`，
   卡头摘要带「今日已用 N」）、CLI（`Today:` 行 + `creditsToday` JSON 字段）。0.4.25 端到端
   隔离实例三处全部验证过。
@@ -758,7 +753,7 @@ POST /billing/meter/get-user-resource  // 返回 accounts 与 proTrialStatus
   `unit.putRecord('ledger', 'workbuddy', doc)`，起实例前写入即可验证差分展示。
 - 实测消耗粒度：两次相隔 4 分钟的查询 698→693（消耗 5 积分），pill 60s 轮询足以捕捉日常消耗。
 
-### 10.1 额度数据归属口径（2026-10-27 用户确认）
+### 10.1 额度数据归属口径
 
 - provider-usage 是「注册 seam + 通用显示层」（其 README 原话：核心是一套注册机制），
   不持有任何 provider 的凭据与计费端点；它自带的 8 个 querier 全是开放 API

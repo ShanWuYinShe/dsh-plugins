@@ -24,6 +24,6 @@ cd .worktrees/main && bun install && bun run build   # 每个工作树独立安�
 **命令执行目录纪律**：一切会产生文件改动的操作——包括 `node -e` 内联脚本、
 `sed -i`、代码生成——都必须先 `cd` 进目标 worktree 再执行，或在命令里写
 绝对路径。shell 的 cwd 会在多次调用间保留，"以为在 worktree、实际改了主
-检出"曾让发布产物缺字段。提交前用 `pwd` + `git status` 确认所在位置与预期
-一致。
+检出"会直接让发布产物缺字段；提交前用 `pwd` + `git status` 确认所在位置与
+预期一致。
 
