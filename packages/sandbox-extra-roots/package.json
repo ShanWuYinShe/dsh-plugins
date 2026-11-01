@@ -23,7 +23,7 @@
     "./package.json": "./package.json"
   },
   "dsh": {
-    "host": "0.2.1-rc.3",
+    "host": "0.2.1-rc.5",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -41,8 +41,8 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.5",
-    "@deepseek-ai/dsh-sandbox": "^0.2.1-rc.3",
-    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-sandbox": "^0.2.1-rc.5",
+    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.5",
     "@types/react": "^19.3.0",
     "react": "^19.3.1",
     "vitest": "^4.1.12"
