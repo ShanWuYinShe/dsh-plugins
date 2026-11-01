@@ -194,6 +194,8 @@ export declare function inspectManifest(
 export declare function exactPinOfDeclared(declared: unknown): string | undefined;
 /** 运行期依赖策略生效时刻（ISO 8601）：该时刻之后发布的版本必须零运行期依赖。 */
 export declare const RUNTIME_DEPENDENCY_POLICY_SINCE: string;
+/** 索引侧排除表：`<包目录>@<版本>` → 原因（已发布但静态 registry 装不动的版本）。 */
+export declare const INDEX_EXCLUDED_VERSIONS: Readonly<Record<string, string>>;
 /** 扫描清单的运行期依赖（dependencies + optionalDependencies，排除 @chaoset 自身包；键排序）。 */
 export declare function runtimeDependenciesOf(manifest: unknown): Record<string, string>;
 /** 汇总运行期依赖事实（build/plan 的 stderr 与 summary 用；按发布时间的策略生效线分类）。 */

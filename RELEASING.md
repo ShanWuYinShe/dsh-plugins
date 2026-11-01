@@ -581,6 +581,11 @@ packument 的 `dist.tarball` 直接指向对应 GitHub Release 资产（标准 n
   - `check` / build 自校验对**策略生效时刻之后发布**的版本仍带运行期依赖时 **fail**（防未来
     回归）；该时刻**之前**发布的 tarball 不可变，只进 `warnings` 不阻断；发布时间缺失同样只告警。
     汇总里对应 `runtimeDependencies.blocking` / `.legacy` 两组，排障与变通见 README「常见安装排障」。
+- **索引侧排除表**（`INDEX_EXCLUDED_VERSIONS`，定义在 `plugin-market-core.mjs`，key 为
+  `<包目录>@<版本>`）：已发布、tarball 不可变但**索引安装会坏**的版本不进索引（仍可经 Release
+  tarball 直接安装）。典型场景是策略生效后仍声明运行期依赖的版本——静态 registry 解析不到它们，
+  pnpm 会 404；策略校验对这种版本仍 fail，排除表是发布后不收坏版本的唯一修正手段。条目在修正
+  版本发布后继续保留，新增条目必须写明原因。
 
 新增发布包必须同时补 `scripts/lib/plugin-market-core.mjs` 的 `PACKAGE_DISPLAY`
 （标题/描述/分类/图标/排序），否则 `bun run market:build` 直接报错，不会静默漏收录。

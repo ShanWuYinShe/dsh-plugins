@@ -21,6 +21,7 @@ import {
   defaultIndexUrl,
   defaultRegistryUrl,
   DEFAULT_MARKET_REF,
+  INDEX_EXCLUDED_VERSIONS,
   MARKET_BRANCH,
   MARKET_README,
   expectedNamesFromDisplay,
@@ -444,6 +445,16 @@ describe("collectCandidates", () => {
     expect(reasons).toContain("sandbox-extra-roots-v0.4.28-alpha.1 => asset-name-mismatch");
     expect(reasons).toContain("provider-usage-v0.2.1-alpha.2 => asset-missing");
     expect(reasons).toContain("session-archive-v0.3.32-alpha.2 => missing-published-at");
+  });
+
+  it("索引排除表：命中的版本不进入候选，skipped 带原因", () => {
+    // 0.4.28 两个包已发布但声明了运行期依赖（静态 registry 装不动），只能走排除表。
+    expect(INDEX_EXCLUDED_VERSIONS["dsh-any-connect@0.4.28"]).toBeTruthy();
+    expect(INDEX_EXCLUDED_VERSIONS["sandbox-extra-roots@0.4.28"]).toBeTruthy();
+    const collected = collectCandidates([releaseOf("dsh-any-connect", "0.4.28")], { dirs: DIRS });
+    expect(collected.candidates).toHaveLength(0);
+    const reason = collected.skipped.map(item => item.reason).find(item => item.startsWith("index-excluded: "));
+    expect(reason).toContain("0.4.29 已修正");
   });
 
   it("只有单个 .tgz 且命名不符时兜底收录（fallbackAsset）", () => {

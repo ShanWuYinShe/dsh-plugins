@@ -319,6 +319,19 @@ if (!Number.isInteger(RUNTIME_DEPENDENCY_POLICY_SINCE_EPOCH)) {
   throw new Error('RUNTIME_DEPENDENCY_POLICY_SINCE 不是合法的 ISO 时刻: ' + JSON.stringify(RUNTIME_DEPENDENCY_POLICY_SINCE))
 }
 
+/**
+ * 索引侧排除表：已发布但**不能经索引/静态 registry 安装**的版本
+ * （`<包目录>@<版本>` → 原因）。它们仍可通过 Release tarball 直接安装，
+ * 只是不进索引。典型场景：运行期依赖策略生效后仍声明
+ * `dependencies`/`optionalDependencies` 的版本——静态 registry 没有这些包，
+ * pnpm 解析会 404。条目在修正版本发布后**继续保留**（已发布版本不会消失）。
+ * 新增条目必须写明原因，并在 RELEASING.md「收录规则」保持口径一致。
+ */
+export const INDEX_EXCLUDED_VERSIONS = Object.freeze({
+  'dsh-any-connect@0.4.28': '运行期依赖策略生效后仍声明 zod / @earendil-works/pi-ai，静态 registry 安装会 404（0.4.29 已修正）',
+  'sandbox-extra-roots@0.4.28': '运行期依赖策略生效后仍声明 @deepseek-ai/node-addon-landlock-run，静态 registry 安装会 404（0.4.29 已修正）',
+})
+
 /** Unix 秒 → ISO 8601（整秒；告警/错误文案用）。 */
 function isoSecondsOf(unixSeconds) {
   return new Date(unixSeconds * 1000).toISOString().replace(/\.000Z$/, 'Z')
@@ -406,6 +419,11 @@ export function collectCandidates(releases, options = {}) {
     const parsed = parseReleaseTag(tag, dirs)
     if (parsed === undefined) continue
     if (!dirSet.has(parsed.dir)) continue
+    const exclusion = INDEX_EXCLUDED_VERSIONS[parsed.dir + '@' + parsed.version]
+    if (exclusion !== undefined) {
+      skipped.push({ tag, reason: 'index-excluded: ' + exclusion })
+      continue
+    }
     if (release.draft === true) {
       skipped.push({ tag, reason: 'draft' })
       continue
