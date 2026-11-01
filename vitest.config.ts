@@ -1,15 +1,16 @@
-import { join, resolve } from "node:path";
 import { transform } from "esbuild";
 import { defineConfig } from "vitest/config";
 
 // 测试环境与用户真实 ~/.dsh 隔离:插件的官方包加载器在模块求值期会读取
 // $DSH_HOME/profiles/node_modules 安装闭包 fallback 与 profile 依赖树,
-// 用户本机是否初始化过 profile 会改变测试的解析路径。指向 .workwork 内
-// 一个不会出现 profiles/ 的目录,两条 harness 环境链全部走不通,官方包
-// 一律回落到包自身依赖树(bun 安装的 optionalDependencies),结果只由
-// 仓库状态决定。运行期需要 DSH_HOME 的测试(sandbox.test.ts 等)在
-// beforeEach 里自行覆盖该变量,不受影响。
-const TEST_DSH_HOME = join(resolve(import.meta.dirname ?? "."), ".workwork", "dsh-test-home");
+// 用户本机是否初始化过 profile 会改变测试的解析路径。
+//
+// **每个测试文件一份全新的空 DSH_HOME**:由 test/setup-test-home.ts 在文件开始前
+// 创建(父目录由 test/global-setup.ts 每轮清空)。URL 解析链因此永远走不到
+// profiles/,官方包一律回落到包自身依赖树;同时任何测试写下的凭据/目录缓存/
+// 状态域都不会泄漏给其它测试,结果只由仓库状态决定,与执行顺序、并行度、
+// 上一轮残留无关。运行期需要覆盖 DSH_HOME 的测试(sandbox.test.ts 等)仍可在
+// 自身 beforeEach 里覆盖。
 
 /**
  * TC39 标准装饰器预转译（enforce: 'pre'）。
@@ -52,6 +53,9 @@ export default defineConfig({
     // false：测试目录被清空/改名（include 匹配不到任何用例）时必须红灯，
     // 不允许「零用例即通过」静默放行。
     passWithNoTests: false,
-    env: { DSH_HOME: TEST_DSH_HOME },
+    // 每个测试文件一份全新 DSH_HOME（见文件头）；globalSetup 每轮清空父目录，
+    // 两次运行之间也不留残留。
+    setupFiles: ["./test/setup-test-home.ts"],
+    globalSetup: ["./test/global-setup.ts"],
   },
 });

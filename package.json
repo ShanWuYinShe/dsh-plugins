@@ -45,6 +45,7 @@
     "typecheck": "node scripts/typert.mjs && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "node scripts/build.mjs && vitest run",
     "test:ci": "bun run build && bun run typecheck && vitest run",
+    "test:stability": "node scripts/test-stability.mjs",
     "gate": "node scripts/publish-gate.mjs",
     "adapt": "node scripts/adapt-dsh.mjs",
     "dsh-status": "node scripts/dsh-follow-status.mjs",

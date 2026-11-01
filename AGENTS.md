@@ -15,6 +15,7 @@ bun run typert          # 只生成 Typert 工件（./typert + ./remote，script
 bun run typecheck       # host + client 两套 tsconfig --noEmit（先自动生成 Typert 工件）
 bun run test            # vitest 回归（先跑 scripts/build.mjs 构建，含 typert + esbuild 产物）
 bun run test:ci         # build + typecheck + test（提交/发布前必跑）
+bun run test:stability  # 测试确定性压测：多轮全量 + 多并发档位（见「约定」的确定性要求）
 bun run gate            # 发布门禁干跑：只读，看哪些包会被发布/为何被跳过
 bun run dsh-status      # 两分支 dsh 依赖基线 vs dsh 最新 rc（正式版）对照（详见 RELEASING.md）
 bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览），详见 RELEASING.md
@@ -80,6 +81,17 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   中文分类前缀（`新增:` / `修复:` / `重构:` / `文档:` / `测试:` / `ci:` 等）。
 - 测试环境通过 vitest 配置里的 `DSH_HOME` 与真实用户目录隔离，不要在测试里
   读写真实的 `~/.dsh`。
+- **测试必须确定性**（同一份代码，任何负载、并发度、执行顺序、上一次跑的残留，
+  结果都必须一致）：
+  - 每个测试文件由 `test/setup-test-home.ts` 分配**全新的空 `DSH_HOME`**，
+    测试不得假设其它测试写下的凭据/缓存/状态存在；需要自定义目录的用例自己
+    `mkdtemp` 并在 `afterEach` 清理。
+  - 禁止用「睡固定时长 + 断言没发生」这种墙钟窗口写负向断言；用事件/可等待的
+    完成信号（必要时加最小测试缝），或 fake timers 断言「没有新增未决定时器」。
+  - 异步资源（定时器、在途 I/O、服务）必须显式 dispose/await 完成后再清理临时
+    目录，避免 `ENOTEMPTY` 这类清理竞态。
+  - 禁止靠 `retry`/`skip`/放大 timeout 掩盖不稳定；偶发假红必须查明根因。
+  - 改测试相关代码后跑 `bun run test:stability`（多轮 + 多并发档位）证明稳定。
 - 测试涉及平台差异时必须显式判定平台（如
   `it.skipIf(process.platform !== "darwin")`），或改用运行时取值
   （`canonicalPath`、`dirname(fakeHome)` 等）保持用例平台无关；路径拼写取自运行时，在其他平台也跑得过。新增平台相关用例时
