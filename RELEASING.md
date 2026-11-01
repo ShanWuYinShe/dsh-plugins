@@ -648,6 +648,13 @@ node scripts/plugin-market.mjs build --out /tmp/market-site --registry-url http:
 **回填/修复**：手动触发 publish workflow（`workflow_dispatch`）填一个已发布的 tag——发布
 步骤因已归档跳过，市场步骤照常从全部 Releases 重新生成并提交到 `market` 分支。
 
+> **收敛前稳定线补发的市场回填**：`main` 在收敛前仍是旧版 `publish.yml`（无市场步骤），
+> 给 `main` 打 tag 只产出 Release、不会更新 `market` 分支。稳定线补发后需在 `alpha` 工作树
+> 用本仓生成器手动回填一次：`git fetch --depth=1 origin market` 取既有站点作 `--previous`
+> → `node scripts/plugin-market.mjs build/check`（`--base-url`/`--registry-url` 用固定 URL）
+> → 执行 `publish.yml` 里「Publish market branch」步骤的脚本推送。收敛后 `main` 获得新版
+> 流水，自动更新恢复。
+
 ### 更新链路的真实边界（DSH 0.2.2 行为）
 
 - **安装**：发现页选版本 → `pluginManager.installBundle` → pnpm add 走索引里的 registry，可用。
