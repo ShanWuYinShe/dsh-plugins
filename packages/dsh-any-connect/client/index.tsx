@@ -86,8 +86,12 @@ export function apply(ctx: ClientContext): void {
     }, WorkBuddyConfigPage))
 
     // Inline model labels: the slot is part of the matched host contract (0.2.2).
+    // 该 slot 是 *single*：官方 @deepseek-ai/dsh-client-ui-deepseek-model-label-1017
+    // 也以默认 priority 0 注册同一 slot，同优先级二次注册会在控制台抛错。
+    // 显式低一档优先级：本插件保持渲染（lowest renders），官方注册安全 shadow。
     ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({
       name: 'conversation.input.model.label',
+      priority: -1,
     }, ModelLabel))
   } catch (error: unknown) {
     // Degrade silently on the page: the host provider still serves models.
