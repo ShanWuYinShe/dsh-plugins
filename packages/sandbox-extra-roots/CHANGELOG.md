@@ -1,3 +1,9 @@
+## 0.4.28 (2026-11-01)
+
+### 优化
+
+* **适配 DSH 宿主 0.2.1-rc.5 稳定线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-rc.5`。
+
 ## 0.4.27 (2026-10-24)
 
 - 修复: Landlock 授权片段改走官方 node-addon-landlock-run grantArgs 产出（apply 侧经 getLandlockRuntime 注入），消除对 launcher flag 拼写的硬编码；bwrap 无官方 API 维持现状。

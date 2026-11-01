@@ -1,3 +1,9 @@
+## 0.3.32 (2026-11-01)
+
+### 优化
+
+* **适配 DSH 宿主 0.2.1-rc.5 稳定线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-rc.5`。
+
 ## 0.3.31 (2026-10-24)
 
 - 维护: 依赖分层——react/@types/react/@deepseek-ai/cordis/vitest 按实际 import 声明至本包 devDependencies;无功能变化。
