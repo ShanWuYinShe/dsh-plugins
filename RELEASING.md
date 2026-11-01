@@ -227,6 +227,7 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    `git push origin <目录>-v<版本>`——一次只推一个 tag，推完确认它触发了流水
    并跑完，再推下一个（纪律见下节）。
    tag 推出去即发版——CI（`.github/workflows/publish.yml`）对该 tag 执行：测试 →
+   稳定性回归（`bun run test:stability`）→
    门禁校验（tag 形态、annotated、tag 与 package.json 版本一致、版本不落后已归档）→
    `bun pm pack` 出 tarball 并创建 GitHub Release 挂为资产（prerelease 版本带
    prerelease 标记）。**tag 由你明确打出，CI 绝不创建 tag**：没推 tag 就没有任何

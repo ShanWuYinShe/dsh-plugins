@@ -61,6 +61,11 @@ jobs:
       - name: Run tests
         run: bun run test:ci
 
+      # 稳定性回归（AGENTS.md「测试必须确定性」）：多轮全量 + 并发档位，
+      # 防止把偶发假红/时序竞态带进 release；脚本见 scripts/test-stability.mjs。
+      - name: Test stability
+        run: bun run test:stability
+
       # 发布基线门禁:所有 dsh-* 依赖必须是 ^<版本> 形态、基线与 engines.dsh
       # 兼容声明都齐全且彼此一致——发布归档的 tag 不允许带糊的状态
       # (engines.dsh 是 DSH 官方 manifest 字段,宿主安装/启动据此判定兼容性;
