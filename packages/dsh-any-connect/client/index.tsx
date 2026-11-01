@@ -83,9 +83,15 @@ export function apply(ctx: ClientContext): void {
     }, WorkBuddyConfigPage))
 
     // DSH 0.2.1-alpha.5+: conversation.input.model.label slot for custom inline model labels.
+    // 该 slot 是 *single*：0.2.1-rc.4+ 宿主自带官方
+    // @deepseek-ai/dsh-client-ui-deepseek-model-label-1017，也以默认 priority 0
+    // 注册同一 slot；同优先级二次注册会抛「already has a registration … register
+    // at a different priority to shadow it（lowest renders）」。显式低一档优先级：
+    // 本插件保持渲染、官方注册安全 shadow，避免宿主控制台报错。
     try {
       ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({
         name: 'conversation.input.model.label',
+        priority: -1,
       }, ModelLabel))
     } catch {
       // Degrade silently if host does not have this slot.
