@@ -204,8 +204,10 @@ jobs:
         run: |
           set -euo pipefail
           SITE="$PWD/.workwork/plugin-market-commit"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 身份用 `git -c` 逐命令传，**不要 git config 写仓库配置**：本步骤也会
+          # 在本地手动回填市场时执行，写仓库级 config 会把之后人工提交/tag 的作者
+          # 改成交互机器人（已踩过：本地回填后 alpha 的提交与发版 tag 全成 bot）。
+          AUTHOR=(-c "user.name=github-actions[bot]" -c "user.email=41898282+github-actions[bot]@users.noreply.github.com")
           WORKTREE="$(mktemp -d)/checkout"
           for attempt in 1 2 3; do
             echo "== 尝试 $attempt/3：提交到 $MARKET_BRANCH 分支 =="
@@ -230,9 +232,9 @@ jobs:
             fi
             TREE=$(git -C "$WORKTREE" write-tree)
             if [ -n "$PARENT" ]; then
-              COMMIT=$(git -C "$WORKTREE" commit-tree "$TREE" -p "$PARENT" -m "市场: 更新插件索引与静态 registry（$TAG）")
+              COMMIT=$(git -C "$WORKTREE" "${AUTHOR[@]}" commit-tree "$TREE" -p "$PARENT" -m "市场: 更新插件索引与静态 registry（$TAG）")
             else
-              COMMIT=$(git -C "$WORKTREE" commit-tree "$TREE" -m "市场: 初始化插件索引与静态 registry")
+              COMMIT=$(git -C "$WORKTREE" "${AUTHOR[@]}" commit-tree "$TREE" -m "市场: 初始化插件索引与静态 registry")
             fi
             git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
             if git push origin "$COMMIT:refs/heads/$MARKET_BRANCH"; then
