@@ -1,3 +1,13 @@
+## 0.4.30-alpha.1 (2026-11-01)
+
+### 修复
+
+* **与 rc.4+ 宿主自带的官方模型标签插件并存**：`conversation.input.model.label` 是 single slot，宿主 0.2.1-rc.4+ 的 `@deepseek-ai/dsh-client-ui-deepseek-model-label-1017` 也以默认 priority 0 注册同一 slot，同优先级二次注册会让宿主控制台报 `already has a registration …`。改为显式 `priority: -1` 注册：本插件保持渲染（lowest renders），官方注册安全 shadow；模型名/费率标签行为不变。
+
+### 优化
+
+* **版本线前移到 `0.4.30` 预发布线**：稳定线已归档 `0.4.29`，发布门禁要求预发布版本必须高于所有已归档版本（含稳定线），因此跳过 `0.4.29-*`；后续 alpha 迭代与收敛转正都在 `0.4.30` 线上推进。
+
 ## 0.4.28-alpha.9 (2026-10-30)
 
 ### 修复
