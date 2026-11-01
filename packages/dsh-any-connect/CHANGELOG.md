@@ -3,6 +3,7 @@
 ### 修复
 
 * **与 rc.4+ 宿主自带的官方模型标签插件并存**：`conversation.input.model.label` 是 single slot，宿主 0.2.1-rc.4+ 的 `@deepseek-ai/dsh-client-ui-deepseek-model-label-1017` 也以默认 priority 0 注册同一 slot，同优先级二次注册会让宿主控制台报 `already has a registration …`。改为显式 `priority: -1` 注册：本插件保持渲染（lowest renders），官方注册安全 shadow；模型名/费率标签行为不变。
+* **卸载后不再残留心跳文件**：心跳写是 fire-and-forget（不能拖慢注册），但 dispose 原先不等在途写就直接清理，迟到的写会把 `<DSH_HOME>/cache/dsh-any-connect` 下的心跳文件重新写回来——宿主退出后 `doctor` 仍能看到一条假心跳。现在 dispose 先等全部在途心跳写落定再清理。
 
 ### 优化
 
