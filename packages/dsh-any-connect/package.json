@@ -1,6 +1,6 @@
 {
   "name": "@chaoset/dsh-any-connect",
-  "version": "0.4.28",
+  "version": "0.4.29",
   "description": "DSH plugin: bring models offered by WorkBuddy-style desktop agents into DeepSeek Harness — zero configuration, per-model thinking effort, and billing rate at a glance",
   "engines": {
     "node": ">=22.19.0"
@@ -38,12 +38,6 @@
       ]
     }
   },
-  "dependencies": {
-    "zod": "4.4.3"
-  },
-  "optionalDependencies": {
-    "@earendil-works/pi-ai": "^1.1.0"
-  },
   "scripts": {
     "build": "node ../../scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -76,12 +70,14 @@
     "@deepseek-ai/dsh-storage-json": "^0.2.1-rc.5",
     "@deepseek-ai/dsh-timeout": "^0.2.1-rc.5",
     "@deepseek-ai/schemastery": "~3.18.5",
+    "@earendil-works/pi-ai": "^1.1.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "jsdom": "^30.1.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "zod": "4.4.3"
   },
   "bugs": {
     "url": "https://github.com/ShanWuYinShe/dsh-plugins/issues"

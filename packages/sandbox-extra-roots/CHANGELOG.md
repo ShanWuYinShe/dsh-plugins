@@ -1,3 +1,9 @@
+## 0.4.29 (2026-11-01)
+
+### 修复
+
+* **运行期依赖归零（可被插件索引 / 静态 registry 安装）**：把 `@deepseek-ai/node-addon-landlock-run` 从 `optionalDependencies` 移入 `devDependencies`。该包本就只在 Linux 惰性加载、缺失时 Landlock 引擎自动降级（其余沙盒引擎不受影响）；0.4.28 的声明方式会让 DSH 用静态 registry 安装索引版本时解析它并 404，本版本修正。
+
 ## 0.4.28 (2026-11-01)
 
 ### 优化

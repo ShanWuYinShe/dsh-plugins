@@ -1,3 +1,9 @@
+## 0.4.29 (2026-11-01)
+
+### 修复
+
+* **运行期依赖归零（可被插件索引 / 静态 registry 安装）**：把 `zod` 与 `@earendil-works/pi-ai` 从 `dependencies`/`optionalDependencies` 移入 `devDependencies`，运行时由宿主 profile runner 的外部插件 runtime resolution 供给。0.4.28 的声明方式会让 DSH 用静态 registry 安装索引版本时按 tarball 清单解析这两个依赖并 404（同 profile 后续包操作也会失败），本版本修正；插件行为不变。
+
 ## 0.4.28 (2026-11-01)
 
 ### 优化
