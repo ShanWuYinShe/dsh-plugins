@@ -4,9 +4,44 @@
   "license": "MIT",
   "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
   "dist-tags": {
-    "latest": "0.4.27"
+    "latest": "0.4.29"
   },
   "versions": {
+    "0.4.29": {
+      "name": "@chaoset/sandbox-extra-roots",
+      "version": "0.4.29",
+      "description": "DSH host plugin: extra writable roots for the workspace-write sandbox (Seatbelt/bwrap/Landlock profiles and the fs fence)",
+      "license": "MIT",
+      "engines": {
+        "node": ">=22.19.0",
+        "dsh": "0.2.1-rc.5"
+      },
+      "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/sandbox-extra-roots#readme",
+      "repository": {
+        "url": "https://github.com/ShanWuYinShe/dsh-plugins",
+        "directory": "packages/sandbox-extra-roots"
+      },
+      "keywords": [],
+      "dsh": {
+        "host": "0.2.1-rc.5",
+        "bundle": {
+          "patch": "./cordis.patch.yml"
+        },
+        "client": {
+          "platform": "web",
+          "inject": [
+            "slots",
+            "locale",
+            "remote"
+          ]
+        }
+      },
+      "dist": {
+        "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/sandbox-extra-roots-v0.4.29/chaoset-sandbox-extra-roots-0.4.29.tgz",
+        "integrity": "sha512-ygJTyCEPtRo4LuDduKJXmZdnZmLAIMoOX9CfOuJKa7VfG5lPDI8WDSV2epA5uXsqGK/Q7VCkDJI+uCit8NrP1g==",
+        "shasum": "b6fb24d9719b39ae0b9440d6d0776ae7e7253966"
+      }
+    },
     "0.4.28-alpha.6": {
       "name": "@chaoset/sandbox-extra-roots",
       "version": "0.4.28-alpha.6",
@@ -1176,6 +1211,7 @@
     }
   },
   "time": {
+    "0.4.29": "2026-11-01T09:34:19.000Z",
     "0.4.28-alpha.6": "2026-10-30T05:08:27.000Z",
     "0.4.28-alpha.5": "2026-10-29T18:06:24.000Z",
     "0.4.28-alpha.4": "2026-10-29T16:45:53.000Z",

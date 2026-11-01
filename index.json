@@ -121,6 +121,17 @@
       },
       "versions": [
         {
+          "version": "0.4.29",
+          "publishTimestamp": 1793525560,
+          "source": {
+            "type": "npm",
+            "registry": "https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/"
+          },
+          "engines": {
+            "dsh": "0.2.1-rc.5"
+          }
+        },
+        {
           "version": "0.4.28-alpha.9",
           "publishTimestamp": 1793341846,
           "source": {
@@ -845,6 +856,17 @@
       },
       "versions": [
         {
+          "version": "0.2.1",
+          "publishTimestamp": 1793524988,
+          "source": {
+            "type": "npm",
+            "registry": "https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/"
+          },
+          "engines": {
+            "dsh": "0.2.1-rc.5"
+          }
+        },
+        {
           "version": "0.2.1-alpha.7",
           "publishTimestamp": 1793336993,
           "source": {
@@ -1272,6 +1294,17 @@
       },
       "versions": [
         {
+          "version": "0.4.29",
+          "publishTimestamp": 1793525659,
+          "source": {
+            "type": "npm",
+            "registry": "https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/"
+          },
+          "engines": {
+            "dsh": "0.2.1-rc.5"
+          }
+        },
+        {
           "version": "0.4.28-alpha.6",
           "publishTimestamp": 1793336907,
           "source": {
@@ -1665,6 +1698,17 @@
         }
       },
       "versions": [
+        {
+          "version": "0.3.32",
+          "publishTimestamp": 1793525128,
+          "source": {
+            "type": "npm",
+            "registry": "https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/"
+          },
+          "engines": {
+            "dsh": "0.2.1-rc.5"
+          }
+        },
         {
           "version": "0.3.32-alpha.6",
           "publishTimestamp": 1793337109,
