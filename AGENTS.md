@@ -91,7 +91,8 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   - 异步资源（定时器、在途 I/O、服务）必须显式 dispose/await 完成后再清理临时
     目录，避免 `ENOTEMPTY` 这类清理竞态。
   - 禁止靠 `retry`/`skip`/放大 timeout 掩盖不稳定；偶发假红必须查明根因。
-  - 改测试相关代码后跑 `bun run test:stability`（多轮 + 多并发档位）证明稳定。
+  - 改测试相关代码后跑 `bun run test:stability`（多轮 + 多并发档位）证明稳定；
+    alpha 分支推送（`test.yml`）与发布流水（`publish.yml`）会自动跑同一脚本。
 - 测试涉及平台差异时必须显式判定平台（如
   `it.skipIf(process.platform !== "darwin")`），或改用运行时取值
   （`canonicalPath`、`dirname(fakeHome)` 等）保持用例平台无关；路径拼写取自运行时，在其他平台也跑得过。新增平台相关用例时

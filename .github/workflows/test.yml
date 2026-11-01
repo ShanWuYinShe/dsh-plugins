@@ -72,6 +72,13 @@ jobs:
       - name: Build and test
         run: bun run test:ci
 
+      # 稳定性回归（AGENTS.md「测试必须确定性」）：仅 alpha 开发线自动跑
+      # （push 到 alpha / PR 目标 alpha）；main 待命期不跑。发布流水
+      # publish.yml 在 pack/publish 前也会再跑一次，保证 release 产物来自稳定提交。
+      - name: Test stability (alpha)
+        if: "github.ref == 'refs/heads/alpha' || github.base_ref == 'alpha'"
+        run: bun run test:stability
+
       # 依赖漏洞审计（OSV.dev 公共 API）：分支推送即审计，早于发布门禁发现
       # 问题；命中 exit 1 使本 job 红灯（安全审计宁可误报让人看一眼）。
       - name: Audit dependencies
