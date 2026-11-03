@@ -298,6 +298,7 @@ node -e "const fs=require('fs');const fd=fs.openSync(process.argv[1],'r');const 
 
 - `references/start-plan-channel.md` — plan 通道取证全过程、已排除变量清单、最小探针代码
 - `references/quota-and-plan.md` — Start Plan balance / claim 响应样本、Coding Plan 窗口额度 JSON、pill 排查细节
+- `references/rate-limit-observability.md` — 限流维度（WorkBuddy 按模型）、恢复时刻的官方解析口径与取证命令、台账/卡片/pill 的现行边界
 - `references/model-catalog.md` — 拉取/推送链细节、重载窗口取证命令、测试四个坑
 - `references/workbuddy-ai-and-credits.md` — 11140 证据链、product.json 权威字段、积分台账实现
 - `references/host-adaptation-and-forensics.md` — adapt 缺口细节、宿主 0.2.2-alpha.3 起的适配面、asar 取证踩坑
