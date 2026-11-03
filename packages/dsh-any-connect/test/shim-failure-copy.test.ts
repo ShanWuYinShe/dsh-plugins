@@ -140,6 +140,28 @@ describe('upstreamFailureMessage', () => {
     expect(HOST_AUTH_RE.test(message)).toBe(false)
   })
 
+  it('WorkBuddy 6004 的中文文案也把恢复时刻写进失败文案', () => {
+    const resetAt = new Date(Date.now() + 2 * 3_600_000)
+    const beijing = new Date(resetAt.getTime() + 8 * 3_600_000)
+    const pad = (value: number): string => String(value).padStart(2, '0')
+    const stamp = `${beijing.getUTCFullYear()}-${pad(beijing.getUTCMonth() + 1)}-${pad(beijing.getUTCDate())}`
+      + ` ${pad(beijing.getUTCHours())}:${pad(beijing.getUTCMinutes())}:${pad(beijing.getUTCSeconds())}`
+    const body = JSON.stringify({
+      code: 6004,
+      msg: `您的使用量已超出频率限制，将在 ${stamp} UTC+8 重置，您也可以切换其他模型继续使用。`,
+      requestId: 'ebb485708428468495b53080014cda53',
+    })
+    const message = upstreamFailureMessage('workbuddy', 'soft_rate', 429, body)
+    expect(message).toContain('上游限流')
+    expect(message).toContain('恢复')
+    expect(message).not.toContain('未提供恢复时间')
+    // 恢复时刻按本地时区渲染，期望值同样用本地 getter 拼，跨时区 CI 也成立。
+    const local = new Date(resetAt.getTime())
+    const localStamp = `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}`
+      + ` ${pad(local.getHours())}:${pad(local.getMinutes())}`
+    expect(message).toContain(localStamp)
+  })
+
   it('429 且上游既没给头也没给文案时刻时，如实说未提供', () => {
     const message = upstreamFailureMessage('workbuddy', 'soft_rate', 429, '{"code":6004,"msg":"slow down"}')
     expect(message).toContain('上游未提供恢复时间')

@@ -114,6 +114,25 @@ describe('shim 把上游限流写进台账', () => {
     expect(Math.abs(active!.resetAtMs! - resetAt.getTime())).toBeLessThan(2_000)
   })
 
+  it('429 + WorkBuddy 中文 6004 文案里的 UTC+8 恢复时刻 → 台账记录', async () => {
+    const resetAt = new Date(Date.now() + 2 * 3_600_000)
+    const beijing = new Date(resetAt.getTime() + 8 * 3_600_000)
+    const pad = (value: number): string => String(value).padStart(2, '0')
+    const stamp = `${beijing.getUTCFullYear()}-${pad(beijing.getUTCMonth() + 1)}-${pad(beijing.getUTCDate())}`
+      + ` ${pad(beijing.getUTCHours())}:${pad(beijing.getUTCMinutes())}:${pad(beijing.getUTCSeconds())}`
+    const body = JSON.stringify({
+      code: 6004,
+      msg: `您的使用量已超出频率限制，将在 ${stamp} UTC+8 重置，您也可以切换其他模型继续使用。`,
+      requestId: 'ebb485708428468495b53080014cda53',
+    })
+    const harness = await startShim(() => ({ ok: false, status: 429, kind: 'soft_rate', message: body }))
+    const response = await postChat(harness)
+    expect(response.status).toBe(429)
+    const active = harness.ledger.activeFor('workbuddy')
+    expect(active?.model).toBe('glm-5.3')
+    expect(Math.abs(active!.resetAtMs! - resetAt.getTime())).toBeLessThan(2_000)
+  })
+
   it('429 但没有恢复头 → 记录「被限了」，不编造恢复时刻', async () => {
     const harness = await startShim(() => ({ ok: false, status: 429, kind: 'soft_rate', message: 'slow down' }))
     await postChat(harness)

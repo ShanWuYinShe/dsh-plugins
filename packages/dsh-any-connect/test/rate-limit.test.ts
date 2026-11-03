@@ -103,6 +103,17 @@ describe('parseResetMessage', () => {
       .toBe(Date.UTC(2026, 9, 30, 6, 20, 2))
   })
 
+  it('解析真实中文 6004 文案（2026-11-03 实测样本）', () => {
+    const body = JSON.stringify({
+      code: 6004,
+      msg: '您的使用量已超出频率限制，将在 2026-11-04 09:46:40 UTC+8 重置，您也可以切换其他模型继续使用。',
+      requestId: 'ebb485708428468495b53080014cda53',
+    })
+    // 观测时刻：2026-11-03 21:05:34 +08:00；恢复时刻应落在 2026-11-04 09:46:40 +08:00。
+    const observedAt = Date.parse('2026-11-03T21:05:34+08:00')
+    expect(parseResetMessage(body, observedAt)).toBe(Date.parse('2026-11-04T09:46:40+08:00'))
+  })
+
   it('调用方可以覆盖裸壁钟的时区解释', () => {
     expect(parseResetMessage('will reset at 2026-10-30 14:20:02', NOW, { bareWallClockOffsetMinutes: 0 }))
       .toBe(Date.UTC(2026, 9, 30, 14, 20, 2))
