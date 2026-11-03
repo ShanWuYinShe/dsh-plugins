@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import * as AnyConnect from '../src/index.js'
-import { WORKBUDDY_AI_SETTINGS_NS, WORKBUDDY_SETTINGS_NS } from '../src/config.js'
 import { WorkBuddyUpstreamClient } from '../src/upstream.js'
 import { applyVariantConfig } from '../src/variant-runtime.js'
 import { AI_VARIANT, CN_VARIANT } from '../src/variants.js'
@@ -48,30 +47,13 @@ describe('WorkBuddy Host settings integration', () => {
     await vi.waitFor(() => {
       expect(ctx.llm.listProviders().map(provider => provider.id)).toContain('workbuddy')
     }, { timeout: 5000 })
-    expect(ctx.llm.listConfigurableProviders()).toContainEqual({
-      provider: 'workbuddy',
-      displayName: 'WorkBuddy',
-      settingsNs: 'anyconnect',
-      settingsPath: [],
-      declared: false,
-    })
-
-    // The directory entries are what the Models settings page joins on to
-    // render a card. Without a Loader the settingsNs falls back to the
-    // legacy namespace constants.
-    const directory = ctx.llm.listConfigurableProviders()
-    for (const [provider, settingsNs] of [
-      ['workbuddy', WORKBUDDY_SETTINGS_NS],
-      ['workbuddy-ai', WORKBUDDY_AI_SETTINGS_NS],
-    ] as const) {
-      expect(directory).toContainEqual({
-        provider,
-        displayName: expect.any(String),
-        settingsNs,
-        settingsPath: [],
-        declared: false,
-      })
-    }
+    // 本插件不向「设置 → 模型」页注册 provider 目录项：五个渠道没有可在该页
+    // 填写的 profile（凭据来自桌面 App / 免密通道），目录项只会渲染出一张
+    // layout=unknown 的死卡片（只剩「其余字段在 cordis.patch.yml 中」提示、
+    // '应用' 按钮禁用）。配置面在「内置插件」页的 bundle 配置卡片；模型选择器
+    // 与模型目录来自 adapter 注册（下面的 listModels 断言）。这条锁防止目录项
+    // 被"顺手"加回来、把死卡片带回设置页。
+    expect(ctx.llm.listConfigurableProviders()).toEqual([])
 
     // No credential anywhere: the group is hidden (empty), not fallback-filled.
     await vi.waitFor(async () => {
@@ -311,15 +293,8 @@ describe('WorkBuddy international variant', () => {
       expect(await ctx.llm.listModels('workbuddy')).toEqual([])
       expect(await ctx.llm.listModels('workbuddy-ai')).toEqual([])
     }, { timeout: 5000 })
-    const entries = ctx.llm.listConfigurableProviders()
-    expect(entries.find(entry => entry.provider === 'workbuddy')).toMatchObject({
-      settingsNs: WORKBUDDY_SETTINGS_NS,
-      settingsPath: [],
-    })
-    expect(entries.find(entry => entry.provider === 'workbuddy-ai')).toMatchObject({
-      settingsNs: WORKBUDDY_AI_SETTINGS_NS,
-      settingsPath: [],
-    })
+    // 目录项缺席是刻意行为（见上一条用例）：模型目录仍由 adapter 注册供给。
+    expect(ctx.llm.listConfigurableProviders()).toEqual([])
   })
 
   it('serves the AI fallback roster when only the AI side is signed in', async () => {

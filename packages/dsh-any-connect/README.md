@@ -124,6 +124,11 @@ dsh-any-connect status --provider opencode-free
 | `authFileZCode` | 自动探测 | 同上，作用于 ZCode 桌面端凭据文件（覆盖环境变量与平台默认探测） |
 | `authFileOpenCode` | 免密公开通道 | 同上，作用于 OpenCode Free 通道的凭据 / token 文件路径（默认免密公开通道，一般无需配置） |
 
+> 本插件的五个渠道**不会**出现在 DSH「设置 → 模型」页：它们没有可填写的 provider profile
+> （凭据来自桌面 App / 官方便捷通道），声明进去只会得到一张空的编辑卡片。配置面统一在
+> **「设置 → 内置插件 → dsh-any-connect」的插件卡片**（模型隐藏、额度、今日统计等）以及上表
+> 的 `cordis.patch.yml` 高级字段；模型选择器照常可用，无需任何额外配置。
+
 ### 凭据来源探测顺序与跨系统支持
 
 - **WorkBuddy**：macOS / Linux 原生路径、Windows 的 Local → Roaming AppData、WSL 下挂载的 Windows 用户目录；亦可用 `WORKBUDDY_AUTH_FILE` / `WORKBUDDY_AI_AUTH_FILE` 环境变量显式指定。

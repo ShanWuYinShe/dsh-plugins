@@ -320,42 +320,29 @@ export function createVariantRuntimeSet(deps: {
             resolveAttachments: () => ctx.get('attachments'),
           })
 
-          let releaseAdapter: AdapterRegistrationHandle | undefined
-          let releaseDirectory: (() => void) | undefined
-          try {
-            releaseAdapter = ctx.llm.registerAdapter([variant.id], adapter.adapter)
-            releaseDirectory = ctx.llm.registerConfigurableProviders([{
-              provider: variant.id,
-              displayName: variant.displayName,
-              // Host directory entries point at the Loader profile entry id;
-              // without a Loader (bare-Context installs/tests) fall back to
-              // the plugin's own namespace for a stable, testable identity.
-              settingsNs: ctx.fiber.entry?.options.id ?? variant.settingsNs,
-              settingsPath: [],
-              declared: false,
-            }])
-          } finally {
-            if (releaseAdapter === undefined || releaseDirectory === undefined) {
-              // Registration threw; release whichever half landed.
-              releaseAdapter?.()
-              releaseDirectory?.()
-            }
-          }
+          // 只注册 adapter：provider 路由与模型目录都由此而来。
+          //
+          // **不要再 registerConfigurableProviders**——本插件的五个渠道在
+          // 「设置 → 模型」页没有可填写的 profile（凭据来自桌面 App / 免密
+          // 通道），声明目录项只会让该页渲染出一张 layout=unknown 的死卡片：
+          // 只剩「其余字段在 cordis.patch.yml 中」提示、'应用' 按钮禁用，还
+          // 给用户「这里能配 API key」的错误暗示。配置面在「内置插件」页的
+          // bundle 配置卡片（plugins.bundle.config slot）。模型选择器与模型
+          // 目录来自 llm.listProviders()（adapter 注册），不依赖目录项。
+          const releaseAdapter = ctx.llm.registerAdapter([variant.id], adapter.adapter)
           // 注册成功：记下句柄，目录变化时靠它通知宿主（见 notifyCatalogChanged）。
           // 与下面的释放严格成对——不记的话就是一条挂在已释放注册上的 replace。
           adapterHandles.set(variant.id, releaseAdapter)
           try {
             ctx.effect(() => () => {
               adapterHandles.delete(variant.id)
-              releaseAdapter?.()
-              releaseDirectory?.()
+              releaseAdapter()
             })
           } catch {
             // The plugin was disposed during registration; release immediately —
             // the plugin-level disposer already closed the shim.
             adapterHandles.delete(variant.id)
-            releaseAdapter?.()
-            releaseDirectory?.()
+            releaseAdapter()
           }
           // 注册本身就会发布 llm/adapters-updated，所以这一次通知不是多余的：
           // 客户端在启动到注册之间可能已打开过页面，缓存里存的是空目录。

@@ -125,9 +125,9 @@ describe('目录变化 → 通知宿主实时刷新模型选择框', () => {
     // 第一次完全相同）**一次都不广播**——宿主每小时的定时刷新绝大多数都属于这种，
     // 无条件广播会让每个打开的客户端每小时白重拉一次目录。
     //
-    // 计数基线说明：宿主对每个变体有 2 次固有广播（registerAdapter 与
-    // registerConfigurableProviders 各一次，实测），插件自己再加 1 次目录发布。
-    // 这里只关心"增量"，所以先记下基线再比差值，不写死绝对数。
+    // 计数基线说明：注册阶段本变体已有若干次固有广播（adapter 注册等，实测——
+    // 具体次数随宿主实现变化，见本文件 installPlugin 的计数说明），插件自己再加
+    // 1 次目录发布。这里只关心"增量"，所以先记下基线再比差值，不写死绝对数。
     const roster: WorkBuddyModelInfo[][] = [[catalogRow('alpha')], [catalogRow('alpha')], [catalogRow('beta')], []]
     const { saves } = trackRefreshCompletions()
     const { publishes, events } = await installPlugin({ models: async () => roster.shift() ?? [] })
