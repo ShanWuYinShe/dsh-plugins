@@ -49,3 +49,22 @@
   （**但重定向后它读不到真实登录态**，会报 "Authentication required"，所以它无法直接充当 chat 对照）。
 - 查内置 provider 配置的权威位置：`Contents/Resources/config/provider/zcode-builtin.json`（含每个 provider 的
   `baseUrl` / `access.mode`，是"端点属于哪条通道"的权威来源）。
+
+## 宿主 0.2.2-alpha.3 起的适配面（现行口径）
+
+- **pi-ai profile 新必填字段**：`ResolvedPiAiProviderProfile` 增加了
+  `maxRequestImages`（默认 50）与 `imageOffloadCountQuantum`（默认 10，必须 ≤ `maxRequestImages`）。
+  这两个默认常量在 `dsh-llm-pi-ai` 的 `config.d.ts` 里导出，但**没有从包入口再导出**，
+  构造 profile 时按同值字面量补齐（见 `src/adapter.ts` 的 `REQUEST_IMAGE_BUDGETS`）。
+  保留图片张数超限时宿主以 `IMAGE_OFFLOAD_REQUIRED` 失败并给出需卸载的最旧张数
+  （此前请求只受 base64 字节上限约束）。
+- **不要向「设置 → 模型」页声明 provider 目录项**：宿主该页只对 `llm-pi-ai` / `llm-deepseek`
+  两种命名空间渲染编辑器；插件自己的命名空间是 `layout=unknown`，只会得到一张
+  「其余字段在 cordis.patch.yml 中」且『应用』被禁用的死卡片（0.2.1-rc.5 与 0.2.2-alpha.3
+  行为一致）。模型选择器与模型目录来自 `llm.registerAdapter` + `llm.listProviders()`，
+  不依赖 `registerConfigurableProviders`；配置面在 `plugins.bundle.config` 卡片。
+  回归锁：`test/settings-integration.test.ts` 断言 `listConfigurableProviders()` 为空。
+- **composer 槽位不要放 fixed 覆盖层**：0.2.2-alpha.3 给 composer seat 加了
+  `will-change: transform`，该 seat 因此成为 fixed 后代的包含块；宿主注释要求 composer 内
+  所有 fixed 浮层一律 portal 到 `document.body`。本插件在 composer 槽位只放内联文本
+  （`conversation.input.model.label`），不要在那里新增 `position: fixed` 弹层。
