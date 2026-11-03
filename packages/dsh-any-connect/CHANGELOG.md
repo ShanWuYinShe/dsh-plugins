@@ -1,3 +1,15 @@
+## 0.4.30-alpha.2 (2026-11-03)
+
+### 修复
+
+* **「设置 → 模型」页不再出现本插件的五个渠道**：此前把每个渠道声明成宿主的 configurable-provider 目录项，而宿主该页编辑器只认 `llm-pi-ai` / `llm-deepseek` 两种布局，本插件的命名空间只能渲染出一张 layout=unknown 的死卡片（仅剩「其余字段在 cordis.patch.yml 中」提示、『应用』按钮禁用），还给用户「这里能配 API key」的错误暗示。现在只注册 adapter——模型选择器与模型目录来自 `llm.listProviders()`，不依赖目录项；配置面仍在「内置插件」页的插件卡片，并加了一条反向锁防止目录项被加回来。
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.3`**：全部 `@deepseek-ai/dsh-*` 依赖 range → `^0.2.2-alpha.3`，`engines.dsh` → 精确 `0.2.2-alpha.3`；vendor 依赖随宿主线前移（`@deepseek-ai/cordis ~4.0.6-alpha.2`、`@deepseek-ai/schemastery ~3.18.6-alpha.2`、`@deepseek-ai/cordis-plugin-loader ~1.0.7-alpha.2`），避免双版本 Cordis 的 `Context` 声明合并失效。
+* **pi-ai profile 适配新增的图片计数上限**：`ResolvedPiAiProviderProfile` 新增必填 `maxRequestImages` / `imageOffloadCountQuantum`，按宿主默认值（50 / 10）声明；保留图片超过 50 张的请求会以 `IMAGE_OFFLOAD_REQUIRED` 失败并提示需要卸载的最旧张数（此前只受字节上限约束），图片请求行为与宿主自家 pi-ai profile 一致。
+* `THIRD_PARTY_NOTICES.md` 的内联闭包版本同步到本次构建产物（cordis / cosmokit / schemastery 与 6 个 `@deepseek-ai/dsh-*` 包）。
+
 ## 0.4.30-alpha.1 (2026-11-01)
 
 ### 修复

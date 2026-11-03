@@ -4,10 +4,10 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 
 | 插件包 | 核心功能 | 当前版本 | 适配 DSH |
 |---|---|---|---|
-| [`@chaoset/dsh-any-connect`](packages/dsh-any-connect/) | **多渠道桌面端与免密模型接入**：WorkBuddy（国内/国际版）、ZCode（Coding/Start Plan 双通道）、OpenCode Free 官方免密免费模型通道；支持思考强度自测与补全、积分倍率显示、图片多模态、自定义模型隐藏与 CLI 诊断 | `0.4.30-alpha.1` | `0.2.2-alpha.2` |
-| [`@chaoset/provider-usage`](packages/provider-usage/) | **对话底栏模型额度指示器**：在输入框状态栏（composer dock）实时显示当前会话 provider 剩余额度与重置时间，点击展开可视化进度条与详细计费包；内置 8+ 种 Provider 查询器并提供开放注册 Seam | `0.2.2-alpha.1` | `0.2.2-alpha.2` |
-| [`@chaoset/sandbox-extra-roots`](packages/sandbox-extra-roots/) | **沙盒额外允许写入目录**：为 `workspace-write` 沙盒安全追加工具缓存目录（npm/pip/cargo/go 等）；跨平台 Seatbelt/bwrap/Landlock 原生沙盒引擎注入；严格防范危险根与 TOCTOU 符号链接逃逸 | `0.4.30-alpha.1` | `0.2.2-alpha.2` |
-| [`@chaoset/session-archive`](packages/session-archive/) | **归档会话完整生命周期管理**：Web 侧边栏专属归档面板与实时徽标；抽屉式**只读浏览**历史会话事件流；批量安全恢复到会话树；两段式彻底物理删除与落盘防竞态保护；纯前端毫秒级检索与排序 | `0.3.33-alpha.1` | `0.2.2-alpha.2` |
+| [`@chaoset/dsh-any-connect`](packages/dsh-any-connect/) | **多渠道桌面端与免密模型接入**：WorkBuddy（国内/国际版）、ZCode（Coding/Start Plan 双通道）、OpenCode Free 官方免密免费模型通道；支持思考强度自测与补全、积分倍率显示、图片多模态、自定义模型隐藏与 CLI 诊断 | `0.4.30-alpha.2` | `0.2.2-alpha.3` |
+| [`@chaoset/provider-usage`](packages/provider-usage/) | **对话底栏模型额度指示器**：在输入框状态栏（composer dock）实时显示当前会话 provider 剩余额度与重置时间，点击展开可视化进度条与详细计费包；内置 8+ 种 Provider 查询器并提供开放注册 Seam | `0.2.2-alpha.2` | `0.2.2-alpha.3` |
+| [`@chaoset/sandbox-extra-roots`](packages/sandbox-extra-roots/) | **沙盒额外允许写入目录**：为 `workspace-write` 沙盒安全追加工具缓存目录（npm/pip/cargo/go 等）；跨平台 Seatbelt/bwrap/Landlock 原生沙盒引擎注入；严格防范危险根与 TOCTOU 符号链接逃逸 | `0.4.30-alpha.2` | `0.2.2-alpha.3` |
+| [`@chaoset/session-archive`](packages/session-archive/) | **归档会话完整生命周期管理**：Web 侧边栏专属归档面板与实时徽标；抽屉式**只读浏览**历史会话事件流；批量安全恢复到会话树；两段式彻底物理删除与落盘防竞态保护；纯前端毫秒级检索与排序 | `0.3.33-alpha.2` | `0.2.2-alpha.3` |
 
 ---
 
@@ -155,7 +155,7 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 
 > 历史代价（如实说明）：0.2.2 适配线之前发布的 tarball 里 `engines.dsh` 是范围，索引按规则把它们 pin 到发布时适配的精确宿主版本（如 `0.2.1-rc.3`）。所以当前稳定参考 `0.2.1-rc.5` 的宿主不会看到旧稳定版可安装——这是「精确匹配、不误导」的代价，收敛期发布对应版本后恢复。已发布 tarball 不可变，索引侧严格、安装期检查对历史版本仍宽松（CLI 仍可强制装旧包）。
 
-> 注：预览线宿主（如 0.2.2-alpha.2）下兼容版本可能全是预发布版，而 DSH 的「默认」标签只从兼容的正式版里选，因此卡片可能不打「默认」；「安装」按钮仍指向该宿主兼容的最高版本，功能正常。
+> 注：预览线宿主（如 0.2.2-alpha.3）下兼容版本可能全是预发布版，而 DSH 的「默认」标签只从兼容的正式版里选，因此卡片可能不打「默认」；「安装」按钮仍指向该宿主兼容的最高版本，功能正常。
 
 > 运行期依赖的历史代价（如实说明，2026-10-30 实测）：2026-10-30T00:00:00Z 之前发布的旧 tarball
 > 里仍带 `dependencies`（例如 `zod`），这些版本按「策略生效前只告警」的规则保留在索引里。若你

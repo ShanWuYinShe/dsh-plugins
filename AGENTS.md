@@ -60,7 +60,7 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   新增发布包必须在 `scripts/lib/plugin-market-core.mjs` 的 `PACKAGE_DISPLAY` 补展示元数据，
   否则 `bun run market:build` 直接报错。
 - **兼容声明**：插件对 DSH 的兼容性用官方 `engines.dsh`，且必须写**精确宿主版本**
-  （如 `0.2.2-alpha.2`，不写 `^` / `~` / `>=`）；依赖 range 仍是 `^X`，由
+  （如 `0.2.2-alpha.3`，不写 `^` / `~` / `>=`）；依赖 range 仍是 `^X`，由
   `bun run adapt` 同步维护，`dsh-baseline` 严格核对「range 的 `^X` ↔ `engines.dsh`
   的精确 `X`」。DSH 升级很可能不兼容旧版本，因此每次升级都要重发对应插件版本；
   不要使用已废弃的自造字段 `dsh.host`。

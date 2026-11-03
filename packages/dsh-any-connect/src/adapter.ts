@@ -31,9 +31,17 @@ const WORKBUDDY_STREAM_IDLE_TIMEOUT_MS = 300_000
  * Image-request budgets at the dsh-llm-pi-ai defaults; the profile type
  * requires them. They bound requests to models whose catalog
  * entry declares `supportsImages`; text-only models never receive images.
+ *
+ * 0.2.2-alpha.3 起 `ResolvedPiAiProviderProfile` 还要求两个计数维度（宿主默认值
+ * 50 / 10：`dsh-llm-pi-ai` config.ts 的 `DEFAULT_MAX_REQUEST_IMAGES` /
+ * `DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM`，两者未从包入口再导出）：保留图片超过
+ * 50 张的请求会以 `IMAGE_OFFLOAD_REQUIRED` 失败并提示需要卸载的最旧张数。
+ * 插件沿用同一默认，与宿主自家 pi-ai profile 的行为一致。
  */
 const REQUEST_IMAGE_BUDGETS = {
   maxRequestImageBytes: 20_971_520,
+  maxRequestImages: 50,
+  imageOffloadCountQuantum: 10,
   requestImagePixelBudget: 4_194_304,
   requestImageMaxBytes: 1_048_576,
 } as const

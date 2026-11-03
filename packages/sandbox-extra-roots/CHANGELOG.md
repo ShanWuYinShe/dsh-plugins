@@ -1,3 +1,9 @@
+## 0.4.30-alpha.2 (2026-11-03)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.3`**：全部 `@deepseek-ai/dsh-*` 依赖 range → `^0.2.2-alpha.3`，`engines.dsh` → 精确 `0.2.2-alpha.3`；vendor 依赖 `@deepseek-ai/cordis` 前移到 `~4.0.6-alpha.2`。`@deepseek-ai/dsh-sandbox` 在 alpha.3 只有版本号变化（sandbox / sandbox-local / sandbox-policy 的 src 未改），包装契约无变化，无代码适配。
+
 ## 0.4.30-alpha.1 (2026-11-01)
 
 ### 优化

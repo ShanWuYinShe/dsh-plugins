@@ -61,7 +61,7 @@ warning（刻意非阻塞——提醒，不是门禁）。
 
 发布侧的强校验由 `node scripts/dsh-baseline.mjs`（发布门禁步骤
 「Verify dsh baseline」）执行：所有 dsh-* 依赖必须是 `^<版本>` 形态；
-`engines.dsh` **必须写精确宿主版本**（如 `0.2.2-alpha.2`，不能写
+`engines.dsh` **必须写精确宿主版本**（如 `0.2.2-alpha.3`，不能写
 `^X` / `~X` / `>=X`），且必须与依赖基线精确一致；任一不满足即
 exit 1 阻断发布。`engines.dsh` 是 DSH 官方 manifest 字段，宿主安装与
 profile 启动按**精确匹配**判定插件兼容性——写范围会过度声明兼容性、误导用户，
@@ -214,7 +214,7 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    - 在 `CHANGELOG.md` 顶部新增 `## <版本> (YYYY-MM-DD)` 小节——GitHub
      Release 说明自动取自这里（`scripts/release-notes.mjs`），不写就没有说明；
      CHANGELOG 只保留当前适配线的条目（更早历史以 GitHub Releases 为准），
-     适配小节把 `engines.dsh`（兼容声明，**精确宿主版本**，如 `0.2.2-alpha.2`）与依赖 range（`^版本`）分开表述；
+     适配小节把 `engines.dsh`（兼容声明，**精确宿主版本**，如 `0.2.2-alpha.3`）与依赖 range（`^版本`）分开表述；
    - 升 `package.json` 的 `version`（bump 是最后一步）。
 4. **推送前逐提交复核**（`git log --oneline origin/<分支>..HEAD` +
    `git diff origin/<分支>..HEAD`）：版本号、CHANGELOG 小节、实际 diff 三者
@@ -551,7 +551,7 @@ packument 的 `dist.tarball` 直接指向对应 GitHub Release 资产（标准 n
   4. 两者都没有 → 继续排除（`missing-engines-dsh`）。
 - **精确匹配的行为矩阵（不误导的代价，如实记录）**：索引里每个版本只对它精确声明的
   那个宿主版本显示可安装；同线其它预发布/正式版都不匹配（宿主升级很可能不兼容旧版）。
-  - `0.2.2-alpha.2` 宿主：只看到 `engines.dsh` pin 为 `0.2.2-alpha.2` 的版本；
+  - `0.2.2-alpha.3` 宿主：只看到 `engines.dsh` pin 为 `0.2.2-alpha.3` 的版本；
   - 稳定线历史版本 pin 在 `0.2.1-rc.2`/`rc.3`，因此当前稳定参考 `0.2.1-rc.5` 的宿主
     **不会看到旧稳定版**可安装——这是「精确匹配、不误导」的代价，收敛期发布对应版本后恢复；
   - DSH 每次升级（含同线 alpha→rc→下一 alpha）都需要插件重新发布对应版本。

@@ -1,3 +1,9 @@
+## 0.3.33-alpha.2 (2026-11-03)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.3`**：全部 `@deepseek-ai/dsh-*` 依赖 range → `^0.2.2-alpha.3`，`engines.dsh` → 精确 `0.2.2-alpha.3`；vendor 依赖 `@deepseek-ai/cordis` 前移到 `~4.0.6-alpha.2`。`dsh-session` / `dsh-session-persistence` / `dsh-session-query` / `dsh-session-title` / `dsh-workspace` 在 alpha.3 均无源码变化；`dsh-api-session-controller` 的投影帧内部改动不影响本插件（仅作为客户端模块图依赖声明），无代码适配。
+
 ## 0.3.33-alpha.1 (2026-11-01)
 
 ### 优化
