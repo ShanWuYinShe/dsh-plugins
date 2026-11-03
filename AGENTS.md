@@ -63,15 +63,14 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   （如 `0.2.2-alpha.3`，不写 `^` / `~` / `>=`）；依赖 range 仍是 `^X`，由
   `bun run adapt` 同步维护，`dsh-baseline` 严格核对「range 的 `^X` ↔ `engines.dsh`
   的精确 `X`」。DSH 升级很可能不兼容旧版本，因此每次升级都要重发对应插件版本；
-  不要使用已废弃的自造字段 `dsh.host`。
+  不要使用自造字段 `dsh.host`（宿主不认识该字段）。
 - **客户端 inject**：`dsh.client.inject` 声明的是**客户端模块包名**（服务提供方包），
   不是 cordis 服务名；`cordis` 运行时的服务依赖写在 client 入口的 `export const inject`。
 - **入口面**：Host 入口（`src/index.ts`）只导出 `name` / `inject` / `Config` / `apply`，
   Client 入口（`client/index.tsx`）只导出 `name` / `inject` / `apply`；禁止
   `export default` 与 `export *`。测试需要的内部实现从 `../src/<module>.js` /
-  `../client/<module>.js` 相对导入——**不要为了测试方便从入口转发**（历史上
-  dsh-any-connect 入口 27 条 export 语句转发 162 个名字，2026-10-29 收敛为
-  `name`/`inject`/`Config`/`apply`）。根 `test/entry-surface.test.ts` 是这条规则的锁。
+  `../client/<module>.js` 相对导入——**不要为了测试方便从入口转发**；入口只允许
+  `name`/`inject`/`Config`/`apply`。根 `test/entry-surface.test.ts` 是这条规则的锁。
 - **独立 CLI**：`dsh-any-connect` 的 `lib/bin.js` 是构建期用 esbuild 打出的**自包含**
   bundle（内联 MIT 依赖，见包内 THIRD_PARTY_NOTICES.md）：插件源码静态 import 宿主包，
   而 bin 是独立 node 进程、不经宿主 runtime resolution，所以必须自包含。改 bin 依赖后
@@ -99,8 +98,17 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   建议在 Linux 容器实测一遍（`node:24` 镜像 + tar 管道传入源码跑
   `bun run test:ci`；macOS 打 tar 要带 `COPYFILE_DISABLE=1 --no-xattrs`，
   否则 `._*` AppleDouble 文件会被 vitest 当测试文件收集）。
-  **容器实测两个必做前提**（2026-10-29 实测，否则会出现 8 条环境假阳性）：
+  **容器实测两个必做前提**（否则会出现一批环境假阳性）：
   ① 源码里没有 `.git` 时，`publish-gate`/`scripts-cli` 的 `git tag -l` 会抛
   `fatal: not a git repository`，需在容器内 `git init && git add -A && git commit`
   （或挂载真实 `.git`）；② 以 **非 root 用户**运行——`electron-discovery` 用
   `chmod 000` 构造 EACCES，root 会无视权限位导致假红。
+
+## 按需加载的 skill（`.agents/skills/`）
+
+| skill | 何时加载 |
+|---|---|
+| `dsh-plugin-release` | 分支模型、发布纪律、版本号与推送门禁 |
+| `dsh-plugin-worktree` | 跨分支 worktree 操作 |
+| `dsh-plugin-tag` | 打发版 tag 的具体步骤（详见 RELEASING.md） |
+| `dsh-any-connect-channels` | 改 dsh-any-connect 任一渠道 / 排查额度、限流、模型目录时 |
