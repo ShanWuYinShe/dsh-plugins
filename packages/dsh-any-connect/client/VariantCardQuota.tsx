@@ -65,14 +65,14 @@ function CardRefreshButton({ busy, onClick, t }: { busy: boolean; onClick: () =>
 
 /** 额度区块（限流块放最前：通道正在拒收请求时这是用户唯一能行动的信息）。 */
 export function VariantCardQuota({ card }: { card: VariantCardView }): React.ReactNode {
-  const { t, status, busy, rateLimit, refreshWithCatalog, copiedPlanId, copyPlanId, startPlanClaim, view } = card
+  const { t, status, busy, rateLimits, refreshWithCatalog, copiedPlanId, copyPlanId, startPlanClaim, view } = card
   const { isZCode, isOpenCode, isStartPlanCard, zcodePlan, zcodePools, isPlanActive, planStateLabel, displayPlanName } = view
   return (
     <>
       {/* 限流块放最前：通道正在拒收请求时，这是用户唯一能行动的信息
           （还要等多久 / 等不到确切时间）。三个分支（ZCode/OpenCode/WorkBuddy）
           共用同一份展示，因为 429 是所有上游共有的事实。 */}
-      <RateLimitBox t={t} rateLimit={rateLimit} />
+      <RateLimitBox t={t} rateLimits={rateLimits} />
       {isZCode ? (
         <>
           <hr style={dividerStyle} />

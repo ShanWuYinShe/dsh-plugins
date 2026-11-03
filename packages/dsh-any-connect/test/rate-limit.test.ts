@@ -77,8 +77,35 @@ describe('parseResetMessage', () => {
       .toBe(Date.UTC(2026, 9, 30, 6, 20, 2))
   })
 
-  it('没有显式时区不解析（不猜上游时区）', () => {
-    expect(parseResetMessage('will reset at 2026-10-30 14:20:02', NOW)).toBeUndefined()
+  it('WorkBuddy 官方口径：省略时区时按 UTC+8（上海壁钟）解释', () => {
+    // 官方客户端解析正则把 ` UTC+8` 当可选后缀，缺失时直接按 UTC+8 反解。
+    expect(parseResetMessage('your usage will reset at 2026-10-30 14:20:02, alternatively switch models', NOW))
+      .toBe(Date.UTC(2026, 9, 30, 6, 20, 2))
+  })
+
+  it('接受 `(UTC+8)` 括号写法与 T 分隔符', () => {
+    expect(parseResetMessage('reset at 2026-10-30T14:20:02 (UTC+8)', NOW))
+      .toBe(Date.UTC(2026, 9, 30, 6, 20, 2))
+  })
+
+  it('接受 ISO 偏移写法 +08:00', () => {
+    expect(parseResetMessage('will reset at 2026-10-30T14:20:02+08:00', NOW))
+      .toBe(Date.UTC(2026, 9, 30, 6, 20, 2))
+  })
+
+  it('中文正文同样识别（恢复时刻不依赖英文 reset 前缀）', () => {
+    expect(parseResetMessage('当前模型使用频率超限，将于 2026-10-30 14:20:02 (UTC+8) 后恢复', NOW))
+      .toBe(Date.UTC(2026, 9, 30, 6, 20, 2))
+  })
+
+  it('正文有多个时刻时优先取 reset 附近的那个', () => {
+    expect(parseResetMessage('started 2026-10-30 10:00:00, your usage will reset at 2026-10-30 14:20:02 UTC+8', NOW))
+      .toBe(Date.UTC(2026, 9, 30, 6, 20, 2))
+  })
+
+  it('调用方可以覆盖裸壁钟的时区解释', () => {
+    expect(parseResetMessage('will reset at 2026-10-30 14:20:02', NOW, { bareWallClockOffsetMinutes: 0 }))
+      .toBe(Date.UTC(2026, 9, 30, 14, 20, 2))
   })
 
   it('日历上不存在的日期不解析（02-30 不能被顺延成 03-02）', () => {
@@ -247,5 +274,56 @@ describe('RateLimitLedger', () => {
     now = 2_001
     expect(ledger.activeFor('zcode')).toBeUndefined()
     expect(ledger.snapshot().recent).toHaveLength(1)
+  })
+})
+
+describe('RateLimitLedger：按模型分账（WorkBuddy 的限流维度）', () => {
+  /** 造一条限流观测（默认无 reset 头，走 TTL 活跃判定）。 */
+  function observe(model: string | undefined, nowMs = 1_000, provider = 'workbuddy'): ReturnType<typeof observeRateLimit> {
+    return observeRateLimit({ provider, status: 429, kind: 'soft_rate', ...model === undefined ? {} : { model }, nowMs })
+  }
+
+  it('同一 provider 的不同模型各自一条观测，互不覆盖', () => {
+    const ledger = new RateLimitLedger({ now: () => 1_000 })
+    ledger.record(observe('glm-5.3')!)
+    ledger.record(observe('deepseek-v4-pro')!)
+    expect(ledger.activesFor('workbuddy').map(entry => entry.model).sort()).toEqual(['deepseek-v4-pro', 'glm-5.3'])
+  })
+
+  it('一次成功只清对应模型：B 成功不能清掉仍在限流的 A', () => {
+    const ledger = new RateLimitLedger({ now: () => 1_000 })
+    ledger.record(observe('glm-5.3')!)
+    ledger.record(observe('deepseek-v4-pro')!)
+    ledger.clear('workbuddy', 'deepseek-v4-pro')
+    expect(ledger.activesFor('workbuddy').map(entry => entry.model)).toEqual(['glm-5.3'])
+  })
+
+  it('不传模型时清该 provider 的全部观测', () => {
+    const ledger = new RateLimitLedger({ now: () => 1_000 })
+    ledger.record(observe('glm-5.3')!)
+    ledger.record(observe(undefined)!)
+    ledger.clear('workbuddy')
+    expect(ledger.activesFor('workbuddy')).toEqual([])
+  })
+
+  it('同模型再次撞限流合并为同一条：保留最早时刻并累加次数', () => {
+    let now = 1_000
+    const ledger = new RateLimitLedger({ now: () => now })
+    ledger.record(observe('glm-5.3')!)
+    now = 3_000
+    ledger.record(observe('glm-5.3', 3_000)!)
+    const active = ledger.activeFor('workbuddy')
+    expect(active?.model).toBe('glm-5.3')
+    expect(active?.blockedAtMs).toBe(1_000)
+    expect(active?.lastSeenAtMs).toBe(3_000)
+    expect(active?.hits).toBe(2)
+  })
+
+  it('模型未知的 provider 级观测与模型级观测并存，模型成功时一并清掉 provider 级', () => {
+    const ledger = new RateLimitLedger({ now: () => 1_000 })
+    ledger.record(observe(undefined)!)
+    ledger.record(observe('glm-5.3')!)
+    ledger.clear('workbuddy', 'glm-5.3')
+    expect(ledger.activesFor('workbuddy')).toEqual([])
   })
 })

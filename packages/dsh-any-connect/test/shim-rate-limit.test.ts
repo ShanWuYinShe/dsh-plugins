@@ -64,11 +64,11 @@ async function startShim(
 }
 
 /** POST one chat completion; the answer itself is irrelevant here. */
-async function postChat(harness: Harness): Promise<Response> {
+async function postChat(harness: Harness, model = 'glm-5.3'): Promise<Response> {
   return await fetch(`${harness.shim.baseUrl()}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', authorization: `Bearer ${harness.shim.token()}` },
-    body: JSON.stringify({ model: 'glm-5.3', stream: true, messages: [{ role: 'user', content: 'hi' }] }),
+    body: JSON.stringify({ model, stream: true, messages: [{ role: 'user', content: 'hi' }] }),
   })
 }
 
@@ -192,5 +192,54 @@ describe('shim 把上游限流写进台账', () => {
     await postChat(harness)
     const active = harness.ledger.activeFor('workbuddy')
     expect(active!.resetAtMs).toBe(resetSeconds * 1000)
+  })
+})
+
+describe('台账按模型记账（WorkBuddy 的限流维度）', () => {
+  it('A 模型被限时 B 模型请求成功，不会清掉 A 的观测', async () => {
+    let next: WorkBuddyChatResult = { ok: false, status: 429, kind: 'soft_rate', message: 'slow down' }
+    const harness = await startShim(() => next)
+    await postChat(harness, 'glm-5.3')
+    expect(harness.ledger.activeFor('workbuddy')?.model).toBe('glm-5.3')
+
+    next = {
+      ok: true,
+      response: new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+    }
+    const response = await postChat(harness, 'deepseek-v4-pro')
+    expect(response.status).toBe(200)
+    expect(harness.ledger.activesFor('workbuddy').map(entry => entry.model)).toEqual(['glm-5.3'])
+  })
+
+  it('同一模型请求成功后只清它自己，另一个被限模型仍在台账里', async () => {
+    let next: WorkBuddyChatResult = { ok: false, status: 429, kind: 'soft_rate', message: 'slow down' }
+    const harness = await startShim(() => next)
+    await postChat(harness, 'glm-5.3')
+    await postChat(harness, 'deepseek-v4-pro')
+    expect(harness.ledger.activesFor('workbuddy')).toHaveLength(2)
+
+    next = {
+      ok: true,
+      response: new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+    }
+    await postChat(harness, 'glm-5.3')
+    expect(harness.ledger.activesFor('workbuddy').map(entry => entry.model)).toEqual(['deepseek-v4-pro'])
+  })
+
+  it('A 模型被限不阻止 B 模型请求：观测不参与门禁', async () => {
+    const calls: string[] = []
+    let next: WorkBuddyChatResult = { ok: false, status: 429, kind: 'soft_rate', message: 'slow down' }
+    const harness = await startShim(() => {
+      calls.push('called')
+      return next
+    })
+    await postChat(harness, 'glm-5.3')
+    next = {
+      ok: true,
+      response: new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+    }
+    const response = await postChat(harness, 'deepseek-v4-pro')
+    expect(calls, '限流观测只记录、不拦截').toHaveLength(2)
+    expect(response.status).toBe(200)
   })
 })

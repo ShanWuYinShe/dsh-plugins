@@ -84,6 +84,16 @@ describe('pill 端到端：限流与额度用尽', () => {
     expect(text).not.toContain('remaining')
   })
 
+  it('限流头行带模型名：用户一眼看出是哪个模型被限，而不是整个 provider', async () => {
+    const text = await renderPill({
+      provider: 'workbuddy',
+      windows: [{ id: 'w', label: '积分', remain: 80, unit: '', limit: 100 }],
+      fetchedAt: Date.now(),
+      rateLimit: { blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 1, model: 'glm-5.3' },
+    })
+    expect(text).toContain('glm-5.3')
+  })
+
   it('限流但上游没给恢复时刻：如实说「未提供」', async () => {
     const text = await renderPill({
       provider: 'zcode',

@@ -36,6 +36,20 @@ describe('rateLimitHeadline', () => {
     const text = rateLimitHeadline({ blockedAt: 0, lastSeenAt: 0, status: 429, hits: 1 }, t)
     expect(text).toBe('rateLimitedUnknown')
   })
+
+  it('带模型时头行写明是哪个模型被限（避免误读成整个 provider）', () => {
+    const text = rateLimitHeadline({ blockedAt: 0, lastSeenAt: 0, status: 429, hits: 1, model: 'glm-5.3' }, t)
+    expect(text).toBe('rateLimitedUnknown · glm-5.3')
+  })
+
+  it('有恢复时刻时也带模型名', () => {
+    const text = rateLimitHeadline(
+      { blockedAt: 0, lastSeenAt: 0, resetAt: Date.parse('2026-10-29T12:00:00Z'), status: 429, hits: 1, model: 'glm-5.3' },
+      t,
+    )
+    expect(text.startsWith('until:')).toBe(true)
+    expect(text.endsWith(' · glm-5.3')).toBe(true)
+  })
 })
 
 describe('headlineText：限流优先于额度数字', () => {

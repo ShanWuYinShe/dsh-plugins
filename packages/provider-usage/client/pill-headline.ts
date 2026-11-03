@@ -28,6 +28,7 @@ function unitSuffix(unit: string): string {
  *
  * 限流排在窗口数字之前：通道正在拒收请求时，「还剩 80%」是误导——用户此刻
  * 发不出请求，他要知道的是什么时候能发。额度仍然在展开面板里，不丢信息。
+ * 上游按模型限流时头行会带上模型名（`限流中 · glm-5.3`），避免整体误读。
  *
  * 额度用尽时头行仍是「0 credits 剩余」（诚实），恢复时刻由
  * {@link exhaustedResetText} 追加在按钮的 title/aria 上，不挤占折叠态宽度。
@@ -79,6 +80,10 @@ export function exhaustedResetText(snapshot: UsageSnapshot, t: PillCopy): string
  * （官方 usage-policy 原文），不存在可推算的窗口；编一个倒计时比不说更糟。
  */
 export function rateLimitHeadline(rateLimit: UsageRateLimit, t: PillCopy): string {
-  if (rateLimit.resetAt === undefined) return t('rateLimitedUnknown')
-  return t('rateLimitedUntil', { time: formatReset(new Date(rateLimit.resetAt).toISOString()) })
+  const base = rateLimit.resetAt === undefined
+    ? t('rateLimitedUnknown')
+    : t('rateLimitedUntil', { time: formatReset(new Date(rateLimit.resetAt).toISOString()) })
+  // 上游的限流是**按模型**的（WorkBuddy 尤其如此）：头行必须带上模型名，
+  // 否则用户会把「A 模型被限」误读成「整个 provider 不能用」。
+  return rateLimit.model === undefined ? base : `${base} · ${rateLimit.model}`
 }

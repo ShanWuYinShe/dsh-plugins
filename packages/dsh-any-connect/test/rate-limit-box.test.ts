@@ -38,9 +38,9 @@ afterEach(() => {
   root = null
 })
 
-function render(rateLimit: WorkBuddyWebRateLimit | undefined, nowMs?: number): string {
+function render(rateLimits: readonly WorkBuddyWebRateLimit[] | undefined, nowMs?: number): string {
   act(() => {
-    root!.render(createElement(RateLimitBox, { t: t as never, rateLimit, nowMs }))
+    root!.render(createElement(RateLimitBox, { t: t as never, rateLimits, nowMs }))
   })
   return container.textContent ?? ''
 }
@@ -52,7 +52,7 @@ describe('RateLimitBox', () => {
 
   it('上游给了恢复时刻 → 说几点恢复', () => {
     const now = new Date('2026-10-29T10:00:00Z').getTime()
-    const text = render({ blockedAt: now - 60_000, lastSeenAt: now, resetAt: now + 30 * 60_000, status: 429, hits: 2 }, now)
+    const text = render([{ blockedAt: now - 60_000, lastSeenAt: now, resetAt: now + 30 * 60_000, status: 429, hits: 2 }], now)
     expect(text).toContain('rateLimitTitle')
     expect(text).toContain('resets:')
     expect(text).not.toContain('unknown:')
@@ -60,26 +60,49 @@ describe('RateLimitBox', () => {
 
   it('上游没给恢复时刻 → 如实说「未提供」，并给出已等时长', () => {
     const now = new Date('2026-10-29T10:00:00Z').getTime()
-    const text = render({ blockedAt: now - 90_000, lastSeenAt: now, status: 429, hits: 3 }, now)
+    const text = render([{ blockedAt: now - 90_000, lastSeenAt: now, status: 429, hits: 3 }], now)
     expect(text).toContain('unknown:2min')
     expect(text).not.toContain('resets:')
   })
 
   it('显示被拒次数与模型名', () => {
     const now = 1_000_000
-    const text = render({ blockedAt: now, lastSeenAt: now, status: 429, hits: 5, model: 'glm-5.3' }, now)
+    const text = render([{ blockedAt: now, lastSeenAt: now, status: 429, hits: 5, model: 'glm-5.3' }], now)
     expect(text).toContain('meta:5:glm-5.3')
   })
 
   it('模型未知时说「全部模型」而不是留空', () => {
     const now = 1_000_000
-    const text = render({ blockedAt: now, lastSeenAt: now, status: 429, hits: 1 }, now)
+    const text = render([{ blockedAt: now, lastSeenAt: now, status: 429, hits: 1 }], now)
     expect(text).toContain('rateLimitAnyModel')
   })
 
   it('秒级已等时长按秒显示', () => {
     const now = 1_000_000
-    const text = render({ blockedAt: now - 5_000, lastSeenAt: now, status: 429, hits: 1 }, now)
+    const text = render([{ blockedAt: now - 5_000, lastSeenAt: now, status: 429, hits: 1 }], now)
     expect(text).toContain('unknown:5s')
+  })
+})
+
+describe('RateLimitBox：逐模型展示', () => {
+  it('两个模型同时被限 → 各自一个框（标题出现两次）', () => {
+    const now = 1_000_000
+    const text = render([
+      { blockedAt: now, lastSeenAt: now, status: 429, hits: 1, model: 'glm-5.3' },
+      { blockedAt: now, lastSeenAt: now, status: 429, hits: 2, model: 'deepseek-v4-pro' },
+    ], now)
+    expect(text.split('rateLimitTitle')).toHaveLength(3)
+    expect(text).toContain('meta:1:glm-5.3')
+    expect(text).toContain('meta:2:deepseek-v4-pro')
+  })
+
+  it('空数组等同于没有限流', () => {
+    expect(render([], 1_000_000)).toBe('')
+  })
+
+  it('明确写出「插件不拦截请求」', () => {
+    const now = 1_000_000
+    const text = render([{ blockedAt: now, lastSeenAt: now, status: 429, hits: 1 }], now)
+    expect(text).toContain('rateLimitNote')
   })
 })

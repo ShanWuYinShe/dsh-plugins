@@ -258,13 +258,14 @@ export interface WorkBuddyWebRateLimit {
   lastSeenAt: number
   /**
    * 上游明示的恢复时刻，epoch ms。**只有**上游真的说了才存在：
-   * 响应头（`Retry-After` / `X-RateLimit-Reset`）或错误体里带时区的显式时刻
-   * （如 WorkBuddy `reset at <时间> UTC+8`）；缺失即「上游没说」。
+   * 响应头（`Retry-After` / `X-RateLimit-Reset`）或错误正文里的显式时刻。
+   * WorkBuddy 的正文时刻形如 `2026-10-30 14:20:02 UTC+8`；时区后缀省略时
+   * 按 UTC+8 解释（与 WorkBuddy 官方客户端口径一致）。缺失即「上游没说」。
    */
   resetAt?: number
   /** 上游状态码（429；OpenCode FreeTierError 为 403）。 */
   status: number
-  /** 触发限流的模型 id，若上游回执里带得到。 */
+  /** 触发限流的模型 id，若上游回执里带得到（WorkBuddy 按模型限流，通常都有）。 */
   model?: string
   /** 同一段限流期内撞到的次数。 */
   hits: number
@@ -319,10 +320,12 @@ export type WorkBuddyWebStatus =
      */
     excludedModels?: readonly WorkBuddyWebModelRow[]
     /**
-     * 当前仍在生效的上游限流。缺席表示「现在没被限」——不是「不查」：
-     * 台账是进程内的实时观测，没有观测就是没发生。
+     * 当前仍在生效的上游限流，**按模型一条**。缺席表示「现在没被限」——
+     * 不是「不查」：台账是进程内的实时观测，没有观测就是没发生。
+     * 同一 provider 下 A 模型被限、B 模型可用是常态（WorkBuddy 按模型限流），
+     * 所以这里是数组，卡片逐模型渲染；观测只展示、不拦截请求。
      */
-    rateLimit?: WorkBuddyWebRateLimit
+    rateLimits?: readonly WorkBuddyWebRateLimit[]
   }
   | { status: 'error'; message: string }
 

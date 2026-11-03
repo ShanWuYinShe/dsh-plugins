@@ -25,19 +25,32 @@
  *   本模块只管 429 这条通道，额度窗口的恢复时间由窗口自带的 `resetsAt` 表达。
  * - WorkBuddy / OpenCode 免费通道：没有公开的限流窗口文档。OpenCode 的
  *   FreeUsageLimitError（HTTP 429）在响应头带 `Retry-After`；FreeTierError
- *   （HTTP 403）是官方客户端形状校验，不带恢复时刻。WorkBuddy `code:6004`
- *   把恢复时刻写在错误体（`reset at <时间> UTC+8`）。
+ *   （HTTP 403）是官方客户端形状校验，不带恢复时刻。
  *
- * 因此本模块的契约是：`resetAt` 只来自上游**明说**的事实——响应头
- * （`Retry-After` / `X-RateLimit-Reset`）或错误体里带时区的显式时刻
- * （如 WorkBuddy `code:6004` 的 `reset at 2026-10-30 14:20:02 UTC+8`）；
- * 两者都没有就只报「何时被限」，让界面如实说「恢复时间未知」，
- * 而不是给一个会骗人的倒计时。
+ *   WorkBuddy（含 WorkBuddy AI）的限流是**按模型**的，不是整个 provider 共享：
+ *   官方客户端把 cap-hit 以 modelId 为键落盘（`markCapHit(accountKey, modelId,
+ *   resetAt)`），错误信封 `bizCode === 6004`，恢复时刻写在错误正文里，文案还会
+ *   提示「或换其它模型继续」。官方客户端解析正文时用
+ *   `/(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\s*(?:UTC\+8|\(UTC\+8\)))?/`
+ *   搜时刻，**省略时区时按 UTC+8（上海壁钟）解释**；本模块与该口径保持一致。
+ *
+ * 因此本模块的契约是：`resetAt` 来自上游**明说**的事实——响应头
+ * （`Retry-After` / `X-RateLimit-Reset`）或错误正文里的显式时刻；正文时刻的
+ * 时区后缀可省略（省略即 UTC+8，与 WorkBuddy 官方客户端同口径）。两者都没有
+ * 就只报「何时被限」，让界面如实说「恢复时间未知」，而不是给一个会骗人的倒计时。
+ *
+ * 台账只记录、**绝不拦截**：它不参与任何请求门禁，请求是否放行完全由上游决定，
+ * 一次成功请求只清掉对应模型的观测。
  *
  * @module dsh-any-connect/rate-limit
  */
 
-/** 一次 429 观测，按 provider（变体 id）记录。 */
+/**
+ * 一次 429 观测，按 provider（变体 id）+ 模型记录。
+ *
+ * WorkBuddy 一家就按模型限流：同一个 provider 下 A 模型被限时 B 模型仍可用，
+ * 因此台账的行级键是 `provider + model`，而不是整个 provider 一条。
+ */
 export interface RateLimitObservation {
   /** 变体 id，与 provider route 键一致（workbuddy / zcode / opencode-free …）。 */
   provider: string
@@ -48,7 +61,8 @@ export interface RateLimitObservation {
   /**
    * 上游明示的恢复时刻（毫秒 epoch）。**只有**上游真的说了才存在：
    * 响应头 `Retry-After`（秒或 HTTP-date）/ `X-RateLimit-Reset`（秒或毫秒 epoch），
-   * 或错误体里的显式时刻（如 WorkBuddy `reset at <时间> UTC+8`）。
+   * 或错误正文里的时刻（如 WorkBuddy `usage will reset at 2026-10-30 14:20:02 UTC+8`，
+   * 省略时区时按 UTC+8 解释，见 {@link parseResetMessage}）。
    * 拿不到就是 undefined——界面必须如实说「恢复时间未知」。
    */
   resetAtMs?: number
@@ -62,7 +76,7 @@ export interface RateLimitObservation {
   hits: number
 }
 
-/** 台账快照：按 provider 键的观测，以及给界面用的派生判断。 */
+/** 台账快照：按 provider+模型 键的观测，以及给界面用的派生判断。 */
 export interface RateLimitSnapshot {
   /** 当前仍在限流窗口内的观测（resetAtMs 已过或缺失但仍在 TTL 内）。 */
   active: readonly RateLimitObservation[]
@@ -114,39 +128,45 @@ export function parseResetHeader(value: string | null | undefined, nowMs: number
   return parsed
 }
 
-/** 错误体里带时区的显式重置时刻：WorkBuddy `code:6004` 实测形态。 */
-const RESET_MESSAGE_PATTERN =
-  /\breset(?:s)?\s+at\s+(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})\s*(?:UTC|GMT)\s*([+-])(\d{1,2})(?::?(\d{2}))?/iu
+/** 错误正文里的时刻：`YYYY-MM-DD HH:mm:ss`，日期与时间之间允许空格或 `T`（WorkBuddy 官方客户端同口径）。 */
+const RESET_TIMESTAMP = /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/gu
+
+/** 时刻后缀的显式时区：`UTC+8` / `UTC+08:00` / `GMT-5` / `(UTC+8)`。 */
+const RESET_UTC_OFFSET = /^\s*\(?\s*(?:UTC|GMT)\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?\s*\)?/iu
+
+/** 时刻后缀的 ISO 偏移：`+08:00` / `+0800`（部分上游用这种写法）。 */
+const RESET_ISO_OFFSET = /^\s*\(?\s*([+-])(\d{2}):?(\d{2})\s*\)?/u
+
+/** 恢复类关键词：正文里出现多个时刻时，用它挑出「恢复时刻」那一个。 */
+const RESET_KEYWORD = /reset|resets|重置|恢复|刷新/iu
 
 /**
- * 解析错误体里明写的恢复时刻，统一成毫秒 epoch。
+ * 正文时刻省略时区时的默认解释：UTC+8（上海壁钟）。
  *
- * 只认**带显式时区**的 `reset at YYYY-MM-DD HH:mm:ss UTC±N`（WorkBuddy
- * `code:6004` 的实测文案）。没有时区的裸时刻不解析——那需要猜上游用哪个
- * 时区，猜错就是给用户一个假的倒计时。日期字段做日历回滚校验（`02-30`
- * 之类不能悄悄变成 3 月 2 日），过去超过一天的时刻也不当恢复时刻。
- *
- * @param value - 上游错误体原文。
- * @param nowMs - 解析基准时刻（用于拒绝明显过去的时刻）。
- * @returns 毫秒 epoch；无法可靠解析时为 undefined。
+ * 这是 WorkBuddy 官方客户端自己的口径——它的解析正则把
+ * ` UTC+8` / ` (UTC+8)` 当作**可选**后缀，并在缺失时直接
+ * `Date.UTC(y, m-1, d, h-8, ...)`，即按 UTC+8 反解。本模块对齐这一口径；
+ * 调用方仍可通过 options 覆盖。
  */
-export function parseResetMessage(value: string | null | undefined, nowMs: number): number | undefined {
-  if (value === null || value === undefined) return undefined
-  const match = RESET_MESSAGE_PATTERN.exec(value)
-  if (match === null) return undefined
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText, sign, offsetHourText, offsetMinuteText] = match
-  const year = Number(yearText)
-  const month = Number(monthText)
-  const day = Number(dayText)
-  const hour = Number(hourText)
-  const minute = Number(minuteText)
-  const second = Number(secondText)
-  const offsetHour = Number(offsetHourText)
-  const offsetMinute = Number(offsetMinuteText ?? '0')
+export const DEFAULT_BARE_WALL_CLOCK_OFFSET_MINUTES = 8 * 60
+
+/**
+ * 把一个「壁钟时刻 + 时区偏移」换算成毫秒 epoch，并做日历回滚与过去时刻校验。
+ *
+ * @param parts - 正文里读到的年月日时分秒与偏移分钟数（东八区为 +480）。
+ * @param nowMs - 解析基准时刻（过去超过一天的场合直接拒绝）。
+ * @returns 毫秒 epoch；字段非法或日期不存在时为 undefined。
+ */
+function resetEpochFromParts(
+  parts: { year: number, month: number, day: number, hour: number, minute: number, second: number },
+  offsetMinutes: number,
+  nowMs: number,
+): number | undefined {
+  const { year, month, day, hour, minute, second } = parts
   if (month < 1 || month > 12 || day < 1 || day > 31
     || hour > 23 || minute > 59 || second > 59
-    || offsetHour > 14 || offsetMinute > 59) return undefined
-  const offsetMs = (sign === '+' ? 1 : -1) * (offsetHour * 60 + offsetMinute) * 60_000
+    || Math.abs(offsetMinutes) > 14 * 60) return undefined
+  const offsetMs = offsetMinutes * 60_000
   const utcMs = Date.UTC(year, month - 1, day, hour, minute, second) - offsetMs
   if (!Number.isFinite(utcMs)) return undefined
   // 日历回滚校验：2 月 30 日会被 Date.UTC 顺延成 3 月 2 日，那不是上游写的时刻。
@@ -157,6 +177,125 @@ export function parseResetMessage(value: string | null | undefined, nowMs: numbe
   }
   if (utcMs < nowMs - 86_400_000) return undefined
   return utcMs
+}
+
+/**
+ * 解析一个正文时刻：后缀有显式时区就用它，没有就按 {@link DEFAULT_BARE_WALL_CLOCK_OFFSET_MINUTES}。
+ *
+ * @param text - 上游错误正文原文。
+ * @param match - {@link RESET_TIMESTAMP} 命中项。
+ * @param nowMs - 解析基准时刻。
+ * @param bareOffsetMinutes - 正文省略时区时的解释偏移（默认 UTC+8）。
+ * @returns 毫秒 epoch；字段非法/日期不存在/明显过去时为 undefined。
+ */
+function resetEpochFromMatch(
+  text: string,
+  match: RegExpExecArray,
+  nowMs: number,
+  bareOffsetMinutes: number,
+): number | undefined {
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match
+  const matched = match[0] ?? ''
+  const after = text.slice(match.index + matched.length)
+  let offsetMinutes: number
+  const utc = RESET_UTC_OFFSET.exec(after)
+  if (utc !== null) {
+    offsetMinutes = (utc[1] === '+' ? 1 : -1) * (Number(utc[2]) * 60 + Number(utc[3] ?? '0'))
+  } else {
+    const iso = RESET_ISO_OFFSET.exec(after)
+    offsetMinutes = iso === null
+      ? bareOffsetMinutes
+      : (iso[1] === '+' ? 1 : -1) * (Number(iso[2]) * 60 + Number(iso[3]))
+  }
+  return resetEpochFromParts({
+    year: Number(yearText),
+    month: Number(monthText),
+    day: Number(dayText),
+    hour: Number(hourText),
+    minute: Number(minuteText),
+    second: Number(secondText),
+  }, offsetMinutes, nowMs)
+}
+
+/** 关键词出现的位置（正文里所有 reset/重置/恢复 的位置，供时刻消歧用）。 */
+function keywordPositions(text: string): number[] {
+  const positions: number[] = []
+  const pattern = new RegExp(RESET_KEYWORD.source, 'giu')
+  for (;;) {
+    const match = pattern.exec(text)
+    if (match === null) break
+    positions.push(match.index)
+  }
+  return positions
+}
+
+/**
+ * 时刻与最近关键词的距离（正文有多个时刻时用于消歧）。
+ *
+ * @param positions - {@link keywordPositions} 的结果。
+ * @param index - 时刻起点。
+ * @param length - 时刻长度。
+ * @returns 距离；正文里没有关键词时为 undefined。
+ */
+function keywordDistance(positions: readonly number[], index: number, length: number): number | undefined {
+  let best: number | undefined
+  for (const position of positions) {
+    const distance = position < index ? index - (position + 1) : Math.max(0, position - (index + length))
+    if (best === undefined || distance < best) best = distance
+  }
+  return best
+}
+
+/**
+ * 解析错误正文里明写的恢复时刻，统一成毫秒 epoch。
+ *
+ * 口径与 WorkBuddy 官方客户端一致（见模块头注释）：
+ * - 在正文里搜 `YYYY-MM-DD[ T]HH:mm:ss`；
+ * - 后缀 ` UTC+8` / ` (UTC+8)` / `UTC±N` / `±HH:MM` 有就用；
+ * - **省略时区时按 UTC+8 解释**（官方客户端同口径，本插件这条路径只在
+ *   429/soft_rate 上下文调用，正文里的时刻就是恢复时刻）；
+ * - 正文出现多个时刻时，优先取 `reset/重置/恢复/刷新` 附近的那个；无法唯一
+ *   确定就取最靠前的一个（与官方客户端「先命中先用」一致，不为多个候选编造）。
+ *
+ * 日期字段做日历回滚校验（`02-30` 之类不能悄悄变成 3 月 2 日），过去超过
+ * 一天的时刻也不当恢复时刻。
+ *
+ * @param value - 上游错误正文原文。
+ * @param nowMs - 解析基准时刻（用于拒绝明显过去的时刻）。
+ * @param options - `bareWallClockOffsetMinutes`：正文时刻省略时区时的解释偏移，默认 480（UTC+8）。
+ * @returns 毫秒 epoch；无法可靠解析时为 undefined。
+ */
+export function parseResetMessage(
+  value: string | null | undefined,
+  nowMs: number,
+  options: { bareWallClockOffsetMinutes?: number } = {},
+): number | undefined {
+  if (value === null || value === undefined) return undefined
+  const bareOffsetMinutes = options.bareWallClockOffsetMinutes ?? DEFAULT_BARE_WALL_CLOCK_OFFSET_MINUTES
+  const candidates: { atMs: number, index: number, length: number }[] = []
+  const pattern = new RegExp(RESET_TIMESTAMP.source, 'gu')
+  for (;;) {
+    const match = pattern.exec(value)
+    if (match === null) break
+    const atMs = resetEpochFromMatch(value, match, nowMs, bareOffsetMinutes)
+    if (atMs !== undefined) candidates.push({ atMs, index: match.index, length: (match[0] ?? '').length })
+  }
+  const [first] = candidates
+  if (first === undefined) return undefined
+  if (candidates.length === 1) return first.atMs
+  // 多个时刻：取离 reset/重置/恢复 最近的那个；都没有关键词就取最靠前的
+  // （与 WorkBuddy 官方客户端「先命中先用」一致）。
+  const positions = keywordPositions(value)
+  let best = first
+  let bestDistance = keywordDistance(positions, first.index, first.length)
+  for (const candidate of candidates.slice(1)) {
+    const distance = keywordDistance(positions, candidate.index, candidate.length)
+    if (distance !== undefined && (bestDistance === undefined || distance < bestDistance)) {
+      best = candidate
+      bestDistance = distance
+    }
+  }
+  return best.atMs
 }
 
 /**
@@ -184,7 +323,7 @@ export function observeRateLimit(input: {
   // soft_rate 之外的状态码不算限流（例如 500 也被某些上游说成「稍后重试」，
   // 但那是服务端故障，不是额度节奏）。
   if (input.kind !== 'soft_rate' && !RATE_LIMIT_STATUSES.has(input.status)) return undefined
-  // 响应头优先（机器可读、无歧义）；没有才看错误体里明写的带时区时刻。
+  // 响应头优先（机器可读、无歧义）；没有才看错误正文里的时刻。
   const resetAtMs = parseResetHeader(input.headers?.get('retry-after'), nowMs)
     ?? parseResetHeader(input.headers?.get('x-ratelimit-reset'), nowMs)
     ?? parseResetMessage(input.body, nowMs)
@@ -211,12 +350,29 @@ export function isRateLimitActive(
 }
 
 /**
- * 内存台账：按 provider 合并同一段限流期，并派生界面需要的视图。
+ * 台账行键：provider + 模型。
  *
- * 合并规则：同一 provider 在「仍处于限流中」时再次撞到限流，视为同一次持续
- * 限流——保留最早的 `blockedAtMs`（用户想知道「等了多久」）、刷新
- * `lastSeenAtMs` 与 `hits`、用最新的 `resetAtMs` 覆盖（上游每次都会给更准的值）。
- * 一旦上一次已过期，就是新的一段限流，重新计时。
+ * 模型缺省代表「上游没告诉我们哪个模型」的 provider 级观测（例如传输层只给了
+ * 状态码）；有模型时按模型分行，因为 WorkBuddy 的限流就是按模型计的。
+ *
+ * @param provider - 变体 id。
+ * @param model - 模型 id，未知时省略。
+ * @returns Map 键。
+ */
+function ledgerKey(provider: string, model: string | undefined): string {
+  return model === undefined || model === '' ? `${provider}\u0000` : `${provider}\u0000${model}`
+}
+
+/**
+ * 内存台账：按 provider+模型 合并同一段限流期，并派生界面需要的视图。
+ *
+ * 合并规则：同一行（同一 provider 的同一模型）在「仍处于限流中」时再次撞到
+ * 限流，视为同一次持续限流——保留最早的 `blockedAtMs`（用户想知道「等了
+ * 多久」）、刷新 `lastSeenAtMs` 与 `hits`、用最新的 `resetAtMs` 覆盖（上游
+ * 每次都会给更准的值）。一旦上一次已过期，就是新的一段限流，重新计时。
+ *
+ * **只观测、不拦截**：任何请求都不会因为台账里有活跃观测而被拒绝，是否放行
+ * 完全由上游决定；一次成功请求只清掉它自己那一行的观测。
  */
 export class RateLimitLedger {
   private readonly observations = new Map<string, RateLimitObservation>()
@@ -236,7 +392,8 @@ export class RateLimitLedger {
    */
   record(observation: RateLimitObservation): RateLimitObservation {
     const now = this.now()
-    const previous = this.observations.get(observation.provider)
+    const key = ledgerKey(observation.provider, observation.model)
+    const previous = this.observations.get(key)
     const merged: RateLimitObservation = previous !== undefined && isRateLimitActive(previous, now, this.ttlMs)
       ? {
           ...observation,
@@ -247,13 +404,30 @@ export class RateLimitLedger {
             : {},
         }
       : observation
-    this.observations.set(merged.provider, merged)
+    this.observations.set(key, merged)
     return merged
   }
 
-  /** 清掉某 provider 的观测（例如一次成功请求证明限流已解除）。 */
-  clear(provider: string): void {
-    this.observations.delete(provider)
+  /**
+   * 清掉观测：一次成功请求只证明**它自己那个模型**的限流解除。
+   *
+   * 上游按模型限流时，B 模型成功不能拿来清 A 模型的观测（否则卡片会把还在
+   * 限流的 A 误报成已恢复）。不传 `model` 时清该 provider 的全部观测——那是
+   * 「整条通道都验证过」的口径，只给确实不分模型的场景用。
+   *
+   * @param provider - 变体 id。
+   * @param model - 模型 id；省略表示清整个 provider。
+   */
+  clear(provider: string, model?: string): void {
+    if (model !== undefined && model !== '') {
+      this.observations.delete(ledgerKey(provider, model))
+      // 同一次成功也说明渠道整体可用：把「模型未知」的 provider 级观测一并清掉。
+      this.observations.delete(ledgerKey(provider, undefined))
+      return
+    }
+    for (const key of [...this.observations.keys()]) {
+      if (key.startsWith(`${provider}\u0000`)) this.observations.delete(key)
+    }
   }
 
   /**
@@ -273,7 +447,12 @@ export class RateLimitLedger {
     }
   }
 
-  /** 单个 provider 的活跃观测，没有则 undefined。 */
+  /** 该 provider 当前全部活跃观测（按最近被限时间倒序），卡片逐模型展示。 */
+  activesFor(provider: string): readonly RateLimitObservation[] {
+    return this.snapshot(provider).active
+  }
+
+  /** 最近一次活跃观测，没有则 undefined（pill 这类 provider 级表面用它代表当前状态）。 */
   activeFor(provider: string): RateLimitObservation | undefined {
     return this.snapshot(provider).active[0]
   }

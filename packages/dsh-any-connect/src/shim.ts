@@ -94,7 +94,8 @@ export interface WorkBuddyShimOptions {
  */
 export interface RateLimitRecorder {
   record(observation: RateLimitObservation): unknown
-  clear(provider: string): void
+  /** 清掉观测：一次成功只证明该模型的限流解除；省略 model 表示清整个 provider。 */
+  clear(provider: string, model?: string): void
 }
 
 
@@ -172,10 +173,13 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
    * File an upstream refusal into the rate-limit ledger.
    *
    * Called on both success and failure so the ledger self-heals: a request that
-   * gets through proves the channel is open again, which is the only way to
-   * clear an observation whose upstream never sent a reset header.
+   * gets through proves that **this model** is usable again, which is the only
+   * way to clear an observation whose upstream never sent a reset header. The
+   * clear is scoped to the same model: WorkBuddy limits per model, so a
+   * success on model B must not erase model A's still-active observation.
    *
-   * Never throws: bookkeeping must not turn a model answer into an error.
+   * Never throws: bookkeeping must not turn a model answer into an error, and
+   * it never gates a request — the upstream alone decides whether to answer.
    */
   function trackRateLimit(
     result: { ok: false; status: number; kind: string; message?: string; headers?: Headers } | { ok: true },
@@ -184,7 +188,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     if (rateLimits === undefined) return
     try {
       if (result.ok) {
-        rateLimits.clear(providerId)
+        rateLimits.clear(providerId, model)
         return
       }
       const observation: RateLimitObservation | undefined = observeRateLimit({

@@ -70,10 +70,11 @@ export interface WorkBuddyStatusRouteOptions {
   /** In-process key authorizing probe control writes; handed to the card. */
   probeKey: string
   /**
-   * 当前生效的上游限流（rate-limit.ts 的台账读数）。返回 undefined 即「现在没被限」。
-   * 可选：没有台账的装配（CLI/测试）不展示这一块。
+   * 当前生效的上游限流（rate-limit.ts 的台账读数），**按模型一条**。
+   * 返回 undefined 或空数组即「现在没被限」。可选：没有台账的装配（CLI/测试）
+   * 不展示这一块。
    */
-  rateLimit?: () => WorkBuddyWebRateLimit | undefined
+  rateLimits?: () => readonly WorkBuddyWebRateLimit[] | undefined
   /** Route path; one per variant. */
   path: string
 }
@@ -106,10 +107,10 @@ export async function workBuddyWebStatus(
     ...deps.excludedCount !== undefined ? { excludedCount: deps.excludedCount() } : {},
     ...deps.probe === undefined ? {} : { probe: deps.probe() },
     // 限流读在「已登录」分支里：未登录时不存在模型通道，报一个空限流块只会
-    // 让卡片多一行噪音。
+    // 让卡片多一行噪音。上游按模型限流，因此携带的是逐模型数组。
     ...(() => {
-      const rateLimit = deps.rateLimit?.()
-      return rateLimit === undefined ? {} : { rateLimit }
+      const rateLimits = deps.rateLimits?.()
+      return rateLimits === undefined || rateLimits.length === 0 ? {} : { rateLimits }
     })(),
     probeKey: deps.probeKey,
   }

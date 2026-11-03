@@ -75,8 +75,8 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
   const probeKey = status.probeKey
   /** 今日 Start Plan 待领取探测结果；只有 Start Plan 变体的 status 会带。 */
   const startPlanClaim: WorkBuddyWebStartPlanClaim | undefined = status.startPlanClaim
-  /** 当前上游限流（429 观测）；缺席即「现在没被限」。 */
-  const rateLimit = status.rateLimit
+  /** 当前上游限流（429 观测），按模型一条；缺席即「现在没被限」。 */
+  const rateLimits = status.rateLimits
   /**
    * 已隐藏模型的完整行。
    *
@@ -231,7 +231,7 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     copiedPlanId,
     probe,
     startPlanClaim,
-    rateLimit,
+    rateLimits,
     copyPlanId,
     refresh,
     refreshWithCatalog,

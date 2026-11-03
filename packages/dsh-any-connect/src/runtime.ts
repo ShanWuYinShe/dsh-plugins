@@ -198,10 +198,11 @@ export function createVariantRuntimeSet(deps: {
         excludedCount: () => runtime.catalog.excludedCount(),
         // 隐藏区数据：让用户看见隐藏了什么并能逐条恢复（而不是只能一键全恢复）。
         excludedModels: () => runtime.catalog.excludedModels(),
-        // 上游限流读数：卡片据此说「被限多久、几点恢复（或恢复时间未知）」。
-        rateLimit: () => {
-          const active = rateLimits.activeFor(runtime.variant.id)
-          return active === undefined ? undefined : toWebRateLimit(active)
+        // 上游限流读数：卡片据此说「哪个模型被限、被限多久、几点恢复」。
+        // WorkBuddy 按模型限流，所以这里给逐模型数组（可能同时有多个模型被限）。
+        rateLimits: () => {
+          const actives = rateLimits.activesFor(runtime.variant.id)
+          return actives.length === 0 ? undefined : actives.map(toWebRateLimit)
         },
         probeKey,
       })
