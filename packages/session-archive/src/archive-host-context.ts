@@ -1,9 +1,10 @@
 /**
- * archive-host-context.ts — 归档 host 的内部上下文（助手与共享状态）。
+ * archive-host-context.ts — 远程服务的内部依赖装配（deps：助手与共享状态）。
  *
- * 2026-10-08 从 663 行的 archive-host.ts 拆出：内部助手（会话快照、文件定位、标题
- * 批量读取、串行互斥、代际文件扫描）与五个对外方法原本在一个闭包里。现在助手收进
- * 本模块返回的 deps 对象，queries / mutations 两个子工厂顶部解构后方法体逐字不动。
+ * 从 663 行的 host 模块拆出：内部助手（会话快照、文件定位、标题批量读取、
+ * 串行互斥、代际文件扫描）与五个对外方法原本在一个闭包里。SA-08 起五个
+ * 能力方法整体搬进 remote.ts 的 SessionArchiveGateway，本模块只返回 deps
+ * 对象（不对外暴露方法），供 Gateway 构造期装配。
  *
  * @module @chaoset/session-archive/archive-host-context
  */
@@ -91,12 +92,12 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig, statF
   /**
    * delete ↔ unarchive 临界区的互斥串行化（插件闭包内的 promise 链）。
    * 两者的「检查 → 生效」窗口必须互斥，否则并发时会出现两种错位：
-   *   - unarchive 的 confirm 看到 located → deleteArchived 随后 rm →
+   *   - unarchive 的 confirm 看到 located → delete() 随后 rm →
    *     unarchiveSession 仍把 id 移出归档集合：文件没了、归档标记也没了，内存
    *     会话重回侧边栏（等同误恢复）；
    *   - 反向：恢复刚落地，先行发起的删除把新恢复会话的文件清掉。
    * registry 的官方写入 API（archiveSession / unarchiveSession）内部自行
-   * 串行化归档集合写入，deleteArchived 不经过它，因此这里自行串行化。
+   * 串行化归档集合写入，delete() 不经过它，因此这里自行串行化。
    * delete 的临界区与 unarchive 的 confirm → unarchiveSession 段经本链互斥；
    * 本插件不持有 registry 写锁，只串行化自己的"检查 → 生效"窗口，无循环等待。
    */
@@ -108,20 +109,20 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig, statF
   }
 
   /**
-   * 从归档集合移除若干 id（恢复用；删除不调用——见 deleteArchived），返回实际移除的 id。
+   * 从归档集合移除若干 id（恢复用；删除不调用——见 delete），返回实际移除的 id。
    *
    * 走官方 unarchiveSession。官方方法不做存在性检查、幂等（未归档的 id 直接
    * resolve），因此：
    * - confirm 在调用前逐个复核 id 是否仍可恢复（文件仍存在）；未通过复核
    *   的保持原状（仍是 ghost 或正常归档），不能因为请求过就一并抹掉；
-   * - confirm → unarchiveSession 段与 deleteArchived 的删除临界区经
+   * - confirm → unarchiveSession 段与 delete() 的删除临界区经
    *   exclusive 互斥（见 exclusive）——官方写入串行只挡住其他归档集合
    *   写入者，挡不住不经过它的删除；
    */
   async function removeFromArchiveSet(ids: string[], confirm?: (sessionId: string) => Promise<boolean>): Promise<string[]> {
     const removedIds: string[] = [];
     for (const sessionId of new Set(ids)) {
-      // confirm → 移除与 deleteArchived 的删除临界区互斥（见 exclusive）。
+      // confirm → 移除与 delete() 的删除临界区互斥（见 exclusive）。
       await exclusive(async () => {
         if (confirm !== undefined) {
           try { if (!(await confirm(sessionId))) return; } catch { return; }
@@ -192,7 +193,7 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig, statF
       locationPath = snapshot?.location?.path;
     } catch {
       // stat 抛错（后端异常/契约漂移）——既不能确认存在也不能确认缺失，
-      // 必须按 unknown 处理。返回 absent 会让 deleteArchived 把它记成
+      // 必须按 unknown 处理。返回 absent 会让 delete() 把它记成
       // "幂等删除成功"（0.3.9 谎报成功的同源变体）；unknown 对应删除路径
       // 的 unlocatable 拒绝。
       return { state: 'unknown' };

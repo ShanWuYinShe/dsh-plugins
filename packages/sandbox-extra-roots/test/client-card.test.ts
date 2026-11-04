@@ -170,6 +170,22 @@ describe("SandboxRootsCard（jsdom）", () => {
     expect(alert?.textContent).toContain("ctx.sandboxPolicy is unavailable")
   })
 
+  it("预设 chip：一键追加一行并清掉过期的已保存提示", async () => {
+    const p = props()
+    await open(p)
+    const chips = [...container.querySelectorAll(".ser_action")] as HTMLButtonElement[]
+    expect(chips.length).toBeGreaterThan(0)
+    const preset = chips[0]!
+    const presetPath = preset.textContent ?? ""
+    expect(presetPath.length).toBeGreaterThan(0)
+    await click(preset)
+    expect(textarea().value.split("\n")).toContain(presetPath)
+    expect(button(".ser_discard").disabled).toBe(false)
+    // 连点同一个预设不重复追加（appendRootLine 幂等）。
+    await click(preset)
+    expect(textarea().value.split("\n").filter((line) => line === presetPath)).toHaveLength(1)
+  })
+
   it("discard 放弃修改后恢复原值", async () => {
     const p = props({
       getConfig: vi.fn(async (): Promise<SandboxExtraRootsGetResult> => ({

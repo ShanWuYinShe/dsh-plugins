@@ -140,3 +140,30 @@ describe('existingDirectoryRoots', () => {
     }
   })
 })
+
+describe("normalizeRoots 的宽容输入与过滤器异常兜底", () => {
+  it("非对象 source：告警并返回空（asPartialConfig 兜底）", () => {
+    for (const bad of [null, undefined, 42, "x", []]) {
+      const warnings: string[] = []
+      expect(normalizeRoots(bad, (m) => warnings.push(m))).toEqual([])
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain("must be an array")
+    }
+  })
+
+  it("数组里的非字符串元素：告警并剔除（不把数字/对象当路径）", () => {
+    const warnings: string[] = []
+    expect(normalizeRoots({ extraWritableRoots: [42, null, { a: 1 }] }, (m) => warnings.push(m))).toEqual([])
+    expect(warnings.filter((m) => m.includes("non-absolute"))).toHaveLength(3)
+  })
+
+  it("statSync 抛错（非法路径）时判为不存在而不是冒出异常", () => {
+    // NUL 字节路径让 statSync 同步抛 ERR_INVALID_ARG_VALUE（跨平台确定）。
+    const filter = createRootsFilter()
+    expect(filter.isExistingDirCached("\0invalid")).toBe(false)
+    // 过滤入口同样安全：非法根按"不存在"处理并告警。
+    const warnings: string[] = []
+    expect(filter.existingDirectoryRoots(["\0invalid"], new Set<string>(), "test", (m) => warnings.push(m))).toEqual([])
+    expect(warnings[0]).toContain("does not exist")
+  })
+})

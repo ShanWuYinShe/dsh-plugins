@@ -21,9 +21,9 @@ describe('Coding Plan 窗口额度（monitor/usage/quota/limit）', () => {
     expect(quota?.level).toBe('pro')
     expect(quota?.limits).toHaveLength(3)
     expect(codingPlanQuotaWindows(quota!)).toEqual([
-      { id: 'tokens_limit-3-5', label: '5 小时', remain: 100, limit: 100, unit: '%', resetsAt: new Date(1_791_403_544_725).toISOString() },
-      { id: 'tokens_limit-6-1', label: '7 天', remain: 76, limit: 100, unit: '%', resetsAt: new Date(1_791_865_446_983).toISOString() },
-      { id: 'time_limit-5-1', label: '工具调用', remain: 1000, limit: 1000, unit: '次', resetsAt: new Date(1_793_026_354_999).toISOString() },
+      { id: 'tokens_limit-3-5', label: { en: '5 hours', zh: '5 小时' }, remain: 100, limit: 100, unit: '%', resetsAt: new Date(1_791_403_544_725).toISOString() },
+      { id: 'tokens_limit-6-1', label: { en: '7 days', zh: '7 天' }, remain: 76, limit: 100, unit: '%', resetsAt: new Date(1_791_865_446_983).toISOString() },
+      { id: 'time_limit-5-1', label: { en: 'Tool calls', zh: '工具调用' }, remain: 1000, limit: 1000, unit: { en: 'requests', zh: '次' }, resetsAt: new Date(1_793_026_354_999).toISOString() },
     ])
   })
 
@@ -35,8 +35,8 @@ describe('Coding Plan 窗口额度（monitor/usage/quota/limit）', () => {
       ],
     })
     // 150% 已用 → 剩余 0（不是负数）；-5% → 剩余 100（不是 105）。
-    expect(windows[0]).toMatchObject({ label: '5 小时', remain: 0, limit: 100, unit: '%' })
-    expect(windows[1]).toMatchObject({ label: '7 天', remain: 100, limit: 100, unit: '%' })
+    expect(windows[0]).toMatchObject({ label: { en: '5 hours', zh: '5 小时' }, remain: 0, limit: 100, unit: '%' })
+    expect(windows[1]).toMatchObject({ label: { en: '7 days', zh: '7 天' }, remain: 100, limit: 100, unit: '%' })
   })
 
   it('形状不符一律 undefined（调用方据此回退订阅窗口）', () => {
@@ -50,8 +50,12 @@ describe('Coding Plan 窗口额度（monitor/usage/quota/limit）', () => {
   })
 
   it('未知 unit 走通用标签，缺可展示数字的行被跳过', () => {
-    expect(codingPlanWindowLabel({ type: 'TOKENS_LIMIT', unit: 99, number: 2 })).toBe('额度')
-    expect(codingPlanWindowLabel({ type: 'TIME_LIMIT' })).toBe('工具调用')
+    expect(codingPlanWindowLabel({ type: 'TOKENS_LIMIT', unit: 99, number: 2 })).toEqual({ en: 'Quota', zh: '额度' })
+    expect(codingPlanWindowLabel({ type: 'TIME_LIMIT' })).toEqual({ en: 'Tool calls', zh: '工具调用' })
+    // 单复数：1 hour / 5 hours；1 周按用户心智写成 7 天。
+    expect(codingPlanWindowLabel({ type: 'TOKENS_LIMIT', unit: 3, number: 1 })).toEqual({ en: '1 hour', zh: '1 小时' })
+    expect(codingPlanWindowLabel({ type: 'TOKENS_LIMIT', unit: 6, number: 2 })).toEqual({ en: '14 days', zh: '14 天' })
+    expect(codingPlanWindowLabel({ type: 'TOKENS_LIMIT', unit: 5, number: 3 })).toEqual({ en: '3 months', zh: '3 个月' })
     const windows = codingPlanQuotaWindows({
       limits: [
         { type: 'TOKENS_LIMIT' },        // 无 percentage → 跳过
@@ -60,7 +64,7 @@ describe('Coding Plan 窗口额度（monitor/usage/quota/limit）', () => {
       ],
     })
     expect(windows).toHaveLength(1)
-    expect(windows[0]).toMatchObject({ label: '5 小时', remain: 95 })
+    expect(windows[0]).toMatchObject({ label: { en: '5 hours', zh: '5 小时' }, remain: 95 })
   })
 
   it('同 type/unit/number 重复时 id 仍然唯一（React key 不能撞）', () => {

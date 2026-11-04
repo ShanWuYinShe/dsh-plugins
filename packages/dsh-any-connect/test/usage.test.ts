@@ -22,7 +22,7 @@ interface Registration {
   displayName: string | undefined
   query: (context: { provider: string; signal?: AbortSignal }) => Promise<{
     provider: string
-    windows: readonly { id: string; label: string | { en: string; zh?: string }; remain?: number; limit?: number; unit: string }[]
+    windows: readonly { id: string; label: string | { en: string; zh?: string }; remain?: number; limit?: number; unit: string | { en: string; zh?: string } }[]
     displayName?: string
   }>
 }
@@ -252,10 +252,10 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
     expect(currentPlanWindow([
       { packageName: 'Dead (已过期)', remain: 0, size: 1 },
       { packageName: 'Pro (有效)', remain: 1, size: 1, expiredAt: '2026-10-21T00:00:00.000Z' },
-    ])).toEqual([{ id: 'plan', label: 'Pro', unit: '有效', resetsAt: '2026-10-21T00:00:00.000Z' }])
+    ])).toEqual([{ id: 'plan', label: 'Pro', unit: { en: 'valid', zh: '有效' }, resetsAt: '2026-10-21T00:00:00.000Z' }])
     expect(currentPlanWindow([
       { packageName: 'Only (VALID)', remain: 0, size: 1 },
-    ])).toEqual([{ id: 'plan', label: 'Only', unit: '有效' }])
+    ])).toEqual([{ id: 'plan', label: 'Only', unit: { en: 'valid', zh: '有效' } }])
   })
 
   it('Start Plan 的当日 token 池带真实数字,pill 才有剩余额度可显示', () => {
@@ -280,18 +280,18 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
     // size = 0(理论不应出现)防御:退回「有效」展示,避免 limit 0 的除零与无意义进度条。
     expect(currentPlanWindow([
       { packageName: 'Odd (有效)', remain: 5, size: 0, sameDay: true, unit: 'tokens' },
-    ])).toEqual([{ id: 'plan', label: 'Odd', unit: '有效' }])
+    ])).toEqual([{ id: 'plan', label: 'Odd', unit: { en: 'valid', zh: '有效' } }])
     // Coding Plan 订阅(无 sameDay,remain/size=1 的有效性标志)维持原样。
     expect(currentPlanWindow([
       { packageName: 'GLM Coding Pro (有效)', planName: 'GLM Coding Pro', remain: 1, size: 1 },
-    ])).toEqual([{ id: 'plan', label: 'GLM Coding Pro', unit: '有效' }])
+    ])).toEqual([{ id: 'plan', label: 'GLM Coding Pro', unit: { en: 'valid', zh: '有效' } }])
   })
 
   it('Start Plan 未领取时报「今日待领取」，而不是「不上报额度」', () => {
     // 每日 00:00 后新池子还没发放/领取：accounts 为空（billing/balance 如实返回
     // 空 balances）。pill 若落到通用的「该 provider 不上报额度」，用户会以为额度
     // 功能坏了——额度接口其实是通的，只是今天还没有池子。
-    expect(startPlanWindows([])).toEqual([{ id: 'plan', label: 'Start Plan', unit: '今日待领取' }])
+    expect(startPlanWindows([])).toEqual([{ id: 'plan', label: 'Start Plan', unit: { en: 'not claimed today', zh: '今日待领取' } }])
     // 有池子时仍然报真实 token 数（unit: 'tokens' 声明 token 计数池）。
     expect(startPlanWindows([
       { packageName: 'GLM-5.3-Flash (有效)', remain: 90_000_000, size: 100_000_000, sameDay: true, unit: 'tokens' },
@@ -391,7 +391,11 @@ it('reports the upstream plan name for ZCode instead of a hardcoded label', asyn
 
     const entry = registry.registered.find(candidate => candidate.provider === 'zcode')!
     const snapshot = await entry.query({ provider: 'zcode' })
-    expect(snapshot.windows.map(window => window.label)).toEqual(['5 小时', '7 天'])
+    // label 现在是本地化结构：pill 取 zh、/usage 命令取 en。
+    expect(snapshot.windows.map(window => window.label)).toEqual([
+      { en: '5 hours', zh: '5 小时' },
+      { en: '7 days', zh: '7 天' },
+    ])
     // percentage 是已用：10% → 剩 90%；24% → 剩 76%。
     expect(snapshot.windows[0]).toMatchObject({ remain: 90, limit: 100, unit: '%' })
     expect(snapshot.windows[1]).toMatchObject({ remain: 76, limit: 100, unit: '%' })

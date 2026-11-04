@@ -179,6 +179,24 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant, cli: CliSt
  * Plan. Start Plan 上游按模型分池且池子互不通用（2026-10-24 实测），每池一行；
  * Coding Plan 维持订阅有效性单行。
  */
+/**
+ * 窗口字段的本地化文本：provider-usage 的 i18n 契约允许 `label`/`unit` 是
+ * `{en, zh}` 结构（pill 按语言解析）。CLI 的**语义判定**（如「今日待领取」
+ * 这个 unit 决定空窗口文案）必须先把两种形态归一成字符串，否则对象永远
+ * 不等于字符串字面量——2026-11 回归：Start Plan 的空窗口因此被误报成
+ * "Start Plan: active"。
+ */
+function windowText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'object' && value !== null) {
+    const zh = (value as { zh?: unknown }).zh
+    if (typeof zh === 'string') return zh
+    const en = (value as { en?: unknown }).en
+    if (typeof en === 'string') return en
+  }
+  return ''
+}
+
 export function humanCredits(
   variant: WorkBuddyVariant,
   credits: { total: number; error?: string } | undefined,
@@ -202,13 +220,13 @@ export function humanCredits(
     if (window.remain === undefined || window.limit === undefined) {
       // Start Plan 的「今日待领取」是一个**没有数字的窗口**（startPlanWindows 的
       // 兜底形态）：文案必须说领取，不能落到通用的 "active"。
-      if (isStartPlan && window.unit === '今日待领取') return startPlanEmptyCopy
-      return `${window.label}: active`
+      if (isStartPlan && windowText(window.unit) === '今日待领取') return startPlanEmptyCopy
+      return `${windowText(window.label)}: active`
     }
     const reset = window.resetsAt !== undefined
       ? `, expires ${new Date(window.resetsAt).toLocaleString()}`
       : ''
-    return `${prefix}: ${window.remain.toLocaleString()} / ${window.limit.toLocaleString()} tokens (${window.label})${reset}`
+    return `${prefix}: ${window.remain.toLocaleString()} / ${window.limit.toLocaleString()} tokens (${windowText(window.label)})${reset}`
   }).join('\n')
 }
 

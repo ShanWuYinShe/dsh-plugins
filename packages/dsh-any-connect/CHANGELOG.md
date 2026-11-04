@@ -44,6 +44,19 @@
   路由 404 / adapter 全回滚 / usage 注册 5→0 并可干净重建）。
 * 新增 client 组件 props 直喂 jsdom 用例（ModelRow/VariantCard/WorkBuddyConfigPage 的用户可见行为）。
 
+### 修复
+
+* **额度窗口名称与单位本地化补齐**：`usage.ts` 的「有效 / 今日待领取 / 官方免费」与
+  `zcode-quota.ts` 的「5 小时 / 7 天 / 工具调用 / 额度 / 次」全部改为
+  `{ en, zh }` 本地化结构（英文带单复数）；中文界面显示中文、英文界面显示英文。
+* **Start Plan 空窗口文案回归修复**：bin 的 `humanCredits` 原先按字符串比较 unit，
+  label/unit 契约变化后会把 Start Plan 的空窗口误报为 `active`；新增 `windowText()`
+  兼容 `string | { en, zh }`（取 zh→en），恢复「今日待领取」文案。
+* 测试：新增 5 个测试文件 / 57 用例（组件 props 直喂、jsdom 全链路、server 路由、
+  discovery、heartbeat/ps 平台分支），本包 90 个源文件 lines<80% 的从 17 个降到 0 个
+  （包均 lines 95.43%）；修复 probe-service 覆盖率跨运行抖动的测试时序（afterEach 先
+  `await dispose()` 落定串行队列）。
+
 ## 0.4.30 (2026-11-04)
 
 ### 新增

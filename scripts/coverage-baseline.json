@@ -1,0 +1,984 @@
+{
+  "version": 1,
+  "tolerancePp": 0.2,
+  "globalThresholds": {
+    "statements": 91,
+    "branches": 83,
+    "functions": 93,
+    "lines": 93
+  },
+  "files": {
+    "packages/dsh-any-connect/client/ModelRow.tsx": {
+      "statements": 100,
+      "branches": 96.15,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/client/RateLimitBox.tsx": {
+      "statements": 88.23,
+      "branches": 85.71,
+      "functions": 100,
+      "lines": 85.71
+    },
+    "packages/dsh-any-connect/client/SignedOutRow.tsx": {
+      "statements": 100,
+      "branches": 95,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/client/StartPlanClaimBox.tsx": {
+      "statements": 100,
+      "branches": 83.33,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/client/VariantCard.tsx": {
+      "statements": 100,
+      "branches": 91.66,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/client/VariantCardModels.tsx": {
+      "statements": 90.9,
+      "branches": 100,
+      "functions": 88.88,
+      "lines": 90.9
+    },
+    "packages/dsh-any-connect/client/VariantCardQuota.tsx": {
+      "statements": 100,
+      "branches": 95.91,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/client/VariantsPage.tsx": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/client/WorkBuddyConfigPage.tsx": {
+      "statements": 80,
+      "branches": 75,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/client/config-format.ts": {
+      "statements": 61.9,
+      "branches": 65.38,
+      "functions": 100,
+      "lines": 80
+    },
+    "packages/dsh-any-connect/client/config-styles.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/client/config-types.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/client/fetch-json.ts": {
+      "statements": 85.71,
+      "branches": 100,
+      "functions": 50,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/client/index.tsx": {
+      "statements": 88,
+      "branches": 75,
+      "functions": 50,
+      "lines": 86.36
+    },
+    "packages/dsh-any-connect/client/locales.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/client/useVariantCard.ts": {
+      "statements": 94,
+      "branches": 73.46,
+      "functions": 100,
+      "lines": 98.73
+    },
+    "packages/dsh-any-connect/client/useVariantsPage.ts": {
+      "statements": 98.07,
+      "branches": 71.73,
+      "functions": 96.55,
+      "lines": 98.7
+    },
+    "packages/dsh-any-connect/client/variant-card-view.ts": {
+      "statements": 93.1,
+      "branches": 90.62,
+      "functions": 90,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/adapter.ts": {
+      "statements": 79.16,
+      "branches": 78.66,
+      "functions": 66.66,
+      "lines": 80.95
+    },
+    "packages/dsh-any-connect/src/app-version.ts": {
+      "statements": 94.28,
+      "branches": 88,
+      "functions": 100,
+      "lines": 96.77
+    },
+    "packages/dsh-any-connect/src/auth-desktop-inspect.ts": {
+      "statements": 83.33,
+      "branches": 50,
+      "functions": 100,
+      "lines": 87.5
+    },
+    "packages/dsh-any-connect/src/auth-desktop-read.ts": {
+      "statements": 88.46,
+      "branches": 78.35,
+      "functions": 100,
+      "lines": 91.54
+    },
+    "packages/dsh-any-connect/src/auth-document.ts": {
+      "statements": 86.04,
+      "branches": 79.31,
+      "functions": 100,
+      "lines": 97.22
+    },
+    "packages/dsh-any-connect/src/auth-paths.ts": {
+      "statements": 95.45,
+      "branches": 89.58,
+      "functions": 100,
+      "lines": 95.34
+    },
+    "packages/dsh-any-connect/src/auth-refresh.ts": {
+      "statements": 87.09,
+      "branches": 70,
+      "functions": 100,
+      "lines": 92.59
+    },
+    "packages/dsh-any-connect/src/auth-store.ts": {
+      "statements": 95.74,
+      "branches": 90.8,
+      "functions": 88.88,
+      "lines": 96.47
+    },
+    "packages/dsh-any-connect/src/auth-types.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/auth-zcode-crypto.ts": {
+      "statements": 88.46,
+      "branches": 74.28,
+      "functions": 100,
+      "lines": 88.23
+    },
+    "packages/dsh-any-connect/src/auth-zcode.ts": {
+      "statements": 91.91,
+      "branches": 83.9,
+      "functions": 100,
+      "lines": 96.29
+    },
+    "packages/dsh-any-connect/src/auth.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/catalog-adopt.ts": {
+      "statements": 94.44,
+      "branches": 90.9,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/catalog-fingerprint.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/catalog-lifecycle.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/catalog-refresh.ts": {
+      "statements": 86.99,
+      "branches": 79.03,
+      "functions": 100,
+      "lines": 89.52
+    },
+    "packages/dsh-any-connect/src/catalog-store.ts": {
+      "statements": 88.23,
+      "branches": 87.5,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/catalog-timers.ts": {
+      "statements": 86.48,
+      "branches": 82.75,
+      "functions": 83.33,
+      "lines": 90.62
+    },
+    "packages/dsh-any-connect/src/catalog.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/child-processes.ts": {
+      "statements": 95.65,
+      "branches": 80,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/config.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/credit-ledger.ts": {
+      "statements": 97.72,
+      "branches": 81.48,
+      "functions": 93.75,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/desktop-app-discovery.ts": {
+      "statements": 94.44,
+      "branches": 91.3,
+      "functions": 100,
+      "lines": 93.75
+    },
+    "packages/dsh-any-connect/src/desktop-at-rest-key.ts": {
+      "statements": 95.89,
+      "branches": 93.42,
+      "functions": 100,
+      "lines": 96.92
+    },
+    "packages/dsh-any-connect/src/desktop-auth-envelope.ts": {
+      "statements": 90.65,
+      "branches": 89.28,
+      "functions": 100,
+      "lines": 97.61
+    },
+    "packages/dsh-any-connect/src/desktop-credential-protection.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/desktop-discovery-windows.ts": {
+      "statements": 79.66,
+      "branches": 69.79,
+      "functions": 83.33,
+      "lines": 83.5
+    },
+    "packages/dsh-any-connect/src/desktop-discovery.ts": {
+      "statements": 97.36,
+      "branches": 96.15,
+      "functions": 94.44,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/host-heartbeat.ts": {
+      "statements": 100,
+      "branches": 95.45,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/index.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/loopback.ts": {
+      "statements": 96.66,
+      "branches": 96.77,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/model-filter-store.ts": {
+      "statements": 97.29,
+      "branches": 94.11,
+      "functions": 100,
+      "lines": 96.87
+    },
+    "packages/dsh-any-connect/src/probe-route.ts": {
+      "statements": 90.9,
+      "branches": 90.16,
+      "functions": 100,
+      "lines": 92.77
+    },
+    "packages/dsh-any-connect/src/probe-service.ts": {
+      "statements": 83.52,
+      "branches": 75,
+      "functions": 93.33,
+      "lines": 94.2
+    },
+    "packages/dsh-any-connect/src/probe-store.ts": {
+      "statements": 84.81,
+      "branches": 77.46,
+      "functions": 88.23,
+      "lines": 96.66
+    },
+    "packages/dsh-any-connect/src/probe.ts": {
+      "statements": 100,
+      "branches": 95.83,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/rate-limit.ts": {
+      "statements": 96.85,
+      "branches": 88.97,
+      "functions": 100,
+      "lines": 99.05
+    },
+    "packages/dsh-any-connect/src/reasoning-default.ts": {
+      "statements": 94.82,
+      "branches": 93.1,
+      "functions": 100,
+      "lines": 97.72
+    },
+    "packages/dsh-any-connect/src/runtime-sections.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/runtime.ts": {
+      "statements": 82.67,
+      "branches": 57.14,
+      "functions": 78.78,
+      "lines": 86.84
+    },
+    "packages/dsh-any-connect/src/shim-http.ts": {
+      "statements": 90.38,
+      "branches": 90,
+      "functions": 92.85,
+      "lines": 89.79
+    },
+    "packages/dsh-any-connect/src/shim.ts": {
+      "statements": 89.53,
+      "branches": 78.63,
+      "functions": 96.66,
+      "lines": 90.78
+    },
+    "packages/dsh-any-connect/src/state-store.ts": {
+      "statements": 95,
+      "branches": 37.5,
+      "functions": 100,
+      "lines": 94.73
+    },
+    "packages/dsh-any-connect/src/status-paths.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/timeout.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/upstream-opencode.ts": {
+      "statements": 91.07,
+      "branches": 79.21,
+      "functions": 95,
+      "lines": 93.33
+    },
+    "packages/dsh-any-connect/src/upstream-shared.ts": {
+      "statements": 91.36,
+      "branches": 80.71,
+      "functions": 87.5,
+      "lines": 93.91
+    },
+    "packages/dsh-any-connect/src/upstream-types.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/upstream-workbuddy-http.ts": {
+      "statements": 85.98,
+      "branches": 67.96,
+      "functions": 87.5,
+      "lines": 89.47
+    },
+    "packages/dsh-any-connect/src/upstream-workbuddy-parse.ts": {
+      "statements": 89.33,
+      "branches": 85.71,
+      "functions": 100,
+      "lines": 98.38
+    },
+    "packages/dsh-any-connect/src/upstream-workbuddy.ts": {
+      "statements": 82.45,
+      "branches": 67.82,
+      "functions": 87.5,
+      "lines": 86.45
+    },
+    "packages/dsh-any-connect/src/upstream-zcode-body.ts": {
+      "statements": 91.11,
+      "branches": 81.03,
+      "functions": 100,
+      "lines": 93.02
+    },
+    "packages/dsh-any-connect/src/upstream-zcode-normalize.ts": {
+      "statements": 87.5,
+      "branches": 81.57,
+      "functions": 75,
+      "lines": 89.47
+    },
+    "packages/dsh-any-connect/src/upstream-zcode-start-plan.ts": {
+      "statements": 91.8,
+      "branches": 71.23,
+      "functions": 100,
+      "lines": 91.22
+    },
+    "packages/dsh-any-connect/src/upstream-zcode.ts": {
+      "statements": 91.66,
+      "branches": 90.62,
+      "functions": 94.11,
+      "lines": 92.85
+    },
+    "packages/dsh-any-connect/src/upstream.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/usage.ts": {
+      "statements": 87.5,
+      "branches": 77.77,
+      "functions": 100,
+      "lines": 90.38
+    },
+    "packages/dsh-any-connect/src/values.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/variant-runtime.ts": {
+      "statements": 85.71,
+      "branches": 62.5,
+      "functions": 100,
+      "lines": 85.71
+    },
+    "packages/dsh-any-connect/src/variant-wiring.ts": {
+      "statements": 88.88,
+      "branches": 100,
+      "functions": 71.42,
+      "lines": 86.66
+    },
+    "packages/dsh-any-connect/src/variants.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/version.ts": {
+      "statements": 83.33,
+      "branches": 50,
+      "functions": 100,
+      "lines": 83.33
+    },
+    "packages/dsh-any-connect/src/web-status.ts": {
+      "statements": 92.3,
+      "branches": 85.89,
+      "functions": 100,
+      "lines": 91.8
+    },
+    "packages/dsh-any-connect/src/wsl.ts": {
+      "statements": 90,
+      "branches": 84.84,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/zcode-builtin-catalog.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/zcode-plan-claim-wire.ts": {
+      "statements": 93.47,
+      "branches": 86,
+      "functions": 100,
+      "lines": 97.29
+    },
+    "packages/dsh-any-connect/src/zcode-plan-claim.ts": {
+      "statements": 80,
+      "branches": 65,
+      "functions": 100,
+      "lines": 80
+    },
+    "packages/dsh-any-connect/src/zcode-plan-models.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/zcode-plan-prompt.ts": {
+      "statements": 93.33,
+      "branches": 93.75,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/zcode-plan-store.ts": {
+      "statements": 92.3,
+      "branches": 92.85,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/zcode-quota.ts": {
+      "statements": 98.36,
+      "branches": 90.14,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/zcode-signer.ts": {
+      "statements": 92.47,
+      "branches": 70.58,
+      "functions": 100,
+      "lines": 93.25
+    },
+    "packages/provider-usage/client/ProviderUsagePill.tsx": {
+      "statements": 100,
+      "branches": 75,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/client/WindowRow.tsx": {
+      "statements": 100,
+      "branches": 76.19,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/client/fetch-snapshot.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/client/index.tsx": {
+      "statements": 89.18,
+      "branches": 69.23,
+      "functions": 83.33,
+      "lines": 90.62
+    },
+    "packages/provider-usage/client/locales.ts": {
+      "statements": 100,
+      "branches": 83.33,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/client/pill-format.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/client/pill-headline.ts": {
+      "statements": 100,
+      "branches": 96.96,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/client/pill-styles.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/client/pill-types.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/client/resource-provider.ts": {
+      "statements": 93.75,
+      "branches": 82.14,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/client/useProviderUsage.ts": {
+      "statements": 90.51,
+      "branches": 80.19,
+      "functions": 89.47,
+      "lines": 92
+    },
+    "packages/provider-usage/src/command.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/config.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/index.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/provider-bigmodel.ts": {
+      "statements": 95.55,
+      "branches": 70,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/provider-deepseek.ts": {
+      "statements": 94.73,
+      "branches": 83.33,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/provider-minimax.ts": {
+      "statements": 95.65,
+      "branches": 89.28,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/provider-moonshot.ts": {
+      "statements": 94.11,
+      "branches": 93.33,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/provider-openai.ts": {
+      "statements": 96.42,
+      "branches": 72,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/provider-opencode.ts": {
+      "statements": 94.73,
+      "branches": 91.66,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/provider-openrouter.ts": {
+      "statements": 94.44,
+      "branches": 75,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/provider-shared.ts": {
+      "statements": 100,
+      "branches": 97.43,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/provider-siliconflow.ts": {
+      "statements": 100,
+      "branches": 93.33,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/providers.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/registry.ts": {
+      "statements": 95.05,
+      "branches": 88.04,
+      "functions": 100,
+      "lines": 98.7
+    },
+    "packages/provider-usage/src/resolve.ts": {
+      "statements": 91.66,
+      "branches": 89.81,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/provider-usage/src/route.ts": {
+      "statements": 95.77,
+      "branches": 92.15,
+      "functions": 85.71,
+      "lines": 98.41
+    },
+    "packages/provider-usage/src/types.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/client/SandboxRootsCard.tsx": {
+      "statements": 97.4,
+      "branches": 84.44,
+      "functions": 96.15,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/client/index.tsx": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/client/locales.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/client/roots-preview.ts": {
+      "statements": 98.3,
+      "branches": 92.06,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/client/styles.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/src/apply.ts": {
+      "statements": 100,
+      "branches": 90,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/src/config-store.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/src/config-validate.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/src/config.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/src/index.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/src/plugin-config.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/src/policy-merge.ts": {
+      "statements": 98.41,
+      "branches": 97.36,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/src/remote.ts": {
+      "statements": 98,
+      "branches": 78.94,
+      "functions": 90.9,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/src/roots-filter.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/src/roots.ts": {
+      "statements": 95.23,
+      "branches": 93.1,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/sandbox-extra-roots/src/types.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/ArchiveBadge.tsx": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/ArchiveDeleteAck.tsx": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/ArchiveHeader.tsx": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/ArchivePanel.tsx": {
+      "statements": 100,
+      "branches": 96.87,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/ArchiveRow.tsx": {
+      "statements": 92.3,
+      "branches": 89.55,
+      "functions": 85.71,
+      "lines": 92.3
+    },
+    "packages/session-archive/client/ArchiveToolbar.tsx": {
+      "statements": 100,
+      "branches": 95.65,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/archive-entries.ts": {
+      "statements": 98.75,
+      "branches": 88.17,
+      "functions": 100,
+      "lines": 98.41
+    },
+    "packages/session-archive/client/archive-format.ts": {
+      "statements": 92,
+      "branches": 96.29,
+      "functions": 100,
+      "lines": 93.75
+    },
+    "packages/session-archive/client/index.tsx": {
+      "statements": 93.33,
+      "branches": 84.21,
+      "functions": 87.5,
+      "lines": 96.15
+    },
+    "packages/session-archive/client/locales.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/panel-types.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/styles.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/useArchiveActions.ts": {
+      "statements": 90.96,
+      "branches": 70.51,
+      "functions": 96.96,
+      "lines": 93.89
+    },
+    "packages/session-archive/client/useArchiveBadgeVisibility.ts": {
+      "statements": 94.11,
+      "branches": 84.61,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/useArchiveList.ts": {
+      "statements": 90.21,
+      "branches": 62.22,
+      "functions": 90,
+      "lines": 96.87
+    },
+    "packages/session-archive/client/useArchivePanel.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/useArchivePanelChrome.ts": {
+      "statements": 95.65,
+      "branches": 85.71,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/useArchivePanelOpen.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/client/useArchiveViewState.ts": {
+      "statements": 93.93,
+      "branches": 87.5,
+      "functions": 100,
+      "lines": 96.29
+    },
+    "packages/session-archive/src/archive-host-context.ts": {
+      "statements": 90.08,
+      "branches": 85,
+      "functions": 94.11,
+      "lines": 93.06
+    },
+    "packages/session-archive/src/config.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/src/index.ts": {
+      "statements": 100,
+      "branches": 50,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/src/plugin-config.ts": {
+      "statements": 100,
+      "branches": 92.85,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/src/remote.ts": {
+      "statements": 86.24,
+      "branches": 78.37,
+      "functions": 91.42,
+      "lines": 88.55
+    },
+    "packages/session-archive/src/session-id.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/src/session-query-bridge.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/src/session-scan.ts": {
+      "statements": 85.48,
+      "branches": 82.14,
+      "functions": 100,
+      "lines": 87.73
+    },
+    "packages/session-archive/src/types.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    }
+  }
+}

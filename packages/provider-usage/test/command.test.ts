@@ -54,6 +54,15 @@ describe('formatUsageLine', () => {
     }))).toBe('acme: Total 34 credits, Start Plan —')
   })
 
+  it('本地化 unit 取 en 基线（命令文本只有一种语言）', () => {
+    expect(formatUsageLine(snapshot({
+      windows: [
+        { id: 'plan', label: 'Plan', remain: 0, unit: { en: 'valid', zh: '有效' } },
+        { id: 'pool', label: 'Pool', remain: 5, unit: { en: 'requests', zh: '次' } },
+      ],
+    }))).toBe('acme: Plan 0 valid, Pool 5 requests')
+  })
+
   it('缺 remain 的窗口用 — 占位（不输出 undefined），空单位不留尾随空格', () => {
     expect(formatUsageLine(snapshot({
       windows: [

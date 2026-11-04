@@ -45,7 +45,17 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
     // Config schema 只保证形状/默认值；这里仍是最终防线：canonical 化、危险根
     // 分级过滤、去重，非法 patch 值经 warn 可见（不静默忽略）。每次 apply 换新
     // 目录缓存与生效根，下一次 resolve 即用「当前这一代配置」。
-    merge.update(normalizeRoots(cfg, warn), rootsFilter, warn)
+    const extraRoots = normalizeRoots(cfg, warn)
+    // Windows 官方 ACL 进程沙盒不支持 additionalWritableRoots：rc.1 的
+    // sandbox-local 在 windows-acl rung 的 confine() 里显式抛
+    // SandboxUnsupportedPolicyError（lib/index.js windowsAclRunnerArgv）。若把
+    // 根并入 policy，该平台每一条受限命令都会失败；因此这里不并入（fs fence
+    // 同样不授予，避免"文件工具可用、命令全挂"的分叉），并显式降级让设置卡
+    // 可见。README 的已知限制与此一致。
+    if (process.platform === 'win32' && extraRoots.length > 0) {
+      throw new Error('Windows ACL confinement does not support additional writable roots (official sandbox-local rejects the policy); extra writable roots are not applied on this platform')
+    }
+    merge.update(extraRoots, rootsFilter, warn)
     merge.install()
   } catch (error) {
     const reason = (error as Error)?.message ?? String(error)

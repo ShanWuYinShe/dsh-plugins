@@ -58,13 +58,19 @@ export default defineConfig({
     setupFiles: ["./test/setup-test-home.ts"],
     globalSetup: ["./test/global-setup.ts"],
     coverage: {
-      // 官方规则 RULE-088（docs/testing.md「Coverage gate」）：CI 的门禁口径是
-      // `packages/*/*/src` 逐文件 100%；未覆盖行往往是死代码，应由门禁提示删除
-      // 而不是补测试凑数。本仓当前只有本文件 + `bun run test:coverage`：
-      //   - 覆盖率面 = 四包 host src 与 client 源文件（不含测试、d.ts、bin 产物）；
-      //   - 阈值是**基线棘轮**：2026-11-04 首次接入时按实测值留 ~1pp 余量，
-      //     之后只许上调不许下调；逐文件 100% 是目标，尚未达成（先保证门禁可运行、
-      //     数字可追踪，再分期拉齐）。下调阈值等同放宽门禁，必须在提交信息里说明。
+      // 覆盖率门禁分两层，不要混为一谈：
+      //   1. **全局阈值**（本文件的 thresholds）：四个聚合百分比的粗网兜底；
+      //   2. **逐文件棘轮**（scripts/coverage-ratchet.mjs + scripts/coverage-baseline.json）：
+      //      每个纳入 coverage 的源文件都不得低于版本化基线（容差 0.2pp），
+      //      新增文件必须达到全局阈值，消失文件由基线维护命令清理。
+      //      `bun run test:coverage` = build → vitest --coverage → 棘轮校验。
+      // 官方规则 RULE-088（docs/testing.md「Coverage gate」）的门禁口径是
+      // `packages/*/*/src` **逐文件 100%**；未覆盖行往往是死代码，应由门禁提示
+      // 删除而不是补测试凑数。逐文件 100% 是长期目标，当前先用棘轮保证
+      // 「今天不比昨天差」，并让每个文件的缺口在基线文件里可见、可追踪。
+      //
+      // 覆盖率面 = 四包 host src 与 client 源文件（不含测试、d.ts、bin 产物）。
+      // reporter 必须保留 `json-summary`：棘轮脚本读 coverage/coverage-summary.json。
       provider: "v8",
       reporter: ["text", "json-summary"],
       reportsDirectory: "coverage",
@@ -83,14 +89,19 @@ export default defineConfig({
         // 构建产物（gitignore），不计入覆盖率面。
         "packages/*/client/client.cjs",
       ],
+      // 有测试失败时也生成 coverage-summary.json，保证棘轮步骤能给出
+      // 「哪个文件退化了」的可执行报错，而不是只看到测试红灯。
+      reportOnFailure: true,
       thresholds: {
-        // 2026-11-04 基线实测（`npx vitest run --coverage`，排除当时因他人 WIP
-        // 变红的根锁）：stmts 81.34 / branch 75.24 / funcs 79.29 / lines 84.51。
-        // 阈值 = 基线向下取整并留 ~1pp 抖动余量：只允许上调（棘轮），不得下调。
-        statements: 80,
-        branches: 74,
-        functions: 78,
-        lines: 83,
+        // 阈值 = 实测向下取整并留 ~1pp 抖动余量，只允许上调（棘轮）；下调
+        // 等同放宽门禁，必须在提交信息里说明。逐文件不得回退由
+        // scripts/coverage-baseline.json + 棘轮脚本保证。
+        // 2026-11-05 实测（补齐三包测试后）：stmts 92.09 / branch 84.19 /
+        // funcs 94.70 / lines 94.80。
+        statements: 91,
+        branches: 83,
+        functions: 93,
+        lines: 93,
       },
     },
   },

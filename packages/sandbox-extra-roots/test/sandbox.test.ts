@@ -370,3 +370,75 @@ describe("sandbox-extra-roots Remote（get/set、错误归一化、合并基）"
     });
   });
 });
+
+describe("sandbox-extra-roots 错误路径（覆盖降级/兜底分支）", () => {
+  it("policy.resolve 不是函数：apply 降级（不抛给宿主），get() 带原因", async () => {
+    const ctx = makeCtx({ policy: { resolve: undefined } as unknown as FakePolicy });
+    await apply(ctx, { extraWritableRoots: [EXTRA] });
+    expect(ctx.gateway.get().degraded?.reason).toMatch(/resolve is not a function/);
+    expect(ctx.warnings.some((w: string) => w.includes("NOT in effect"))).toBe(true);
+    // 未安装包装：契约漂移的 resolve 保持原样（没有被替换成包装函数）。
+    expect(ctx.sandboxPolicy.resolve).toBeUndefined();
+  });
+
+  it("gateway 注册失败：只告警，不影响 enforcement（apply 不抛）", async () => {
+    const ctx = makeCtx({ policy: makePolicy() });
+    ctx.plugin = () => {
+      throw new Error("gateway boom");
+    };
+    await expect(apply(ctx, { extraWritableRoots: [EXTRA] })).resolves.toBeUndefined();
+    expect(ctx.warnings.some((w: string) => w.includes("settings gateway failed") && w.includes("gateway boom"))).toBe(true);
+    // enforcement 仍然生效：policy 里已并入根。
+    expect(ctx.sandboxPolicy.resolve().additionalWritableRoots).toEqual([canon(EXTRA)]);
+  });
+
+  it("apply 不带 config：使用 DEFAULT_CONFIG（空根）", async () => {
+    const ctx = makeCtx({ policy: makePolicy() });
+    await apply(ctx);
+    expect(ctx.gateway.get()).toEqual({ config: { extraWritableRoots: [] } });
+  });
+
+  it("logger 缺失时降级路径不抛（可选链兜底）", async () => {
+    const ctx = makeCtx({ policy: undefined });
+    ctx.logger = undefined;
+    await expect(apply(ctx, { extraWritableRoots: [EXTRA] })).resolves.toBeUndefined();
+    expect(ctx.gateway.get().degraded?.reason).toMatch(/sandboxPolicy/);
+  });
+
+  it("gateway 注册抛非 Error 值：String 兜底后仍只告警", async () => {
+    const ctx = makeCtx({ policy: makePolicy() });
+    ctx.plugin = () => {
+      throw "gateway-string-boom";
+    };
+    await expect(apply(ctx, { extraWritableRoots: [EXTRA] })).resolves.toBeUndefined();
+    expect(ctx.warnings.some((w: string) => w.includes("gateway-string-boom"))).toBe(true);
+  });
+
+  it("非对象 partial：invalid-config details.field = config", async () => {
+    const ctx = makeCtx({ policy: makePolicy() });
+    await apply(ctx, { extraWritableRoots: [] });
+    const failure = await (ctx.gateway.set as (p: unknown) => Promise<unknown>)(null).then(
+      () => null,
+      (error: unknown) => remoteErrorOf(error),
+    );
+    expect(failure).toMatchObject({
+      code: "sandbox-extra-roots/invalid-config",
+      details: { field: "config", value: "null" },
+    });
+  });
+
+  it("循环引用值：details.value 走 String 兜底（序列化不抛）", async () => {
+    const ctx = makeCtx({ policy: makePolicy() });
+    await apply(ctx, { extraWritableRoots: [] });
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const failure = await (ctx.gateway.set as (p: unknown) => Promise<unknown>)({ extraWritableRoots: circular }).then(
+      () => null,
+      (error: unknown) => remoteErrorOf(error),
+    );
+    expect(failure).toMatchObject({
+      code: "sandbox-extra-roots/invalid-config",
+      details: { field: "extraWritableRoots", value: "[object Object]" },
+    });
+  });
+});

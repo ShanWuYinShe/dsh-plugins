@@ -16,7 +16,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { isLoopbackHost } from '@deepseek-ai/dsh-host-webserver'
 import { safeMessage } from './registry.js'
 import type { ProviderUsageRegistry } from './registry.js'
-import { PROVIDER_USAGE_PATH, type ProviderUsageAnswer } from './types.js'
+import { PROVIDER_USAGE_PATH, type ProviderUsageAnswer, type ProviderUsageResponse } from './types.js'
 
 /** Constructor dependencies. */
 interface ProviderUsageRouteOptions {
@@ -163,7 +163,10 @@ export function providerUsageHandler(options: ProviderUsageRouteOptions): (req: 
           const snapshot = await options.registry.snapshot(provider, { force, signal: controller.signal })
           snapshots.push(snapshot ?? { provider, queried: false })
         }
-        json(res, 200, { snapshots })
+        // cacheTtlMs 随响应交给浏览器：client 的轮询要排在宿主缓存过期之后，
+        // 否则两边各写一个 60s 常量会撞相位（命中未过期缓存 → 实际更新间隔翻倍）。
+        const body: ProviderUsageResponse = { snapshots, cacheTtlMs: options.registry.cacheTtlMs }
+        json(res, 200, body)
       } finally {
         clearTimeout(timer)
       }

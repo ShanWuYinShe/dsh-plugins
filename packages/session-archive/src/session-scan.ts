@@ -213,7 +213,7 @@ export async function readTitle(persistence: SessionPersistence, sessionId: Sess
 }
 
 /** 并发限制器：最多 N 个任务并行，其余排队。宽度下限 1——直调
- * createArchiveHost 传 0/负数时若产出 0 个 worker，会静默返回全 undefined
+ * 调用方传 0/负数时若产出 0 个 worker，会静默返回全 undefined
  * 的数组而非报错。 */
 export function limitedConcurrency<T>(limit: number, tasks: ReadonlyArray<() => Promise<T>>, signal?: AbortSignal): Promise<T[]> {
   const results = new Array<T>(tasks.length);

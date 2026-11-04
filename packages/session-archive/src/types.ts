@@ -89,7 +89,7 @@ export interface ArchiveFailure {
   readonly reason: string;
 }
 
-/** deleteArchived() 的返回。 */
+/** delete() 的返回。 */
 export interface ArchiveDeleteResult {
   /** 已彻底删除的会话 id。 */
   readonly deleted: readonly string[];

@@ -9,7 +9,20 @@ import { WorkBuddyProbeStore, fingerprintModel } from '../src/probe-store.js'
 
 let root: string | undefined
 
+/**
+ * 本文件创建过的探针服务：afterEach 里逐个 `dispose()` 等串行队列落定。
+ *
+ * 必要性（确定性/覆盖率抖动根因）：`probeMissingCandidates()` 是 fire-and-forget，
+ * 而 isRunning/onSweepError 都只是**运行中**的信号——它们触发后，探针 promise 的
+ * finally、pending 去重清理、探测记录落盘续体仍可能在途。afterEach 立刻删临时目录
+ * 会与这些续体竞态（旧注释已记录过 ENOTEMPTY），而进程收尾时这些续体跑没跑完会
+ * 直接改变 src/probe-service.ts 的 v8 行覆盖（实测跨运行 84.7% ↔ 83.5% 抖动）。
+ * dispose 等待 `this.queue` 落定，是唯一确定性的静止点。
+ */
+const SERVICES: WorkBuddyProbeService[] = []
+
 afterEach(async () => {
+  await Promise.allSettled(SERVICES.splice(0).map(service => service.dispose()))
   if (root !== undefined) await rm(root, { recursive: true, force: true })
   root = undefined
   vi.restoreAllMocks()
@@ -69,6 +82,7 @@ function harness(send: ProbeSender, account = 'uid-1:', catalog?: WorkBuddyCatal
       return send(effort, signal)
     },
   })
+  SERVICES.push(service)
   return { service, store, account: holder, calls }
 }
 
@@ -96,6 +110,7 @@ describe('WorkBuddyProbeService', () => {
       variantId: 'zcode',
       send: () => async () => { throw new Error('must not send') },
     })
+    SERVICES.push(service)
     // Declared-set 模型直接走 unavailable 快路径：reason 应带变体来源前缀。
     expect(await service.probe('probe-me')).toEqual({
       state: 'unavailable',
@@ -125,6 +140,7 @@ describe('WorkBuddyProbeService', () => {
       client: {} as never, account: () => 'uid-1:',
       send: () => async () => { throw new Error('must not send') },
     })
+    SERVICES.push(reread)
     const second = await reread.probe('probe-me')
     expect(second).toEqual({ state: 'ok', validation: 'validating', efforts: ['low'], requests: 0 })
   })
@@ -146,6 +162,7 @@ describe('WorkBuddyProbeService', () => {
         return ACCEPT
       },
     })
+    SERVICES.push(service)
     const result = await service.probe('probe-me')
     expect(result).toEqual({ state: 'unavailable', reason: 'account changed during detection' })
     // Nothing stored under either account.
@@ -185,6 +202,7 @@ describe('WorkBuddyProbeService', () => {
         sweepErrors.push({ modelId, message: error instanceof Error ? error.message : String(error) })
       },
     })
+    SERVICES.push(service)
     service.probeMissingCandidates()
     await vi.waitFor(() => {
       expect(sweepErrors.some(e => e.modelId === 'probe-me' && e.message.includes('credential'))).toBe(true)

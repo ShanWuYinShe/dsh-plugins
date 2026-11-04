@@ -3,8 +3,9 @@ import { apply } from '../src/index.js'
 import { SessionArchiveGateway } from '../src/remote.js'
 
 /**
- * Host 入口 apply 接线回归（SA-18）：
- * - 生效配置经 normalizeConfig 归一化后传给 Gateway 的 host 组合对象；
+ * Host 入口 apply 接线回归（SA-18 / SA-08）：
+ * - 生效配置经 normalizeConfig 归一化后作为 Gateway 的 cfg 传入（能力方法
+ *   已在 Gateway 上，不再有 host 转发对象）；
  * - 非法配置（绕过 Loader schema 直调 apply）必须经宿主 logger.warn 告警
  *   后回退默认值，不再静默。
  */
@@ -29,7 +30,7 @@ describe('apply 接线', () => {
     apply(ctx, { detailMaxMessages: 7 })
     expect(plugins).toHaveLength(1)
     expect(plugins[0]!.plugin).toBe(SessionArchiveGateway)
-    expect(plugins[0]!.config.host).toBeDefined()
+    expect(plugins[0]!.config.cfg).toEqual({ detailMaxMessages: 7, messagePreviewChars: 2000, titleReadConcurrency: 4 })
     // 合法值不告警。
     expect(warnings).toEqual([])
   })

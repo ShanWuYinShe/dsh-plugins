@@ -37,6 +37,18 @@
 * 运行时校验补齐 label 形状（非法折叠为失败快照）；HMR dispose→协议/字典注册移除用例；
   入口 Loader `unwrapExports` 守卫（无 default、四件导出原样）。
 
+### 修复
+
+* **轮询节拍跟随宿主 TTL（F-PU-12 彻底解决）**：同源 route 响应新增 `cacheTtlMs`（Config 生效值），
+  client 每次取数成功后按 `cacheTtlMs + 5s` 排下一次轮询，删除硬编码 65s；旧宿主无字段时回退
+  `60s + 5s`。用户调整 `cacheTtlMs` 后浏览器节拍自动跟随。
+* **窗口 label/unit 均支持本地化**：`UsageLabel = string | { en, [locale] }`，client 按 DSH 语言
+  解析（回退链 精确 locale → 主语言 → en），`/usage` 命令取 en；registry 对 label 与 unit 做同一套
+  形状校验（非法折叠为失败快照）。
+* 测试：新增真实 Loader + 真实 `dsh-host-webserver`（真实 HTTP）+ 真实 `dsh-llm`/`dsh-commands`
+  的 REAL-composition 用例（route 200/JSON、`cacheTtlMs` 贯通、`/usage` 注册、dispose 后 404）；
+  src 每文件 lines 100%（新增 `resolveUsageLabel` 全回退分支用例），本包 lines 98.31%。
+
 ## 0.2.2 (2026-11-04)
 
 ### 新增

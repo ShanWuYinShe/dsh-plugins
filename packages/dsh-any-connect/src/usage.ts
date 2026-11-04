@@ -13,7 +13,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { codingPlanQuotaWindows } from './zcode-quota.js'
+import { codingPlanQuotaWindows, type UsageWindowLabel } from './zcode-quota.js'
 import type { RateLimitLedger } from './rate-limit.js'
 import { variantIsStartPlan } from './variant-runtime.js'
 import type { VariantRuntime } from './variant-runtime.js'
@@ -21,14 +21,8 @@ import type { CreditLedgerSummary } from './credit-ledger.js'
 import type { WorkBuddyCredential } from './auth.js'
 import type { WorkBuddyCreditAccount, ZCodeUpstreamClient } from './upstream.js'
 
-/**
- * 与 provider-usage 的 wire 契约同构的窗口 label。
- *
- * 本包不 import provider-usage 的类型（两包独立安装），只镜像结构：普通字符串
- * 按原文渲染；`{ en, zh }` 由 pill 按 DSH 当前语言解析、`/usage` 命令取 `en`。
- * 新增语言时在这里补键，无需改 provider-usage。
- */
-export type UsageWindowLabel = string | { en: string; zh?: string }
+// 窗口 label/unit 的本地化结构定义在 zcode-quota.ts（usage 依赖它的窗口构造，
+// 反向 import 会成环）；这里直接复用同一类型。
 
 /**
  * The slice of @chaoset/provider-usage's registry this plugin calls.
@@ -52,7 +46,7 @@ export interface ProviderUsageRegistryLike {
       id: string
       label: UsageWindowLabel
       remain?: number
-      unit: string
+      unit: UsageWindowLabel
       limit?: number
       resetsAt?: string
     }[]
@@ -94,7 +88,7 @@ export function totalCreditsWindows(
   id: string
   label: UsageWindowLabel
   remain: number
-  unit: string
+  unit: UsageWindowLabel
   limit?: number
 }> {
   const live = accounts.filter(account => account.remain > 0)
@@ -118,7 +112,7 @@ export function totalCreditsWindows(
     id: string
     label: UsageWindowLabel
     remain: number
-    unit: string
+    unit: UsageWindowLabel
     limit?: number
   }> = [{
     id: 'total',
@@ -156,7 +150,7 @@ export function currentPlanWindow(accounts: readonly WorkBuddyCreditAccount[]): 
   label: UsageWindowLabel
   remain?: number
   limit?: number
-  unit: string
+  unit: UsageWindowLabel
   resetsAt?: string
 }> {
   const current = accounts.find(account => account.remain > 0) ?? accounts[0]
@@ -178,7 +172,7 @@ export function currentPlanWindow(accounts: readonly WorkBuddyCreditAccount[]): 
   return [{
     id: 'plan',
     label,
-    unit: '有效',
+    unit: { en: 'valid', zh: '有效' },
     ...current.expiredAt ? { resetsAt: current.expiredAt } : {},
   }]
 }
@@ -197,7 +191,7 @@ export function startPlanWindows(accounts: readonly WorkBuddyCreditAccount[]): A
   label: UsageWindowLabel
   remain?: number
   limit?: number
-  unit: string
+  unit: UsageWindowLabel
   resetsAt?: string
 }> {
   // 2026-10-24 实测（"ZCode 1024 Dev Day" 活动）：上游把一个活动按模型拆成多份
@@ -229,7 +223,7 @@ export function startPlanWindows(accounts: readonly WorkBuddyCreditAccount[]): A
   // 什么都没有时报「今日待领取」——billing/balance 通着但今天还没发池子）。
   const windows = currentPlanWindow(accounts)
   if (windows.length > 0) return windows
-  return [{ id: 'plan', label: 'Start Plan', unit: '今日待领取' }]
+  return [{ id: 'plan', label: 'Start Plan', unit: { en: 'not claimed today', zh: '今日待领取' } }]
 }
 
 /**
@@ -309,7 +303,7 @@ export function registerUsageQueriers(
             //   「今日待领取」）。
             // - WorkBuddy：同币种分包求和的总积分。
             windows: isOpenCode
-              ? [{ id: 'plan', label: 'OpenCode Free', unit: '官方免费' }]
+              ? [{ id: 'plan', label: 'OpenCode Free', unit: { en: 'free', zh: '官方免费' } }]
               : isStartPlan
                 ? startPlanWindows(credits.accounts)
                 : quotaWindows.length > 0

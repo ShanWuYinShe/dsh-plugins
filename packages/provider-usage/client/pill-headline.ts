@@ -57,9 +57,11 @@ export function headlineText(answer: SnapshotAnswer | undefined, provider: strin
   } else {
     /** 多个窗口只在头行报第一个，「 +N」提示展开还有更多。 */
     const more = snapshot.windows.length > 1 ? ` +${snapshot.windows.length - 1}` : ''
+    const label = resolveUsageLabel(first.label, localeId)
+    const unit = resolveUsageLabel(first.unit, localeId)
     headline = first.remain === undefined
-      ? `${resolveUsageLabel(first.label, localeId)}${first.unit === '' ? '' : `: ${first.unit}`}${more}`
-      : `${formatAmount(first.remain, localeId)}${unitSuffix(first.unit)} ${t('remaining')}${more}`
+      ? `${label}${unit === '' ? '' : `: ${unit}`}${more}`
+      : `${formatAmount(first.remain, localeId)}${unitSuffix(unit)} ${t('remaining')}${more}`
   }
   return stale ? `${headline} · ${t('staleData')}` : headline
 }

@@ -24,6 +24,16 @@
  * @module dsh-any-connect/zcode-quota
  */
 
+/**
+ * 与 provider-usage 的 wire 契约同构的窗口文本（label/unit 共用）。
+ *
+ * 本包不 import provider-usage 的类型（两包独立安装），只镜像结构：普通字符串
+ * 按原文渲染；`{ en, zh }` 由 pill 按 DSH 当前语言解析、`/usage` 命令取 `en`。
+ * 新增语言时在这里补键，无需改 provider-usage。放在 zcode-quota 里是因为
+ * usage.ts 已经依赖它（与 codingPlanQuotaWindows 同方向），避免反向 import。
+ */
+export type UsageWindowLabel = string | { en: string; zh?: string }
+
 /** One entry of `data.limits` as the monitor endpoint declares it. */
 export interface ZCodeQuotaLimit {
   type: string
@@ -53,10 +63,10 @@ export interface ZCodeCodingPlanQuota {
 /** One pill window, structurally matching provider-usage's `UsageWindow`. */
 export interface ZCodeQuotaWindow {
   id: string
-  label: string
+  label: UsageWindowLabel
   remain?: number
   limit?: number
-  unit: string
+  unit: UsageWindowLabel
   resetsAt?: string
 }
 
@@ -106,14 +116,17 @@ export function parseCodingPlanQuota(json: unknown): ZCodeCodingPlanQuota | unde
  * 一个窗口的展示名。unit/number 组合按实测口径翻译：3=小时、6=周（1 周按「7 天」
  * 写，用户的心智模型是天）、5=月；TOKENS_LIMIT 之外的类型（TIME_LIMIT）是工具
  * 调用次数，单独命名。
+ *
+ * 返回本地化结构：pill 按 DSH 当前语言取 zh、`/usage` 命令取 en，英文文案用
+ * 单复数区分（1 hour / 5 hours）。
  */
-export function codingPlanWindowLabel(limit: ZCodeQuotaLimit): string {
-  if (limit.type === 'TIME_LIMIT') return '工具调用'
+export function codingPlanWindowLabel(limit: ZCodeQuotaLimit): UsageWindowLabel {
+  if (limit.type === 'TIME_LIMIT') return { en: 'Tool calls', zh: '工具调用' }
   const size = limit.number !== undefined && limit.number > 0 ? limit.number : 1
-  if (limit.unit === 3) return `${size} 小时`
-  if (limit.unit === 6) return size === 1 ? '7 天' : `${size * 7} 天`
-  if (limit.unit === 5) return size === 1 ? '1 个月' : `${size} 个月`
-  return '额度'
+  if (limit.unit === 3) return { en: size === 1 ? '1 hour' : `${size} hours`, zh: `${size} 小时` }
+  if (limit.unit === 6) return size === 1 ? { en: '7 days', zh: '7 天' } : { en: `${size * 7} days`, zh: `${size * 7} 天` }
+  if (limit.unit === 5) return size === 1 ? { en: '1 month', zh: '1 个月' } : { en: `${size} months`, zh: `${size} 个月` }
+  return { en: 'Quota', zh: '额度' }
 }
 
 /**
@@ -146,7 +159,7 @@ export function codingPlanQuotaWindows(quota: ZCodeCodingPlanQuota): readonly ZC
         label,
         ...remain === undefined ? {} : { remain },
         ...total === undefined ? {} : { limit: total },
-        unit: '次',
+        unit: { en: 'requests', zh: '次' },
         ...resetsAt === undefined ? {} : { resetsAt },
       })
       continue

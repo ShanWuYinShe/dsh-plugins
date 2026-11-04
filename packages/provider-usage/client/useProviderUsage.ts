@@ -191,12 +191,12 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat, useLo
     try {
       // 手动刷新要真刷新：force 让宿主绕过缓存读。自动轮询要等下一个节拍
       // （60s + 相位余量）才重读，按钮必须立刻打一次上游。
-      const snapshot = await fetchSnapshot(provider, signal, { force: true })
-      if (canApply() && snapshot !== undefined) {
+      const fetched = await fetchSnapshot(provider, signal, { force: true })
+      if (canApply() && fetched.answer !== undefined) {
         // 手刷值写回为**一个观测**：它的 fetchedAt 来自宿主，比流里的旧帧晚；
         // 之后的流帧只要 fetchedAt 更晚就自然接管。不再有按墙钟维持的抑制窗。
-        manualAnswerRef.current = snapshot
-        setManualAnswer(snapshot)
+        manualAnswerRef.current = fetched.answer
+        setManualAnswer(fetched.answer)
         setStale(false)
       }
     } catch (error: unknown) {

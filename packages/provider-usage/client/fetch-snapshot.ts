@@ -48,8 +48,21 @@ function isSnapshotAnswer(value: unknown, provider: string): value is SnapshotAn
   return true
 }
 
+/**
+ * 一次取数的结果：一行答案（或 undefined=无答案）+ 宿主成功缓存 TTL。
+ *
+ * `cacheTtlMs` 缺失（旧宿主 / 响应被中间层裁剪）时调用方回退默认节拍——它是
+ * 排程提示，不是答案有效性的一部分。
+ */
+export interface UsageSnapshotFetch {
+  /** 一行答案；形状不合法时为 undefined（按「无答案」处理）。 */
+  answer: SnapshotAnswer | undefined
+  /** 宿主 registry 的成功缓存时长（毫秒）；旧宿主没有该字段。 */
+  cacheTtlMs: number | undefined
+}
+
 /** 拉取一行答案；非 2xx 抛错（调用方决定保旧值还是失败），形状不合法视为无答案。 */
-export async function fetchSnapshot(provider: string, signal?: AbortSignal, options?: { force?: boolean }): Promise<SnapshotAnswer | undefined> {
+export async function fetchSnapshot(provider: string, signal?: AbortSignal, options?: { force?: boolean }): Promise<UsageSnapshotFetch> {
   // force 追加 refresh=1:手动刷新绕过宿主缓存;resource 流的自动轮询不带。
   const suffix = options?.force === true ? '&refresh=1' : ''
   const response = await fetch(`${PROVIDER_USAGE_PATH}?providers=${encodeURIComponent(provider)}${suffix}`, {
@@ -59,8 +72,10 @@ export async function fetchSnapshot(provider: string, signal?: AbortSignal, opti
   })
   if (!response.ok) throw new Error(`HTTP_${response.status}`)
   const payload: unknown = await response.json().catch(() => undefined)
+  const rawTtl = isRecord(payload) ? payload['cacheTtlMs'] : undefined
+  const cacheTtlMs = typeof rawTtl === 'number' && Number.isFinite(rawTtl) && rawTtl >= 0 ? rawTtl : undefined
   const snapshots = isRecord(payload) ? payload['snapshots'] : undefined
-  if (!Array.isArray(snapshots)) return undefined
+  if (!Array.isArray(snapshots)) return { answer: undefined, cacheTtlMs }
   const first: unknown = snapshots[0]
-  return isSnapshotAnswer(first, provider) ? first : undefined
+  return { answer: isSnapshotAnswer(first, provider) ? first : undefined, cacheTtlMs }
 }

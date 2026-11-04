@@ -18,9 +18,10 @@ export function WindowRow({ window, t, localeId }: { window: UsageWindow; t: Pro
   // 语义，与 headline(不显示数字)和圆点(remain 缺失不判色)互相矛盾。
   const showBar = remain !== undefined && limit !== undefined && limit > 0
   const percent = showBar ? (remain / limit) * 100 : 0
-  // label 可能是本地化结构 `{ en, [locale] }`：按 DSH 当前语言解析，纯字符串
-  // 原样渲染。
+  // label/unit 可能是本地化结构 `{ en, [locale] }`：按 DSH 当前语言解析，纯
+  // 字符串原样渲染；unit 解析为空串 = 无单位的既有语义。
   const label = resolveUsageLabel(window.label, localeId)
+  const unit = resolveUsageLabel(window.unit, localeId)
   return (
     <div style={windowRowStyle}>
       <div style={windowHeadStyle}>
@@ -28,10 +29,10 @@ export function WindowRow({ window, t, localeId }: { window: UsageWindow; t: Pro
         <span style={{ fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
           {/* blocked 是上游真的拒绝过（不是余额读数为 0）：说「已用尽」比「0」更准确，因为这一行此刻确实用不了。 */}
           {remain === undefined
-            ? window.unit
+            ? unit
             : window.blocked === true
               ? t('blocked')
-              : `${formatAmount(remain, localeId)} ${window.unit}`}
+              : `${formatAmount(remain, localeId)}${unit === '' ? '' : ` ${unit}`}`}
         </span>
       </div>
       {showBar ? <div style={trackStyle} role="progressbar" aria-labelledby={`pu-window-${window.id}`} aria-valuenow={Math.round(percent)} aria-valuemin={0} aria-valuemax={100}><div className={percent <= 20 ? 'pu-stripe' : undefined} style={fillStyle(percent)} /></div> : null}

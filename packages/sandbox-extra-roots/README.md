@@ -103,3 +103,15 @@ macOS 的 `/private`，仅 POSIX——Windows 暂无对应条目）被过滤，�
 - 写回以官方 `configEditor.edit(current, inherited)` 的当前值为合并基（只并入
   `extraWritableRoots` 白名单字段），不会覆盖 profile patch 里的其它 key，也不会
   把 bundle 继承层固化成 override。
+
+## 已知限制
+
+- **Windows 不支持额外可写根（进程沙盒）**：官方 Windows ACL 进程沙盒
+  （`@deepseek-ai/dsh-sandbox-local` 的 `windows-acl` rung）不消费
+  `SandboxExecutionPolicy.additionalWritableRoots`——0.2.2-rc.1 在
+  `workspace-write` 且存在额外根时会在 `confine()` 直接抛
+  `SandboxUnsupportedPolicyError`（`sandbox-local` 的 `windowsAclRunnerArgv`；
+  官方 README 也只承诺 Seatbelt/bwrap/Landlock 支持该字段）。因此本插件在
+  Windows 上**不会**把配置的额外根并入官方策略（否则每条受限命令都会失败），
+  设置卡显示「额外可写根当前未生效」；文件工具的 fs fence 在该平台同样不会获得
+  这些额外根。需要额外可写目录时请把工作区放在目标路径下，或改用 macOS/Linux。

@@ -2,18 +2,23 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-type FetchSnapshot = (provider: string, signal?: AbortSignal, options?: { force?: boolean }) => Promise<SnapshotAnswer | undefined>
+type FetchSnapshot = (provider: string, signal?: AbortSignal, options?: { force?: boolean }) => Promise<UsageSnapshotFetch>
 
 const fetchMock = vi.hoisted(() =>
-  vi.fn<FetchSnapshot>(() => Promise.resolve(undefined)),
+  vi.fn<FetchSnapshot>(() => Promise.resolve({ answer: undefined, cacheTtlMs: undefined })),
 )
 vi.mock('../client/fetch-snapshot.js', () => ({ fetchSnapshot: fetchMock }))
 
-import { type SnapshotAnswer } from '../client/fetch-snapshot.js'
+import { type SnapshotAnswer, type UsageSnapshotFetch } from '../client/fetch-snapshot.js'
 import type { UsageSnapshot } from '../src/types.js'
-import { RESOURCE_POLL_INTERVAL_MS, RESOURCE_POLL_MARGIN_MS, RESOURCE_POLL_STEP_MS, providerOfAddress, registerProviderUsageResources, usageResourceAddress, usageStream } from '../client/resource-provider.js'
+import { RESOURCE_POLL_FALLBACK_MS, RESOURCE_POLL_MARGIN_MS, providerOfAddress, registerProviderUsageResources, usageResourceAddress, usageStream } from '../client/resource-provider.js'
 function answer(overrides: Partial<UsageSnapshot> = {}): SnapshotAnswer {
   return { provider: 'acme', windows: [{ id: 'w', label: 'W', remain: 3, unit: 'credits' }], fetchedAt: 1, ...overrides }
+}
+
+/** 一次取数结果：答案 + 宿主缓存 TTL（缺省表示旧宿主）。 */
+function fetched(answerValue: SnapshotAnswer | undefined, cacheTtlMs?: number): UsageSnapshotFetch {
+  return { answer: answerValue, cacheTtlMs }
 }
 
 /** 收集流前 n 帧;收够即 abort(先断流再退出,否则 for-await 挂在 60s sleep 上)。 */
@@ -32,7 +37,7 @@ async function firstFrames(stream: AsyncIterable<unknown>, count: number, contro
 describe('usageStream', () => {
   it('首帧立即给出,值不变不重复推帧,值变才推', async () => {
     fetchMock.mockReset()
-    fetchMock.mockResolvedValueOnce(answer({ fetchedAt: 1 })).mockResolvedValueOnce(answer({ fetchedAt: 1 })).mockResolvedValueOnce(answer({ fetchedAt: 2, windows: [{ id: 'w', label: 'W', remain: 5, unit: 'credits' }] }))
+    fetchMock.mockResolvedValueOnce(fetched(answer({ fetchedAt: 1 }))).mockResolvedValueOnce(fetched(answer({ fetchedAt: 1 }))).mockResolvedValueOnce(fetched(answer({ fetchedAt: 2, windows: [{ id: 'w', label: 'W', remain: 5, unit: 'credits' }] })))
     const controller = new AbortController()
     const frames = await firstFrames(usageStream(usageResourceAddress('acme'), controller.signal, 5), 2, controller)
     expect(frames).toEqual([
@@ -60,7 +65,7 @@ describe('usageStream', () => {
       fetchMock
         .mockRejectedValueOnce(new Error('HTTP_502'))
         .mockRejectedValueOnce(new Error('HTTP_502'))
-        .mockResolvedValueOnce(answer({ fetchedAt: 5 }))
+        .mockResolvedValueOnce(fetched(answer({ fetchedAt: 5 })))
       const controller = new AbortController()
       const stream = usageStream(usageResourceAddress('acme'), controller.signal, 5)[Symbol.asyncIterator]()
 
@@ -92,7 +97,7 @@ describe('usageStream', () => {
 
   it('abort 后流结束(生产 60s 循环只在测试外发生)', async () => {
     fetchMock.mockReset()
-    fetchMock.mockResolvedValue(answer())
+    fetchMock.mockResolvedValue(fetched(answer()))
     const controller = new AbortController()
     const stream = usageStream(usageResourceAddress('acme'), controller.signal, 5)[Symbol.asyncIterator]()
     const first = await stream.next()
@@ -117,7 +122,7 @@ describe('地址解析', () => {
 describe('registerProviderUsageResources', () => {
   it('把协议 provider 注册成 ctx.effect，并暴露 open 的 live 流', async () => {
     fetchMock.mockReset()
-    fetchMock.mockResolvedValue(answer())
+    fetchMock.mockResolvedValue(fetched(answer()))
     let registered: { protocol: string; open: (address: string, ctx: { signal: AbortSignal }) => AsyncIterable<unknown> } | undefined
     const dispose = vi.fn()
     const effects: Array<{ body: () => () => void; label: string | undefined }> = []
@@ -142,16 +147,56 @@ describe('registerProviderUsageResources', () => {
   })
 })
 
-// 定时节奏常量与 useResource 流同源。
+// 轮询节拍：正常路径来自宿主响应里的真实 cacheTtlMs，回退值只在旧宿主缺字段时用。
 describe('RESOURCE_POLL_*', () => {
-  it('节拍保持 60s(与宿主 registry 缓存同量级)', () => {
-    expect(RESOURCE_POLL_INTERVAL_MS).toBe(60_000)
+  it('回退节拍 60s + 相位余量 5s（仅在响应无 cacheTtlMs 时使用）', () => {
+    expect(RESOURCE_POLL_FALLBACK_MS).toBe(60_000)
+    expect(RESOURCE_POLL_MARGIN_MS).toBe(5_000)
   })
 
-  it('步长 = 节拍 + 相位余量：下一次读取落在宿主缓存过期之后', () => {
-    // 宿主成功缓存默认 TTL 与节拍同为 60s；不加余量时某一帧可能命中未过期
-    // 缓存，实际更新间隔被拉长到 ~120s。
-    expect(RESOURCE_POLL_MARGIN_MS).toBe(5_000)
-    expect(RESOURCE_POLL_STEP_MS).toBe(RESOURCE_POLL_INTERVAL_MS + RESOURCE_POLL_MARGIN_MS)
+  it('轮询按宿主返回的 cacheTtlMs + 余量排程（用户改 Config.cacheTtlMs 即生效）', async () => {
+    vi.useFakeTimers()
+    try {
+      fetchMock.mockReset()
+      // 第二次取数的业务内容必须变化，否则「值不变不推帧」会让 second 永远挂着。
+      fetchMock.mockResolvedValueOnce(fetched(answer(), 1_000)).mockResolvedValue(fetched(answer({ fetchedAt: 2 }), 1_000))
+      const controller = new AbortController()
+      const stream = usageStream(usageResourceAddress('acme'), controller.signal)[Symbol.asyncIterator]()
+      // 首帧立即
+      const first = await stream.next()
+      expect(first.done).toBe(false)
+      const second = stream.next()
+      // TTL 1000 + 余量 5000：过 5_999ms 仍不该有第二次取数。
+      await vi.advanceTimersByTimeAsync(5_999)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await second
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      controller.abort()
+      expect((await stream.next()).done).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('响应无 cacheTtlMs（旧宿主）时回退默认节拍 65s', async () => {
+    vi.useFakeTimers()
+    try {
+      fetchMock.mockReset()
+      fetchMock.mockResolvedValueOnce(fetched(answer())).mockResolvedValue(fetched(answer({ fetchedAt: 2 })))
+      const controller = new AbortController()
+      const stream = usageStream(usageResourceAddress('acme'), controller.signal)[Symbol.asyncIterator]()
+      await stream.next()
+      const second = stream.next()
+      await vi.advanceTimersByTimeAsync(RESOURCE_POLL_FALLBACK_MS + RESOURCE_POLL_MARGIN_MS - 1)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await second
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      controller.abort()
+      await stream.next()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

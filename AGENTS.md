@@ -16,7 +16,8 @@ bun run typecheck       # host + client 两套 tsconfig --noEmit（先自动生�
 bun run test            # vitest 回归（先跑 scripts/build.mjs 构建，含 typert + esbuild 产物）
 bun run test:ci         # build + typecheck + test（提交/发布前必跑）
 bun run test:stability  # 测试确定性压测：多轮全量 + 多并发档位（见「约定」的确定性要求）
-bun run test:coverage   # 覆盖率（v8；阈值是防回退基线，官方 RULE-088 的逐文件 100% 为长期目标）
+bun run test:coverage   # build + vitest --coverage + 逐文件覆盖率棘轮（基线 scripts/coverage-baseline.json）
+bun run coverage:ratchet --write  # 覆盖率提升后刷新逐文件基线（只升不降；确需放宽用 --write --lower 并在提交信息说明）
 bun run gate            # 发布门禁干跑：只读，看哪些包会被发布/为何被跳过
 bun run dsh-status      # 两分支 dsh 依赖基线 vs dsh 最新 rc（正式版）对照（详见 RELEASING.md）
 bun run dsh-status --strict  # 严格模式：main 基线 ≠ npm 最新正式版时 exit 1（发布流水门禁用）
@@ -110,6 +111,16 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   对「声明 range ↔ 实际解析版本 ↔ bun.lock」三方锁定。
 - **废弃 API**：0.2.2-rc.1 起 `Session.eventAt/snapshotEvents/ownEvents` 与
   `SessionController.page()` 已标 `@deprecated`（禁止新调用）；`test/deprecated-api.test.ts` 拦截。
+- **覆盖率门禁两层**（RULE-088 的官方口径是 `packages/*/*/src` 逐文件 100%，本仓长期目标）：
+  ① 全局阈值（`vitest.config.ts` 的 coverage.thresholds，只升不降）；
+  ② **逐文件棘轮**（`scripts/coverage-baseline.json` + `scripts/coverage-ratchet.mjs`）：每个纳入
+  coverage 的源文件不得低于版本化基线（容差 0.2pp），新增文件必须达到全局阈值，删除文件由
+  `bun run coverage:ratchet --write` 清理。改完测试/源码后跑 `bun run test:coverage`，并做一次反向
+  验证（把基线某文件数字调高 1pp → 必须红；恢复后绿）。纯类型文件（如 `client/pill-types.ts`）
+  在 v8 里 0 条可执行语句，棘轮按 N/A 处理。
+- **REAL-composition 测试依赖构建产物**：按包名经 Loader 装载真实入口（`lib/index.js`）的用例
+  必须先 `node scripts/build.mjs`（或 `bunx tsc -p packages/<pkg>/tsconfig.json`）；`bun run test`
+  与 `bun run test:ci` 自带构建，直接 `bunx vitest run packages/<pkg>` 时先手动构建一次。
 - 测试涉及平台差异时必须显式判定平台（如
   `it.skipIf(process.platform !== "darwin")`），或改用运行时取值
   （`canonicalPath`、`dirname(fakeHome)` 等）保持用例平台无关；路径拼写取自运行时，在其他平台也跑得过。新增平台相关用例时

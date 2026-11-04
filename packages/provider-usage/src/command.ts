@@ -53,7 +53,9 @@ function formatWindow(window: UsageWindow): string {
   // 命令是单一语言文本（英语基线）：本地化 label 一律取 en，与 client 按
   // DSH 当前语言解析互不冲突。
   const label = resolveUsageLabel(window.label, 'en')
-  return window.unit === '' ? `${label} ${remaining}` : `${label} ${remaining} ${window.unit}`
+  // unit 与 label 同一套本地化契约；命令只出英语基线，空单位不留尾随空格。
+  const unit = resolveUsageLabel(window.unit, 'en')
+  return unit === '' ? `${label} ${remaining}` : `${label} ${remaining} ${unit}`
 }
 
 /** 一行额度文本:displayName(registry 把注册期 displayName 回填进答案，缺省回 provider 键)+ 逐窗口 "label remain unit"。 */

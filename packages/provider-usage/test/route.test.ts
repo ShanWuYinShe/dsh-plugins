@@ -8,8 +8,8 @@ import { providerUsageHandler } from '../src/route.js'
 import type { UsageSnapshot } from '../src/types.js'
 
 /** Build a registry with one answering provider. */
-function makeRegistry(): ProviderUsageRegistry {
-  const registry = new ProviderUsageRegistry(new Context(), { cacheTtlMs: 0 })
+function makeRegistry(options: { cacheTtlMs?: number } = {}): ProviderUsageRegistry {
+  const registry = new ProviderUsageRegistry(new Context(), { cacheTtlMs: options.cacheTtlMs ?? 60_000 })
   registry.register('acme', async (): Promise<UsageSnapshot> => ({
     provider: 'acme',
     windows: [{ id: 'w', label: 'W', remain: 3, unit: 'credits' }],
@@ -43,7 +43,7 @@ describe('providerUsageHandler', () => {
 
     const { status, body } = exchange.result()
     expect(status).toBe(200)
-    expect(body).toEqual({ snapshots: [
+    expect(body).toEqual({ cacheTtlMs: 60_000, snapshots: [
       { provider: 'acme', displayName: 'Acme', windows: [{ id: 'w', label: 'W', remain: 3, unit: 'credits' }], fetchedAt: expect.any(Number) },
       // A provider with no querier is a normal answer, not a 404: the surface
       // must be able to tell "nobody can answer" from "route missing".
@@ -51,11 +51,19 @@ describe('providerUsageHandler', () => {
     ] })
   })
 
+  it('把宿主成功缓存 TTL 写进响应（client 据此排下一次轮询）', async () => {
+    const handler = providerUsageHandler({ registry: makeRegistry({ cacheTtlMs: 1_234 }) })
+    const exchange = fakeExchange({ url: '/?providers=acme' })
+    await handler(exchange.req, exchange.res)
+    const { body } = exchange.result() as { body: { cacheTtlMs: number } }
+    expect(body.cacheTtlMs).toBe(1_234)
+  })
+
   it('answers an empty list when no provider is requested', async () => {
     const handler = providerUsageHandler({ registry: makeRegistry() })
     const exchange = fakeExchange({ url: '/' })
     await handler(exchange.req, exchange.res)
-    expect(exchange.result()).toEqual({ status: 200, body: { snapshots: [] } })
+    expect(exchange.result()).toEqual({ status: 200, body: { snapshots: [], cacheTtlMs: 60_000 } })
   })
 
   it('deduplicates repeated providers and ignores blank segments', async () => {

@@ -53,6 +53,7 @@
 | `client-manifest-contract.test.ts` | `dsh.client` 取值域：`platform: 'web'`、导出 `./client`，feature 插件不设 `immediately`/`external` |
 | `dep-resolution-baseline.test.ts` | 声明 range、实际解析版本与 bun.lock 三方都等于 `engines.dsh` 基线（混入 pre-rc 实例即红） |
 | `third-party-notices.test.ts` | client 产物内联第三方代码（typert remote-info）的包必须附 THIRD_PARTY_NOTICES 并进 `files`；**bin 构建闭包（esbuild metafile → `.workwork/bin-closure.json`）与 notices 表格的组件/版本逐条相等** |
+| `coverage-baseline.test.ts` | 逐文件覆盖率棘轮基线：基线文件与 `vitest.config.ts` 的 include/exclude 推导面完全一致；基线里的全局阈值与配置同源；容差/写入逻辑反向自检（回退必红、容差内放行、新文件须达全局阈值、过期记录须清理） |
 | `lock-index.test.ts` | 锁文件与索引表双向一致（单测在 UNIT_TESTS 登记，防索引腐烂） |
 | `no-focused-tests.test.ts` | 测试文件里没有 .only / 裸 .skip / .todo（条件跳过 skipIf 不在此限） |
 
@@ -64,6 +65,36 @@
 > 2026-10-29 起 `./typert` / `./remote` 由官方 `@deepseek-ai/dsh-typert-generator`
 > 从 `@Remote` 装饰器与服务方法签名生成，「手写工件 ↔ 装饰器」的漂移面在结构上
 > 不再存在；生成失败会让 `bun run build` 直接失败。
+
+## 逐文件覆盖率棘轮（防回退）
+
+覆盖率门禁分两层，不要混为一谈：
+
+1. **全局阈值**：`vitest.config.ts` 的 `coverage.thresholds`，四个聚合百分比的粗网兜底；
+2. **逐文件棘轮**：`scripts/coverage-baseline.json`（版本化、随代码提交）+ `scripts/coverage-ratchet.mjs`，
+   保证每个纳入 coverage 的源文件**不得低于基线**（容差 0.2pp，只吸收覆盖率采集抖动）。
+   `bun run test:coverage` = `build` → `vitest run --coverage` → 棘轮校验。
+
+棘轮规则（脚本内实现，`test/coverage-baseline.test.ts` 锁住判据本身）：
+
+- 已记录文件：四个指标（statements/branches/functions/lines）任一低于基线-0.2pp → 红；
+- 基线里没有、coverage 面里有的**新增文件**：四个指标都必须达到全局阈值才能入基线；
+- 基线有、覆盖率面没有的**过期记录**：红，提示清理（防止文件消失后旧记录掩盖未来回退）；
+- 基线只升不降：`--write` 默认拒绝写入低于旧基线超过容差的值（要显式 `--lower`）。
+
+维护命令：
+
+```bash
+bun run test:coverage                  # build + 全量测试 + coverage + 棘轮校验（本地/CI 同一条命令）
+bun run coverage:ratchet --write       # 覆盖率提升后上调基线（新文件自动入基线、过期记录自动清理）
+bun run coverage:ratchet --write --lower  # 显式放宽：仅限确实删除已验证代码/重构导致的可接受下降，
+                                          # 必须在提交信息里说明；CI 不使用
+bun run coverage:ratchet               # 只校验不写（等价 test:coverage 的最后一步）
+```
+
+官方 RULE-088 的**逐文件 100%** 仍是长期目标：棘轮先保证「今天不比昨天差」，基线文件让每个文件的
+缺口可见、可追踪；提升某个文件后记得 `--write` 上调，避免它再次回退。改棘轮/基线后必须反向验证：
+手动把基线里某文件某指标 +1pp → 校验红；还原后绿。新增源文件后必须刷新基线（否则锁会报缺记录）。
 
 ## 写一把新锁时的约定
 

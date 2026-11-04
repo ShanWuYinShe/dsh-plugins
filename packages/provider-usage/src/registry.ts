@@ -200,14 +200,15 @@ function assertQuerierSnapshot(provider: string, value: unknown): void {
   for (const [index, item] of windows.entries()) {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) throw invalidSnapshot(provider, `windows[${index}] is not an object`)
     const window = item as Record<string, unknown>
-    for (const key of ['id', 'unit'] as const) {
-      if (typeof window[key] !== 'string') throw invalidSnapshot(provider, `windows[${index}].${key} is not a string`)
-    }
+    if (typeof window['id'] !== 'string') throw invalidSnapshot(provider, `windows[${index}].id is not a string`)
     if (window['id'] === '') throw invalidSnapshot(provider, `windows[${index}].id is empty`)
-    // label 允许字符串（provider 专有名词，原文渲染）或本地化结构
+    // label/unit 允许字符串（provider 专有名词/计量单位，原文渲染）或本地化结构
     // `{ en, [locale] }`（en 必备）；非法形状绝不能进 client 渲染层。
     if (!isValidUsageLabel(window['label'])) {
       throw invalidSnapshot(provider, `windows[${index}].label is neither a string nor a localized label with a non-empty "en"`)
+    }
+    if (!isValidUsageLabel(window['unit'])) {
+      throw invalidSnapshot(provider, `windows[${index}].unit is neither a string nor a localized label with a non-empty "en"`)
     }
     for (const key of ['remain', 'limit'] as const) {
       const amount = window[key]
@@ -266,7 +267,8 @@ export class ProviderUsageRegistry extends Service {
   private readonly cache = new Map<string, CacheEntry>()
   /** In-flight queries keyed by provider, so concurrent readers share one request. */
   private readonly inflight = new Map<string, Promise<UsageSnapshot>>()
-  private readonly cacheTtlMs: number
+  /** 成功缓存时长（毫秒）：Config.cacheTtlMs 的解析值，同时经 route 暴露给 client 排程。 */
+  private readonly cacheTtl: number
   private readonly errorCacheTtlMs: number
   private readonly unresolvedTtlMs: number
   private readonly queryTimeoutMs: number
@@ -283,11 +285,22 @@ export class ProviderUsageRegistry extends Service {
 
   constructor(ctx: Context, options: ProviderUsageRegistryOptions = {}) {
     super(ctx, 'providerUsage')
-    this.cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS
+    this.cacheTtl = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS
     this.errorCacheTtlMs = options.errorCacheTtlMs ?? DEFAULT_ERROR_CACHE_TTL_MS
     this.unresolvedTtlMs = options.unresolvedTtlMs ?? DEFAULT_UNRESOLVED_TTL_MS
     this.queryTimeoutMs = options.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS
     this.now = options.now ?? Date.now
+  }
+
+  /**
+   * 成功缓存的当前时长（毫秒）。
+   *
+   * route 把它写进响应体，client 用它排下一次轮询（TTL + 相位余量），因此
+   * 用户改宿主 `Config.cacheTtlMs` 时浏览器侧节拍跟着变，不再是两边各写一个
+   * 60s 常量去猜相位。只读——缓存策略的写入入口只有 Loader 的 config。
+   */
+  get cacheTtlMs(): number {
+    return this.cacheTtl
   }
 
   /**
@@ -442,7 +455,7 @@ export class ProviderUsageRegistry extends Service {
           // 失败按更短负缓存:账单接口恢复后第一次读取即重试,不必等满
           // 一个成功 TTL。自动轮询间隔等于成功 TTL,失败态的重试频率
           // 上界不变(每读者每分钟一次),只把恢复时延从分钟级降到秒级。
-          expiresAt: this.now() + (snapshot.error === undefined ? this.cacheTtlMs : this.errorCacheTtlMs),
+          expiresAt: this.now() + (snapshot.error === undefined ? this.cacheTtl : this.errorCacheTtlMs),
         })
       }
       return snapshot

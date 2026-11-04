@@ -15,16 +15,23 @@ async function snapshotWith(payload: unknown): Promise<unknown> {
 }
 
 describe('fetchSnapshot', () => {
-  it('返回 snapshots[0]（快照）', async () => {
-    await expect(snapshotWith({ snapshots: [{ provider: 'acme', windows: [], fetchedAt: 7 }] }))
-      .resolves.toEqual({ provider: 'acme', windows: [], fetchedAt: 7 })
+  it('返回 snapshots[0]（快照）+ 宿主缓存 TTL', async () => {
+    await expect(snapshotWith({ snapshots: [{ provider: 'acme', windows: [], fetchedAt: 7 }], cacheTtlMs: 1234 }))
+      .resolves.toEqual({ answer: { provider: 'acme', windows: [], fetchedAt: 7 }, cacheTtlMs: 1234 })
   })
 
   it('返回 snapshots[0]（未注册标记：provider 一致且 queried=false）', async () => {
     // route 层把「该 provider 无 querier」写成 {provider, queried:false}，它没有
     // windows，但仍是合法答案（pill 据此显示「未提供额度查询」）。
-    await expect(snapshotWith({ snapshots: [{ provider: 'acme', queried: false }] }))
-      .resolves.toEqual({ provider: 'acme', queried: false })
+    await expect(snapshotWith({ snapshots: [{ provider: 'acme', queried: false }], cacheTtlMs: 60_000 }))
+      .resolves.toEqual({ answer: { provider: 'acme', queried: false }, cacheTtlMs: 60_000 })
+  })
+
+  it('cacheTtlMs 缺失/非法时回退 undefined（旧宿主兼容，排程交给默认节拍）', async () => {
+    for (const cacheTtlMs of [undefined, 'nope', null, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(snapshotWith({ snapshots: [], cacheTtlMs }), `cacheTtlMs=${String(cacheTtlMs)}`)
+        .resolves.toEqual({ answer: undefined, cacheTtlMs: undefined })
+    }
   })
 
   it('非 2xx 抛 HTTP_xxx 形错误（传输失败与「无答案」必须可区分）', async () => {
@@ -55,7 +62,7 @@ describe('fetchSnapshot', () => {
       { snapshots: [{ provider: 'acme', windows: [], fetchedAt: 1, error: 42 }] }, // error 非字符串
     ]
     for (const payload of invalidPayloads) {
-      await expect(snapshotWith(payload), `payload=${JSON.stringify(payload)}`).resolves.toBeUndefined()
+      await expect(snapshotWith(payload), `payload=${JSON.stringify(payload)}`).resolves.toEqual({ answer: undefined, cacheTtlMs: undefined })
     }
   })
 

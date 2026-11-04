@@ -42,6 +42,17 @@
 * 测试：新增真实 Loader + 真实 `SandboxPolicyService` 的 REAL-composition 用例、设置卡 jsdom 行为用例；
   重写策略合并/引用计数/还原/过滤用例；删除 wrap/confine/landlock 旧测试。
 
+### 修复
+
+* **Windows 平台护栏**：官方 Windows ACL 进程沙盒不消费 `additionalWritableRoots`
+  （0.2.2-rc.1 在 `workspace-write` + 有额外根时直接抛 `SandboxUnsupportedPolicyError`）。
+  插件现在在 win32 上不把额外根并入策略、不安装包装，并以 `degraded` 在设置卡明确提示
+  「额外可写根当前未生效」，避免「文件工具可用但每条 bash/terminal 命令都失败」的分叉；
+  README 新增「已知限制」说明。非 Windows 平台行为不变（macOS/Linux 完整支持）。
+* 覆盖率：本包可执行行 lines 100%（client 入口/样式、policy merge、remote、roots 等全部补齐
+  行为测试与边界），新增 6 个测试文件（client 入口编排、样式注入/非 DOM、policy-merge 边界、
+  roots 分类、Windows 护栏等），共 13 文件 / 105 用例。
+
 ## 0.4.30 (2026-11-04)
 
 ### 新增

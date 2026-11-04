@@ -78,6 +78,34 @@ describe('WindowRow', () => {
     expect(container.textContent).toContain('Plain name')
   })
 
+  it('本地化 unit 按 localeId 解析（纯字符串 unit 原样渲染）', () => {
+    act(() => {
+      root!.render(createElement(WindowRow, {
+        window: { id: 'w', label: 'Plan', unit: { en: 'valid', zh: '有效' }, remain: 3 },
+        t,
+        localeId: 'zh',
+      }))
+    })
+    expect(container.textContent).toContain('有效')
+    act(() => {
+      root!.render(createElement(WindowRow, {
+        window: { id: 'w', label: 'Plan', unit: { en: 'valid', zh: '有效' }, remain: 3 },
+        t,
+        localeId: 'en',
+      }))
+    })
+    expect(container.textContent).toContain('valid')
+    act(() => {
+      root!.render(createElement(WindowRow, {
+        window: { id: 'w', label: 'Plan', unit: '', remain: 3 },
+        t,
+        localeId: 'en',
+      }))
+    })
+    // 空 unit 解析为空串：不留下悬空的空格。
+    expect(container.textContent).toMatch(/3$/)
+  })
+
   it('localeId 透传给数值格式化（跟随 DSH 语言）', () => {
     act(() => {
       root!.render(createElement(WindowRow, {

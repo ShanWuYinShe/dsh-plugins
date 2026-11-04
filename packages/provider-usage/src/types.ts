@@ -68,8 +68,15 @@ export interface UsageWindow {
   label: UsageLabel
   /** Remaining amount, when the provider reports one. */
   remain?: number
-  /** Denomination of `remain`/`limit`, e.g. `credits`, `usd`, `requests`. */
-  unit: string
+  /**
+   * Denomination of `remain`/`limit`, e.g. `credits`, `usd`, `requests`.
+   *
+   * 与 {@link UsageWindow.label} 同一套本地化契约：`'credits'` 这类计量单位通常
+   * 是纯字符串，但任何面向用户的单位文本（`'有效'`、`'今日待领取'`、`'次'`）
+   * 都可以给 `{ en, [locale] }`，由 surface 按 DSH 当前语言解析。
+   * 空串仍是「无单位」的既有语义。
+   */
+  unit: UsageLabel
   /**
    * Window ceiling, when the provider reports one. Absent means "remaining is
    * the whole fact" (a balance), not "limit is zero".
@@ -207,3 +214,17 @@ export type ProviderUsageAnswer = UsageSnapshot | { provider: string; queried: f
 
 /** Route the browser half reads; the host half registers exactly this path. */
 export const PROVIDER_USAGE_PATH = '/plugins/provider-usage/usage'
+
+/**
+ * `GET PROVIDER_USAGE_PATH` 的响应体。
+ *
+ * `cacheTtlMs` 是宿主 registry 的**成功缓存时长**（部署配置项）：浏览器侧据此
+ * 把下一次轮询排在缓存过期之后，而不是用自己硬编码的节拍去猜。旧宿主没有该
+ * 字段时 client 回退到默认节拍（见 client/resource-provider.ts）。
+ */
+export interface ProviderUsageResponse {
+  /** 与请求 providers 顺序一致的逐行答案。 */
+  snapshots: ProviderUsageAnswer[]
+  /** 宿主成功缓存时长（毫秒）。 */
+  cacheTtlMs: number
+}

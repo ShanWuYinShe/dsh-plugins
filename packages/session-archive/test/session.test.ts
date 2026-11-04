@@ -2,12 +2,23 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import type { Context } from "@deepseek-ai/cordis";
+import { Context } from "@deepseek-ai/cordis";
 import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 // 入口只导出 Loader 四件套（name/inject/config/apply），测试便利值走相对路径导入
 // （官方 package-surface 规则：入口不得为测试冻结额外 API）。
-import { createArchiveHost } from "../src/archive-host.js";
+// SA-08：五个能力方法已整体搬进 SessionArchiveGateway；测试经真实 Context
+// 插件装配（ctx.plugin(Gateway)）取得 Gateway，再直调 @Remote 方法——不再
+// 有 createArchiveHost 中间转发对象。
+import { SessionArchiveGateway } from "../src/remote.js";
 import { createHostContext } from "../src/archive-host-context.js";
+import type { StatFile } from "../src/archive-host-context.js";
+import type { SessionArchiveConfig } from "../src/plugin-config.js";
+import type {
+  ArchiveDeleteResult,
+  ArchiveDetailResult,
+  ArchiveListResult,
+  ArchiveUnarchiveResult,
+} from "../src/types.js";
 
 const prevHome = process.env.HOME;
 const prevDshHome = process.env.DSH_HOME;
@@ -60,8 +71,9 @@ function assistantEvent(seq: number, time: number, text: string) {
   return { type: "assistant/message", seq, time, data: { turn: 1, step: seq, message: { id: "m" + seq, role: "assistant", content: [{ type: "text", text }] }, stream: [] } };
 }
 
-/**
- * 官方契约夹具：list() 返回
+const baseCfg: SessionArchiveConfig = { detailMaxMessages: 50, messagePreviewChars: 500, titleReadConcurrency: 2 };
+
+/** 手动闸门
  * SessionPersistenceSnapshot 数组、open() read 句柄读事件流、事件 data
  * 为官方 SessionEventMap 形状（user/message 本体、assistant/message 包装）。
  * stat(id) 快照带 0.2.2 的标准 location（当前代际工件路径），与宿主
@@ -77,6 +89,8 @@ function makeFixture(options: {
    * 临界区内部调它，用例据此获得「删除已持锁」的确定性同步点，不再靠
    * delay(50) 之类的墙钟窗口。 */
   onSessionGet?: (sessionId: string) => void;
+  /** remoteAccess.allows 桩：默认全放行（owner）；给 false 走非 owner 过滤。 */
+  remoteAllows?: (sessionId: string) => boolean;
 } = {}) {
   const registryState = {
     initialized: true,
@@ -183,10 +197,39 @@ function makeFixture(options: {
     ...services,
     get: (name: string) => services[name],
   } as unknown as Context;
-  return { ctx, registryState, headers, sessions, persistenceMock, eventReads: () => eventReads, statCalls: () => statCalls, listCalls: () => listCalls, openCalls: () => openCalls, titleCalls: () => titleCalls };
+
+  /** 真实 Context 装配：provide 宿主服务 + 插件化激活 Gateway（SA-08）。
+   * 返回带默认 signal 的调用面，测试可以像调用普通方法一样使用 @Remote 方法。 */
+  async function gateway(cfg: SessionArchiveConfig = baseCfg, statFile?: StatFile): Promise<GatewayFacade> {
+    const real = new Context() as any;
+    for (const [name, value] of Object.entries(services)) real.provide(name, value);
+    real.provide("remoteAccess", {
+      allows: (resource: { kind: string; id?: unknown }) =>
+        resource.kind !== "session" || (options.remoteAllows?.(String(resource.id)) ?? true),
+    });
+    await real.plugin(SessionArchiveGateway, { cfg, statFile });
+    const instance = real.get("sessionArchive") as SessionArchiveGateway | undefined;
+    if (instance === undefined) throw new Error("Gateway did not activate");
+    const signal = () => new AbortController().signal;
+    return {
+      list: (s?: AbortSignal) => instance.list(s ?? signal()),
+      count: (s?: AbortSignal) => instance.count(s ?? signal()),
+      detail: (id: string, s?: AbortSignal) => instance.detail(id, s ?? signal()),
+      delete: (ids: string[], s?: AbortSignal) => instance.delete(ids, s ?? signal()),
+      unarchive: (ids: string[], s?: AbortSignal) => instance.unarchive(ids, s ?? signal()),
+    };
+  }
+  return { ctx, gateway, registryState, headers, sessions, persistenceMock, eventReads: () => eventReads, statCalls: () => statCalls, listCalls: () => listCalls, openCalls: () => openCalls, titleCalls: () => titleCalls };
 }
 
-const baseCfg = { detailMaxMessages: 50, messagePreviewChars: 500, titleReadConcurrency: 2 };
+/** 测试侧的 Gateway 调用面：缺省 signal（@Remote 方法要求末尾注入项）。 */
+interface GatewayFacade {
+  list(signal?: AbortSignal): Promise<ArchiveListResult>;
+  count(signal?: AbortSignal): Promise<{ count: number }>;
+  detail(sessionId: string, signal?: AbortSignal): Promise<ArchiveDetailResult>;
+  delete(sessionIds: string[], signal?: AbortSignal): Promise<ArchiveDeleteResult>;
+  unarchive(sessionIds: string[], signal?: AbortSignal): Promise<ArchiveUnarchiveResult>;
+}
 
 /** 手动闸门：把「某个异步操作已进入临界区」变成可 await 的确定性同步点。 */
 function deferred() {
@@ -217,7 +260,7 @@ describe("session-archive host", () => {
       { type: "user/message", seq: 1, time: 3000, data: { id: "m3", role: "user", content: [{ type: "text", text: "没有标题的会话" }] } },
     ]);
     writeSession("s3", []);
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
 
     const listResult = await archiveHost.list();
     expect(listResult.items.length === 2 && !listResult.items.some((i) => i.sessionId === "s-ghost")).toBe(true);
@@ -243,7 +286,7 @@ describe("session-archive host", () => {
 
     // 截断语义:上限 2、实际 4 条文本消息时,只返回前两条但如实上报总数。
     const cappedCfg = { ...baseCfg, detailMaxMessages: 2 };
-    const cappedHost = createArchiveHost(f.ctx, cappedCfg);
+    const cappedHost = await f.gateway(cappedCfg);
     writeSession("s2", [
       messageEvent(1, 10, "一"),
       messageEvent(2, 20, "二"),
@@ -267,7 +310,7 @@ describe("session-archive host", () => {
         { id: "live-unarchived", cwd: "/proj/b", createdAt: 2000 },
       ],
     });
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
     writeSession("a1", [{ type: "session/title", seq: 1, time: 1, data: { title: "T-a1", messageSeqs: [], source: { kind: "fallback" } } }]);
     writeSession("live-unarchived", []);
 
@@ -284,7 +327,7 @@ describe("session-archive host", () => {
     expect(f.eventReads() === afterFirstList).toBe(true);
 
     // deleteArchived:未归档的会话(即使文件存在、不在内存)必须拒绝且不动文件。
-    const delForeign = await archiveHost.deleteArchived(["live-unarchived"]);
+    const delForeign = await archiveHost.delete(["live-unarchived"]);
     expect(delForeign.deleted.length === 0
       && delForeign.failed[0]!.reason === "not-archived"
       && fs.existsSync(sessionPath("live-unarchived"))).toBe(true);
@@ -315,7 +358,7 @@ describe("session-archive host", () => {
         { id: "foreign", cwd: "/proj/c", createdAt: 3000 }, // 未归档
       ],
     });
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
     writeSession("s-busy", []);
     writeSession("s-quiet", []);
     writeSession("s-del", []);
@@ -328,7 +371,7 @@ describe("session-archive host", () => {
     f.sessions.set("s-quiet", {});
 
     // 批量部分失败聚合:deleted 与 failed 同时出现,各自归类正确、文件状态正确。
-    const mixed = await archiveHost.deleteArchived(["s-busy", "s-del", "foreign"]);
+    const mixed = await archiveHost.delete(["s-busy", "s-del", "foreign"]);
     expect(mixed.deleted.length === 1 && mixed.deleted[0] === "s-del").toBe(true);
     expect(mixed.failed.length === 2).toBe(true);
     expect(mixed.failed.some((x) => x.sessionId === "s-busy" && x.reason === "busy")).toBe(true);
@@ -341,20 +384,20 @@ describe("session-archive host", () => {
     expect(mixed.needsRestart).toEqual([]);
 
     // 「静默但在内存」不再被猜成可删：显式状态 busy，文件保持原状。
-    const quiet = await archiveHost.deleteArchived(["s-quiet"]);
+    const quiet = await archiveHost.delete(["s-quiet"]);
     expect(quiet).toEqual({ deleted: [], failed: [{ sessionId: "s-quiet", reason: "busy" }], removedFromArchive: 0, needsRestart: [] });
     expect(fs.existsSync(sessionPath("s-quiet"))).toBe(true);
 
     // 会话离开宿主内存（冷文件）后即可删除，且 needsRestart 为空。
     f.sessions.delete("s-quiet");
-    const quiet2 = await archiveHost.deleteArchived(["s-quiet"]);
+    const quiet2 = await archiveHost.delete(["s-quiet"]);
     expect(quiet2.deleted.includes("s-quiet")
       && quiet2.failed.length === 0
       && !fs.existsSync(sessionPath("s-quiet"))).toBe(true);
     expect(quiet2.needsRestart).toEqual([]);
 
     // 损坏首行的孤儿文件:枚举不到但文件确实存在 → 拒绝并保留文件,不谎报成功。
-    const orphanResult = await archiveHost.deleteArchived(["orphan"]);
+    const orphanResult = await archiveHost.delete(["orphan"]);
     expect(orphanResult.deleted.length === 0
       && orphanResult.failed.length === 1
       && orphanResult.failed[0]!.reason === "unenumerable"
@@ -363,7 +406,7 @@ describe("session-archive host", () => {
     // 真 ghost(从未有文件):cwd 未知时 locate 只能探缺省目录,既探不到真实
     // 文件也确认不了缺失——不再谎报成功,按不可枚举拒绝;ghost id 留在归档
     // 集合由存在性过滤隐藏,面板与侧边栏均不可见。
-    const ghostResult = await archiveHost.deleteArchived(["s-ghost"]);
+    const ghostResult = await archiveHost.delete(["s-ghost"]);
     expect(ghostResult.deleted.length === 0
       && ghostResult.failed.length === 1
       && ghostResult.failed[0]!.sessionId === "s-ghost"
@@ -372,7 +415,7 @@ describe("session-archive host", () => {
 
     // 离开内存后删除成功:文件与会话目录一并消失,归档集合仍保留 ghost id。
     f.sessions.delete("s-busy");
-    const delBusy = await archiveHost.deleteArchived(["s-busy"]);
+    const delBusy = await archiveHost.delete(["s-busy"]);
     expect(delBusy.deleted.includes("s-busy")
       && !fs.existsSync(sessionPath("s-busy"))
       && !fs.existsSync(path.join(saRoot, "--proj--", "s-busy"))).toBe(true);
@@ -389,7 +432,7 @@ describe("session-archive host", () => {
       archived: ["s-x"],
       headers: [{ id: "s-x", cwd: "/proj/x", createdAt: 1000 }],
     });
-    const archiveHost1 = createArchiveHost(f1.ctx, baseCfg);
+    const archiveHost1 = await f1.gateway(baseCfg);
     writeSession("s-x", []);
     // stat 快照的 location 覆盖为哈希式目录(模拟宿主布局契约改为哈希目录名),
     // 同时让 list 的存在性过滤仍能看到该会话。
@@ -404,7 +447,7 @@ describe("session-archive host", () => {
       }
       return snapshot;
     };
-    const out1 = await archiveHost1.deleteArchived(["s-x"]);
+    const out1 = await archiveHost1.delete(["s-x"]);
     expect(out1.deleted.includes("s-x")).toBe(true);
     expect(fs.existsSync(path.join(hashDir, "session.jsonl"))).toBe(false); // 文件已删
     expect(fs.existsSync(hashDir)).toBe(true); // 目录保留
@@ -415,13 +458,13 @@ describe("session-archive host", () => {
       archived: ["s-y"],
       headers: [{ id: "s-y", cwd: "/proj/y", createdAt: 2000 }],
     });
-    const archiveHost2 = createArchiveHost(f2.ctx, baseCfg);
+    const archiveHost2 = await f2.gateway(baseCfg);
     writeSession("s-y", []);
     fs.writeFileSync(path.join(saRoot, "--proj--", "s-y", "other-session.jsonl"), "[]");
     // 同目录还躺着本会话旧代际：目录保留但旧代际必须清掉，否则「已彻底删除」
     // 的会话数据仍在磁盘上。
     fs.writeFileSync(path.join(saRoot, "--proj--", "s-y", "session.v1.jsonl"), "[]");
-    const out2 = await archiveHost2.deleteArchived(["s-y"]);
+    const out2 = await archiveHost2.delete(["s-y"]);
     expect(out2.deleted.includes("s-y")).toBe(true);
     expect(fs.existsSync(sessionPath("s-y"))).toBe(false); // 本会话当前代际已删
     expect(fs.existsSync(path.join(saRoot, "--proj--", "s-y", "session.v1.jsonl"))).toBe(false); // 旧代际已清
@@ -435,7 +478,7 @@ describe("session-archive host", () => {
       archived: ["s-z"],
       headers: [{ id: "s-z", cwd: "/proj/z", createdAt: 3000 }],
     });
-    const archiveHost3 = createArchiveHost(f3.ctx, baseCfg);
+    const archiveHost3 = await f3.gateway(baseCfg);
     writeSession("s-z", []);
     const hashDir3 = path.join(saRoot, "--proj--", "feedface");
     fs.mkdirSync(hashDir3, { recursive: true });
@@ -450,7 +493,7 @@ describe("session-archive host", () => {
       }
       return snapshot;
     };
-    const out3 = await archiveHost3.deleteArchived(["s-z"]);
+    const out3 = await archiveHost3.delete(["s-z"]);
     expect(out3.deleted.includes("s-z")).toBe(true);
     expect(fs.existsSync(path.join(hashDir3, "session.jsonl"))).toBe(false);
     expect(fs.existsSync(path.join(hashDir3, "session.v1.jsonl"))).toBe(false);
@@ -464,7 +507,7 @@ describe("session-archive host", () => {
       archived: ["s-w"],
       headers: [{ id: "s-w", cwd: "/proj/w", createdAt: 4000 }],
     });
-    const archiveHost4 = createArchiveHost(f4.ctx, baseCfg);
+    const archiveHost4 = await f4.gateway(baseCfg);
     writeSession("s-w", []);
     const hashDir4 = path.join(saRoot, "--proj--", "cafebabe");
     fs.mkdirSync(hashDir4, { recursive: true });
@@ -486,7 +529,7 @@ describe("session-archive host", () => {
       }
       return snapshot;
     };
-    const out4 = await archiveHost4.deleteArchived(["s-w"]);
+    const out4 = await archiveHost4.delete(["s-w"]);
     expect(out4.deleted).toEqual([]);
     expect(out4.failed).toHaveLength(1);
     expect(out4.failed[0]!.sessionId).toBe("s-w");
@@ -500,7 +543,7 @@ describe("session-archive host", () => {
       archived: ["u1", "u-ghost"],
       headers: [{ id: "u1", cwd: "/proj/a", createdAt: 1000 }],
     });
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
     writeSession("u1", []);
 
     // ghost(无持久化文件)拒绝恢复,归档集合保持原状。
@@ -544,16 +587,16 @@ describe("session-archive host", () => {
       const info = await fs.promises.stat(candidate);
       return { size: info.size, mtimeMs: info.mtimeMs };
     };
-    const archiveHost = createArchiveHost(f.ctx, baseCfg, statFile);
+    const archiveHost = await f.gateway(undefined, statFile);
 
     // 单次重建:rm#1 后复验发现重现、再删一次;第二次复验已消失 → deleted。
     fakePresent = 1;
-    expect(await archiveHost.deleteArchived(["r1"])).toEqual({ deleted: ["r1"], failed: [], removedFromArchive: 0, needsRestart: [] });
+    expect(await archiveHost.delete(["r1"])).toEqual({ deleted: ["r1"], failed: [], removedFromArchive: 0, needsRestart: [] });
     expect(fs.existsSync(sessionPath("r1"))).toBe(false);
 
     // 持续重建:两次删除后复验都"仍存在" → 不谎报已删,计入 reappeared。
     fakePresent = 2;
-    expect(await archiveHost.deleteArchived(["r2"])).toEqual({ deleted: [], failed: [{ sessionId: "r2", reason: "reappeared" }], removedFromArchive: 0, needsRestart: [] });
+    expect(await archiveHost.delete(["r2"])).toEqual({ deleted: [], failed: [{ sessionId: "r2", reason: "reappeared" }], removedFromArchive: 0, needsRestart: [] });
     // 注：真实文件在两次 rm 后已不存在；reappeared 是对「复验仍存在」的如实上报。
     expect(fs.existsSync(sessionPath("r2"))).toBe(false);
   });
@@ -572,7 +615,7 @@ describe("session-archive host", () => {
       messageEvent(2, 2, "内容"),
       assistantEvent(3, 3, "回复"),
     ]);
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
     const listResult = await archiveHost.list();
     const row = listResult.items[0]!;
     expect(listResult.items.length === 1 && row.sessionId === "v1").toBe(true);
@@ -605,7 +648,7 @@ describe("session-archive host", () => {
       const { location: _location, ...rest } = snapshot;
       return rest;
     };
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
     const listResult = await archiveHost.list();
     const pendingRow = listResult.items[0]!;
     expect(listResult.items.length === 1 && pendingRow.sessionId === "n1"
@@ -614,7 +657,7 @@ describe("session-archive host", () => {
     expect(pendingRow.size === 0 && pendingRow.updatedAt === 1000).toBe(true);
     // 删除:文件存在但无法定位路径 → 既不能谎报成功也不能删错东西,按 busy
     // 同级的失败语义兜底(failed 上报),文件保持原状。
-    const del = await archiveHost.deleteArchived(["n1"]);
+    const del = await archiveHost.delete(["n1"]);
     expect(del.deleted.length === 0
       && del.failed.length === 1
       && fs.existsSync(sessionPath("n1"))).toBe(true);
@@ -644,7 +687,7 @@ describe("session-archive host", () => {
     const currentGeneration = path.join(path.dirname(legacyPath), "session.v2.jsonl");
     f.persistenceMock.locate = () => ({ kind: "jsonl", path: currentGeneration });
 
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
 
     // 恢复:目录扫描落到 session.v1.jsonl → confirm 通过 → 移出归档集合。
     const un = await archiveHost.unarchive(["g1"]);
@@ -654,7 +697,7 @@ describe("session-archive host", () => {
 
     // 删除:同样按目录扫描,真实文件被删、会话目录一并清理。
     f.registryState.archivedSessionIds.push("g1"); // 恢复到归档态再验删除
-    const del = await archiveHost.deleteArchived(["g1"]);
+    const del = await archiveHost.delete(["g1"]);
     expect(del.deleted.includes("g1")
       && !fs.existsSync(path.join(path.dirname(legacyPath), "session.v1.jsonl"))
       && !fs.existsSync(path.dirname(legacyPath))).toBe(true);
@@ -695,7 +738,7 @@ describe("session-archive host", () => {
       messageEvent(1, 1, "hi"),
       { type: "assistant/message", seq: 2, time: 2, data: { turn: 1, step: 1, message: { id: "m2", role: "assistant", content: [{ type: "tool-call", id: "c1", name: "read", arguments: "{}" }] }, stream: [] } },
     ]);
-    const detail = await createArchiveHost(f.ctx, baseCfg).detail("tc1");
+    const detail = await (await f.gateway()).detail("tc1");
     // 纯工具调用消息在旧实现里 text 为空 → 被跳过（不计 totalMessageCount）；
     // rc.1 形状识别后必须有占位文本并计入总数。
     expect(detail.messages.map((message) => message.text)).toEqual(["hi", "[read]"]);
@@ -716,8 +759,8 @@ describe("session-archive host", () => {
     f.persistenceMock.stat = async () => {
       throw new Error("backend contract drift");
     };
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
-    const del = await archiveHost.deleteArchived(["e1"]);
+    const archiveHost = await f.gateway(baseCfg);
+    const del = await archiveHost.delete(["e1"]);
     expect(del.deleted.length === 0
       && del.failed.length === 1
       && del.failed[0]!.sessionId === "e1"
@@ -744,8 +787,8 @@ describe("session-archive host", () => {
     });
     writeSession("m1", []);
     f.sessions.set("m1", {});
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
-    const delP = archiveHost.deleteArchived(["m1"]);
+    const archiveHost = await f.gateway(baseCfg);
+    const delP = archiveHost.delete(["m1"]);
     await deleteInCritical.promise;              // 删除已持锁（显式状态判定中）
     const unP = archiveHost.unarchive(["m1"]);   // 恢复的临界区必然排在删除之后
     const [del, un] = await Promise.all([delP, unP]);
@@ -763,7 +806,7 @@ describe("session-archive host", () => {
       headers: [{ id: "m2", cwd: "/proj/b", createdAt: 2000 }],
     });
     writeSession("m2", []);
-    const archiveHost2 = createArchiveHost(f2.ctx, baseCfg);
+    const archiveHost2 = await f2.gateway(baseCfg);
     const unarchiveInCritical = deferred();
     const releaseUnarchive = deferred();
     const registry = f2.ctx.workspaceRegistry;
@@ -775,7 +818,7 @@ describe("session-archive host", () => {
     };
     const unP2 = archiveHost2.unarchive(["m2"]);
     await unarchiveInCritical.promise;
-    const delP2 = archiveHost2.deleteArchived(["m2"]); // 必然排在恢复之后
+    const delP2 = archiveHost2.delete(["m2"]); // 必然排在恢复之后
     releaseUnarchive.resolve();
     const [un2, del2] = await Promise.all([unP2, delP2]);
     expect(un2).toEqual({ restored: ["m2"], failed: [], removedFromArchive: 1 });
@@ -795,7 +838,7 @@ describe("session-archive host", () => {
       // 损坏/异构日志:assistant 事件的 data.message 缺失。
       { type: "assistant/message", seq: 2, time: 20, data: { turn: 1, step: 2, stream: [] } },
     ]);
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
     const detail = await archiveHost.detail("d1");
     expect(detail.messages.length === 1
       && detail.messages[0]!.text === "正常消息").toBe(true);
@@ -820,7 +863,7 @@ describe("session-archive host", () => {
       // 整行是 null(损坏日志里 JSON 字面量 null)。
       null,
     ]);
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
     const detail = await archiveHost.detail("d1");
     expect(detail.title === "畸形会话").toBe(true);
     expect(detail.messages.length === 1
@@ -848,7 +891,7 @@ describe("session-archive host", () => {
     }
     many.push(messageEvent(451, 4510, "最后一条"));
     writeSession("c1", many);
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
     const readsBefore = f.eventReads();
 
     const items = await archiveHost.list();
@@ -874,7 +917,7 @@ describe("session-archive host", () => {
     });
     writeSession("u-ok", []);
     // u-gone:有 header 但文件已删 → stat 枚举不到。
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
 
     const result = await archiveHost.unarchive(["u-ok", "u-ghost", "u-gone", "u-foreign"]);
     expect(result.restored).toEqual(["u-ok"]);
@@ -903,7 +946,7 @@ describe("session-archive host", () => {
     });
     writeSession("s1", []);
     writeSession("s2", []);
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
 
     const count = await archiveHost.count();
     expect(count.count).toBe(2); // 幽灵 id 不计
@@ -931,7 +974,7 @@ describe("session-archive host", () => {
     writeSession("s2", [
       { type: "user/message", seq: 1, time: 3000, data: { id: "m1", role: "user", content: [{ type: "text", text: "hi" }] } },
     ]);
-    const archiveHost = createArchiveHost(f.ctx, baseCfg);
+    const archiveHost = await f.gateway(baseCfg);
 
     const { items } = await archiveHost.list();
     expect(items.find((i) => i.sessionId === "s1")?.title).toBe("索引标题");
@@ -962,24 +1005,26 @@ describe("session-archive host", () => {
     };
     // 单行 rejected：该行回退直读，其余仍走索引。
     files();
-    const partial = createArchiveHost(mk({ map: { s1: "索引标题" }, reject: ["s2"] }).ctx, baseCfg);
+    const partial = (await mk({ map: { s1: "索引标题" }, reject: ["s2"] }).gateway());
     const partialItems = await partial.list();
     expect(partialItems.items.find((i) => i.sessionId === "s1")?.title).toBe("索引标题");
     expect(partialItems.items.find((i) => i.sessionId === "s2")?.title).toBe("文件标题二");
     // 整单抛错：全量回退直读，标题仍对。
     files();
     const f = mk({ throwAll: true });
-    const fallback = createArchiveHost(f.ctx, baseCfg);
+    const fallback = await f.gateway(baseCfg);
     const fallbackItems = await fallback.list();
     expect(fallbackItems.items.find((i) => i.sessionId === "s1")?.title).toBe("文件标题一");
     expect(fallbackItems.items.find((i) => i.sessionId === "s2")?.title).toBe("文件标题二");
     expect(f.openCalls()).toBeGreaterThan(0);
   });
 
-  it("真 Cordis 代理语义下回退直读（未 inject 的直接属性访问抛错）", async () => {
+  it("真实 Context 未挂载 sessionQuery 时回退直读（可选服务探测走 ctx.get）", async () => {
     // 回归：dsh web 启动曾报 cannot get property "sessionQuery" without
     // inject——真实 ctx 是 Proxy，未声明 inject 的服务直接读属性即抛，只有
-    // ctx.get 会对缺席服务返回 undefined。可选服务探测必须走 get。
+    // ctx.get 会对缺席服务返回 undefined。可选服务探测必须走 get；本用例
+    // 用真实 Context（未 provide sessionQuery）装配 Gateway，list 仍能回退
+    // 直读标题。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-proxy-"));
     const f = makeFixture({
       archived: ["s1"],
@@ -988,16 +1033,7 @@ describe("session-archive host", () => {
     writeSession("s1", [
       { type: "session/title", seq: 1, time: 1000, data: { title: "文件标题", messageSeqs: [], source: { kind: "user" } } },
     ]);
-    const proxied = new Proxy(f.ctx as unknown as Record<string, unknown>, {
-      get(target, prop, receiver) {
-        if (prop === "get") return (name: string) => (target as Record<string, unknown>)[name];
-        if (prop in target) return Reflect.get(target, prop, receiver);
-        throw new Error(`cannot get property "${String(prop)}" without inject`);
-      },
-    });
-    const archiveHost = createArchiveHost(proxied as unknown as Context, baseCfg);
-    const { items } = await archiveHost.list();
+    const { items } = await (await f.gateway()).list();
     expect(items.length).toBe(1);
     expect(items[0]?.title).toBe("文件标题");
-  });
-});
+  });});

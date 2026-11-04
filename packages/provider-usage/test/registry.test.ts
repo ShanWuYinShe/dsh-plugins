@@ -785,6 +785,29 @@ describe('querier 返回形状校验（第三方扩展点不得让 client 渲染
     expect(snapshot?.windows[0]?.label).toEqual(label)
   })
 
+  it('本地化 unit（{en, zh}）合法：原样透传给 client 按语言解析', async () => {
+    const unit = { en: 'valid', zh: '有效' }
+    const snapshot = await registryAnswering({
+      provider: 'acme',
+      windows: [{ id: 'w', label: 'Plan', remain: 1, unit }],
+      fetchedAt: 0,
+    }).snapshot('acme')
+    expect(snapshot?.error).toBeUndefined()
+    expect(snapshot?.windows[0]?.unit).toEqual(unit)
+  })
+
+  it('unit 形状非法：折叠成失败快照（unit 与 label 同一套契约）', async () => {
+    for (const unit of [null, 42, { zh: '有效' }, { en: '' }] as unknown[]) {
+      const snapshot = await registryAnswering({
+        provider: 'acme',
+        windows: [{ id: 'w', label: 'Plan', unit }],
+        fetchedAt: 0,
+      }).snapshot('acme')
+      expect(snapshot?.windows).toEqual([])
+      expect(snapshot?.error, `unit=${JSON.stringify(unit)}`).toContain('windows[0].unit is neither a string nor a localized label')
+    }
+  })
+
   it('本地化 label 形状非法：折叠成失败快照（不让脏 label 进渲染层）', async () => {
     const invalidLabels: unknown[] = [
       { zh: '总计' }, // 缺 en 回退基线

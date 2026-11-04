@@ -1,41 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
 import { TYPERT as HOST_ARTIFACT } from '@chaoset/session-archive/typert'
-import { SessionArchiveGateway } from '../src/remote.js'
-import { createArchiveHost } from '../src/archive-host.js'
 import { readTitle, scanSession } from '../src/session-scan.js'
-import type { ArchiveHost } from '../src/archive-host.js'
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
-import type { Context as CordisContext } from '@deepseek-ai/cordis'
+import { makeGateway } from './gateway-fixture.js'
 
 /**
  * SA-07 取消回归（RULE-037）：5 个 Remote 方法末尾声明 `signal: AbortSignal`
  * （typert 识别为 Gateway 注入项，不是 wire 参数），signal 透传给
  * persistence.open/read/stat 与标题索引，并在分块/批量循环处 cooperative
- * 检查。这里不重复生成器行为，只钉住三件事：marker 声明、透传、abort 生效。
+ * 检查。这里不重复生成器行为，只钉住三件事：生成工件声明、透传、abort 生效。
  */
-
-/** 极简 host 桩上下文：本文件的 host 测试只需要这三个服务面。 */
-function makeHostContext(persistence: unknown, archived: string[] = []): CordisContext {
-  const services: Record<string, unknown> = {
-    workspaceRegistry: { archivedSessionIds: archived, unarchiveSession: async () => {} },
-    sessionPersistence: persistence,
-    sessions: { get: () => undefined },
-  }
-  return {
-    ...services,
-    get: (name: string) => services[name],
-  } as unknown as CordisContext
-}
-
-const cfg = { detailMaxMessages: 10, messagePreviewChars: 100, titleReadConcurrency: 2 }
 
 /** 构造只读 persistence 桩：记录 open/read/stat 收到的 options。 */
 function makePersistence(events: readonly SessionEvent[], header: SessionHeader) {
   const opened: Array<{ signal?: AbortSignal } | undefined> = []
   const reads: Array<{ signal?: AbortSignal } | undefined> = []
-  const stats: Array<{ signal?: AbortSignal } | undefined> = []
   const persistence = {
     open: async (_id: SessionId, _access: string, options?: { signal?: AbortSignal }) => {
       opened.push(options)
@@ -49,12 +29,9 @@ function makePersistence(events: readonly SessionEvent[], header: SessionHeader)
         close: async () => {},
       }
     },
-    stat: async (_id: SessionId, options?: { signal?: AbortSignal }) => {
-      stats.push(options)
-      return undefined
-    },
+    stat: async () => undefined,
   }
-  return { persistence: persistence as unknown as SessionPersistence, opened, reads, stats }
+  return { persistence: persistence as unknown as SessionPersistence, opened, reads }
 }
 
 describe('Remote 取消声明（SA-07）', () => {
@@ -73,17 +50,7 @@ describe('Remote 取消声明（SA-07）', () => {
   })
 
   it('Gateway 在入口即检查 signal（预取消的调用直接拒绝）', async () => {
-    const ctx = new Context()
-    ctx.provide('remoteAccess', { allows: () => true } as never)
-    const host = {
-      list: async () => ({ items: [] }),
-      existingIds: async () => [],
-      count: async () => ({ count: 0 }),
-      detail: async () => ({}),
-      deleteArchived: async () => ({ deleted: [], failed: [], removedFromArchive: 0, needsRestart: [] }),
-      unarchive: async () => ({ restored: [], failed: [], removedFromArchive: 0 }),
-    } as unknown as ArchiveHost
-    const gateway = new SessionArchiveGateway(ctx, { host })
+    const { gateway } = makeGateway()
     const aborted = new AbortController()
     aborted.abort(new Error('cancelled by test'))
     await expect(gateway.list(aborted.signal)).rejects.toThrow('cancelled by test')
@@ -121,18 +88,24 @@ describe('signal 透传到持久化层（SA-07）', () => {
     expect(opened[0]?.signal).toBe(controller.signal)
   })
 
-  it('host.list/deleteArchived 把 signal 传给 persistence.stat 并在预取消时拒绝', async () => {
-    const { persistence, stats } = makePersistence(events, header)
-    const host = createArchiveHost(makeHostContext(persistence, ['s1']), cfg)
+  it('Gateway list/delete/unarchive 把 signal 传给 persistence.stat 并在预取消时拒绝', async () => {
+    const stats: Array<{ signal?: AbortSignal } | undefined> = []
+    const { gateway } = makeGateway({
+      archived: ['s1'],
+      stat: async (_id, options) => {
+        stats.push(options)
+        return undefined
+      },
+    })
     const controller = new AbortController()
-    expect((await host.list(controller.signal)).items).toEqual([])
+    expect((await gateway.list(controller.signal)).items).toEqual([])
     expect(stats.length).toBeGreaterThan(0)
     expect(stats.every((options) => options?.signal === controller.signal)).toBe(true)
 
     const aborted = new AbortController()
     aborted.abort(new Error('abort-list'))
-    await expect(host.list(aborted.signal)).rejects.toThrow('abort-list')
-    await expect(host.deleteArchived(['s1'], aborted.signal)).rejects.toThrow('abort-list')
-    await expect(host.unarchive(['s1'], aborted.signal)).rejects.toThrow('abort-list')
+    await expect(gateway.list(aborted.signal)).rejects.toThrow('abort-list')
+    await expect(gateway.delete(['s1'], aborted.signal)).rejects.toThrow('abort-list')
+    await expect(gateway.unarchive(['s1'], aborted.signal)).rejects.toThrow('abort-list')
   })
 })

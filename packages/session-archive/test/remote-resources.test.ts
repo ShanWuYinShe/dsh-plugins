@@ -1,5 +1,5 @@
 /**
- * @Remote resources 声明与逐项过滤回归（访问控制，审计 P1 / SA-01）。
+ * @Remote resources 声明与逐项过滤/业务编排回归（访问控制，审计 P1 / SA-01 / SA-08）。
  *
  * 官方 typert-protocol + dsh-api-remote-access 契约：
  * - 方法必须通过 resources reader 或默认 resolver 声明它访问的资源；
@@ -12,23 +12,23 @@
  *   逐项经 `ctx.remoteAccess.allows({kind:'session', id})` 过滤（count 用过滤后
  *   数量）——官方 session/list 的同款模型，unfiltered aggregate 是缺陷。
  *
+ * SA-08 后五个能力方法体都在 Gateway 上（含入口闸门与结果归类），本文件
+ * 同时验证这些方法体行为。
+ *
  * 断言走官方反射 API remoteMethods(gateway)（读类原型上的版本化 marker），
  * 不复制装饰器实现、也不依赖生成工件。
  */
 
 import { describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
-import { SessionArchiveGateway } from '../src/remote.js'
-import type { ArchiveHost } from '../src/archive-host.js'
-import type { ArchiveListRow } from '../src/types.js'
+import { makeGateway } from './gateway-fixture.js'
 
-/** 构造网关实例并读出 Remote marker（只测声明，不调用 host 方法）。 */
+/** 构造网关实例并读出 Remote marker（只测声明，不调用方法）。 */
 function readMarkers() {
-  const ctx = new Context()
-  // host 桩：本用例只读 marker，任何方法都不会被调用。
-  const gateway = new SessionArchiveGateway(ctx, { host: {} as ArchiveHost })
-  return remoteMethods(gateway)
+  return remoteMethods(makeGateway().gateway)
 }
 
 /** 按实现方法名取 marker。 */
@@ -38,27 +38,10 @@ function markerOf(method: string) {
   return marker
 }
 
-/** 未取消的 signal：Remote 方法要求末尾注入 signal（SA-07），用例显式传入。 */
-function liveSignal(): AbortSignal {
-  return new AbortController().signal
-}
+const liveSignal = (): AbortSignal => new AbortController().signal
 
-function row(sessionId: string): ArchiveListRow {
-  return { sessionId, title: null, cwd: null, createdAt: 0, updatedAt: 0, size: 0, live: false }
-}
-
-/**
- * 构造一个带 remoteAccess 桩的网关：allows 只放行 admitted 里的会话 id。
- * 官方远程服务是 Cordis 服务，必须挂在真实 Context 上；provide 的桩按
- * 官方 `allows(resource)` 形状判定（owner/无 Remote 调用时真实实现返回 true，
- * 这里由用例显式控制）。
- */
-function gatewayWithAccess(admitted: readonly string[], config: { host: ArchiveHost }): SessionArchiveGateway {
-  const ctx = new Context()
-  const allows = (resource: { kind: string; id?: string }): boolean =>
-    resource.kind !== 'session' || admitted.includes(String(resource.id))
-  ctx.provide('remoteAccess', { allows } as never)
-  return new SessionArchiveGateway(ctx, config)
+function snapshotOf(id: string) {
+  return { header: { id, createdAt: 1 } }
 }
 
 describe('@Remote resources 声明（访问控制）', () => {
@@ -82,8 +65,7 @@ describe('@Remote resources 声明（访问控制）', () => {
   })
 
   it('detail 不声明 reader（sessionId 单参命中默认 resolver）', () => {
-    const marker = markerOf('detail')
-    expect(marker.resources).toBeUndefined()
+    expect(markerOf('detail').resources).toBeUndefined()
   })
 
   it('list/count 不声明 resources（无会话参数），逐项 allows 过滤由其方法体承担', () => {
@@ -93,107 +75,127 @@ describe('@Remote resources 声明（访问控制）', () => {
   })
 })
 
-describe('list/count 逐项 remoteAccess 过滤（SA-01）', () => {
-  const allRows = [row('s1'), row('s2'), row('s3')]
-
-  it('list 只返回 allows 放行的行（非 owner 隐藏他人会话元数据）', async () => {
-    const gateway = gatewayWithAccess(['s1', 's3'], {
-      host: {
-        list: async () => ({ items: allRows }),
-        existingIds: async () => allRows.map((item) => item.sessionId),
-        count: async () => ({ count: allRows.length }),
-      } as unknown as ArchiveHost,
-    })
-    const result = await gateway.list(liveSignal())
-    expect(result.items.map((item) => item.sessionId)).toEqual(['s1', 's3'])
+describe('list/count 逐项 remoteAccess 过滤（SA-01 / SA-08 方法体）', () => {
+  const ids = ['s1', 's2', 's3']
+  const fixtures = (allows?: (id: string) => boolean) => makeGateway({
+    archived: ids,
+    snapshots: Object.fromEntries(ids.map((id) => [id, snapshotOf(id)])),
+    // 每行一个 title 事件：rowFor 标题直读路径覆盖（无 sessionQuery）。
+    events: Object.fromEntries(ids.map((id) => [id, [
+      { type: 'session/title', seq: 0, time: 1, data: { title: 'T-' + id, messageSeqs: [], source: { kind: 'user' } } },
+    ]])),
+    allows,
   })
 
-  it('count 用逐项过滤后的数量（不是 host 的全量计数）', async () => {
-    const gateway = gatewayWithAccess(['s2'], {
-      host: {
-        list: async () => ({ items: allRows }),
-        existingIds: async () => allRows.map((item) => item.sessionId),
-        count: async () => ({ count: allRows.length }),
-      } as unknown as ArchiveHost,
-    })
+  it('list 只返回 allows 放行的行（非 owner 隐藏他人会话元数据）', async () => {
+    const { gateway } = fixtures((id) => id === 's1' || id === 's3')
+    const result = await gateway.list(liveSignal())
+    expect(result.items.map((item) => item.sessionId)).toEqual(['s1', 's3'])
+    expect(result.items.map((item) => item.title)).toEqual(['T-s1', 'T-s3'])
+  })
+
+  it('count 用逐项过滤后的数量（不是全量计数）', async () => {
+    const { gateway } = fixtures((id) => id === 's2')
     expect((await gateway.count(liveSignal())).count).toBe(1)
   })
 
   it('全部被拒绝时 list 为空、count 为 0', async () => {
-    const gateway = gatewayWithAccess([], {
-      host: {
-        list: async () => ({ items: allRows }),
-        existingIds: async () => allRows.map((item) => item.sessionId),
-        count: async () => ({ count: allRows.length }),
-      } as unknown as ArchiveHost,
-    })
+    const { gateway } = fixtures(() => false)
     expect((await gateway.list(liveSignal())).items).toEqual([])
     expect((await gateway.count(liveSignal())).count).toBe(0)
   })
 
   it('owner（allows 恒 true）看到全部行', async () => {
-    const gateway = gatewayWithAccess(allRows.map((item) => item.sessionId), {
-      host: {
-        list: async () => ({ items: allRows }),
-        existingIds: async () => allRows.map((item) => item.sessionId),
-        count: async () => ({ count: allRows.length }),
-      } as unknown as ArchiveHost,
-    })
+    const { gateway } = fixtures()
     expect((await gateway.list(liveSignal())).items).toHaveLength(3)
     expect((await gateway.count(liveSignal())).count).toBe(3)
   })
+
+  it('空归档集合：list 空、count 0（不触发持久化枚举）', async () => {
+    const { gateway, statCalls } = makeGateway()
+    expect((await gateway.list(liveSignal())).items).toEqual([])
+    expect((await gateway.count(liveSignal())).count).toBe(0)
+    expect(statCalls).toEqual([])
+  })
 })
 
-describe('Gateway 业务编排（SA-08）', () => {
-  const archivedRow = row('s1')
-
-  it('detail 在方法体做归档成员闸门：非成员抛 session-archive/not-archived', async () => {
-    const gateway = gatewayWithAccess(['s1'], {
-      host: {
-        archivedSet: () => new Set(['s1']),
-        detail: async () => ({ sessionId: 's1' }),
-      } as unknown as ArchiveHost,
+describe('Gateway 能力方法体（SA-08）', () => {
+  it('detail 在方法体内做归档成员闸门：非成员抛 session-archive/not-archived', async () => {
+    const { gateway } = makeGateway({
+      archived: ['s1'],
+      snapshots: { s1: snapshotOf('s1') },
+      events: { s1: [] },
     })
-    await expect(gateway.detail('other', new AbortController().signal)).rejects.toMatchObject({ code: 'session-archive/not-archived' })
-    await expect(gateway.detail('s1', new AbortController().signal)).resolves.toEqual({ sessionId: 's1' })
+    await expect(gateway.detail('other', liveSignal())).rejects.toMatchObject({ code: 'session-archive/not-archived' })
+    const detail = await gateway.detail('s1', liveSignal())
+    expect(detail.sessionId).toBe('s1')
+    expect(detail.messages).toEqual([])
   })
 
-  it('delete 在方法体分流归档成员：非成员直接归入 not-archived，成员才进 host', async () => {
-    const calls: string[][] = []
-    const gateway = gatewayWithAccess(['s1'], {
-      host: {
-        archivedSet: () => new Set(['s1', 's2']),
-        deleteArchived: async (ids: string[]) => {
-          calls.push(ids)
-          return { deleted: [], failed: [{ sessionId: 's1', reason: 'busy' }], removedFromArchive: 0, needsRestart: [] }
-        },
-      } as unknown as ArchiveHost,
+  it('delete 在方法体内分流归档成员：非成员归入 not-archived，成员走定位/删除流程', async () => {
+    const { gateway } = makeGateway({
+      archived: ['s1'],
+      snapshots: { s1: snapshotOf('s1') }, // 无 location → 文件不可定位
     })
-    const result = await gateway.delete(['s1', 'foreign', 'foreign'], new AbortController().signal)
-    expect(calls).toEqual([['s1']])
+    const result = await gateway.delete(['s1', 'foreign'], liveSignal())
+    expect(result.deleted).toEqual([])
     expect(result.failed).toEqual([
       { sessionId: 'foreign', reason: 'not-archived' },
-      { sessionId: 's1', reason: 'busy' },
+      { sessionId: 's1', reason: 'unlocatable' },
     ])
-    expect(result.deleted).toEqual([])
+    expect(result.removedFromArchive).toBe(0)
   })
 
-  it('unarchive 与 delete 对称：非成员不进 host，成员结果原样合并', async () => {
-    const calls: string[][] = []
-    const gateway = gatewayWithAccess(['s1'], {
-      host: {
-        archivedSet: () => new Set(['s1']),
-        unarchive: async (ids: string[]) => {
-          calls.push(ids)
-          return { restored: ids, failed: [], removedFromArchive: ids.length }
-        },
-      } as unknown as ArchiveHost,
+  it('unarchive 与 delete 对称：非成员归入 not-archived，成员 confirm 复核后归类', async () => {
+    const { gateway, removed } = makeGateway({
+      archived: ['s1'],
+      snapshots: { s1: snapshotOf('s1') },
     })
-    expect(await gateway.unarchive(['s1', 'foreign'], new AbortController().signal)).toEqual({
-      restored: ['s1'],
-      failed: [{ sessionId: 'foreign', reason: 'not-archived' }],
-      removedFromArchive: 1,
-    })
-    expect(calls).toEqual([['s1']])
+    const result = await gateway.unarchive(['s1', 'foreign'], liveSignal())
+    expect(result.restored).toEqual([])
+    expect(result.failed).toEqual([
+      { sessionId: 'foreign', reason: 'not-archived' },
+      { sessionId: 's1', reason: 'not-restorable' },
+    ])
+    expect(removed).toEqual([])
+  })
+
+  it('delete：快照后文件已消失（absent）按幂等删除处理，且内存会话仍在时返回 needsRestart', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sa-gw-absent-'))
+    try {
+      const missing = path.join(dir, 'session.jsonl')
+      const { gateway } = makeGateway({
+        archived: ['s1'],
+        snapshots: { s1: { header: { id: 's1', createdAt: 1 }, location: { kind: 'jsonl', path: missing } } },
+        // busyIfLive 第一次读为 undefined（不拒绝）→ markDeleted 复核时返回会话
+        // （文件已删、内存仍在 → needsRestart）。
+        sessionGets: [undefined, { id: 's1' }],
+      })
+      const result = await gateway.delete(['s1'], liveSignal())
+      expect(result).toEqual({ deleted: ['s1'], failed: [], removedFromArchive: 0, needsRestart: ['s1'] })
+      expect(fs.existsSync(missing)).toBe(false)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('delete：内存中的会话按显式状态拒绝（busy），文件保持原状', async () => {
+    // 真实文件 + location：fileInfo 定位成功后才进入锁内的显式状态判定。
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sa-gw-busy-'))
+    const file = path.join(dir, 's1', 'session.jsonl')
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, '[]')
+    try {
+      const { gateway } = makeGateway({
+        archived: ['s1'],
+        snapshots: { s1: { header: { id: 's1', createdAt: 1 }, location: { kind: 'jsonl', path: file } } },
+        inMemory: ['s1'],
+      })
+      const result = await gateway.delete(['s1'], liveSignal())
+      expect(result).toEqual({ deleted: [], failed: [{ sessionId: 's1', reason: 'busy' }], removedFromArchive: 0, needsRestart: [] })
+      expect(fs.existsSync(file)).toBe(true)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

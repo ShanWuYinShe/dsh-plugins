@@ -85,13 +85,16 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 ```
 
 非法值（0/负数/非整数/超上限/未知字段）在 apply 时 fail loud，不会被静默接受。
-客户端的额度 pill 轮询节拍是「宿主缓存 TTL（默认 60s）+ 5s 相位余量」= 65s，
-属浏览器侧协议节拍、不属于部署可变量；把宿主 `cacheTtlMs` 调到 >65s 时二者会重新
-相位耦合（已知限制）。
+客户端的额度 pill 轮询节拍**跟随宿主缓存 TTL**：同源路由的响应体携带
+`cacheTtlMs`（本配置的生效值），client 在每次取数成功后按 `cacheTtlMs + 5s 相位余量`
+排下一次轮询；旧宿主若响应里没有该字段，回退 `60s + 5s`。因此调大/调小
+`cacheTtlMs` 时浏览器侧节拍自动跟随，不存在两端各写一个常量猜相位的残留问题。
 
 同源路由 `GET /plugins/provider-usage/usage` 与 `/usage` 命令都有**总预算**：route 单请求
 20s（所有 provider 顺序查询共享，超时折叠为逐 provider 的失败快照后仍返回完整 JSON）；
 `/usage` 默认 20s、`/usage refresh` 60s。单个 provider 的查询仍受 15s deadline 约束。
+route 响应体除 provider 快照外还携带 `cacheTtlMs`（本配置的生效缓存 TTL），供浏览器
+侧按真实 TTL 排轮询。
 
 额度窗口的 `label` 字段支持两种形态：纯字符串（原样渲染），或
 `{ en: string, [locale]: string }` 本地化映射（客户端按 DSH 当前语言解析，回退链
@@ -138,16 +141,23 @@ ctx.inject(['providerUsage'], usageCtx => {
 ### 数据结构
 
 ```ts
+/** 本地化文案：纯字符串原样使用，或 { en, [locale] } 映射按当前语言解析。 */
+type UsageLabel = string | { en: string; [locale: string]: string }
+
 interface UsageWindow {
   id: string            // 同一快照内唯一，React key / 稳定渲染用
-  label: string         // provider 自报的包名，原样显示不翻译
+  label: UsageLabel     // 窗口名（provider 自报；字符串原样显示，映射按语言解析）
   remain?: number       // 剩余量
-  unit: string          // 单位：credits / usd / cny / requests…
+  unit: UsageLabel      // 单位（同上：可本地化，例如 { en: 'credits', zh: '积分' }）
   limit?: number        // 窗口上限；缺省表示「只有剩余量」（余额），不是「上限为 0」
   resetsAt?: string     // ISO-8601 重置时刻；有它表示会回填的限额
   blocked?: boolean     // 上游此次确认拒收（与「余额为 0」不同）
 }
 ```
+
+`label` / `unit` 的本地化回退链：精确 locale → 主语言（如 `zh-CN` → `zh`）→ `en` →
+首个非空值；`/usage` 命令文本固定取 `en`。非法形状（非字符串/缺 `en`）在 registry
+校验时被判为失败快照，不会把坏数据渲染进 pill。
 
 ## 工作原理
 

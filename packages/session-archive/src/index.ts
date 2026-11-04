@@ -8,8 +8,8 @@
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * - index.ts — 插件入口：name/inject 与 apply
- * - archive-host.ts archive-host-context.ts archive-host-queries.ts archive-host-mutations.ts —
- *   归档 host 组合入口、内部上下文（deps 对象）与只读查询 / 写操作两个子工厂
+ * - archive-host-context.ts — 远程服务的内部依赖装配（deps：归档集合快照、
+ *   持久化句柄、文件/事件原语）；五个能力方法本体在 remote.ts
  * - session-scan.ts — 会话文件扫描与读取助手
  * - session-query-bridge.ts — sessionQuery 可选服务的唯一探测入口（自有最小契约）
  * - plugin-config.ts — 插件身份与配置默认值/归一化
@@ -24,7 +24,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { DEFAULT_CONFIG, normalizeConfig } from './plugin-config.js'
 import type { SessionArchiveConfig } from './plugin-config.js'
-import { createArchiveHost } from './archive-host.js'
 import { SessionArchiveGateway } from './remote.js'
 
 // Cordis Loader 的 function plugin 面：只导出 name / inject / Config / apply（值导出）。
@@ -45,5 +44,7 @@ export function apply(ctx: Context, config?: Partial<SessionArchiveConfig>): voi
     DEFAULT_CONFIG,
     (message) => ctx.logger?.warn?.(message),
   )
-  ctx.plugin(SessionArchiveGateway, { host: createArchiveHost(ctx, cfg) })
+  // @Remote 能力方法直接由 Gateway 实现（SA-08）——只把生效配置与纯内部
+  // 的 deps 装配传进去；不再构造另一个 host 转发对象。
+  ctx.plugin(SessionArchiveGateway, { cfg })
 }

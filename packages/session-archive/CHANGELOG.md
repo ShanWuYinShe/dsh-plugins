@@ -40,6 +40,16 @@
 * **测试分层**：新增真实 `cordis-plugin-loader` 装配真实包入口 + 真实文件世界的
   composition 用例（含 dispose→移除→重装）、jsdom 面板行为用例、Remote 取消用例。
 
+### 重构
+
+* **@Remote 能力方法彻底落位**：`list` / `count` / `detail` / `delete` / `unarchive` 的业务方法体
+  整体搬进 `SessionArchiveGateway`（@Remote 方法即能力实现），删除 `archive-host*.ts` 三个
+  转发层；`createHostContext` 收敛为内部依赖装配。行为不变。
+* 测试：host 夹具改为真实 `Context` + `ctx.plugin(Gateway)` 装配；新增 client slot 的 HMR
+  dispose→移除用例、jsdom 面板全链路（22 用例：筛选/分页/全选/详情/恢复/两段式删除/
+  部分失败本地化/导出/轮询/焦点陷阱等）与格式化全分支用例；本包 lines 覆盖 93.86%，
+  逐文件全部 ≥85%。
+
 ## 0.3.33 (2026-11-04)
 
 ### 新增
