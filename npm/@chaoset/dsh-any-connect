@@ -4,9 +4,48 @@
   "license": "MIT",
   "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/dsh-any-connect#readme",
   "dist-tags": {
-    "latest": "0.4.29"
+    "latest": "0.4.30"
   },
   "versions": {
+    "0.4.30": {
+      "name": "@chaoset/dsh-any-connect",
+      "version": "0.4.30",
+      "description": "DSH plugin: bring models offered by WorkBuddy-style desktop agents into DeepSeek Harness — zero configuration, per-model thinking effort, and billing rate at a glance",
+      "license": "MIT",
+      "engines": {
+        "node": ">=24.9.0",
+        "dsh": "0.2.2-rc.1"
+      },
+      "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/dsh-any-connect#readme",
+      "repository": {
+        "url": "https://github.com/ShanWuYinShe/dsh-plugins",
+        "directory": "packages/dsh-any-connect"
+      },
+      "keywords": [],
+      "bin": {
+        "dsh-any-connect": "./lib/bin.js"
+      },
+      "dsh": {
+        "manifestVersion": 1,
+        "bundle": {
+          "patch": "./cordis.patch.yml"
+        },
+        "client": {
+          "platform": "web",
+          "inject": [
+            "@deepseek-ai/dsh-client-locale",
+            "@deepseek-ai/dsh-client-ui-model-selection",
+            "@deepseek-ai/dsh-client-ui-plugin-manager",
+            "@deepseek-ai/dsh-client-ui-renderer"
+          ]
+        }
+      },
+      "dist": {
+        "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v0.4.30/chaoset-dsh-any-connect-0.4.30.tgz",
+        "integrity": "sha512-uoCm5UFZNcjJRwQzD7Uy9tV76r4wOegD0GWk7clYOo2aQkk8MDDx4d0cQO2DxzaoXBXm8I8Wl45gWNaf82XfCw==",
+        "shasum": "6d088a36fd68f5d4c5faf07d67320ac9738fa600"
+      }
+    },
     "0.4.30-alpha.4": {
       "name": "@chaoset/dsh-any-connect",
       "version": "0.4.30-alpha.4",
@@ -2559,6 +2598,7 @@
     }
   },
   "time": {
+    "0.4.30": "2026-11-04T11:27:07.000Z",
     "0.4.30-alpha.4": "2026-11-04T01:06:47.000Z",
     "0.4.30-alpha.3": "2026-11-03T11:44:05.000Z",
     "0.4.30-alpha.2": "2026-11-03T11:04:15.000Z",
