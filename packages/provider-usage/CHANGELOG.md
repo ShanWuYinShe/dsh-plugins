@@ -1,8 +1,114 @@
-## 0.2.1 (2026-11-01)
+## 0.2.2 (2026-11-04)
+
+### 新增
+
+* **适配 DSH 0.2.2-rc.1 正式版（稳定线）**：`@deepseek-ai/dsh-*` 依赖 range → `^0.2.2-rc.1`，`engines.dsh` → 精确 `0.2.2-rc.1`；vendor 依赖随宿主稳定线前移（`@deepseek-ai/cordis ~4.1.0`）。
+* **限流状态展示**：查询器可上报上游 429 观测（含恢复时刻与模型维度），pill 折叠态优先显示「限流中 · {时间} 恢复 · {模型}」，展开面板给出被拒次数；带模型的观测在头行标明模型名，避免把单模型限流误读成整个 provider 不可用。
+* **额度查询 Seam 扩展**：第三方 querier 的扩展类型可达，返回形状做运行时校验。
+
+### 修复
+
+* **pill 偶发消失的两个结构性根因**（刷新页面 / 重开插件才恢复）：对齐宿主自带 pill 的注册形状；`resolveSeat` 改为不抛错、拿不到时下一次渲染自动重试。
+* **额度用尽不再谎报「不提供额度查询」**：额度耗尽与「上游无账单接口」两种状态分开表达。
+* 额度取数收敛到单一官方路径；手写影子类型改用宿主官方契约。
 
 ### 优化
 
-* **适配 DSH 宿主 0.2.1-rc.5 稳定线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-rc.5`。
+* 行为不变的模块化收敛与类型收紧；精确匹配宿主 `engines.dsh`；查询缓存/超时/单飞与失败脱敏口径统一。
+
+## 0.2.2-alpha.3 (2026-11-03)
+
+### 优化
+
+* **限流头行带模型名**：上游按模型限流时（WorkBuddy / WorkBuddy AI 的 429 观测带模型维度），pill 折叠态此前只说「限流中」，用户会误以为整个 provider 不可用。现在带模型的观测在头行追加 ` · {模型}`（如 `限流中 · 20:00 恢复 · glm-5.3`），与展开面板的模型信息一致。
+
+## 0.2.2-alpha.2 (2026-11-03)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.3`**：全部 `@deepseek-ai/dsh-*` 依赖 range → `^0.2.2-alpha.3`，`engines.dsh` → 精确 `0.2.2-alpha.3`；vendor 依赖 `@deepseek-ai/cordis` 前移到 `~4.0.6-alpha.2`。本插件使用的 llm / settings / credentials / webServer / commands / client slots 接口在 alpha.3 无变化，无代码适配。
+
+## 0.2.2-alpha.1 (2026-11-01)
+
+### 优化
+
+* **版本线前移到 `0.2.2` 预发布线**：稳定线已归档 `0.2.1`，发布门禁要求预发布版本必须高于所有已归档版本（含稳定线），本次仅前移版本号、无功能改动；后续 alpha 迭代与收敛转正都在 `0.2.2` 线上推进。
+
+## 0.2.1-alpha.7 (2026-10-30)
+
+### 变更
+
+* **扩展 Seam 类型可达**：新增 `src/dsh.d.ts`，构建时并入 `lib/index.d.ts`，按 README 的 `import type {} from '@chaoset/provider-usage'` 现在能拿到 `ctx.providerUsage` 的 Context 增强（此前 augmentation 只落在未导出的 `lib/registry.d.ts`，消费者编译不过）。
+* **第三方 querier 返回形状校验**：畸形快照（`windows` 非数组、字段类型错误、`resetsAt` 不可解析等）在 registry 出口折叠为 error 快照（保留上一次结果 + degraded），不再透传给 client——渲染期抛错会被宿主永久 abdicate，表现为 pill 消失到刷新为止。
+* bigmodel 订阅回退窗口：`resetsAt` 只在字符串自带时区时输出 ISO 绝对时刻（无时区不猜），`unit` 不再承载 `VALID` 状态词；client 与 `/usage` 支持空单位。
+* `/usage` 对无 `remain` 的窗口输出「—」，不再出现 `undefined`。
+* `apiKeyEnv` 先按官方 `isCredentialRefName` 校验，非法名字按未配置处理（不再每次查询抛 TypeError，把一处配置笔误变成持久错误）。
+* openai/openrouter 用量字段缺席时省略 `remain`（只报上限），不再把 hard_limit 当余额、把已花费显示成满额。
+
+## 0.2.1-alpha.6 (2026-10-30)
+
+### 破坏性变更
+
+* **兼容声明改为精确匹配宿主版本**：`engines.dsh` 由 `^0.2.2-alpha.2` 改为 `0.2.2-alpha.2`（不带范围操作符）。每个插件版本只声明它发布时实际适配的 DSH 版本——DSH 升级（含同线 alpha→rc→下一 alpha）后必须安装对应重新发布的插件版本；宿主安装/启动会严格按精确版本判定兼容性，确需跨版本使用可用宿主 `allow-version <包>@<版本> --dsh-version <版本> --accept-risk` 显式接受风险。插件索引（market）同步对每个版本做精确 pin。
+## 0.2.1-alpha.5 (2026-10-30)
+
+### 重构
+
+* **行为不变的优雅化**（26 文件，+360/−410）：`snapshotOf()` 收敛 8 个 provider 文件 11 处重复的快照组装；`underDeadline()` 消掉 registry 两段约 60 行重复的截止时间逻辑（错误消息原文保留）；线协议单一来源 `ProviderUsageAnswer`（host 响应与 client 解析共用）+ `isQueriedAnswer()` 守卫替代 3 处 `'queried' in` + cast；pill-styles 抽 `BODY_TEXT`/`META_TEXT` 收敛 8 处排版重复。
+* **类型收紧**：删 `ResolverAnswer`/`SnapshotAnswer`/`PillAnswer` 影子类型，改用官方 `ResolvedProvider`/`UsageSnapshot`/`AccountDetails['balance']`；client 非空断言清零、`as any` 清零；删除 `CANONICAL_ALIASES`、4 个 `DEFAULT_*`、`USAGE_RESOURCE_PROTOCOL` 等 9 个未用导出与 10 处过期历史注释。
+
+## 0.2.1-alpha.4 (2026-10-29)
+
+### 优化
+
+* **适配 DSH 0.2.2-alpha.2 的清单契约**：兼容声明迁移到官方字段——`engines.dsh` = `^0.2.2-alpha.2`（替换自造的 `dsh.host`）、`engines.node` = `>=24.9.0`（宿主 0.2.2 起最低 Node.js 24.9）、补 `dsh.manifestVersion: 1`。
+* **删除旧兼容物**：移除空的手写 typert 工件 `src/typert.host.ts` 与 `exports["./typert"]`——本包没有 `@Remote` 服务面（浏览器侧走同域 HTTP 路由 + resources live 流），该工件唯一作用是满足旧校验。
+* `dsh.client.inject` 校正为实际提供服务的客户端包名：去掉没有客户端行的静态库 `@deepseek-ai/dsh-client-ui-slots`，补实际消费其服务与 `useResource` 的 `@deepseek-ai/dsh-client-resources`。
+* 宿主入口收敛为 function plugin 的 Loader 面（`name` / `inject` / `apply`），实现值与类型不再从入口转出，包外扩展统一走 `ctx.providerUsage` 服务面。
+
+### 重构
+
+* **额度取数收敛到单一官方路径**：删除「resources 服务缺席时组件内 60s 轮询 + 唤醒监听」的旧兜底分支。0.2.2 的 web-app bundle 恒装配 `@deepseek-ai/dsh-client-resources`，本包 `dsh.client.inject` 与 Cordis `inject` 都把它声明为硬依赖——缺席即插件不激活，而不是换第二条数据源。额度只经 `ResourceProvider('provider-usage')` 的 live 流 + standard kit 的 `useResource` 读取；手动刷新仍走 force 同域路由，并用短窗抑制流内旧帧。
+* **手写影子类型改用宿主官方契约**：`resolveSeat` 的目录类型改为 `ModelDirectory`（`ctx.get('modelDirectories')` 走官方服务声明）；resource 注册改用官方 `ctx.resources` / `ResourceProvider` / `RemoteResult`，并收进 `ctx.effect` 随插件 fiber 自动反注册（HMR 不再残留「协议已被占用」）。
+* 测试同步重写：注册形状、资源帧、渲染测试改由 resource 流驱动（可控 `useResource` 桩），锁住「单一数据通道」与「目录解析渲染期绝不抛错」两条回归。
+
+### 文档
+
+* README：`dsh.host` 表述改为 `engines.dsh`，补 Node.js >= 24.9 前置、单一数据通道与 ResourceProvider 说明；`UsageWindow.blocked` 补进数据结构；校正与实现不符的表述——dock 相邻的是宿主自带 activity / usage pill（而非 `stats`）、限流表补 `blocked` 行、「抽屉」改「浮层面板」、WorkBuddy 汇总行为标注为需同时安装 `dsh-any-connect`。
+
+## 0.2.1-alpha.3 (2026-10-29)
+
+### 修复
+
+* **pill 偶发消失的结构性根因（对齐宿主自带 pill 的注册形状）**：宿主自带的 activity / usage pill 从不失效，因为它们的 `inject` 是**无参常量函数**（`statPillInject = () => ({ hooks: { performanceUsage } })`），注册期不解析任何会话或服务状态，会话数据全部走 standard kit。本包此前在注册期解析模型目录，同时踩中宿主两条机制：`cachedSessionInject` 对 inject 结果的**永久缓存**（坏 props 固化），以及 render 期抛错触发的 `reportEntryError({abdicate:true})` → `SlotRegistry.abdicated`（只增不减的 WeakSet，entry 永久退出投影）。两者都表现为「pill 莫名其妙消失、刷新才好」。
+  * 重构：`inject` 改为无参常量，只交付 `t` 与 `resolveSeat`；不再用 `ctx.inject(['slots','modelDirectories'])` 等目录服务（那层原本的唯一作用就是「等就绪再注册」）。
+  * 目录解析下移到组件渲染期：hook 从 standard kit 的 `sessionId` 经 `resolveSeat` 现取，`useMemo` 按 sessionId 缓存；`resolveSeat` **永不抛错**，拿不到返回 `undefined`，下一次 render 自动重试。
+  * 移除上一版引入的 `resolveError` 重试补丁（问题下移后不再需要）。
+  * 测试：`test/client-seat.test.ts` 重写为「注册形状」回归（inject 零参恒定、不含会话快照、任意 sessionId 不抛错、服务缺席/就绪两种状态）；根 `test/bundle.test.ts` 的 dock 冒烟同步改为断言新形状。
+
+## 0.2.1-alpha.2 (2026-10-29)
+
+### 修复
+
+* **pill 偶发消失（刷新页面/重开插件才恢复）的剩余根因**：dock entry 的 `inject` 在目录解析失败时会向外抛错（原意是阻止坏 props 进 `sessionInjectCache`），但宿主 `SlotErrorBoundary` 捕获 render 期异常后调 `reportEntryError({ abdicate: true })`，而 `SlotRegistry.abdicated` 是只增不减的 WeakSet——该 entry 在本次注册生命周期内永久退出 dock 投影，表现即「pill 莫名其妙不见」。现改为返回 `resolveError` 让组件下一帧重试：自愈且不触发崩溃上报；`test/client-seat.test.ts` 增加穷举断言锁住「`inject` 任意异常都不穿透」。
+* **额度用尽不再谎报「不提供额度查询」**：查询器在额度耗尽时曾返回空窗口列表，界面渲染成 `noWindows`（「该 provider 不上报额度」），用户据此以为查询功能坏了。现在由查询器上报真实的 0 额度窗口，并用 `blocked` 标志区分「上游确认拒收」与「余额读数为 0」。
+
+### 新增
+
+* **上游限流（429）展示**：`UsageSnapshot.rateLimit` 承载观测到的限流状态，pill 折叠态优先显示「限流中 · {时间} 恢复」，展开面板给出被拒次数与模型；恢复时刻**只来自上游响应头**（`Retry-After` / `X-RateLimit-Reset`），拿不到就如实说「上游未提供恢复时间」，绝不按固定窗口推算。
+* 额度用尽且窗口声明了 `resetsAt` 时，pill 的 title 补上恢复时刻（用户「到什么时候能接着用」的直接答案）。
+
+## 0.2.1-alpha.1 (2026-10-29)
+
+### 文档
+
+* README 对齐真实渲染：pill 示例改为 provider 键 + 余额摘要（无货币符号与 `·` 分隔）、删去不存在的「字符级进度条」、「重置倒计时/阶梯限额」改为重置时间与三色阶告警；`deepseek-official` 只读 `total_balance` 单列；`deepseekAccount` 契约注释的 optionalDependencies / dsh-agent 钉版表述随 0.1.12 依赖分层更新（resolve.ts 注释）。
+
+## 0.2.1-alpha.0 (2026-10-28)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.2` 预发布线**：`dsh.host` 与全部 `@deepseek-ai/dsh-*` 依赖对齐 `^0.2.2-alpha.2`，vendor 依赖同步前移；`dsh-client-resources` 的 resource 订阅契约在 0.2.2 未变，pill 的取数与流式刷新逻辑无改动。
 
 ## 0.2.0 (2026-10-24)
 

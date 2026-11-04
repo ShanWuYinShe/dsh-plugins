@@ -11,7 +11,7 @@ import type { Api, AuthContext, CredentialStore, Model, ModelThinkingLevel, Prov
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy'
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy'
 import { resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
-import type { LlmModelInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
+import type { LlmModelBadge, LlmModelInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
@@ -22,18 +22,26 @@ import type { WorkBuddyShim } from './shim.js'
 import { normalizeCredits } from './upstream.js'
 
 /** Provider route this bundle owns. */
-export const WORKBUDDY_PROVIDER = 'workbuddy'
+const WORKBUDDY_PROVIDER = 'workbuddy'
 
 /** Provider idle ceiling while one stream read is outstanding. */
-export const WORKBUDDY_STREAM_IDLE_TIMEOUT_MS = 300_000
+const WORKBUDDY_STREAM_IDLE_TIMEOUT_MS = 300_000
 
 /**
  * Image-request budgets at the dsh-llm-pi-ai defaults; the profile type
  * requires them. They bound requests to models whose catalog
  * entry declares `supportsImages`; text-only models never receive images.
+ *
+ * 0.2.2 线起（alpha.3 引入、rc.1 同口径）`ResolvedPiAiProviderProfile` 还要求两个计数维度（宿主默认值
+ * 50 / 10：`dsh-llm-pi-ai` config.ts 的 `DEFAULT_MAX_REQUEST_IMAGES` /
+ * `DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM`，两者未从包入口再导出）：保留图片超过
+ * 50 张的请求会以 `IMAGE_OFFLOAD_REQUIRED` 失败并提示需要卸载的最旧张数。
+ * 插件沿用同一默认，与宿主自家 pi-ai profile 的行为一致。
  */
 const REQUEST_IMAGE_BUDGETS = {
   maxRequestImageBytes: 20_971_520,
+  maxRequestImages: 50,
+  imageOffloadCountQuantum: 10,
   requestImagePixelBudget: 4_194_304,
   requestImageMaxBytes: 1_048_576,
 } as const
@@ -74,26 +82,53 @@ const NO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const
 const RATE_SEPARATOR = ' · '
 
 /**
+ * The billing facts both display surfaces are built from.
+ *
+ * Display-only and cannot affect routing: the wire request is built from
+ * `model.id` (pi-ai's completions API sets `model: model.id`), the selection a
+ * picker submits is `{provider, model: id, reasoningEffort}`, and `dsh-llm`
+ * validates `name` as a non-empty string without comparing its contents.
+ * Nothing in the host resolves a model *by* name.
+ */
+interface BillingFacts {
+  /** Upstream says the model is free right now. */
+  free: boolean
+  /** Upstream promotion label (`限时免费` / `夜间折扣` …), when it declares one. */
+  promo: string | undefined
+  /** Credit multiplier (`x0.79`), when the catalog discloses it. */
+  rate: string | undefined
+}
+
+/** Read the three billing facts once so both surfaces decide from the same input. */
+function billingFacts(info: WorkBuddyModelInfo): BillingFacts {
+  const promo = info.billing?.badges?.[0]
+  return {
+    free: info.billing?.free === true,
+    promo: promo !== undefined && promo.length > 0 ? promo : undefined,
+    rate: normalizeCredits(info.billing?.credits),
+  }
+}
+
+/**
  * Append the billing rate to one model's display name.
  *
  * The rate rides the *name* rather than only `description` because the DSH
  * model surfaces disagree about which field they render: the `/model` popup
- * shows `description` but the composer's model seat (`ModelSelect`) renders
- * `model.name` only and never reads `description`. Carrying the rate on the
- * name makes it visible in both.
+ * builds its rows from `model.name` alone and never reads `description`.
+ * Carrying the rate on the name makes it visible in both.
  *
- * This is display-only and cannot affect routing: the wire request is built
- * from `model.id` (pi-ai's completions API sets `model: model.id`), the
- * selection a picker submits is `{provider, model: id, reasoningEffort}`, and
- * `dsh-llm` validates `name` as a non-empty string without comparing its
- * contents. Nothing in the host resolves a model *by* name.
+ * The suffix deliberately carries only free/rate — not the promotion label:
+ * the name is also what `/model` and the session metadata show, and the promo
+ * label is a selector-only decoration (it lives in the native badge instead).
+ *
+ * @param name - display name the catalog handed in.
+ * @param info - that model's catalog entry.
+ * @returns the name with its billing suffix, or the bare base name.
  */
 function withRate(name: string, info: WorkBuddyModelInfo): string {
   const baseName = name.split(RATE_SEPARATOR)[0] ?? name
-  if (info.billing?.free === true) {
-    return `${baseName}${RATE_SEPARATOR}免费`
-  }
-  const rate = normalizeCredits(info.billing?.credits)
+  const { free, rate } = billingFacts(info)
+  if (free) return `${baseName}${RATE_SEPARATOR}免费`
   return rate === undefined ? baseName : `${baseName}${RATE_SEPARATOR}${rate}`
 }
 
@@ -195,8 +230,13 @@ export function reasoningFields(
   return { reasoning: true, thinkingLevelMap: map as ThinkingLevelMap }
 }
 
-/** Build one pi-ai model descriptor pointing at the loopback shim. */
-function toPiModel(
+/**
+ * Build one pi-ai model descriptor pointing at the loopback shim.
+ *
+ * Exported for the package's own contract tests（同包测试走相对路径 import，
+ * 不经包入口——入口只保留 Loader 四导出）。不供宿主/其它包使用。
+ */
+export function toPiModel(
   info: WorkBuddyModelInfo,
   baseUrl: string,
   providerId: string,
@@ -212,11 +252,24 @@ function toPiModel(
     input: info.supportsImages === true ? ['text', 'image'] : ['text'],
     ...reasoningFields(info, observe?.(info.id)),
     cost: NO_COST,
+    // 容量必须显式声明：DSH 0.2.2 起「未声明容量的自定义模型」默认按十进制
+    // 1M 上下文 / 128K 输出（release notes「其他变更」），本插件不能依赖那个
+    // 默认值。目录每行都带真实容量——FALLBACK_* 常量、上游响应解析
+    // （parseModelRow 对 maxInput/maxOutput 缺失或非正的行直接丢弃）、saved
+    // 目录校验（catalog-store 的 isModel 要求两个字段是有限数字）、未知模型的
+    // 保守默认（200K / 32K，见 defaultZCodeModelInfo / startPlanModelInfo）——
+    // 所以这里透传即可；test/capacity.test.ts 锁住这条不变量。
     contextWindow: info.contextWindow,
     maxTokens: info.maxTokens,
-    compat: {
-      supportsDeveloperRole: false,
-    },
+    // `compat` 是 pi-ai 的官方 `Model.compat`（openai-completions 通道取
+    // `OpenAICompletionsCompat`，见 pi-ai 1.3.0+/dist/providers/compat-schema.d.ts），
+    // 不是本仓自造的兼容字段：该分发在 `model.reasoning && compat.supportsDeveloperRole`
+    // 为真时把系统提示词发成 `role: "developer"`，而 WorkBuddy 网关对该角色回
+    // HTTP 400 code 11128，所以从源头上声明 `false` 让它发 `system`（shim 的
+    // normalizeDeveloperRole 仍作为第二道防线兜住别处混入的 developer）。
+    // anthropic-messages 协议没有 developer 角色（其 compat 类型里也没有这个
+    // 字段），因此只对 OpenAI 形通道声明。
+    ...api === 'openai-completions' ? { compat: { supportsDeveloperRole: false } } : {},
   } as unknown as Model<Api>
 }
 
@@ -294,6 +347,22 @@ export function createWorkBuddyAdapter(options: WorkBuddyAdapterOptions): WorkBu
 }
 
 /**
+ * Short provider-authored badge for one model (DSH 0.2.2 `LlmModelInfo.badge`).
+ *
+ * Same decision as the name suffix — see {@link billingLabel} — re-encoded as
+ * localized text plus a tone so the native selector can render it directly.
+ *
+ * @param info - that model's catalog entry.
+ * @returns the badge, or undefined when the catalog discloses no billing data.
+ */
+export function modelBadge(info: WorkBuddyModelInfo): LlmModelBadge | undefined {
+  const { free, promo, rate } = billingFacts(info)
+  if (free) return { text: { en: 'Free', zh: '免费' }, tone: 'success' }
+  if (promo !== undefined) return { text: { en: promo, zh: promo }, tone: 'info' }
+  return rate === undefined ? undefined : { text: rate, tone: 'neutral' }
+}
+
+/**
  * The WorkBuddy route's adapter: `PiAiAdapter` with the billing rate folded
  * into the catalog answers it returns to the DSH model pickers.
  *
@@ -329,10 +398,15 @@ class WorkBuddyPiAiAdapter extends PiAiAdapter {
     return models.map(model => {
       const info = this.infoFor(model.id)
       if (info === undefined) return model
+      const badge = modelBadge(info)
       // The rate rides the display name only: surfaces that render name and
       // description side by side showed it twice when it also filled the
       // description, so the description stays untouched here.
-      return { ...model, name: withRate(model.name, info) }
+      return {
+        ...model,
+        name: withRate(model.name, info),
+        ...badge === undefined ? {} : { badge },
+      }
     })
   }
 
@@ -340,6 +414,11 @@ class WorkBuddyPiAiAdapter extends PiAiAdapter {
     const resolved = await super.resolveModel(provider, model, signal)
     const info = this.infoFor(model)
     if (info === undefined) return resolved
-    return { ...resolved, name: withRate(resolved.name, info) }
+    const badge = modelBadge(info)
+    return {
+      ...resolved,
+      name: withRate(resolved.name, info),
+      ...badge === undefined ? {} : { badge },
+    }
   }
 }

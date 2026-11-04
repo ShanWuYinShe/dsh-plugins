@@ -60,9 +60,12 @@ npm 的**版本列表**：稳定线目标 = 非进行中预发布的最高版（
 warning（刻意非阻塞——提醒，不是门禁）。
 
 发布侧的强校验由 `node scripts/dsh-baseline.mjs`（发布门禁步骤
-「Verify dsh baseline」）执行：所有 dsh-* 依赖必须是 `^<版本>` 形态、
-基线一致、`dsh.host` 存在且与基线一致，任一不满足即 exit 1 阻断发布——
-`dsh.host` 是 npm 消费者可见的适配声明，发布归档的 tag 不允许带糊的状态。
+「Verify dsh baseline」）执行：所有 dsh-* 依赖必须是 `^<版本>` 形态；
+`engines.dsh` **必须写精确宿主版本**（如 `0.2.2-rc.1`，不能写
+`^X` / `~X` / `>=X`），且必须与依赖基线精确一致；任一不满足即
+exit 1 阻断发布。`engines.dsh` 是 DSH 官方 manifest 字段，宿主安装与
+profile 启动按**精确匹配**判定插件兼容性——写范围会过度声明兼容性、误导用户，
+因此本仓一律精确声明。旧字段 `dsh.host` 已废弃，残留同样会被该脚本拦下。
 本地干跑直接执行该脚本即可（无网络、无 git 依赖，纯 manifest 校验）。
 
 依赖漏洞审计由 `bun run audit`（发布门禁步骤「Audit dependencies」）
@@ -168,7 +171,8 @@ DSH 0.1.6-alpha 新增的原生「设置 → 已归档会话」页（0.1.5 稳�
   进 main 时**保持基础号、仅去掉后缀**即成为正式版（`0.3.14-alpha.1` →
   `0.3.14`）。唯一的跳号例外见下方「稳定线热修占用基础号」——那是被迫让位，
   不是常规操作。
-- **插件版本号与 dsh 版本号无关**：跟随宿主升级只改依赖 range 与 `dsh.host`，
+- **插件版本号与 dsh 版本号无关**：跟随宿主升级只改依赖 range（仍是 `^版本`）与
+  `engines.dsh`（改为新的精确宿主版本），
   不改插件自身版本号的基础号；`0.3.14-alpha.1` 收敛得到的是 `0.3.14`，不是
   「dsh 的版本」。
 - 预发布线发版：在 alpha 分支升 `-alpha.N` 的 N；dsh 线进入 rc 阶段后后缀换
@@ -209,6 +213,8 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
 3. 验证通过后，为每个受影响的包：
    - 在 `CHANGELOG.md` 顶部新增 `## <版本> (YYYY-MM-DD)` 小节——GitHub
      Release 说明自动取自这里（`scripts/release-notes.mjs`），不写就没有说明；
+     CHANGELOG 只保留当前适配线的条目（更早历史以 GitHub Releases 为准），
+     适配小节把 `engines.dsh`（兼容声明，**精确宿主版本**，如 `0.2.2-rc.1`）与依赖 range（`^版本`）分开表述；
    - 升 `package.json` 的 `version`（bump 是最后一步）。
 4. **推送前逐提交复核**（`git log --oneline origin/<分支>..HEAD` +
    `git diff origin/<分支>..HEAD`）：版本号、CHANGELOG 小节、实际 diff 三者
@@ -221,12 +227,13 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    `git push origin <目录>-v<版本>`——一次只推一个 tag，推完确认它触发了流水
    并跑完，再推下一个（纪律见下节）。
    tag 推出去即发版——CI（`.github/workflows/publish.yml`）对该 tag 执行：测试 →
+   稳定性回归（`bun run test:stability`）→
    门禁校验（tag 形态、annotated、tag 与 package.json 版本一致、版本不落后已归档）→
    `bun pm pack` 出 tarball 并创建 GitHub Release 挂为资产（prerelease 版本带
    prerelease 标记）。**tag 由你明确打出，CI 绝不创建 tag**：没推 tag 就没有任何
-   Release，不存在「顺手多发一版」。发版后核对 Release 的资产 tarball 与 `dsh.host`
-   字段符合预期（解包资产读 `package/package.json` 的 `dsh.host`：
-   `tar -xOf <tgz> package/package.json`）。
+   Release，不存在「顺手多发一版」。发版后核对 Release 的资产 tarball 与
+   `engines.dsh` 字段符合预期（解包资产读 `package/package.json` 的
+   `engines.dsh`：`tar -xOf <tgz> package/package.json`——必须是精确版本，不是范围）。
 
 ### tag 推送纪律（一次一个，推完确认再推下一个）
 
@@ -319,19 +326,30 @@ DSH 出新高基础号的 alpha 线（如 `0.1.2` 终结后的 `0.1.3-alpha.0`�
 alpha 分支：
 
 ```bash
-node scripts/adapt-dsh.mjs 0.1.3-alpha.0   # 改全部 @deepseek-ai/dsh-* range
+node scripts/adapt-dsh.mjs 0.1.3-alpha.0   # 改全部 @deepseek-ai/dsh-* range 与 engines.dsh
 bun install                                 # 重新生成 lockfile
+bun run build                               # 重新生成 lib/ 与 Typert 工件（见下节）
 # 对照新宿主的 diff 复核用到的契约（参照历史 CHANGELOG 的记录方式），
 # 升版本号、写 CHANGELOG，然后：
 bun run test:ci && git push
 ```
 
+宿主升级后必须重跑 `bun run build`：Typert 工件由构建期生成器按当前宿主契约
+的类型分析产出，手工复用旧工件会让 `./typert` / `./remote` 与新宿主失配。
+
 `adapt-dsh.mjs` 支持 `--dry-run` 预览，它只改各 package.json 的依赖 range。若 `bun install` 报某 dsh 包解析不到，先检查 adapt 是否已把 range 改写。稳定线（main）跟进 dsh 新的 rc（如 `0.1.1-rc.2` → `0.1.2-rc.1`）时同样在 main 上执行同一流程。
 
-`adapt-dsh.mjs` 同时把每个发布包 `package.json` 的 `dsh.host` 字段改写为
-目标版本——那是 npm 消费者可见的「本包适配的宿主版本」声明
-（`npm view <包名> dsh.host` 可查），跟随宿主版本自动维护，无需手工改。
-`dsh-follow-status.mjs` 会核对它与依赖基线的一致性，漂移即 warning。
+`adapt-dsh.mjs` 同时把每个发布包 `package.json` 的 `engines.dsh` 兼容声明
+改写为**精确宿主版本**（如 adapt 到 `0.1.3-alpha.0` 就写 `0.1.3-alpha.0`，不写
+`^` / `~` / `>=`）——`engines.dsh` 是 DSH 官方 manifest
+字段（`@deepseek-ai/dsh-package-manifest` 的 `DshEnginesManifest`），宿主安装
+与 profile 启动按精确匹配判定兼容性；存在时它单独生效、peer 依赖不再参与判定。
+**为什么精确**（用户裁定 2026-10-30）：每个插件版本都有匹配的 DSH 版本，DSH 升级
+很可能不兼容旧版本；写范围会过度声明兼容性、容易误导用户。代价是每次宿主升级
+（含同线 alpha→rc→下一 alpha）都要重新发布对应插件版本。
+`dsh-follow-status.mjs` 会核对它与依赖基线的一致性（漂移即 warning）；
+`dsh-baseline.mjs` 在发布门禁里严格核对「依赖 range `^X` ↔ 兼容声明精确 `X`」。
+旧字段 `dsh.host` 已废弃，adapt 会把残留一并删除。
 
 同一命令也用于让重建后的 alpha 分支跟进新预发布线：adapt 不比较新旧、按
 指定版本整块覆写，因此「待命的 alpha 分支等到 dsh 新 alpha 线后开始适配」
@@ -362,7 +380,7 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 
    ```bash
    git checkout -b alpha main
-   node scripts/adapt-dsh.mjs <新线版本>   # 改全部 @deepseek-ai/dsh-* range 与 dsh.host
+   node scripts/adapt-dsh.mjs <新线版本>   # 改全部 @deepseek-ai/dsh-* range 与 engines.dsh
    bun install                             # 重新生成 lockfile
    ```
 
@@ -378,8 +396,8 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
    工作树里完成（不在主检出目录操作），分三件事：
 
    a. **`adapt` 到新正式版并去掉预发布后缀**：`node scripts/adapt-dsh.mjs
-      <该线最新 rc>` + `bun install`，让依赖基线与 `dsh.host` 对齐这条线的
-      正式版；把包版本去掉后缀（`0.3.2-alpha.0` → `0.3.2`；若稳定线热修已
+      <该线最新 rc>` + `bun install`，让依赖基线与 `engines.dsh` 对齐这条线
+      的正式版；把包版本去掉后缀（`0.3.2-alpha.0` → `0.3.2`；若稳定线热修已
       占用该基础号，先跳到下一个基础号），写 CHANGELOG。
 
    b. **压缩成单个提交**：整条 alpha 线的累积改动只留**一个**基于 main 的
@@ -406,6 +424,10 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
    > origin/main`）再 ff 合并——`reset --soft` 的目标必须始终是当下的
    > `origin/main`。
 
+   > **索引源 URL 固定，不受分支变化影响**：站点发布在独立的 `market` 分支，`alpha` 线、
+   > `rc` 线与正式版任一条线发版都会更新同一个索引 URL；收敛合入 `main`、删除 `alpha`
+   > 分支都不会改变它，用户添加一次永久有效，无需公告或迁移。
+
 5. **删除 alpha 分支（远程与本地都删），进入待命期**：发布完成后该 alpha 分支即完成使命
    （它的全部内容已进 main），**远程和本地都必须彻底删除**，不留残留：
 
@@ -431,18 +453,234 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 > 删除（远程与本地）再重建，因此它的起点永远是当下的 main，main 的历史里
 > 也看不到 alpha 的迭代过程。
 
+## Typert 工件与 @Remote 服务面
+
+Web client 通过 `ctx.remote` 调用的 Host 能力（本仓 `sandbox-extra-roots`、
+`session-archive` 的配置/归档网关）用 DSH 官方 Typert 机制实现，禁止手写工件：
+
+- **服务面**：`TypertRemoteService` 子类 + 具体业务方法上的标准装饰器 `@Remote`；
+  参数与返回类型定义在包的 `src/types.ts`，经 `package.json` 的 `./types` 子路径导出
+  （生成器的 `./remote` 调用面按该子路径引用类型）。JSDoc 会被收进工件的线上描述与
+  JSON Schema，改类型时一并维护注释。
+- **工件**：`./typert`（Host 工件，typert-loader 注册进 `ctx.typert.local`）与
+  `./remote`（Client 调用面，client `ctx.remote.$mount` 挂载）由
+  [`@deepseek-ai/dsh-typert-generator`](https://github.com/deepseek-ai/deepseek-harness)
+  在 `bun run build` 的第二阶段生成到 `lib/`（gitignore 产物）。新增/修改 `@Remote`
+  方法或签名后必须重新构建；client 源码用包自引用子路径 `import "@chaoset/<pkg>/remote"`，
+  因此生成必须先于 client 打包。
+- **登记**：新增一个带 `./typert` 导出的包时，必须同时登记进根 `tsconfig.host.json`
+  的 `references`；`scripts/typert.mjs` 对「声明了 `./typert` 却未登记」直接报错。
+- **构建期类型契约 shim**：`scripts/lib/typert-protocol.d.ts` 是生成器 program 的
+  输入契约（官方 `@deepseek-ai/dsh-typert-protocol` 的公开类型面），只经
+  `tsconfig.host.json` 的 `paths` 提供给生成器；包编译/typecheck 不使用它。
+  仅当官方生成器支持从 `node_modules` 解析协议包类型（不再要求协议包是已登记的
+  工作区包）时才可删除该 shim。
+- **无 Remote 的包**不要声明 `./typert` / `./remote`（空工件是历史兼容物，
+  2026-10-29 已清除）。
+- **工件跨平台字节一致**（2026-10-29 实测）：同一源码在 macOS arm64 与
+  Linux arm64（Docker `node:24`）上生成的 10 个 typert 工件 sha256 完全相同，
+  `bun.lock` 也未被 Linux 冻结安装改写。CI 若想防生成器升级静默改字节，可记录
+  一份 sha 清单做对比。
+- **发布前干净构建**：先 `rm -rf packages/*/lib` 再 `bun run build`。tsc 不清理解释
+  已删源码留下的旧产物（`scripts/typert.mjs` 只清 `typert.host.*.map` 一类已知残留），
+  沿用旧 `lib/` 会把过期文件打进 tarball（`files` 含 `lib/` 整目录）。
+
+## 独立 CLI（`dsh-any-connect`）的构建约定
+
+插件的 Host 源码静态 import 宿主包（`@deepseek-ai/dsh-home-paths` 等，只声明在
+devDependencies），由宿主 profile runner 的 runtime resolution 在进程内补齐；
+**但 `bin` 是宿主 Loader 之外的独立 node 进程**，解析路径上没有这些包，直接跑
+tsc 产出的 `lib/bin.js` 会 `ERR_MODULE_NOT_FOUND`。因此构建的第 4 阶段用 esbuild
+把 bin 入口连同依赖闭包打成**自包含单文件 ESM**（`bundle` + `minify`，external
+只剩 `node:` 内建，保留 shebang），产物脱离 `node_modules` 也能运行。
+
+- bin 清单从 `package.json#bin` 派生（`lib/<name>.js` ↔ `src/<name>.ts`），新增 bin 的包自动纳入；
+- 内联第三方包（均 MIT）的许可告知放包根 `THIRD_PARTY_NOTICES.md` 并列入 `files`；
+- 回归由包内 `test/bin-self-contained.test.ts` 守住（shebang、仅 `node:` import、
+  空目录 `--help`/`status --json` 实测）；**只跑 `tsc` 会把 `lib/bin.js` 覆盖回裸产物**，
+  该测试会按设计红灯——完整 `bun run build` 后才是发布态。
+
+## 插件索引与静态 registry
+
+DSH 0.2.2 的「自定义插件索引」（实验性 bundle，`@deepseek-ai/dsh-experimental-plugin-market-bundle`）
+让用户在插件页的**发现**标签里浏览索引并一键安装/查看版本。索引的安装源只有 npm registry
+与 git 仓库两种；本仓的发布产物是 GitHub Release tarball，且 npmjs 发布已放弃（commit
+926cbb8：Trusted Publishing 拒绝 + passkey 2FA），因此本仓自建一个**静态 npm 协议 registry**，
+与索引一起作为站点发布在独立的发布产物分支 `market` 上——该分支长期存在，根目录即站点根，
+通过 raw.githubusercontent 以 `market` 分支为 ref 提供固定 URL。
+
+站点不放在 GitHub Release 资产里：**Release 资产名中的斜杠会被 GitHub 静默替换成点号**
+（已实测），而 pnpm 请求静态 registry 时用 `<registry>/@scope/<pkg>` 这种带子路径的 URL，
+Release 资产无法承载；git ref 支持任意子路径，因此站点由 `market` 分支承载。
+Release 本身仍是插件 tarball 的分发渠道（不变）。
+
+### 站点布局（`market` 分支根目录，CI 生成，禁止手工编辑）
+
+```text
+index.json          索引源
+README.md           生成器写入的「勿手工编辑」说明
+icons/<slug>.svg    索引里相对引用的插件图标（raw 返回 image/svg+xml）
+npm/@chaoset/<pkg>  静态 registry 的 packument；pnpm 以 %2F 编码请求 scoped 名
+```
+
+站点 URL 固定：
+
+```text
+索引源：        https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
+静态 registry： https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
+图标：          https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/icons/<slug>.svg
+```
+
+索引里每个版本的 `source` 是 `{ "type": "npm", "registry": "https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/" }`；
+packument 的 `dist.tarball` 直接指向对应 GitHub Release 资产（标准 npm tarball），
+`dist.integrity`（sha512 SRI）与 `dist.shasum`（sha1）由生成器下载资产后计算。
+用户安装/更新仍走 DSH 自带的 pnpm 与 bundle 对账，不经过 npmjs。
+
+### 收录规则
+
+生成器只从 **GitHub Releases** 收集，不遍历 git tag：
+
+- tag 形如 `<包目录>-v<精确 SemVer>`，资产为 `chaoset-<包目录>-<版本>.tgz`；
+- 资产内 `package.json` 必须能确定该版本的**精确宿主版本**，且包名/版本与 tag 一致：
+  1. 声明了精确 `engines.dsh` → 原样使用（新发布的包）；
+  2. 声明的是范围（历史 tarball 全是 `^X`）→ 取**最低满足版本** X 作为精确 pin
+     （即发布时适配的宿主版本）；无法判定精确版本（`*` / `latest` / `||` 组合等）→
+     fail-safe 跳过并记 `invalid-engines-dsh`；
+  3. 否则旧字段 `dsh.host` 是**精确版本**（如 `0.2.1-rc.3`）→ 原样作为精确 pin；
+     不是精确版本则跳过并记 `invalid-dsh-host-pin`；
+  4. 两者都没有 → 继续排除（`missing-engines-dsh`）。
+- **精确匹配的行为矩阵（不误导的代价，如实记录）**：索引里每个版本只对它精确声明的
+  那个宿主版本显示可安装；同线其它预发布/正式版都不匹配（宿主升级很可能不兼容旧版）。
+  - `0.2.2-rc.1` 宿主：只看到 `engines.dsh` pin 为 `0.2.2-rc.1` 的版本；
+  - 稳定线历史版本 pin 在 `0.2.1-rc.2`/`rc.3`，因此当前稳定参考 `0.2.1-rc.5` 的宿主
+    **不会看到旧稳定版**可安装——这是「精确匹配、不误导」的代价，收敛期发布对应版本后恢复；
+  - DSH 每次升级（含同线 alpha→rc→下一 alpha）都需要插件重新发布对应版本。
+- 映射来源保留供离线复核：范围取整的版本在 packument 里写
+  `dshMarket: { source: "engines-range", declaredEnginesDsh: "^X" }`；旧 `dsh.host` 版本
+  保留原 `dsh.host` 字段。`check` 据此验算精确 pin（`engines.dsh` 必须等于来源推出的版本）。
+  不为旧 tarball 重打包补 `engines.dsh`（Release 不可变），严格化只发生在索引/registry 侧；
+  安装期检查对历史版本仍宽松（CLI 仍可强制装旧包），发现页不误导由索引保证。
+- `publishTimestamp` 取 Release `published_at`；同一版本重复出现时取发布时间较新的那条。
+- **外部插件的运行期依赖必须为空**：`dependencies` / `optionalDependencies` 里不能有宿主
+  包（`zod`、`@deepseek-ai/*` 等），只能放 `devDependencies`；本仓 `@chaoset/*` 之间互引不计。
+  原因（2026-10-30 实测，pnpm 11.28.5 / 12.4.2）：DSH 安装索引版本时执行
+  `pnpm add <spec> --registry=<静态 registry>`，pnpm 不只读 packument，还会按 tarball 自带的
+  `package.json` 解析依赖；**装过一个带运行期依赖的版本后，同 profile 的下一次 `pnpm add` 会对
+  既有 lockfile 条目重新解析**，去静态 registry 请求 `zod` 之类并 `ERR_PNPM_FETCH_404`，安装链
+  断掉（已发版本无法回改）。运行期依赖由宿主 profile runner 的 runtime resolution 从宿主安装闭包
+  补齐（官方外部插件机制），因此运行期零依赖既正确也必要；与直接装 tarball（依赖从常规 registry
+  安装到 profile）在“依赖落地位置”上不同，但插件运行行为一致。
+- 索引侧对运行期依赖的强制（策略生效时刻 `RUNTIME_DEPENDENCY_POLICY_SINCE =
+  "2026-10-30T00:00:00Z"`，定义在 `plugin-market-core.mjs`；**按发布时间而不是「最新版本」判定**，
+  避免等待新版本发布造成发布顺序死锁）：
+  - 生成器扫描每个收录版本 tarball manifest 的 `dependencies`/`optionalDependencies`（排除
+    `@chaoset/*` 自身包），在 `plan`/`build` 的 stderr 与 summary（`runtimeDependencies`）里
+    逐条呈报；
+  - packument 仍**不写** `dependencies`/`optionalDependencies`/`peerDependencies`（写了 pnpm
+    同样会去静态 registry 解析并 404；`check` 拒绝带依赖段的 packument）；曾声明的运行期依赖以
+    `dshMarket: { runtimeDependencies: { 名: 范围 } }` 记录，供离线复核与 `--previous` 重建；
+  - `check` / build 自校验对**策略生效时刻之后发布**的版本仍带运行期依赖时 **fail**（防未来
+    回归）；该时刻**之前**发布的 tarball 不可变，只进 `warnings` 不阻断；发布时间缺失同样只告警。
+    汇总里对应 `runtimeDependencies.blocking` / `.legacy` 两组，排障与变通见 README「常见安装排障」。
+- **索引侧排除表**（`INDEX_EXCLUDED_VERSIONS`，定义在 `plugin-market-core.mjs`，key 为
+  `<包目录>@<版本>`）：已发布、tarball 不可变但**索引安装会坏**的版本不进索引（仍可经 Release
+  tarball 直接安装）。典型场景是策略生效后仍声明运行期依赖的版本——静态 registry 解析不到它们，
+  pnpm 会 404；策略校验对这种版本仍 fail，排除表是发布后不收坏版本的唯一修正手段。条目在修正
+  版本发布后继续保留，新增条目必须写明原因。
+
+新增发布包必须同时补 `scripts/lib/plugin-market-core.mjs` 的 `PACKAGE_DISPLAY`
+（标题/描述/分类/图标/排序），否则 `bun run market:build` 直接报错，不会静默漏收录。
+
+### 生成与校验
+
+```bash
+bun run market:plan    # 查 Releases → 输出收录/排除清单（JSON 到 stdout，日志到 stderr）
+bun run market:build   # 生成站点到 .workwork/plugin-market-site（缓存 .workwork/plugin-market-cache）
+bun run market:check   # 离线校验站点（官方 parseMarketIndex + 索引/registry 交叉一致 + 规范序列化）
+```
+
+等价 CLI：`node scripts/plugin-market.mjs <plan|build|check>`；`build/check` 需要 `--out`，
+并支持 `--repo`、`--cache`、`--base-url`、`--registry-url`、`--concurrency`；`build --previous <dir>`
+复用既有站点里历史版本的摘要与元数据、只下载新增版本的 tarball（增量生成用）；
+`build --allow-partial` 仅为本地排障放行 tarball 失败（CI 不传）。
+生成器只下载并读取 tarball 内 `package.json`，从不安装或执行包代码；输出确定性——同一批
+Releases 重复 build 逐字节相同，`check` 输出的 `digest` 可直接对比。缓存与站点目录都在
+gitignore 的 `.workwork/` 下。
+
+`build` 的失败语义（2026-10-30 起）：任一 tarball 下载/解析失败即**非零退出且不写站点**
+（`--allow-partial` 例外），避免「跳过一个版本却 exit 0 → CI 提交缺版本的站点」这种静默退化；
+写盘前还会用官方 `parseMarketIndex` 自校验（等价 `validateSite`），不把官方校验器拒绝的索引
+落盘。`check` 与 build 自校验把「策略生效时刻（2026-10-30T00:00:00Z）之后发布且带运行期依赖」
+记为错误、把「更早发布（或时间缺失）且带运行期依赖」记为告警；summary 携带
+`runtimeDependencies`（`policySince`/`blocking`/`legacy`）/`failures`/`warnings`，stderr
+逐条打印，CI 日志可直接看到。
+
+`check` 的判据：文件集合恰为上述布局；JSON 为规范序列化（手改会被发现，README 内容必须与
+生成器内置一致）；官方 `parseMarketIndex` 接受；每个版本的 registry 常量、版本集合、
+`engines.dsh`（必须是单个精确宿主版本 pin，映射版本还能由保留的来源字段离线复核）、
+`publishTimestamp`、`dist.integrity/shasum` 形态与 `dist.tarball`
+（精确等于该版本的 Release 资产 URL）都与索引一致；图标存在且是 SVG。
+
+本地端到端（配合任意静态服务器；pnpm 请求 scoped 名时用 `%2F`，服务器需 decode）：
+
+```bash
+node scripts/plugin-market.mjs build --out /tmp/market-site --registry-url http://127.0.0.1:PORT/npm/
+```
+
+### CI 发布流程
+
+`publish.yml` 在任一 `<包目录>-v<版本>` tag 产生新发布后（「Pack and publish」之后；
+`workflow_dispatch` 回填时无新发布也照常生成）自动：
+
+1. 从**全部 GitHub Releases** 汇总收录清单并生成站点（`build`）：取 `market` 分支既有站点
+   作为 `--previous` 输入，只下载新增版本的 tarball；该分支尚不存在时全量生成；
+2. `check`（显式传 `--base-url`/`--registry-url`，与索引里声明的 URL 一致；build 自身也已
+   严格失败 + 官方 `parseMarketIndex` 自校验，check 是第二道复核）；
+3. 提交到 `market` 分支：首次没有该分支时创建一个仅含站点的**孤立根提交**，之后在其上
+   累积提交；站点树无变化则跳过（幂等）；并发推送导致 non-fast-forward 时重取最新头、
+   重新生成提交再推，至多重试 3 次。commit message：`市场: 更新插件索引与静态 registry（<tag>）`
+   （首次是 `市场: 初始化插件索引与静态 registry`）。
+
+`market` 分支与 `alpha`/`main` 的双分支发布体系正交，站点只提交到 `market` 分支，
+`alpha`/`main` 上不含站点文件。站点提交用 `GITHUB_TOKEN` 推送（不会触发其它 workflow），
+且只含站点文件，`test.yml` / `dsh-follow.yml` 的 push 触发又带路径过滤（`packages/**`、
+`scripts/**`、`test/**`、工作流文件等），因此站点更新不会产生测试或发布流水。
+
+**回填/修复**：手动触发 publish workflow（`workflow_dispatch`）填一个已发布的 tag——发布
+步骤因已归档跳过，市场步骤照常从全部 Releases 重新生成并提交到 `market` 分支。
+
+> **收敛前稳定线补发的市场回填**：`main` 在收敛前仍是旧版 `publish.yml`（无市场步骤），
+> 给 `main` 打 tag 只产出 Release、不会更新 `market` 分支。稳定线补发后需在 `alpha` 工作树
+> 用本仓生成器手动回填一次：`git fetch --depth=1 origin market` 取既有站点作 `--previous`
+> → `node scripts/plugin-market.mjs build/check`（`--base-url`/`--registry-url` 用固定 URL）
+> → 执行 `publish.yml` 里「Publish market branch」步骤的脚本推送。收敛后 `main` 获得新版
+> 流水，自动更新恢复。
+
+### 更新链路的真实边界（DSH 0.2.2 行为）
+
+- **安装**：发现页选版本 → `pluginManager.installBundle` → pnpm add 走索引里的 registry，可用。
+- **更新（同一进程内）**：安装成功后 plugin-manager 把 registry 记在内存，同一会话的
+  「已安装」页版本检查/更新沿用该 registry，可用。
+- **更新（重启后）**：内存态丢失，「已安装」页回落到 profile 配置的 registry（npmjs/
+  npmmirror），查不到本仓新版本——这是 DSH 对非 npm 源的设计限制。发现页的更新标记仍会显示
+  （基于索引里的推荐版本），重启后请用
+  `dsh plugin --profile web add @chaoset/<pkg>@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/`，
+  或继续用 Release tarball URL。
+- **禁止**把自建 registry 写入用户 profile 的 pnpm 配置：那会劫持该 profile 的全局 registry，
+  影响其它插件安装；索引里的 `source.registry` 只对单次安装生效。
+
 ## 手动兜底
 
-> **搁置期 main 流水不可用**：main 分支的 `publish.yml` 仍是 npm 时代流水
-> （`pnpm publish --registry=registry.npmjs.org`），npm 渠道随 Trusted
-> Publishing 收紧已死（alpha 线 926cbb8 迁移时的结论）。搁置期若需稳定线
-> 紧急热修，推 main 不会产出 Release 资产，直接用下述 `pnpm pack` +
-> `gh release create` 兜底；main 的 publish 流水留待双线收敛时随整线搬运。
+> main 的 `publish.yml` 已是迁移后的 GitHub Release 流水（`bun pm pack` +
+> `gh release create`；alpha 线 926cbb8 完成迁移，已随收敛进入 main）：
+> 稳定线紧急热修照常推 main、打 tag 即可走 CI 产出 Release。下述完全手工
+> 兜底只在 CI 整体不可用时才需要。
 
 CI tag 流水失败、或需要完全手工发版时，按顺序兜底：
 
-1. **先在仓库根执行 `bun run build`**——`lib/` 与 `client/client.cjs` 都是
-   gitignore 的构建产物，跳过构建直接 pack 会打出缺文件的 tarball（装上即坏）。
+1. **先在仓库根执行干净构建**：`rm -rf packages/*/lib` 后 `bun run build`——
+   `lib/` 与 `client/client.cjs` 都是 gitignore 的构建产物，跳过构建直接 pack 会打出
+   缺文件的 tarball（装上即坏）；不先删 `lib/` 则可能把已删源码的旧产物带进 tarball。
 2. 自己打 tag 并推出，让 CI 走完发布：`git tag -a <目录>-v<版本> -m "<包名> v<版本>"`
    然后**逐个** `git push origin <目录>-v<版本>`（一次一个 tag，推完确认触发与
    成败再推下一个，见「tag 推送纪律」；tag 流水会自动测试 → 门禁 → 建 Release）。

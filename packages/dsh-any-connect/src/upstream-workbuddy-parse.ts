@@ -6,6 +6,7 @@
  * @module dsh-any-connect/upstream-workbuddy-parse
  */
 
+import { isObject } from './values.js'
 import {
   normalizeCredits,
   type WorkBuddyUpstreamModel,
@@ -87,10 +88,6 @@ function resolveUpstreamBilling(wrapped: Record<string, unknown>): { billing: Wo
       free,
     },
   }
-}
-
-export function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function positive(value: unknown): value is number {

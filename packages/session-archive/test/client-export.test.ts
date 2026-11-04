@@ -1,14 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { detailToMarkdown, exportFilename, mergeArchivedMarkdown } from "../client/index.tsx";
-
-vi.mock("react", () => ({
-  createElement: (...args: any[]) => ({ args }),
-  useState: (init: any) => [typeof init === "function" ? init() : init, () => {}],
-  useEffect: () => {},
-  useCallback: (fn: any) => fn,
-  useRef: () => ({ current: null }),
-  useMemo: (fn: any) => fn(),
-}));
+import { describe, expect, it } from "vitest";
+import { detailToMarkdown, exportFilename, mergeArchivedMarkdown } from "../client/archive-entries.js";
 
 const item = { sessionId: "AAA-BBB", title: "修复登录页", cwd: "/proj/web" };
 const detail = {

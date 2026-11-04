@@ -171,4 +171,18 @@ export interface WorkBuddyRefreshOutcome {
 /** Chat answer: either a live SSE response or a classified failure. */
 export type WorkBuddyChatResult =
   | { ok: true; response: Response }
-  | { ok: false; status: number; kind: UpstreamErrorKind; message: string }
+  | {
+      ok: false
+      status: number
+      kind: UpstreamErrorKind
+      message: string
+      /**
+       * The failure response's headers, when the upstream sent any.
+       *
+       * Carried out of the transport layer because the only authoritative
+       * statement of "when may I retry" is here: `Retry-After` and
+       * `X-RateLimit-Reset` arrive on the 429 itself, and nothing later can
+       * reconstruct them. Absent for transport failures (no response at all).
+       */
+      headers?: Headers
+    }

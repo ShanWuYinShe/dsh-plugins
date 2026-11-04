@@ -6,7 +6,7 @@ import {
   ZCODE_CLIENT_IDENTITY,
   ZCODE_CLIENT_PREFIX,
   ZCODE_CLIENT_PREFIX_LENGTH,
-} from '../src/index.js'
+} from '../src/zcode-plan-prompt.js'
 
 /**
  * The dedicated Start Plan channel admits a request only when its `system`

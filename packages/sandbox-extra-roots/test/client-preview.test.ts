@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-// 直接导入真实客户端模块（纯函数；模块顶层的 CSS 注入有 document 守卫，
-// React 是唯一运行时依赖）。此前 analyzeRootsText 零覆盖,/private 与
-// 主目录祖先的口径漂移只能在保存失败后才发现。
-import { analyzeRootsText, appendRootLine, hasBlockingProblems, presetsForPlatform, cleanRootLine } from "../client/index.tsx";
+// 直接从纯函数模块导入（client 入口只导出 apply/inject；同包测试按 DSH
+// 客户端入口纪律走 '../client/<module>.js' 相对路径，不因测试便利拓宽公开面）。
+// 此前 analyzeRootsText 零覆盖,/private 与主目录祖先的口径漂移只能在保存
+// 失败后才发现。
+import { analyzeRootsText, appendRootLine, hasBlockingProblems, presetsForPlatform, cleanRootLine } from "../client/roots-preview.js";
 
 function kinds(lines: string): string[] {
   return analyzeRootsText(lines).map((p) => p.kind);

@@ -10,16 +10,11 @@
 
 ## 效果
 
-在 composer 底部状态栏出现一个形如 `workbuddy · 23 credits left` 的 pill，
-点击展开每个计费包的进度条：
-
-```
-workbuddy
-  CodeBuddy个人版国内运营裂变包    23 credits
-  ▓▓▓▓▓░░░░░░░░░░░░░░░░░  23 / 100
-  CodeBuddy个人版国内运营裂变包   100 credits
-  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 100 / 100
-```
+在 composer 底部状态栏出现一个形如 `workbuddy 23 credits left` 的 pill
+（provider 键 + 剩余摘要），点击展开浮层面板查看明细：每个计费包一行图形化
+进度条，标注套餐名、余量/总量（`23 / 100`）、重置时间，进度条颜色随
+余量分三档告警。同时安装 `dsh-any-connect` 时，WorkBuddy 的多个计费包会汇总为
+一行「总计」，逐包明细在设置页的插件卡片查看。
 
 - **当前 provider 来源**：会话的模型目录（`ctx.modelDirectories`），与 composer
   的模型选择器同源——切换模型时 pill 跟随变化，无需额外协调。
@@ -27,22 +22,41 @@ workbuddy
 - **查询失败**：保留上次成功的数据并标注错误，不把用户正在看的数字抹掉。
 - **不消耗额度**：只调用各 provider 的**只读**余额接口，60s 缓存 + 并发单飞
   （多个读取共用一次请求）。
+- **单一数据通道**：额度经宿主 resources 模型的 live 流（协议 `provider-usage`）
+  读取，由 resources 服务统一轮询；组件内不存在第二条轮询/兜底路径。
 
 ## 安装
 
+### 方式一（推荐）：插件索引
+
+启用 DSH 的「自定义插件索引」实验性 bundle 后，在**发现 → 添加索引源**填入：
+
+```text
+https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
+```
+
+即可在发现页一键安装本插件、查看与安装任意历史版本（索引与静态 registry 由 CI 从
+GitHub Releases 生成，发布在发行分支（当前 `alpha`，收敛后 `main`）根下的 `market/` 目录）。重启 DSH 后更新到指定版本
+（DSH 对自建 registry 的自动更新检查只在安装会话内生效）：
+
+```bash
+dsh plugin --profile web add @chaoset/provider-usage@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
+```
+
+### 方式二：tarball URL（手动）
 ```bash
 dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v<版本>/chaoset-provider-usage-<版本>.tgz
 ```
 
 `<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。
 
-前置：DSH 宿主版本见本包 `package.json` 的 `dsh.host` 字段。
+前置：DSH 宿主版本见本包 `package.json` 的 `engines.dsh`（当前为**精确版本** `0.2.2-rc.1`，DSH 按精确匹配判定兼容；DSH 升级后请安装为对应新版本重新发布的本插件）；宿主 0.2.2 起要求 Node.js >= 24.9。
 
 ## 内置查询器
 
 | provider | 接口 | 说明 |
 |---|---|---|
-| `deepseek` / `deepseek-account` / `deepseek-official` | `GET {base}/user/balance`（无 API key 时退到 OAuth 账户充值+赠送钱包） | 按币种各一行；有 key 永远走接口，不重复计数。DSH 0.2.1-rc.2 官方的两条路由是 `deepseek-account`（OAuth 登录）与 `deepseek-official`（API key），`deepseek` 供自定义 profile 沿用 |
+| `deepseek` / `deepseek-account` / `deepseek-official` | `GET {base}/user/balance`（无 API key 时退到 OAuth 账户充值+赠送钱包） | 按币种各一行；有 key 永远走接口，不重复计数。官方的两条路由是 `deepseek-account`（OAuth 登录）与 `deepseek-official`（API key），`deepseek` 供自定义 profile 沿用 |
 | `openrouter` | `/api/v1/key` + `/api/v1/credits` | 优先 key 自身限额，回落到账户额度 |
 | `moonshot` | `GET {base}/v1/users/me/balance` | 可用/现金/代金券 |
 | `siliconflow` | `GET {base}/v1/user/info` | 总额/可用/充值分列 |
@@ -58,7 +72,10 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 
 ## 为其他 provider 注册查询器
 
-任何插件的 host 半侧都可以注册（`provider` 即 DSH 的 provider 路由 id）：
+任何插件的 host 半侧都可以注册（`provider` 即 DSH 的 provider 路由 id）。
+本包入口只保留 Loader 面（`name` / `inject` / `apply`）；TypeScript 下让编译器
+看到 `ctx.providerUsage` 的服务声明即可（例如 `import type {} from '@chaoset/provider-usage'`），
+类型与实现模块不从入口转出：
 
 ```ts
 ctx.inject(['providerUsage'], usageCtx => {
@@ -101,6 +118,7 @@ interface UsageWindow {
   unit: string          // 单位：credits / usd / cny / requests…
   limit?: number        // 窗口上限；缺省表示「只有剩余量」（余额），不是「上限为 0」
   resetsAt?: string     // ISO-8601 重置时刻；有它表示会回填的限额
+  blocked?: boolean     // 上游此次确认拒收（与「余额为 0」不同）
 }
 ```
 
@@ -110,19 +128,57 @@ interface UsageWindow {
   `/plugins/provider-usage/usage` 暴露同域只读路由（仅回环 Origin，与
   dsh-any-connect 的状态路由同一姿态）。
 - browser 半侧把 pill 注册进 `conversation.composer.dock`（list slot，
-  `order: 10`，排在宿主自带 `stats` 之后），按当前 provider 轮询路由。注册
-  挂在 `ctx.inject(['slots','modelDirectories'])` 子 fiber 下——**必须等模型目录
-  服务就绪再注册**：宿主对 entry props 的缓存按「entry × 会话绑定」永久存活，
-  过早解析出的 `undefined` 会固化，让该会话整页看不到 pill（只能靠刷新页面或
-  重开插件恢复）。
+  `order: 10`，排在宿主自带的 activity / usage pill（order 0 / 1）之后），并为协议 `provider-usage` 注册
+  ResourceProvider：流首帧立即、之后每 60s 读一次同域路由，pill 用 standard
+  kit 的 `useResource` 消费这条 live 流。resources 由本包 `dsh.client.inject`
+  与 Cordis `inject` 双重声明为硬依赖，因此没有「resources 缺席时退回组件
+  内轮询」的降级路径。
+- **注册形状对齐宿主自带的 activity / usage pill**：`inject` 是**无参常量函数**，
+  注册期不解析任何会话或服务状态（宿主即
+  `statPillInject = () => ({ hooks: { performanceUsage } })`）。会话相关数据一律
+  在**渲染期**取：组件从 standard kit 拿 `sessionId`，经注入的 `resolveSeat`
+  现解析模型目录。
+
+  这一条是 2026-10-29 重构的结论。此前在注册期解析目录，撞上宿主两条机制，
+  两条都表现为「pill 莫名其妙消失、刷新才好」：
+
+  1. `cachedSessionInject` 把 inject 结果按 (entry × 会话绑定)**永久缓存**
+     （`dsh-client-ui-renderer`，无失效路径）——注册瞬间服务没就绪，缺 directory
+     的坏 props 就固化到该会话整页；
+  2. render 期抛错 → `SlotErrorBoundary` → `reportEntryError({ abdicate: true })`
+     → `SlotRegistry.abdicated`（只增不减的 WeakSet）→ 该 entry 永久退出投影。
+
+  现在 `resolveSeat` 永不抛错、拿不到就返回 `undefined`（这一次渲染不显示，
+  下一次 render 自动重试），entry 的存活与任何服务生命周期都无关。
 - 缓存 60s、查询超时 15s、并发读取单飞；失败保留上次数据并脱敏（JWT / `sk-`
   / 查询参数里的 token）。
+
+### 限流与「额度用尽」是两件事
+
+pill 与 provider 卡片都会显示上游 **429 限流**，但两者口径不同、互不替代：
+
+| 状态 | 含义 | 数据来源 | 界面 |
+| --- | --- | --- | --- |
+| `rateLimit` | 通道对该**模型**此刻拒收请求 | 查询器观测到的 429（含模型维度） | 「限流中 · {时间} 恢复 · {模型}」或「上游未提供恢复时间 · {模型}」 |
+| 窗口 `remain: 0` | 额度**用完了** | 上游额度接口 | 「0 {unit} 剩余」+ 红色空条 |
+| 窗口 `blocked: true` | 上游对**该窗口**确认拒收（与「余额读数为 0」不同） | 查询器实际观测到的拒绝 | 展开面板该行显示「已用尽」 |
+| `resetsAt` | 会回填的窗口何时重置 | 上游额度接口 | 用尽时补在 pill 的 title 上 |
+
+关键约束：**恢复时刻只来自上游明说的事实**（查询器从上游响应头或错误正文取到的
+时刻）。拿不到就如实说「未提供」，绝不按固定窗口推算——GLM Coding Plan 的并发
+限流按订阅档位动态调整（官方 rate-limit 文档），根本不存在可推算的窗口。
+上游按模型限流时（如 WorkBuddy 的各模型 cap-hit），携带模型的观测会在折叠头行
+追加模型名，避免把单模型限流误读成整个 provider 不可用。
+
+额度耗尽与「不提供额度查询」也**必须分开**：前者是有额度但用完了，后者是
+上游没有账单接口。查询器用「空 windows + error」表达软失败、用真实窗口表达
+额度，二者不能混。
 
 ## 已知边界
 
 - 无 key 的 DeepSeek 路由（`deepseek` / `deepseek-account` / `deepseek-official`，
   三者归一化到同一 provider）读宿主 `deepseekAccount` 服务（`@deepseek-ai/dsh-deepseek-account`，
-  同本包 optionalDependencies 的版本基线）：`getBalance(AccountClientMetadata)` 返回
+  版本基线见本包 devDependencies）：`getBalance(AccountClientMetadata)` 返回
   `{status:'ready', value, bonusWallets} | {status:'failed'} | null`。该服务由宿主挂载，
   非本包提供；宿主改形状时 typecheck 直接红灯（不手写影子类型）。
 - 额度口径完全取决于 provider 是否提供只读余额接口。**没有该接口的 provider

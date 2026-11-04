@@ -14,11 +14,12 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { codingPlanQuotaWindows } from './zcode-quota.js'
+import type { RateLimitLedger } from './rate-limit.js'
 import { variantIsStartPlan } from './variant-runtime.js'
 import type { VariantRuntime } from './variant-runtime.js'
 import type { CreditLedgerSummary } from './credit-ledger.js'
 import type { WorkBuddyCredential } from './auth.js'
-import type { WorkBuddyCreditAccount, WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
+import type { WorkBuddyCreditAccount, ZCodeUpstreamClient } from './upstream.js'
 
 /**
  * The slice of @chaoset/provider-usage's registry this plugin calls.
@@ -48,6 +49,19 @@ export interface ProviderUsageRegistryLike {
     }[]
     fetchedAt: number
     error?: string
+    /**
+     * 当前观测到的上游限流（rate-limit.ts 的台账读数）。只在「查询器真的看到过
+     * 429」时存在——额度窗口说「还剩多少」，这个说「通道现在收不收请求」，
+     * 两件事互不替代：订阅制 coding plan 常常是额度还有、但被并发限流。
+     */
+    rateLimit?: {
+      blockedAt: number
+      lastSeenAt: number
+      resetAt?: number
+      status: number
+      model?: string
+      hits: number
+    }
   }>, displayName?: string): () => void
 }
 
@@ -75,7 +89,20 @@ export function totalCreditsWindows(
   limit?: number
 }> {
   const live = accounts.filter(account => account.remain > 0)
-  if (live.length === 0) return []
+  // 全部耗尽**不是**「没有额度可报」，是「额度用完了」——两者在 pill 上是
+  // 两句完全不同的话。返回空窗口会被 provider-usage 渲染成「该 provider 不上报
+  // 额度」（noWindows），用户据此以为查询功能坏了；这里如实报一条 remain:0 的
+  // 窗口：进度条空、圆点红、文案是「0 credits 剩余」。
+  // 只有「上游一个包都没给」才算真的无可报（见下方 accounts.length 判定）。
+  if (live.length === 0) {
+    if (accounts.length === 0) return []
+    return [{
+      id: 'total',
+      label: '总计',
+      remain: 0,
+      unit: 'credits',
+    }]
+  }
   const remain = live.reduce((sum, account) => sum + account.remain, 0)
   const limit = live.reduce((sum, account) => sum + (account.size > 0 ? account.size : 0), 0)
   const windows: Array<{
@@ -213,12 +240,11 @@ export function startPlanWindows(accounts: readonly WorkBuddyCreditAccount[]): A
  * member is a TypeScript error, and this package must not import the other's
  * types just to reach an optional neighbour (they install independently).
  *
- * @param client - fallback client for variants that never built their own.
  */
 export function registerUsageQueriers(
   ctx: Context,
   runtimes: readonly VariantRuntime[],
-  client: WorkBuddyUpstreamClient,
+  rateLimits?: RateLimitLedger,
 ): void {
   ctx.inject(['providerUsage'], (usageCtx: Context) => {
     const usage = usageCtx.get('providerUsage') as ProviderUsageRegistryLike | undefined
@@ -227,9 +253,9 @@ export function registerUsageQueriers(
       usageCtx.effect(() => usage.register(
         runtime.variant.id,
         async context => {
-          const credential = await runtime.store.resolve() as WorkBuddyCredential
+          const credential = await runtime.store.resolve()
           if (context.signal?.aborted === true) throw context.signal.reason ?? new Error('aborted')
-          const credits = await (runtime.client ?? client).fetchCredits(credential)
+          const credits = await runtime.client.fetchCredits(credential)
           const isZCode = runtime.variant.kind === 'zcode'
           const isOpenCode = runtime.variant.kind === 'opencode'
           const isStartPlan = variantIsStartPlan(runtime.variant)
@@ -281,6 +307,23 @@ export function registerUsageQueriers(
                     ? currentPlanWindow(credits.accounts)
                     : totalCreditsWindows(credits.accounts, todaySummary),
             fetchedAt: Date.now(),
+            // 限流读数与额度窗口并列上报：额度是「还剩多少」，限流是「现在能不能发」。
+            // 台账里没有活跃观测就整段缺席（= 当前没被限），不报一个空对象让
+            // 界面去猜。
+            ...(() => {
+              const active = rateLimits?.activeFor(runtime.variant.id)
+              if (active === undefined) return {}
+              return {
+                rateLimit: {
+                  blockedAt: active.blockedAtMs,
+                  lastSeenAt: active.lastSeenAtMs,
+                  ...active.resetAtMs === undefined ? {} : { resetAt: active.resetAtMs },
+                  status: active.status,
+                  ...active.model === undefined ? {} : { model: active.model },
+                  hits: active.hits,
+                },
+              }
+            })(),
           }
         },
         runtime.variant.displayName,

@@ -38,7 +38,7 @@ describe('BUILTIN_USAGE_QUERIERS', () => {
   it('registers the documented providers with display names', () => {
     expect([...BUILTIN_USAGE_QUERIERS.keys()]).toEqual([
       'deepseek',
-      // 宿主官方 DeepSeek 的两条路由键（宿主 0.2.1-rc.2）：钱包与 API key 各一条，
+      // 宿主官方 DeepSeek 的两条路由键（0.2.1-rc.2 起如此）：钱包与 API key 各一条，
       // 界面上的 provider 就是这两个 id，缺任一都会让官方 DeepSeek 显示「不支持」。
       'deepseek-account',
       'deepseek-official',
@@ -184,6 +184,16 @@ describe('openrouterUsage', () => {
     const snapshot = await openrouterUsage({ provider: 'openrouter', apiKey: 'k' })
     expect(snapshot.windows[0]?.remain).toBe(0)
   })
+
+  it('omits remain when the usage total is absent（不按 0 假定用量）', async () => {
+    stubFetch({
+      'https://openrouter.ai/api/v1/key': { status: 404, body: {} },
+      'https://openrouter.ai/api/v1/credits': { body: { data: { total_credits: 10 } } },
+    })
+    const snapshot = await openrouterUsage({ provider: 'openrouter', apiKey: 'k' })
+    // total_usage 缺席时 remain 未知：只报上限，不能把已花费显示成满额。
+    expect(snapshot.windows).toEqual([{ id: 'account', label: 'Account credits', unit: 'credits', limit: 10 }])
+  })
 })
 
 describe('moonshotUsage', () => {
@@ -315,7 +325,7 @@ describe('bigmodelUsage', () => {
     ])
   })
 
-  it('falls back to subscription list when quota limit endpoint is not available', async () => {
+  it('falls back to subscription list when quota limit endpoint is not available（无时区的 expireTime 不猜时刻）', async () => {
     stubFetch({
       'https://open.bigmodel.cn/api/monitor/usage/quota/limit': { status: 404, body: {} },
       'https://bigmodel.cn/api/biz/subscription/list': {
@@ -335,8 +345,34 @@ describe('bigmodelUsage', () => {
       {
         id: 'sub-glm-coding-pro',
         label: 'GLM Coding Pro',
-        unit: 'VALID',
-        resetsAt: '2026-10-01 00:00:00',
+        // 订阅有效性不是额度：没有 remain/limit，unit 为空串（不再把状态词 VALID 当单位）。
+        unit: '',
+        // 上游 "YYYY-MM-DD HH:mm:ss" 不带时区，绝对时刻不可知 → 不输出 resetsAt。
+      },
+    ])
+  })
+
+  it('keeps a timezone-qualified subscription expiry as an ISO reset instant', async () => {
+    stubFetch({
+      'https://open.bigmodel.cn/api/monitor/usage/quota/limit': { status: 404, body: {} },
+      'https://bigmodel.cn/api/biz/subscription/list': {
+        body: {
+          code: 200,
+          data: {
+            list: [
+              { productName: 'GLM Coding Pro', status: 'VALID', expireTime: '2026-10-01T00:00:00+08:00' },
+            ],
+          },
+        },
+      },
+    })
+    const snapshot = await bigmodelUsage({ provider: 'bigmodel', apiKey: 'sk-glm' })
+    expect(snapshot.windows).toEqual([
+      {
+        id: 'sub-glm-coding-pro',
+        label: 'GLM Coding Pro',
+        unit: '',
+        resetsAt: '2026-09-30T16:00:00.000Z',
       },
     ])
   })
@@ -429,6 +465,17 @@ describe('openaiUsage', () => {
         resetsAt: new Date(1760000000 * 1000).toISOString(),
       },
     ])
+  })
+
+  it('omits remain when the usage endpoint is unavailable（不把 hard_limit 当余额）', async () => {
+    stubFetch({
+      'https://api.openai.com/dashboard/billing/subscription': {
+        body: { hard_limit_usd: 100 },
+      },
+      // 用量端点未 stub：getJson 抛 unexpected fetch，被 catch 折叠成「用量不可得」。
+    })
+    const snapshot = await openaiUsage({ provider: 'openai', apiKey: 'sk-test' })
+    expect(snapshot.windows).toEqual([{ id: 'balance', label: 'Balance', limit: 100, unit: 'usd' }])
   })
 
   it('uses total_available directly when present', async () => {

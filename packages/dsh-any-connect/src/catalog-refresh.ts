@@ -8,12 +8,13 @@
  * @module dsh-any-connect/catalog-refresh
  */
 
-import { RegionMismatchError, type WorkBuddyCredential, type ZCodePlanKind } from './auth.js'
+import { RegionMismatchError, type WorkBuddyCredential } from './auth.js'
 import { credentialIdentity } from './catalog-store.js'
 import { filterByCodingPlanWhitelist } from './zcode-builtin-catalog.js'
+import { errorMessage } from './values.js'
 import type { StartPlanPreviewResult } from './zcode-plan-claim.js'
 import { fallbackFor, variantIsStartPlan, type VariantRuntime } from './variant-runtime.js'
-import { WorkBuddyUpstreamClient, chatBase, type ZCodeUpstreamClient } from './upstream.js'
+import { chatBase, type ZCodeUpstreamClient } from './upstream.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AdapterRegistrationHandle } from '@deepseek-ai/dsh-llm'
 import { catalogFingerprint } from './catalog-fingerprint.js'
@@ -22,7 +23,6 @@ import { adoptIdentity } from './catalog-adopt.js'
 /** 刷新模块依赖（由 catalog-lifecycle 透传）。 */
 export interface CatalogRefreshDeps {
   ctx: Context
-  client: WorkBuddyUpstreamClient
   runtimes: readonly VariantRuntime[]
   adapterHandles: Map<string, AdapterRegistrationHandle>
   isStopped: () => boolean
@@ -42,7 +42,7 @@ export interface CatalogRefresh {
 }
 
 export function createCatalogRefresh(deps: CatalogRefreshDeps): CatalogRefresh {
-  const { ctx, client, runtimes, adapterHandles, isStopped } = deps
+  const { ctx, runtimes, adapterHandles, isStopped } = deps
 
 /** 目录拉取失败后的延迟重试：最多再试 2 次、间隔 60s（暂态故障自愈，耗尽即停）。 */
 const CATALOG_REFRESH_RETRIES = 2
@@ -101,7 +101,7 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
     try {
       const signedIn = await runtime.store.current()
       if (signedIn === undefined) return false
-      const credential = await runtime.store.resolve() as WorkBuddyCredential
+      const credential = await runtime.store.resolve()
       preview = await claimPreviewFor(runtime)(credential)
     } catch {
       // 凭据读不到 / 探测抛错 / 超时：一律「没探到」，不刷新也不改标记。
@@ -172,28 +172,23 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
   /**
    * 通知宿主「该 provider 的目录内容变了」，正在打开的客户端随之重拉模型列表。
    *
-   * 为什么走 `handle.replace()`：客户端（dsh-client-ui-model-selection 的
-   * `ModelCatalogDirectory`）只在四个远程事件上重拉目录，其中
-   * `llm/adapters-updated` 是我们能触发的那个；而它**缓存命中即直接返回**，
-   * 收不到事件就一直展示打开页面那一刻的旧名单，直到用户刷新页面。
-   * 该事件由 `dsh-llm` 私有的 `emitAdaptersUpdated` 发布，插件不能直接调——但
-   * `AdapterRegistrationHandle.replace` 的 JSDoc 明说路由集唯一的变更点正是
-   * 发布该事件的地方，所以"用同样的路由替换自己"就是公开的正式通知手段
-   * （空数组也是合法替换，而初始注册不接受空列表）。**不要另造事件**。
+   * 走宿主公开事件 `llm/models-updated(provider)`（DSH 0.2.2 新增，声明在
+   * `dsh-llm` 的 `Events` 上，语义正是「该路由的模型或展示元数据变了，消费者重拉
+   * `listModels()`」）。客户端 `ModelCatalogDirectory` 订阅了它并直接 `refresh()`
+   * （见宿主 `dsh-client-ui-model-selection` 的 `modelDirectories` 构造器），
+   * 且该事件在 `dsh-api-remotes` 的转发白名单里，Host 一发浏览器就收到。
    *
-   * 容错：插件卸载、或注册与通知之间的竞态，都会让 `replace` 抛
-   * `LlmError REGISTRATION_DISPOSED`（注册已释放，路由没了）。这是正常路径，
-   * 吞掉即可——为一次目录通知打断 refreshCatalog 才是错的。
+   * 0.2.2 之前没有这个事件，只能用 `handle.replace([provider])` 借
+   * `llm/adapters-updated` 通知——那是拓扑事件，语义是「适配器增删了路由」，
+   * 每次都真的重注册一遍路由，比直发目录事件重得多。
+   *
+   * 容错：emit 只是本地派发，没有可抛点；客户端没订阅也只是不刷新，
+   * 下一次轮询自然收敛。
    */
   function notifyCatalogChanged(provider: string): void {
-    // shim 还没监听、或注册已释放：这条目录等注册那次通知自己可见，不额外补一发。
-    const handle = adapterHandles.get(provider)
-    if (handle === undefined) return
-    try {
-      handle.replace([provider])
-    } catch (error: unknown) {
-      ctx.logger?.debug?.(`dsh-any-connect: ${provider} adapter registration is gone; catalog update not announced: ${error instanceof Error ? error.message : String(error)}`)
-    }
+    // shim 还没监听：这条目录等注册那次通知自己可见，不额外补一发。
+    if (!adapterHandles.has(provider)) return
+    ctx.emit('llm/models-updated', provider)
   }
 
   /**
@@ -201,7 +196,7 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
    * **只读本地文件，绝不触网**（`current()` 不做 token 刷新，`fetchModels` 属于
    * 注册后的 refreshCatalog）。
    *
-   * 为什么必须在 registerAdapter 之前做（2026-10-27 取证，全过程记录在项目 skill dsh-any-connect-zcode 第 5.4 节）：插件
+   * 为什么必须在 registerAdapter 之前做（2026-10-27 取证，全过程记录在项目 skill dsh-any-connect-channels「5.3 重载窗口」）：插件
    * 重载/宿主重启会腰斩在途请求，宿主的自动重试（TRANSPORT 可重试，~500ms 后
    * 重发）若落在新实例「已注册但目录仍隐藏」的窗口里，pi-ai 的 modelOf 在空
    * 目录里找不到模型 → UNKNOWN_MODEL——它不在默认可重试集合里，重试管线立即
@@ -217,15 +212,8 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
     try {
       const signedIn = await runtime.store.current()
       if (signedIn === undefined || isStopped()) return
-      const identity = credentialIdentity(signedIn as unknown as Parameters<typeof credentialIdentity>[0])
+      const identity = credentialIdentity(signedIn)
       if (identity === runtime.lastIdentity) return
-      // 夜免资格与 refreshCatalog 同判（transform 已把 zcodePlan 固定为该变体
-      // 的语义）：saved/fallback 的徽标在采用那一刻就要带对，不能等 live 改写。
-      if (runtime.variant.kind === 'zcode') {
-        runtime.catalog.setNightFreeEligible(
-          (signedIn as unknown as { zcodePlan?: ZCodePlanKind }).zcodePlan !== 'start-plan',
-        )
-      }
       // 预热阶段的 publish 没有注册句柄可通知（notifyCatalogChanged 静默跳过），
       // 但它会把指纹记进 publishedCatalog——注册自身会广播 adapters-updated，
       // 客户端重拉时读到的正是这份已采用的目录，语义完整。
@@ -276,17 +264,10 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
         if (isStopped()) return
         // WorkBuddy 凭据带 uid/enterpriseId；RuntimeStore 的结构最小化类型
         // 只承诺 accessToken，这里按 kind 已分流的前提下还原完整形状。
-        const identity = credentialIdentity(credential as unknown as Parameters<typeof credentialIdentity>[0])
-        // 夜间免费是 Coding Plan 的权益，Start Plan 不享受。两个 ZCode 变体
-        // 是独立产品，各自的凭据 transform 已固定 zcodePlan，资格随之而定。
-        if (variant.kind === 'zcode') {
-          catalog.setNightFreeEligible(
-            (credential as unknown as { zcodePlan?: ZCodePlanKind }).zcodePlan !== 'start-plan',
-          )
-        }
+        const identity = credentialIdentity(credential)
         if (identity !== runtime.lastIdentity) await adoptIdentity(runtime, identity, publishCatalog)
         const generation = runtime.lastIdentity
-        const models = await (runtime.client ?? client).fetchModels(credential as Parameters<WorkBuddyUpstreamClient['fetchModels']>[0])
+        const models = await runtime.client.fetchModels(credential)
         if (isStopped()) return
         // 拉取中账号又变了（切换/登出）：迟到响应直接丢弃，不覆盖新身份。
         if (generation !== runtime.lastIdentity) return
@@ -306,11 +287,11 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
         // live 拉取再失败（catch 停在 saved），用户就长期看不到这个分组——而这
         // 恰恰是 saved 存在的目的（重启后别落回内置名单）。所以空名单不写盘。
         if (models.length > 0) {
-          await catalogStore!.save({
+          await catalogStore.save({
             account: identity,
             source: variant.kind === 'opencode'
               ? 'https://opencode.ai'
-              : (variant.kind === 'zcode' ? 'https://open.bigmodel.cn' : chatBase(credential as unknown as Parameters<typeof chatBase>[0])),
+              : (variant.kind === 'zcode' ? 'https://open.bigmodel.cn' : chatBase(credential)),
             fetchedAtMs: runtime.catalogFetchedAtMs,
 
             models: [...models],
@@ -329,7 +310,7 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
           }
           return
         }
-        const message = error instanceof Error ? error.message : String(error)
+        const message = errorMessage(error)
         // 拉取失败 = 没拉到（保留上一份名单），不是「拉到了空的」。
         runtime.catalogEmpty = false
         runtime.catalogError = message.slice(0, 300)

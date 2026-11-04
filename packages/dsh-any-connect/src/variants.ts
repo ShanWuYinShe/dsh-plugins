@@ -103,7 +103,13 @@ export interface WorkBuddyVariant {
    * windows, and which models exist for a shared id.
    */
   catalogFilename: string
-  /** Settings namespace owning this variant's configuration card. */
+  /**
+   * Legacy settings-namespace identity string (see config.ts).
+   *
+   * Not registered as a configurable-provider directory entry: the variant's
+   * configuration surface is the bundle config card, and 「设置 → 模型」只有
+   * llm-pi-ai / llm-deepseek 两种可编辑布局，声明目录项只会得到死卡片。
+   */
   settingsNs: SettingsNamespace
   /** Same-origin status route consumed by this variant's card. */
   statusPath: string

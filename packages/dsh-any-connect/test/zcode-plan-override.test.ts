@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { applyZCodePlanOverride, effectiveZCodePlan, isNightFreeEligiblePlan } from '../src/zcode-plan-store.js'
+import { applyZCodePlanOverride, effectiveZCodePlan } from '../src/zcode-plan-store.js'
 import { parseZCodeAuth } from '../src/auth.js'
 
 const CLEANUP: (() => Promise<void>)[] = []
@@ -25,15 +25,6 @@ describe('生效计划计算（按变体固定语义）', () => {
     expect(effectiveZCodePlan('start-plan', 'start-plan')).toBe('start-plan')
     expect(effectiveZCodePlan('individual-coding-plan', 'start-plan')).toBe('start-plan')
     expect(effectiveZCodePlan(undefined, 'start-plan')).toBe('start-plan')
-  })
-
-  it('夜间免费资格只属于 coding 语义', () => {
-    expect(isNightFreeEligiblePlan('individual-coding-plan')).toBe(true)
-    expect(isNightFreeEligiblePlan('team-coding-plan')).toBe(true)
-    expect(isNightFreeEligiblePlan('off-peak')).toBe(true)
-    expect(isNightFreeEligiblePlan('coding-plan')).toBe(true)
-    expect(isNightFreeEligiblePlan(undefined)).toBe(true)
-    expect(isNightFreeEligiblePlan('start-plan')).toBe(false)
   })
 })
 

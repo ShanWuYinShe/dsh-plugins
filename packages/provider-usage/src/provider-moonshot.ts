@@ -1,14 +1,11 @@
 /**
- * provider-moonshot.ts — moonshot 的额度查询器。
- *
- * 2026-10-08 从 521 行的 providers.ts 拆出：每个 provider 一个文件，共享取值助手
- * 单独成模块，providers.ts 只保留内置注册表与 re-export。
+ * provider-moonshot.ts — Moonshot (Kimi) 的额度查询器。
  *
  * @module @chaoset/provider-usage/provider-moonshot
  */
 
 import type { ProviderUsageQuerier, UsageWindow } from './types.js'
-import { num, rec, getJson, joinRoot, trimBase } from './provider-shared.js'
+import { num, rec, snapshotOf, getJson, joinRoot, trimBase } from './provider-shared.js'
 
 /**
  * Moonshot (Kimi)'s balance.
@@ -18,7 +15,7 @@ import { num, rec, getJson, joinRoot, trimBase } from './provider-shared.js'
  * differs from the total, so the bar's total is explainable.
  */
 export const moonshotUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
-  if (apiKey === undefined) return { provider: 'moonshot', windows: [], fetchedAt: Date.now() }
+  if (apiKey === undefined) return snapshotOf('moonshot', [])
   const root = trimBase(baseURL ?? 'https://api.moonshot.cn')
   const body = await getJson(joinRoot(root, '/v1/users/me/balance'), { authorization: `Bearer ${apiKey}` }, signal)
   const data = rec(body['data'])
@@ -35,10 +32,5 @@ export const moonshotUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, sig
   if (voucher !== undefined && voucher > 0) {
     windows.push({ id: 'voucher', label: 'Voucher', remain: voucher, unit: 'cny' })
   }
-  return {
-    provider: 'moonshot',
-    windows,
-    fetchedAt: Date.now(),
-    ...windows.length === 0 ? { error: 'the balance endpoint reported no usable balance' } : {},
-  }
+  return snapshotOf('moonshot', windows, { error: 'the balance endpoint reported no usable balance' })
 }

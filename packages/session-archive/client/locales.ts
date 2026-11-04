@@ -7,8 +7,7 @@
  * @module @chaoset/session-archive/client/locales
  */
 
-
-
+/** locale 命名空间（侧边栏徽标与归档面板文案）。 */
 export const NS = "sidebar.sessionArchive";
 
 export const zh = {
@@ -71,7 +70,8 @@ export const zh = {
   restartNeeded: "其中 {n} 个会话仍在内存中，设置 → 已归档会话的条目将在宿主重启后消失"
 };
 
-export const en = {
+/** 英文文案必须覆盖中文全部键（缺键在 typecheck 阶段报错）。 */
+export const en: Record<keyof typeof zh, string> = {
   badge: "Archive",
   panelTitle: "Archived sessions",
   refresh: "Refresh",

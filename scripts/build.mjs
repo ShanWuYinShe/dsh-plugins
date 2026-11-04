@@ -1,9 +1,17 @@
-// 全仓构建：每包 tsc 编译 src/ → lib/，esbuild 打包 client/index.tsx → client/client.cjs
+// 全仓构建，四段顺序固定：
+//   1) 每包 tsc 编译 src/ → lib/（含 dsh.d.ts 增强合并）
+//   2) typert 工件生成（scripts/typert.mjs → lib/typert.*）
+//   3) esbuild 打包 client/index.tsx → client/client.cjs
+//   4) esbuild 打包 package.json 声明的 bin 入口 → 自包含 lib/bin.js
+// 顺序不能换：client 源码用包自引用子路径 import "@chaoset/<pkg>/remote"，
+// esbuild 解析到 lib/typert.remote-client.js，故生成必须早于 client 打包；
+// bin 覆盖的是 tsc 阶段写出的同名产物，故打包必须在 tsc 之后（见阶段 4）。
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { formatTypertFailure, generateTypertArtifacts, TypertGenerationError } from "./typert.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 // 包列表从目录派生而非硬编码:硬编码清单在增删包时必然漂移
@@ -53,7 +61,13 @@ async function buildClient(pkgDir, pkgName, pkgId) {
     // 页面没有全局 React 就会在渲染时抛 ReferenceError（曾让侧栏徽章与
     // 设置卡片在稳定版宿主上崩溃）。
     jsx: "automatic",
-    external: ["react", "react/jsx-runtime"],
+    // zod：生成的 remote-client 工件顶部 import zod（codec 工厂用）。宿主 Web 壳的
+    // PLATFORM_MODULES（@deepseek-ai/dsh-client-web）把 zod 作为共享平台模块提供给
+    // 客户端的 require，故这里 external，让 client.cjs 的 require("zod") 取宿主单例。
+    // remote-info（@deepseek-ai/dsh-typert-protocol/remote-info）是纯 ESM 数据工厂、
+    // 无共享运行时身份，不能 external（宿主模块表里没有它），随 bundle 内置——与官方
+    // tsdown 客户端打包的 INLINE_SAFE/GENERATED_REMOTE 判定一致。
+    external: ["react", "react/jsx-runtime", "zod"],
     // 压缩产物（实测体积 -37~39%）：client.cjs 是宿主加载进浏览器的分发
     // 产物，与 npm 包发布 dist 同理不做可读性保留；调试看 client/ 源码。
     minify: true,
@@ -80,6 +94,8 @@ ${body}
   writeFileSync(join(pkgDir, "client", "client.cjs"), wrapped);
 }
 
+// ── 阶段 1：Host 源码编译（tsc 只碰 src/ → lib/*.js|d.ts，不清理 lib/） ──
+const compiled = [];
 for (const pkg of PACKAGES) {
   const pkgDir = join(ROOT, "packages", pkg);
   if (!existsSync(join(pkgDir, "src"))) {
@@ -89,8 +105,81 @@ for (const pkg of PACKAGES) {
   const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
   tsc(pkgDir);
   appendDshAugmentations(pkgDir);
+  compiled.push({ pkg, pkgDir, pkgName: pkgJson.name });
+}
+
+// ── 阶段 2：Typert 工件生成（tsc 之后、client 打包之前） ──
+// 失败必须让构建失败：client 依赖 ./remote 工件，缺失时 bundle 会以难懂的错误收场。
+try {
+  const typert = generateTypertArtifacts(ROOT);
+  const files = typert.artifacts.length * 2
+    + typert.artifacts.filter((artifact) => artifact.remote !== undefined).length * 3;
+  console.log(`typert: ${typert.artifacts.length} 个包 / ${files} 个工件文件`);
+} catch (error) {
+  if (!(error instanceof TypertGenerationError)) throw error;
+  console.error(formatTypertFailure(error));
+  process.exit(1);
+}
+
+// ── 阶段 3：Client 打包（externals 见 buildClient） ──
+for (const { pkg, pkgDir, pkgName } of compiled) {
   if (existsSync(join(pkgDir, "client", "index.tsx"))) {
-    await buildClient(pkgDir, pkg, pkgJson.name);
+    await buildClient(pkgDir, pkg, pkgName);
   }
   console.log(`built ${pkg}`);
+}
+
+// ── 阶段 4：包内 bin 的自包含打包 ──
+// bin 由宿主 loader 之外的独立 node 进程启动，不经宿主 runtime resolution：
+// 源码静态 import 的宿主包（dsh-home-paths 等）只声明在包的 devDependencies
+// 里，用户 profile 的解析路径上没有它们——直接跑 tsc 产出的 lib/bin.js 会
+// ERR_MODULE_NOT_FOUND。这里把 bin 入口连同依赖闭包打成单文件 ESM（external
+// 只剩 node: 内建），产物脱离 node_modules 也能运行。内联第三方包的许可告知
+// 见包根 THIRD_PARTY_NOTICES.md；新增 bin 的包同样要随包发布该文件。
+// bundle 落在 lib/<name>.js，与 tsc 产物同目录：运行期按 import.meta.url 读
+// ../package.json（版本号）的相对路径不受影响。
+
+/** bin 声明 → { 源码, 目标产物 }；清单从 package.json 派生，增删 bin 时无需改构建脚本。 */
+function binEntries(pkgDir, pkgJson) {
+  if (pkgJson.bin === undefined) return [];
+  const declared = typeof pkgJson.bin === "string" ? { [pkgJson.name]: pkgJson.bin } : pkgJson.bin;
+  return Object.values(declared).map((target) => {
+    // 约定：bin 指向 lib/*.js，源码是同名的 src/*.ts（tsc 阶段已产出同名 .js，这里覆盖）。
+    const match = /^\.\/lib\/(.+)\.js$/u.exec(target);
+    if (match === null) throw new Error(`bin 目标 ${target} 必须在 lib/*.js 下`);
+    const source = join(pkgDir, "src", `${match[1]}.ts`);
+    if (!existsSync(source)) throw new Error(`bin 目标 ${target} 没有对应的 ${source}`);
+    return { source, target: join(pkgDir, target) };
+  });
+}
+
+/** 打包一个包声明的全部 bin；无 bin 声明的包是空操作。 */
+async function buildBin(pkg, pkgDir) {
+  const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+  for (const { source, target } of binEntries(pkgDir, pkgJson)) {
+    const result = await build({
+      entryPoints: [source],
+      bundle: true,
+      format: "esm",
+      platform: "node",
+      // 宿主 engines.node 下限是 >=24.9.0，产物只需在 Node 24 上跑。
+      target: ["node24"],
+      // 分发产物同 client bundle：调试看源码，发布跑压缩版本。
+      minify: true,
+      write: false,
+    });
+    const output = result.outputFiles?.[0];
+    if (output === undefined) throw new Error(`bin 打包 ${source} 无输出`);
+    // esbuild 会保留入口的 hashbang；发布产物靠它直接执行，丢了会变成
+    // 「SyntaxError: Invalid or unexpected token」。升级 esbuild 时不能默默退化。
+    if (!output.text.startsWith("#!")) throw new Error(`bin 打包 ${source} 丢了 shebang`);
+    writeFileSync(target, output.text);
+    // tsc 阶段写出的 .map 描述的是未打包的产物，被 bundle 覆盖后即成过期文件。
+    rmSync(`${target}.map`, { force: true });
+    console.log(`built ${pkg} bin (${Buffer.byteLength(output.text)} bytes)`);
+  }
+}
+
+for (const { pkg, pkgDir } of compiled) {
+  await buildBin(pkg, pkgDir);
 }

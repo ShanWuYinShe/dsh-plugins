@@ -7,6 +7,7 @@ const KEY = 'k'.repeat(48)
 async function mount(deps?: {
   refresh?: () => Promise<{ state: string; reason?: string }>
   deleteModel?: (modelId: string) => Promise<{ state: string; excludedCount?: number }>
+  restoreModel?: (modelId: string) => Promise<{ state: string; restored?: boolean; excludedCount?: number }>
   restoreModels?: () => Promise<{ state: string; excludedCount?: number }>
 }): Promise<{ server: Server; port: number; calls: string[] }> {
   const calls: string[] = []
@@ -22,6 +23,12 @@ async function mount(deps?: {
       : async (modelId: string) => {
         calls.push(`delete-model:${modelId}`)
         return deps.deleteModel!(modelId)
+      },
+    restoreModel: deps?.restoreModel === undefined
+      ? undefined
+      : async (modelId: string) => {
+        calls.push(`restore-model:${modelId}`)
+        return deps.restoreModel!(modelId)
       },
     restoreModels: deps?.restoreModels === undefined
       ? undefined
@@ -147,6 +154,37 @@ describe('workBuddyProbeHandler', () => {
     const m = await mount()
     mounted = m
     expect((await post(m.port, { action: 'delete-model', modelId: 'm1' }, AUTH)).status).toBe(404)
+  })
+
+  // 2026-10-29：单条恢复。与全量恢复的关键差别是**不动其它隐藏项**。
+  it('dispatches restore-model and validates modelId', async () => {
+    const m = await mount({ restoreModel: async () => ({ state: 'ok', restored: true, excludedCount: 1 }) })
+    mounted = m
+
+    const res = await post(m.port, { action: 'restore-model', modelId: 'deepseek-flash' }, AUTH)
+    expect(res.status).toBe(200)
+    expect((res.json as { restored: boolean }).restored).toBe(true)
+    expect(m.calls).toEqual(['restore-model:deepseek-flash'])
+
+    // 空/空白 modelId 是无效动作，不能当成"恢复某个空 id"。
+    expect((await post(m.port, { action: 'restore-model' }, AUTH)).status).toBe(400)
+    expect((await post(m.port, { action: 'restore-model', modelId: '' }, AUTH)).status).toBe(400)
+    expect((await post(m.port, { action: 'restore-model', modelId: '   ' }, AUTH)).status).toBe(400)
+  })
+
+  it('restore-model 回报 restored=false 表示本来就没隐藏（不算错误）', async () => {
+    const m = await mount({ restoreModel: async () => ({ state: 'ok', restored: false, excludedCount: 0 }) })
+    mounted = m
+    const res = await post(m.port, { action: 'restore-model', modelId: 'already-visible' }, AUTH)
+    expect(res.status).toBe(200)
+    expect((res.json as { restored: boolean }).restored).toBe(false)
+  })
+
+  it('answers 404 for restore-model when restoreModel hook is absent', async () => {
+    const m = await mount({ restoreModels: async () => ({ state: 'ok' }) })
+    mounted = m
+    // 只挂了全量恢复、没挂单条恢复：不能悄悄降级成全量（那会误伤其它隐藏项）。
+    expect((await post(m.port, { action: 'restore-model', modelId: 'm1' }, AUTH)).status).toBe(404)
   })
 
   it('dispatches restore-models', async () => {

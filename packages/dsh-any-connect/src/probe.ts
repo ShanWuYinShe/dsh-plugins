@@ -47,13 +47,13 @@ export const PROBE_PROMPT = 'ping'
 export const PROBE_MAX_TOKENS = 1
 
 /** Per-request ceiling so one hung probe cannot stall the queue. */
-export const PROBE_REQUEST_TIMEOUT_MS = 30_000
+const PROBE_REQUEST_TIMEOUT_MS = 30_000
 
 /** Sentinel generator; injectable so tests get deterministic values. */
 export type SentinelFactory = () => string
 
 /** Default sentinel: unmistakably non-canonical, different on every call. */
-export function randomSentinel(): string {
+function randomSentinel(): string {
   return `probe_sentinel_${randomBytes(12).toString('hex')}`
 }
 

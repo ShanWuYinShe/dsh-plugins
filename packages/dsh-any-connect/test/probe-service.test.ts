@@ -85,6 +85,24 @@ describe('WorkBuddyProbeService', () => {
     expect(await h2.service.probe('probe-me')).toEqual({ state: 'unavailable', reason: 'model does not need detection' })
   })
 
+  it('prefixes unavailable reasons with the configured variant id', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-psvc-'))
+    const service = new WorkBuddyProbeService({
+      store: new WorkBuddyProbeStore({ path: join(root, '.workbuddy-probe.json'), pluginVersion: '0.0.0-test' }),
+      catalog: declaredCatalog(),
+      credentials: { current: async () => ({ ...CREDENTIAL }) } as never,
+      client: {} as never,
+      account: () => 'uid-1:',
+      variantId: 'zcode',
+      send: () => async () => { throw new Error('must not send') },
+    })
+    // Declared-set 模型直接走 unavailable 快路径：reason 应带变体来源前缀。
+    expect(await service.probe('probe-me')).toEqual({
+      state: 'unavailable',
+      reason: 'zcode: model does not need detection',
+    })
+  })
+
   it('runs a full validating sweep and reuses the record without new requests', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-psvc-'))
     const answers: Record<string, { status: number; streamed: boolean; errorCode?: string }> = {
@@ -140,11 +158,15 @@ describe('WorkBuddyProbeService', () => {
     // 候选（未声明档位且无有效记录）自动入队并落盘。
     const h = harness(async effort => effort === undefined ? ACCEPT : (effort === 'low' ? ACCEPT : REJECT))
     h.service.probeMissingCandidates()
-    // isRunning 在队列入队前为 false，不能当完成信号——直接等请求发出、
-    // 再等记录落盘（单候选时队列即空）。
+    // isRunning 在队列入队前为 false，不能当"已开始"的信号：先等请求真的发出
+    // （此时探针必然已在运行），再等它退出。running 从进入探针前一直保持到
+    // store.set 落盘完成之后（见 probe-service.ts 的 try/finally），所以它变回
+    // false ⇔ 本轮清扫的异步写已全部结束——afterEach 删目录因此不可能再与在途
+    // 写竞态（旧写法只等内存记录，磁盘写还在飞，曾报 ENOTEMPTY）。
     await vi.waitFor(() => expect(h.calls.length).toBeGreaterThan(0), { timeout: 5000 })
-    await vi.waitFor(() =>
-      expect(h.store.get('probe-me', fingerprintModel(undeclaredCatalog().current()[0]!), 'uid-1:')?.validation).toBe('validating'), { timeout: 5000 })
+    await vi.waitFor(() => expect(h.service.isRunning()).toBe(false), { timeout: 5000 })
+    // 记录已在内存里且已落盘。
+    expect(h.store.get('probe-me', fingerprintModel(undeclaredCatalog().current()[0]!), 'uid-1:')?.validation).toBe('validating')
   })
   it('reports sweep probe failures through onSweepError instead of unhandled rejection', async () => {
     // 回归:清扫入口丢弃 promise,而 credentials.current() 会因凭据区域
@@ -177,10 +199,12 @@ describe('WorkBuddyProbeService', () => {
     const sent = h.calls.length
     expect(sent).toBeGreaterThan(0)
     // 再次自动检测：记录仍有效（同指纹、同账号、未过期），零新请求。
-    // 负向断言的保护力取决于观察窗口:20ms 在慢机器上可能来不及让误入队
-    // 的探针发出请求(漏报方向失效),给到 150ms——足够 stub 级探针完整跑完。
+    // 断言"不会入队"而不是"等 150ms 没看到请求"：probeMissingCandidates 的候选
+    // 筛选是同步的，入队是发请求的必要前置，未入队即结构上零新请求——不依赖
+    // 观察窗口长短（旧写法在慢机器上会漏报、在快机器上白等）。
+    const enqueue = vi.spyOn(h.service, 'probe')
     h.service.probeMissingCandidates()
-    await new Promise(resolve => setTimeout(resolve, 150))
+    expect(enqueue).not.toHaveBeenCalled()
     expect(h.calls.length).toBe(sent)
   })
 })

@@ -1,14 +1,11 @@
 /**
- * provider-openai.ts — openai 的额度查询器。
- *
- * 2026-10-08 从 521 行的 providers.ts 拆出：每个 provider 一个文件，共享取值助手
- * 单独成模块，providers.ts 只保留内置注册表与 re-export。
+ * provider-openai.ts — OpenAI / OneAPI / NewAPI 的额度查询器。
  *
  * @module @chaoset/provider-usage/provider-openai
  */
 
 import type { ProviderUsageQuerier, UsageWindow } from './types.js'
-import { num, str, rec, getJson, trimBase } from './provider-shared.js'
+import { num, str, rec, snapshotOf, getJson, trimBase } from './provider-shared.js'
 
 /**
  * OpenAI / OneAPI / NewAPI billing subscription and balance.
@@ -17,10 +14,10 @@ import { num, str, rec, getJson, trimBase } from './provider-shared.js'
  * `GET {base}/dashboard/billing/usage`.
  */
 export const openaiUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signal }) => {
-  if (apiKey === undefined) return { provider: 'openai', windows: [], fetchedAt: Date.now() }
+  if (apiKey === undefined) return snapshotOf('openai', [])
   const root = trimBase(baseURL ?? 'https://api.openai.com')
   const headers = { authorization: `Bearer ${apiKey}` }
-  let sub: Record<string, unknown> = {}
+  let sub: Record<string, unknown>
   try {
     sub = await getJson(`${root}/dashboard/billing/subscription`, headers, signal)
   } catch {
@@ -28,9 +25,7 @@ export const openaiUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signa
   }
 
   const windows: UsageWindow[] = []
-  let planTitle: string | undefined
-  const plan = rec(sub['plan'])
-  if (str(plan['title'])) planTitle = str(plan['title'])
+  const planTitle = str(rec(sub['plan'])['title'])
 
   const hardLimit = num(sub['hard_limit_usd'] ?? sub['system_hard_limit_usd'] ?? sub['max_budget'])
   const totalAvailable = num(sub['total_available'])
@@ -47,7 +42,10 @@ export const openaiUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signa
       ...resetsAt !== undefined ? { resetsAt } : {},
     })
   } else if (hardLimit !== undefined) {
-    let usageCost = 0
+    // 用量接口失败时不得把 hard_limit 当余额：那会把「已用掉一部分」显示成
+    // 「满额」，与「不猜值」的口径相反。拿不到用量就只报上限——remain 缺席
+    // 表示「余额未知」，client 已按该语义渲染（不画进度条、不显示 0）。
+    let usageCost: number | undefined
     try {
       const now = new Date()
       const startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
@@ -55,27 +53,22 @@ export const openaiUsage: ProviderUsageQuerier = async ({ baseURL, apiKey, signa
       const usageRes = await getJson(`${root}/dashboard/billing/usage?start_date=${startDate}&end_date=${endDate}`, headers, signal)
         .catch(() => getJson(`${root}/v1/dashboard/billing/usage?start_date=${startDate}&end_date=${endDate}`, headers, signal))
       const totalUsageCents = num(usageRes['total_usage'])
-      if (totalUsageCents !== undefined) {
-        usageCost = totalUsageCents / 100
-      }
+      if (totalUsageCents !== undefined) usageCost = totalUsageCents / 100
     } catch {
-      // Usage endpoint unavailable, balance equals hardLimit
+      // Usage endpoint unavailable: remain stays absent rather than claiming hardLimit.
     }
     windows.push({
       id: 'balance',
       label: 'Balance',
-      remain: Math.max(0, hardLimit - usageCost),
+      ...usageCost === undefined ? {} : { remain: Math.max(0, hardLimit - usageCost) },
       limit: hardLimit,
       unit: 'usd',
       ...resetsAt !== undefined ? { resetsAt } : {},
     })
   }
 
-  return {
-    provider: 'openai',
-    ...planTitle === undefined ? {} : { plan: planTitle },
-    windows,
-    fetchedAt: Date.now(),
-    ...windows.length === 0 ? { error: 'the billing subscription endpoint reported no quota' } : {},
-  }
+  return snapshotOf('openai', windows, {
+    plan: planTitle,
+    error: 'the billing subscription endpoint reported no quota',
+  })
 }

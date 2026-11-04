@@ -27,7 +27,7 @@
  * - desktop-credential-protection.ts desktop-auth-envelope.ts desktop-discovery.ts
  *   desktop-discovery-windows.ts desktop-at-rest-key.ts desktop-app-discovery.ts wsl.ts — at-rest 凭据门面与
  *   信封/发现/密钥解析器、按平台找 Electron 二进制、WSL 判定与 Windows 路径转换
- * - state-store.ts — 自有凭据副本的状态域持久化（storageDomain）与旧散文件迁移
+ * - state-store.ts — 自有凭据副本的状态域持久化（storageDomain）
  * 上游通道
  * - upstream.ts upstream-shared.ts upstream-types.ts — 上游门面、协议共享层（常量与助手）、
  *   协议类型（纯声明，零运行时）
@@ -42,11 +42,13 @@
  *   HTTP 管道（读体/写错误体）、pi-ai 适配器、默认档回落（无非思考态模型补 high/最高档）、
  *   版本 UA、deadline 抽象
  * 探针与状态
+ * - rate-limit.ts — 上游 429 限流观测台账（有上游明示的重置时刻才报，绝不按窗口推算）
  * - probe.ts probe-service.ts probe-store.ts probe-route.ts — 档位探测
  * - web-status.ts status-paths.ts loopback.ts host-heartbeat.ts version.ts — 同源 status 路由、
  *   路径常量、回环守卫、心跳与版本
  * 其它
- * - bin.ts typert.host.ts — status/diagnostics CLI 与 typert 服务面声明
+ * - bin.ts — status/diagnostics CLI
+ * - values.ts — 跨模块共用的 unknown 值守卫与错误文本归一
  *
  * @module dsh-any-connect
  */
@@ -55,201 +57,17 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-settings'
-import { legacyOwnAuthPath, workbuddyOwnAuthPath } from './auth-paths.js'
-import { CreditLedger } from './credit-ledger.js'
-import { anyConnectDomain, domainCreditLedgerPersistence, domainStateStore, migrateLegacyCredentialFiles } from './state-store.js'
-import { WorkBuddyUpstreamClient } from './upstream.js'
-
-export {
-  anyConnectDomain,
-  domainStateStore,
-  openStandaloneStateStore,
-  migrateLegacyCredentialFiles,
-  type WorkBuddyStateStore,
-} from './state-store.js'
-import { registerUsageQueriers } from './usage.js'
-import { createVariantRuntimeSet } from './runtime.js'
 import { Config } from './config.js'
 import type { Options } from './config.js'
+import { CreditLedger } from './credit-ledger.js'
+import { createVariantRuntimeSet } from './runtime.js'
+import { anyConnectDomain, domainCreditLedgerPersistence, domainStateStore } from './state-store.js'
+import { WorkBuddyUpstreamClient } from './upstream.js'
+import { errorMessage } from './values.js'
+import { registerUsageQueriers } from './usage.js'
 
-export { WORKBUDDY_PROVIDER, WORKBUDDY_STREAM_IDLE_TIMEOUT_MS, createWorkBuddyAdapter, type WorkBuddyAdapter } from './adapter.js'
-export { createWorkBuddyShim, type WorkBuddyShim } from './shim.js'
-export {
-  FALLBACK_OPENCODE_MODELS,
-  FALLBACK_WORKBUDDY_AI_MODELS,
-  FALLBACK_WORKBUDDY_MODELS,
-  FALLBACK_ZCODE_MODELS,
-  WorkBuddyCatalog,
-  type WorkBuddyModelInfo,
-} from './catalog.js'
-
-export {
-  FALLBACK_ZCODE_START_PLAN_MODELS,
-  isStartPlanActivityActive,
-  startPlanModelInfo,
-  startPlanModelsFromEntitlements,
-  type StartPlanActivity,
-  type StartPlanEntitlement,
-  type StartPlanEntitlements,
-} from './zcode-plan-models.js'
-export {
-  CAPTCHA_FAILED_CODE,
-  buildClaimBody,
-  buildClaimHeaders,
-  buildPreviewHeaders,
-  buildPreviewUrl,
-  claimStartPlan,
-  parseClaimResponse,
-  parsePreviewBody,
-  previewStartPlan,
-  probeAndClaimStartPlan,
-  type StartPlanClaimCredential,
-  type StartPlanClaimResult,
-  type StartPlanPlatformInfo,
-  type StartPlanPreviewItem,
-  type StartPlanPreviewResult,
-} from './zcode-plan-claim.js'
-export {
-  prepareStartPlanBody,
-  withStartPlanPrefix,
-  hasStartPlanPrefix,
-  ZCODE_CLIENT_IDENTITY,
-  ZCODE_CLIENT_PREFIX,
-  ZCODE_CLIENT_PREFIX_LENGTH,
-  type AnthropicTextBlock,
-} from './zcode-plan-prompt.js'
-export {
-  WorkBuddyCatalogStore,
-  WORKBUDDY_CATALOG_FILENAME,
-  credentialIdentity,
-  workbuddyCatalogPath,
-  type SavedWorkBuddyCatalog,
-} from './catalog-store.js'
-export {
-  decryptZCodeEncryptedKey,
-  defaultDesktopAuthCandidates,
-  defaultZCodeDesktopCandidates,
-  defaultOpenCodeCandidates,
-  desktopAuthCandidatesFor,
-  parseOpenCodeAuth,
-  defaultOpenCodePublicCredential,
-  parseWorkBuddyAuth,
-  parseZCodeAuth,
-  parseZCodePlanSelection,
-  RegionMismatchError,
-  selectZCodeAccountKey,
-  WORKBUDDY_AUTH_FILE_ENV,
-  WORKBUDDY_AUTH_FILENAME,
-  WorkBuddyCredentialStore,
-  workbuddyOwnAuthPath,
-  type DecryptZCodeKeyOptions,
-  type WorkBuddyAuthStatus,
-  type WorkBuddyCredential,
-} from './auth.js'
-export {
-  applyZCodePlanOverride,
-  effectiveZCodePlan,
-  isNightFreeEligiblePlan,
-} from './zcode-plan-store.js'
-export {
-  AI_VARIANT,
-  CN_VARIANT,
-  PROVIDER_VARIANTS,
-  variantFor,
-  WORKBUDDY_VARIANTS,
-  ZCODE_VARIANT,
-  OPENCODE_VARIANT,
-  type VariantKind,
-  type WorkBuddyVariant,
-} from './variants.js'
-
-export {
-  FALLBACK_APP_VERSION,
-  WORKBUDDY_APP_VERSION_FILENAME,
-  appUserAgent,
-  appVersionPath,
-  installedAppVersion,
-  readBundleVersion,
-  resolveAppVersion,
-  validAppVersion,
-  type AppVersionInfo,
-  type WorkBuddyAppVersionSource,
-} from './app-version.js'
-export {
-  PROBE_EFFORT_CANDIDATES,
-  PROBE_MAX_TOKENS,
-  PROBE_PROMPT,
-  PROBE_REQUEST_TIMEOUT_MS,
-  probeModel,
-  randomSentinel,
-  type ProbeAttempt,
-  type ProbeOutcome,
-  type ProbeSender,
-  type SentinelFactory,
-} from './probe.js'
-export {
-  newestFirst,
-  fingerprintModel,
-  workbuddyProbePath,
-  WORKBUDDY_AI_PROBE_FILENAME,
-  WORKBUDDY_PROBE_FILENAME,
-  WorkBuddyProbeStore,
-  type WorkBuddyProbeRecord,
-  type WorkBuddyProbeValidation,
-} from './probe-store.js'
-export { WorkBuddyProbeService, type WorkBuddyProbeStatus } from './probe-service.js'
-export {
-  createProbeKey,
-  registerWorkBuddyProbeRoute,
-  workBuddyProbeHandler,
-  WORKBUDDY_AI_PROBE_PATH,
-  WORKBUDDY_PROBE_PATH,
-} from './probe-route.js'
-export {
-  chatBase,
-  classifyUpstreamError,
-  modelWithCurrentPromotion,
-  normalizeCredits,
-  prepareAnthropicBody,
-  prepareChatBody,
-  prepareInternationalChatBody,
-  regionOf,
-  WorkBuddyUpstreamClient,
-  ZCodeUpstreamClient,
-  OpenCodeUpstreamClient,
-  type UpstreamErrorKind,
-  type WorkBuddyChatResult,
-  type WorkBuddyCredits,
-  type WorkBuddyEffort,
-  type WorkBuddyModelBilling,
-  type WorkBuddyModelReasoning,
-  type WorkBuddyPromotion,
-  type WorkBuddyRefreshOutcome,
-  type WorkBuddyUpstreamModel,
-  type ZCodeUpstreamClientOptions,
-} from './upstream.js'
-// pill 窗口助手（provider-usage 注册 seam 的同一模块）；CLI 也直接从这里取。
-export { currentPlanWindow, startPlanWindows, totalCreditsWindows } from './usage.js'
-export { catalogFingerprint } from './catalog-fingerprint.js'
-export { Config, WORKBUDDY_SETTINGS_NS, WORKBUDDY_AI_SETTINGS_NS, ZCODE_SETTINGS_NS, OPENCODE_SETTINGS_NS } from './config.js'
-export type { Options } from './config.js'
-
-export { applyVariantConfig } from './variant-runtime.js'
-export {
-  parseZCodeApiKey,
-  solveClientRequestProofOfWork,
-  ZCodeClientSigner,
-  type ZCodeParsedKey,
-} from './zcode-signer.js'
-export {
-  WORKBUDDY_HOST_HEARTBEAT_FILENAME,
-  clearHostHeartbeat,
-  isHeartbeatProcessAlive,
-  processStartTimeMs,
-  readHostHeartbeat,
-  workbuddyHostHeartbeatPath,
-  type WorkBuddyHostHeartbeat,
-} from './host-heartbeat.js'
+/** The plugin's configuration schema; the Loader reads it as the `Config` export. */
+export { Config }
 
 /** Stable Cordis plugin name. */
 export const name = 'llm-anyconnect'
@@ -283,7 +101,7 @@ export function apply(ctx: Context, config: Config): void {
   const variants = createVariantRuntimeSet({ ctx, client, current })
 
   // Usage readout：注册 seam 与 pill 窗口助手见 usage.ts（本文件不再持有查询器实现）。
-  registerUsageQueriers(ctx, variants.runtimes, client)
+  registerUsageQueriers(ctx, variants.runtimes, variants.rateLimits)
 
   // This plugin ships its own configuration cards: opt out of the host's
   // auto-generated settings page (mirroring upstream `dsh-llm-pi-ai`). The
@@ -294,17 +112,15 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   // 状态域（storageDomain）：自有凭据副本的官方持久化位（storages/dsh_any_connect/，
-  // 见 state-store.ts）。服务就绪后搬旧散文件、把域存取推进每个变体；注入前的
-  // 读写走 `.dsh-any-connect/` 下的文件回落，由迁移例程收编，两侧无缝衔接。
+  // 见 state-store.ts）。服务就绪后把域存取推进每个变体；域 open 之前（注入前
+  // 的 refresh 等）读写走 `.dsh-any-connect/` 下的文件回落，域就绪后以域为准。
   // 域不可用时 error 日志 + 继续文件回落——模型代理的主链路不该因持久化层
-  // 故障整体不可用；回落与域之间由迁移例程保证单向收敛（先写域成功才删源）。
-  // 宿主未挂 storage-domain 表单（更老的宿主）时 inject 永不触发，行为同回落。
+  // 故障整体不可用。
+  // 宿主未挂 storage-domain 表单时 inject 永不触发，行为同回落。
   ctx.inject(['storageDomain'], child => {
     void (async () => {
       const domain = await child.storageDomain.open(anyConnectDomain)
       const state = domainStateStore(domain)
-      const warn = (message: string) => ctx.logger?.warn?.(message)
-      await migrateLegacyCredentialFiles(state, legacyOwnAuthPath, workbuddyOwnAuthPath, warn)
       variants.setState(state)
       // 今日消耗台账（credit-ledger.ts）与凭据副本同域（ledger 表）：域就绪即
       // 注入；open 失败时整个域走下面的统一 error 路径，台账随域一起缺席。
@@ -315,7 +131,7 @@ export function apply(ctx: Context, config: Config): void {
     })().catch((error: unknown) => {
       ctx.logger?.error?.(
         'dsh-any-connect: state domain unavailable; owned-copy persistence stays on the file fallback:'
-        + ` ${error instanceof Error ? error.message : String(error)}`,
+        + ` ${errorMessage(error)}`,
       )
     })
   })

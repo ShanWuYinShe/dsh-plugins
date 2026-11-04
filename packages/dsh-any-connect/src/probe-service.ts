@@ -46,6 +46,12 @@ export interface WorkBuddyProbeServiceOptions {
   /** Injectable for tests; defaults to the live upstream sender. */
   send?: (modelId: string) => ProbeSender
   /**
+   * 装配方（变体）的来源标识。给出后所有 `unavailable` 状态的 reason 带
+   * `<variantId>: ` 前缀——多个变体共用同一宿主日志/状态路由时能区分来源。
+   * 缺省不加（服务级测试按字面断言 reason）。
+   */
+  variantId?: string
+  /**
    * 自动清扫中的探针失败上报（清扫入口 probeMissingCandidates 丢弃
    * promise，rejection 若无人接就是 unhandled rejection，Node ≥15 默认
    * 策略下可终止宿主进程——credentials.current() 会因凭据区域不匹配
@@ -67,6 +73,12 @@ export class WorkBuddyProbeService {
 
   constructor(options: WorkBuddyProbeServiceOptions) {
     this.options = options
+  }
+
+  /** unavailable 统一出口：装配了 variantId 时给 reason 加来源前缀。 */
+  private unavailable(reason: string): WorkBuddyProbeStatus {
+    const { variantId } = this.options
+    return { state: 'unavailable', reason: variantId === undefined ? reason : `${variantId}: ${reason}` }
   }
 
   /** Whether a sweep is in flight right now. */
@@ -100,9 +112,9 @@ export class WorkBuddyProbeService {
    */
   async probe(modelId: string): Promise<WorkBuddyProbeStatus> {
     const info = this.options.catalog.current().find(model => model.id === modelId)
-    if (info === undefined) return { state: 'unavailable', reason: `unknown model: ${modelId}` }
+    if (info === undefined) return this.unavailable(`unknown model: ${modelId}`)
     const account = this.options.account()
-    if (account === undefined) return { state: 'unavailable', reason: 'no WorkBuddy credential' }
+    if (account === undefined) return this.unavailable('no WorkBuddy credential')
     const pendingKey = JSON.stringify([account, modelId])
     const pending = this.pending.get(pendingKey)
     if (pending !== undefined) return pending
@@ -111,9 +123,9 @@ export class WorkBuddyProbeService {
       // Re-read inside the queue: an earlier sweep may have changed the catalog
       // or already answered this model.
       const current = this.options.catalog.current().find(model => model.id === modelId)
-      if (current === undefined) return { state: 'unavailable', reason: `unknown model: ${modelId}` }
+      if (current === undefined) return this.unavailable(`unknown model: ${modelId}`)
       if (current.reasoning?.supports !== true || (current.reasoning.supportedEfforts?.length ?? 0) > 0) {
-        return { state: 'unavailable', reason: 'model does not need detection' }
+        return this.unavailable('model does not need detection')
       }
       const cached = this.recordFor(modelId)
       if (cached !== undefined && cached.validation !== 'unknown') {
@@ -125,9 +137,9 @@ export class WorkBuddyProbeService {
       // it started under, and storing the result afterwards would resurrect
       // the previous account's answer.
       const activeAccount = this.options.account()
-      if (activeAccount !== account) return { state: 'unavailable', reason: 'account changed before detection' }
+      if (activeAccount !== account) return this.unavailable('account changed before detection')
       const credential = await this.options.credentials.current()
-      if (credential === undefined) return { state: 'unavailable', reason: 'no WorkBuddy credential' }
+      if (credential === undefined) return this.unavailable('no WorkBuddy credential')
 
       const send = this.options.send === undefined
         ? (effort: string | undefined, signal: AbortSignal) =>
@@ -143,7 +155,7 @@ export class WorkBuddyProbeService {
         // The account may have changed while the requests were in flight. Drop
         // the observation rather than attribute it to whoever is signed in now.
         if (this.options.account() !== account) {
-          return { state: 'unavailable', reason: 'account changed during detection' }
+          return this.unavailable('account changed during detection')
         }
         const record = this.options.store.record(
           fingerprintModel(current),
@@ -153,7 +165,7 @@ export class WorkBuddyProbeService {
         )
         await this.options.store.set(modelId, record)
         if (outcome.validation === 'unknown') {
-          return { state: 'unavailable', reason: outcome.reason }
+          return this.unavailable(outcome.reason)
         }
         return { state: 'ok', validation: outcome.validation, efforts: record.efforts, requests: outcome.requests }
       } finally {

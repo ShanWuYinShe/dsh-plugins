@@ -3,7 +3,10 @@ import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
-import { createArchiveHost } from "../src/index.js";
+import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
+// 入口只导出 Loader 四件套（name/inject/config/apply），测试便利值走相对路径导入
+// （官方 package-surface 规则：入口不得为测试冻结额外 API）。
+import { createArchiveHost } from "../src/archive-host.js";
 
 const prevHome = process.env.HOME;
 const prevDshHome = process.env.DSH_HOME;
@@ -18,6 +21,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // 兜底：用例超时/中断时测试体内的 finally 可能不执行，fake timers 绝不能
+  // 泄漏给同文件后续用例（泄漏会让后续 await delay(...) 永远不 resolve，
+  // 一条用例的失败放大成整片红——历史上三条失败正是这种级联）。
+  vi.useRealTimers();
   process.env.HOME = prevHome;
   process.env.DSH_HOME = prevDshHome;
   fs.rmSync(fakeHome, { recursive: true, force: true });
@@ -56,16 +63,19 @@ function assistantEvent(seq: number, time: number, text: string) {
  * 官方契约夹具：list() 返回
  * SessionPersistenceSnapshot 数组、open() read 句柄读事件流、事件 data
  * 为官方 SessionEventMap 形状（user/message 本体、assistant/message 包装）。
- * 默认带 locate——jsonl 后端的诊断钩子（不在抽象契约上），
- * withLocate=false 覆盖无 locate 后端的降级路径。
+ * stat(id) 快照带 0.2.2 的标准 location（当前代际工件路径），与宿主
+ * jsonl 后端的行为一致。
  */
 function makeFixture(options: {
   archived?: string[];
   headers?: Array<Record<string, any>>;
-  withLocate?: boolean;
   /** sessionQuery 标题索引桩：map 给 fulfilled 标题（缺席=无标题）、
    * reject 列单行 rejected、throwAll 整单抛错。不传=无该服务（回退直读）。 */
   titles?: { map?: Record<string, string>; reject?: string[]; throwAll?: boolean };
+  /** 观测点：ctx.sessions.get 每次被调用时回调。删除路径只在 exclusive
+   * 临界区内部调它，用例据此获得「删除已持锁」的确定性同步点，不再靠
+   * delay(50) 之类的墙钟窗口。 */
+  onSessionGet?: (sessionId: string) => void;
 } = {}) {
   const registryState = {
     initialized: true,
@@ -84,7 +94,6 @@ function makeFixture(options: {
       registryState.archivedSessionIds = registryState.archivedSessionIds.filter((id) => id !== sessionId);
     },
   };
-  const withLocate = options.withLocate ?? true;
   const headers = options.headers ?? [];
   const sessions = new Map<string, unknown>();
   let eventReads = 0;
@@ -96,20 +105,24 @@ function makeFixture(options: {
   };
   const eventsOf = (id: string) => JSON.parse(fs.readFileSync(sessionPath(id), "utf8"));
 
-  const persistenceMock: Record<string, any> = withLocate
-    ? { locate: (meta: { id: string }) => ({ kind: "jsonl", path: sessionPath(meta.id) }) }
-    : {};
+  const persistenceMock: Record<string, any> = {};
   let statCalls = 0;
   let listCalls = 0;
   let openCalls = 0;
   let titleCalls = 0;
   // 官方契约 stat(id):只读该会话元数据;枚举不到(无 header 或文件已删)
-  // 返回 undefined。四端点都走 stat 逐 id 定位，不做全量 list()。
+  // 返回 undefined。快照携带 0.2.2 的标准 location(当前代际工件路径)。
+  // 四端点都走 stat 逐 id 定位，不做全量 list()。
   persistenceMock.stat = async (id: string) => {
     statCalls++;
     if (!headers.some((h) => h.id === id) || !fs.existsSync(sessionPath(id))) return void 0;
     const header = headerOf(id);
-    return { header, revision: id + ":rev", sizeBytes: fs.statSync(sessionPath(id)).size };
+    return {
+      header,
+      revision: id + ":rev",
+      sizeBytes: fs.statSync(sessionPath(id)).size,
+      location: { kind: "jsonl", path: sessionPath(id) },
+    };
   };
   persistenceMock.list = async () => {
     listCalls++;
@@ -162,7 +175,7 @@ function makeFixture(options: {
   const services: Record<string, unknown> = {
     workspaceRegistry: archiveRegistry,
     sessionPersistence: persistenceMock,
-    sessions: { get: (id: string) => sessions.get(id) },
+    sessions: { get: (id: string) => { options.onSessionGet?.(id); return sessions.get(id); } },
     ...(sessionQuery === undefined ? {} : { sessionQuery }),
   };
   const ctx = {
@@ -174,7 +187,12 @@ function makeFixture(options: {
 
 const baseCfg = { detailMaxMessages: 50, messagePreviewChars: 500, titleReadConcurrency: 2 };
 
-const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/** 手动闸门：把「某个异步操作已进入临界区」变成可 await 的确定性同步点。 */
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 // ── 用例 ─────────────────────────────────────────────────────────────
 
@@ -203,15 +221,16 @@ describe("session-archive host", () => {
     const listResult = await archiveHost.list();
     expect(listResult.items.length === 2 && !listResult.items.some((i) => i.sessionId === "s-ghost")).toBe(true);
     expect(!listResult.items.some((i) => i.sessionId === "s3")).toBe(true);
-    expect(listResult.items.find((i) => i.sessionId === "s1").title === "第一个归档会话"
-      && listResult.items.find((i) => i.sessionId === "s2").title === null).toBe(true);
+    const rowOf = (id: string) => listResult.items.find((i) => i.sessionId === id)!;
+    expect(rowOf("s1").title === "第一个归档会话"
+      && rowOf("s2").title === null).toBe(true);
     expect(listResult.items.every((i) => i.size > 0 && i.updatedAt > 0 && i.live === false)).toBe(true);
 
     // 宿主归档不停止内存会话、web 重连还会恢复旧 tab,但归档会话已从会话
     // 列表移除、无法继续对话——内存存在不构成删除风险,不再标记"运行中"。
     f.sessions.set("s1", {});
     const listLive = await archiveHost.list();
-    expect(listLive.items.find((i) => i.sessionId === "s1").live === false).toBe(true);
+    expect(listLive.items.find((i) => i.sessionId === "s1")!.live === false).toBe(true);
 
     // 未截断:messageCount 与 totalMessageCount 一致,truncated 为 false。
     const full = await archiveHost.detail("s1");
@@ -269,10 +288,18 @@ describe("session-archive host", () => {
       && delForeign.failed[0]!.reason === "not-archived"
       && fs.existsSync(sessionPath("live-unarchived"))).toBe(true);
 
-    // detail:同样只对归档成员开放。
+    // detail:同样只对归档成员开放；拒绝走官方 RemoteError（稳定 code + 类型化
+    // details），调用方按 code 判别而非 instanceof。
     let threw: any = null;
     try { await archiveHost.detail("live-unarchived"); } catch (error) { threw = error; }
-    expect(threw !== null && threw.code === "NOT_ARCHIVED").toBe(true);
+    const detailFailure = remoteErrorOf(threw);
+    expect(detailFailure?.code).toBe("session-archive/not-archived");
+    if (detailFailure?.code === "session-archive/not-archived") {
+      expect(detailFailure.details.sessionId).toBe("live-unarchived");
+      expect(detailFailure.message).toContain("session not archived");
+    } else {
+      throw new Error("expected session-archive/not-archived RemoteError");
+    }
     expect((await archiveHost.detail("a1")).title === "T-a1").toBe(true);
   });
 
@@ -367,13 +394,19 @@ describe("session-archive host", () => {
     });
     const archiveHost1 = createArchiveHost(f1.ctx, baseCfg);
     writeSession("s-x", []);
-    // locate 覆盖为哈希式目录,同时让 list 的存在性过滤仍能看到该会话
+    // stat 快照的 location 覆盖为哈希式目录(模拟宿主布局契约改为哈希目录名),
+    // 同时让 list 的存在性过滤仍能看到该会话。
     const hashDir = path.join(saRoot, "--proj--", "deadbeef");
     fs.mkdirSync(hashDir, { recursive: true });
     fs.writeFileSync(path.join(hashDir, "session.jsonl"), "[]");
-    const realLocate = f1.persistenceMock.locate;
-    f1.persistenceMock.locate = (meta: { id: string }) =>
-      meta.id === "s-x" ? { kind: "jsonl", path: path.join(hashDir, "session.jsonl") } : realLocate(meta);
+    const realStat = f1.persistenceMock.stat.bind(f1.persistenceMock);
+    f1.persistenceMock.stat = async (id: string) => {
+      const snapshot = await realStat(id);
+      if (id === "s-x" && snapshot !== undefined) {
+        return { ...snapshot, location: { kind: "jsonl", path: path.join(hashDir, "session.jsonl") } };
+      }
+      return snapshot;
+    };
     const out1 = await archiveHost1.deleteArchived(["s-x"]);
     expect(out1.deleted.includes("s-x")).toBe(true);
     expect(fs.existsSync(path.join(hashDir, "session.jsonl"))).toBe(false); // 文件已删
@@ -388,11 +421,80 @@ describe("session-archive host", () => {
     const archiveHost2 = createArchiveHost(f2.ctx, baseCfg);
     writeSession("s-y", []);
     fs.writeFileSync(path.join(saRoot, "--proj--", "s-y", "other-session.jsonl"), "[]");
+    // 同目录还躺着本会话旧代际：目录保留但旧代际必须清掉，否则「已彻底删除」
+    // 的会话数据仍在磁盘上。
+    fs.writeFileSync(path.join(saRoot, "--proj--", "s-y", "session.v1.jsonl"), "[]");
     const out2 = await archiveHost2.deleteArchived(["s-y"]);
     expect(out2.deleted.includes("s-y")).toBe(true);
-    expect(fs.existsSync(sessionPath("s-y"))).toBe(false); // 本会话文件已删
+    expect(fs.existsSync(sessionPath("s-y"))).toBe(false); // 本会话当前代际已删
+    expect(fs.existsSync(path.join(saRoot, "--proj--", "s-y", "session.v1.jsonl"))).toBe(false); // 旧代际已清
     expect(fs.existsSync(path.join(saRoot, "--proj--", "s-y", "other-session.jsonl"))).toBe(true); // 他者日志保留
     expect(fs.existsSync(path.join(saRoot, "--proj--", "s-y"))).toBe(true); // 目录保留
+
+    // 场景 3:目录归属校验失败 + 同会话多代际并存——降级路径必须清掉本会话
+    // 全部旧代际（不能只删 stat 定位到的那一个），目录本身保留。
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-own3-"));
+    const f3 = makeFixture({
+      archived: ["s-z"],
+      headers: [{ id: "s-z", cwd: "/proj/z", createdAt: 3000 }],
+    });
+    const archiveHost3 = createArchiveHost(f3.ctx, baseCfg);
+    writeSession("s-z", []);
+    const hashDir3 = path.join(saRoot, "--proj--", "feedface");
+    fs.mkdirSync(hashDir3, { recursive: true });
+    fs.writeFileSync(path.join(hashDir3, "session.jsonl"), "[]"); // 当前代际（location 指向它）
+    fs.writeFileSync(path.join(hashDir3, "session.v1.jsonl"), "[]"); // 旧代际
+    fs.writeFileSync(path.join(hashDir3, "session.v2.jsonl.zstd"), "x"); // 旧代际（zstd）
+    const realStat3 = f3.persistenceMock.stat.bind(f3.persistenceMock);
+    f3.persistenceMock.stat = async (id: string) => {
+      const snapshot = await realStat3(id);
+      if (id === "s-z" && snapshot !== undefined) {
+        return { ...snapshot, location: { kind: "jsonl", path: path.join(hashDir3, "session.jsonl") } };
+      }
+      return snapshot;
+    };
+    const out3 = await archiveHost3.deleteArchived(["s-z"]);
+    expect(out3.deleted.includes("s-z")).toBe(true);
+    expect(fs.existsSync(path.join(hashDir3, "session.jsonl"))).toBe(false);
+    expect(fs.existsSync(path.join(hashDir3, "session.v1.jsonl"))).toBe(false);
+    expect(fs.existsSync(path.join(hashDir3, "session.v2.jsonl.zstd"))).toBe(false);
+    expect(fs.existsSync(hashDir3)).toBe(true); // 目录仍保留（fail-safe）
+
+    // 场景 4:降级路径无法清掉旧代际（以目录形态占位使 rm 失败）——该 id 必须
+    // 记 failed 而不是 deleted（磁盘上仍有本会话数据，不得谎报成功）。
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-own4-"));
+    const f4 = makeFixture({
+      archived: ["s-w"],
+      headers: [{ id: "s-w", cwd: "/proj/w", createdAt: 4000 }],
+    });
+    const archiveHost4 = createArchiveHost(f4.ctx, baseCfg);
+    writeSession("s-w", []);
+    const hashDir4 = path.join(saRoot, "--proj--", "cafebabe");
+    fs.mkdirSync(hashDir4, { recursive: true });
+    // 目录占位（先建、mtime 更旧）使清理阶段 rm 以 EISDIR 失败 → 残留；
+    // 当前代际 session.jsonl 必须最后写，确保 resolveGenerationFile 选中它
+    // 而不是这个同名族目录。
+    const staleGeneration = path.join(hashDir4, "session.v1.jsonl");
+    fs.mkdirSync(staleGeneration);
+    fs.writeFileSync(path.join(hashDir4, "session.jsonl"), "[]");
+    // 显式把残留条目的 mtime 拨旧：resolveGenerationFile 按最新 mtime 选代际，
+    // 不能依赖文件系统的 readdir 顺序/时间戳精度。
+    const staleTime = new Date(Date.now() - 60_000);
+    fs.utimesSync(staleGeneration, staleTime, staleTime);
+    const realStat4 = f4.persistenceMock.stat.bind(f4.persistenceMock);
+    f4.persistenceMock.stat = async (id: string) => {
+      const snapshot = await realStat4(id);
+      if (id === "s-w" && snapshot !== undefined) {
+        return { ...snapshot, location: { kind: "jsonl", path: path.join(hashDir4, "session.jsonl") } };
+      }
+      return snapshot;
+    };
+    const out4 = await archiveHost4.deleteArchived(["s-w"]);
+    expect(out4.deleted).toEqual([]);
+    expect(out4.failed).toHaveLength(1);
+    expect(out4.failed[0]!.sessionId).toBe("s-w");
+    expect(out4.failed[0]!.reason).toContain("stale session files remain");
+    expect(f4.registryState.archivedSessionIds.includes("s-w")).toBe(true);
   });
 
   it("unarchive:恢复仍存在文件的会话、拒绝 ghost", async () => {
@@ -433,48 +535,72 @@ describe("session-archive host", () => {
     writeSession("r1", []);
     writeSession("r2", []);
 
-    // 单次重建:生成流恰在删除窗口内落盘(100ms 后写回,早于 300ms 复验点)
-    // → 复验发现重现、再删一次,最终计入 deleted 且文件确实不在。
-    const recreate = setTimeout(() => {
-      try { writeSession("r1", []); } catch {}
-    }, 100);
-    const once = await archiveHost.deleteArchived(["r1"]);
-    clearTimeout(recreate);
-    expect(once.deleted.includes("r1") && !fs.existsSync(sessionPath("r1"))).toBe(true);
-
-    // 持续重建(确定性):冻结宿主 delay(fake timers 只伪装 setTimeout/
-    // clearTimeout,setImmediate 与真实 fs 保持原样),测试在「rm 落定 →
-    // 复验 stat」两个同步点之间显式写回——stat 执行时文件必然存在,不再
-    // 与真实时钟竞速(50ms 定时器在 CI 慢机上可被饿满 300ms settle 窗口,
-    // 曾致 publish 流水两次假红)。若同步点推断有误,断言会带完整结果对象
-    // 明确失败,不会偶发翻转。
+    // 确定性版本(不依赖墙钟):冻结宿主 delay(fake timers 只伪装 setTimeout/
+    // clearTimeout,setImmediate 与真实 fs 保持原样),「重建」只发生在
+    // 「rm 文件 + rmdir 会话目录整体落定」与「复验 stat」两个可观测同步点
+    // 之间——stat 执行时文件必然存在。单次重建与持续重建因此都被实际验证,
+    // 不再像旧的 100ms 定时器那样在慢机上可能整个落空(测试看似绿、语义
+    // 已失效),也不再出现 rm→rmdir 间隙写入导致的 ENOTEMPTY 假红。
+    //
+    // 关键同步点:目录/文件的 OS 状态可见早于 fs 回调投递,「目录已消失」
+    // 并不保证宿主 delay 的定时器已经入队。此时若直接 advance(300),假时钟
+    // 会空转到窗口末端,随后才入队的定时器要再等一个窗口——测试便永远等不到
+    // 复验结果(历史「偶发挂死 → 后续用例连锁红」的真实根因;机器越忙越容易
+    // 命中)。因此每次 advance 前都先等「复验定时器恰好 1 个在队」,把推进假
+    // 时钟变成有前置条件的确定性操作,而不是碰运气。
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
+      const sessionDirOf = (id: string) => path.dirname(sessionPath(id));
       /** 等 impl 的「rm 文件 + rmdir 会话目录」整体落定(目录消失)。同步到
        * 目录级而非文件级:写回若落在 rm 与 rmdir 的间隙里,rmdir 会以
        * ENOTEMPTY 失败(实测即 CI 假红的真实 reason)。setImmediate 保持
-       * 真实,轮询推进真实 fs 操作;迭代上限防御挂死。 */
-      const sessionDir = path.dirname(sessionPath("r2"));
-      const waitRm = async () => {
-        for (let i = 0; i < 10000 && fs.existsSync(sessionDir); i++) {
+       * 真实,轮询推进真实 fs 操作;迭代上限只是防挂死护栏,不参与断言。 */
+      const waitSessionDirGone = async (id: string) => {
+        const dir = sessionDirOf(id);
+        for (let i = 0; i < 100000 && fs.existsSync(dir); i++) {
           await new Promise((resolve) => setImmediate(resolve));
         }
-        expect(fs.existsSync(sessionDir)).toBe(false);
+        expect(fs.existsSync(dir), "impl 未清理会话目录: " + dir).toBe(false);
       };
-      const recreate = () => {
-        fs.mkdirSync(sessionDir, { recursive: true });
-        fs.writeFileSync(sessionPath("r2"), "{}");
+      /** 等这一次删除复验的宿主 delay 真正入队(恰好一个未决定时器),再推进
+       * 假时钟——见上方「关键同步点」。 */
+      const waitCheckTimerQueued = async (stage: string) => {
+        for (let i = 0; i < 100000 && vi.getTimerCount() === 0; i++) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+        expect(vi.getTimerCount(), "复验定时器未按预期入队: " + stage).toBe(1);
       };
-      const pending = archiveHost.deleteArchived(["r2"]);
-      await waitRm();                              // rm#1 + rmdir#1 落定
-      recreate();                                  // 删除窗口内第一次重建
+      const recreate = (id: string) => {
+        fs.mkdirSync(sessionDirOf(id), { recursive: true });
+        fs.writeFileSync(sessionPath(id), "{}");
+      };
+
+      // 单次重建:删除窗口内重建一次 → 复验发现重现、再删一次 → 最终 deleted。
+      const onceP = archiveHost.deleteArchived(["r1"]);
+      await waitSessionDirGone("r1");              // rm#1 + rmdir#1 落定
+      await waitCheckTimerQueued("r1-checkA");     // 复验定时器入队
+      recreate("r1");                              // 删除窗口内写入
       await vi.advanceTimersByTimeAsync(300);      // 复验 stat#1 → 存在 → rm#2
-      await waitRm();                              // rm#2 + rmdir#2 落定
-      recreate();                                  // 第二次重建
-      await vi.advanceTimersByTimeAsync(300);      // 复验 stat#2 → 存在
-      const repeated = await pending;
-      expect(repeated.deleted).toEqual([]);
-      expect(repeated.failed).toEqual([{ sessionId: "r2", reason: "reappeared" }]);
+      await waitSessionDirGone("r1");              // rm#2 + rmdir#2 落定
+      await waitCheckTimerQueued("r1-checkB");     // 复验定时器入队
+      await vi.advanceTimersByTimeAsync(300);      // 复验 stat#2 → 不存在 → deleted
+      expect(await onceP).toEqual({ deleted: ["r1"], failed: [], removedFromArchive: 0, needsRestart: [] });
+      expect(fs.existsSync(sessionPath("r1"))).toBe(false);
+      // 删除已完结:不应残留未决定时器(fake timers 语义:悬空 timer = 没跑完)。
+      expect(vi.getTimerCount()).toBe(0);
+
+      // 持续重建:两次复验前都重建 → 两次 rm 都压不掉 → reappeared。
+      const repeatedP = archiveHost.deleteArchived(["r2"]);
+      await waitSessionDirGone("r2");              // rm#1 + rmdir#1 落定
+      await waitCheckTimerQueued("r2-checkA");     // 复验定时器入队
+      recreate("r2");                              // 删除窗口内第一次重建
+      await vi.advanceTimersByTimeAsync(300);      // 复验 stat#1 → 存在 → rm#2
+      await waitSessionDirGone("r2");              // rm#2 + rmdir#2 落定
+      await waitCheckTimerQueued("r2-checkB");     // 复验定时器入队
+      recreate("r2");                              // 第二次重建
+      await vi.advanceTimersByTimeAsync(300);      // 复验 stat#2 → 存在 → reappeared
+      expect(await repeatedP).toEqual({ deleted: [], failed: [{ sessionId: "r2", reason: "reappeared" }], removedFromArchive: 0, needsRestart: [] });
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -496,11 +622,12 @@ describe("session-archive host", () => {
     ]);
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const listResult = await archiveHost.list();
-    expect(listResult.items.length === 1 && listResult.items[0].sessionId === "v1").toBe(true);
-    expect(listResult.items[0].title === "快照形状"
-      && listResult.items[0].cwd === "/proj/a"
-      && listResult.items[0].createdAt === 1000
-      && listResult.items[0].size > 0).toBe(true);
+    const row = listResult.items[0]!;
+    expect(listResult.items.length === 1 && row.sessionId === "v1").toBe(true);
+    expect(row.title === "快照形状"
+      && row.cwd === "/proj/a"
+      && row.createdAt === 1000
+      && row.size > 0).toBe(true);
     expect((await archiveHost.count()).count === 1).toBe(true);
     // 官方事件 data 形状:user/message 本体、assistant/message 包装(message.content)。
     const detail = await archiveHost.detail("v1");
@@ -509,22 +636,30 @@ describe("session-archive host", () => {
       && detail.messages[1]!.role === "assistant" && detail.messages[1]!.text === "回复").toBe(true);
   });
 
-  it("无 locate 的宿主后端:列表/详情可用(文件信息降级),删除按不可定位处理", async () => {
+  it("stat 快照无 location(pending 会话):列表/详情可用(文件信息降级),删除按不可定位处理", async () => {
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-noloc-"));
     const f = makeFixture({
-      withLocate: false,
       archived: ["n1"],
       headers: [{ id: "n1", cwd: "/proj/a", createdAt: 1000 }],
     });
     writeSession("n1", [
       { type: "session/title", seq: 1, time: 1, data: { title: "无定位", messageSeqs: [], source: { kind: "fallback" } } },
     ]);
+    // pending 会话的快照没有 location(宿主对未落盘会话省略该字段)。
+    const realStatN = f.persistenceMock.stat.bind(f.persistenceMock);
+    f.persistenceMock.stat = async (id: string) => {
+      const snapshot = await realStatN(id);
+      if (snapshot === undefined) return void 0;
+      const { location: _location, ...rest } = snapshot;
+      return rest;
+    };
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const listResult = await archiveHost.list();
-    expect(listResult.items.length === 1 && listResult.items[0].sessionId === "n1"
-      && listResult.items[0].title === "无定位").toBe(true);
+    const pendingRow = listResult.items[0]!;
+    expect(listResult.items.length === 1 && pendingRow.sessionId === "n1"
+      && pendingRow.title === "无定位").toBe(true);
     // 文件不可定位:size 退化为 0、updatedAt 退化为创建时间。
-    expect(listResult.items[0].size === 0 && listResult.items[0].updatedAt === 1000).toBe(true);
+    expect(pendingRow.size === 0 && pendingRow.updatedAt === 1000).toBe(true);
     // 删除:文件存在但无法定位路径 → 既不能谎报成功也不能删错东西,按 busy
     // 同级的失败语义兜底(failed 上报),文件保持原状。
     const del = await archiveHost.deleteArchived(["n1"]);
@@ -532,11 +667,11 @@ describe("session-archive host", () => {
       && del.failed.length === 1
       && fs.existsSync(sessionPath("n1"))).toBe(true);
   });
-  it("旧代际文件名(locate 指向当前代际落空):恢复/删除按目录扫描落到实际文件", async () => {
+  it("旧代际文件名(stat location 指向当前代际落空):恢复/删除按目录扫描落到实际文件", async () => {
     // 线上故障第二形状:历史会话落盘为旧代际名 session.jsonl(.zstd),而
-    // locate() 只按当前格式版本拼文件名 → stat 落空 → 恢复被判"文件不存在"
-    // 全部拒绝("已恢复 0 个")、删除谎报成功但文件还在。目录路径不随代际
-    // 变化,修复后按目录扫描落到实际文件。
+    // stat location 只指向当前格式版本拼出的文件名 → 落空 → 恢复被判
+    // "文件不存在"全部拒绝("已恢复 0 个")、删除谎报成功但文件还在。目录路径
+    // 不随代际变化,修复后按目录扫描落到实际文件。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-gen-"));
     const f = makeFixture({
       archived: ["g1"],
@@ -575,17 +710,18 @@ describe("session-archive host", () => {
     expect(fs.existsSync(legacyPath)).toBe(false);
   });
 
-  it("locate 抛错:删除按 unlocatable 拒绝,不得谎报成功(0.3.9 同源回归)", async () => {
-    // fileInfo 的外层兜底若把 locate 抛错误判为 absent,删除路径会记成
-    // "幂等删除成功"——文件还在却进了 deleted。按语义表必须归 unknown,
-    // 对应删除路径的 unlocatable 拒绝。
+  it("stat 抛错:删除按 unenumerable 拒绝,不得谎报成功(0.3.9 同源回归)", async () => {
+    // stat 抛错时 snapshotsByIds 枚举不到该 id → 删除按 unenumerable 拒绝;
+    // 若任何一层把它误判为 absent,删除路径会记成"幂等删除成功"——文件还在
+    // 却进了 deleted。fileInfo 里 stat 抛错也归 unknown(unlocatable),是
+    // 「快照拿到之后、fileInfo 再抛」竞态窗口的防御分支。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-loc-"));
     const f = makeFixture({
       archived: ["e1"],
       headers: [{ id: "e1", cwd: "/proj/a", createdAt: 1000 }],
     });
     writeSession("e1", []);
-    f.persistenceMock.locate = () => {
+    f.persistenceMock.stat = async () => {
       throw new Error("backend contract drift");
     };
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
@@ -593,7 +729,7 @@ describe("session-archive host", () => {
     expect(del.deleted.length === 0
       && del.failed.length === 1
       && del.failed[0]!.sessionId === "e1"
-      && del.failed[0]!.reason === "unlocatable"
+      && del.failed[0]!.reason === "unenumerable"
       && fs.existsSync(sessionPath("e1"))).toBe(true);
     // 恢复同样谨慎拒绝(unknown ≠ located)。
     const un = await archiveHost.unarchive(["e1"]);
@@ -605,26 +741,34 @@ describe("session-archive host", () => {
     // 排队等到删除完成后 confirm → absent → 拒绝恢复。没有互斥时 confirm
     // 可在沉降窗口内探到 located,unarchiveSession 会把 id 移出集合——文件没了、
     // 归档标记也没了,内存会话重回侧边栏。
+    // 同步点用 ctx.sessions.get 回调:impl 只在 exclusive 临界区内部调它,
+    // 因此「删除已持锁」是可等待的事件,不再依赖 delay(50) 这类墙钟窗口
+    // (机器一慢,50ms 内删除可能还没进临界区,恢复反而抢到锁,断言随机红绿)。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-mx1-"));
+    const deleteInCritical = deferred();
     const f = makeFixture({
       archived: ["m1"],
       headers: [{ id: "m1", cwd: "/proj/a", createdAt: 1000 }],
+      onSessionGet: (sessionId) => {
+        if (sessionId === "m1") deleteInCritical.resolve();
+      },
     });
     writeSession("m1", []);
     f.sessions.set("m1", {});
     const archiveHost = createArchiveHost(f.ctx, baseCfg);
     const delP = archiveHost.deleteArchived(["m1"]);
-    await delay(50);
-    const unP = archiveHost.unarchive(["m1"]);
+    await deleteInCritical.promise;              // 删除已持锁(仍处沉降窗口)
+    const unP = archiveHost.unarchive(["m1"]);   // 恢复的临界区必然排在删除之后
     const [del, un] = await Promise.all([delP, unP]);
-    expect(del.deleted.includes("m1")).toBe(true);
-    expect(un.restored.length === 0).toBe(true);
+    expect(del).toEqual({ deleted: ["m1"], failed: [], removedFromArchive: 0, needsRestart: ["m1"] });
+    expect(un).toEqual({ restored: [], failed: [{ sessionId: "m1", reason: "not-restorable" }], removedFromArchive: 0 });
     expect(!fs.existsSync(sessionPath("m1"))).toBe(true);
     // ghost id 留在集合,由存在性过滤隐藏。
     expect(f.registryState.archivedSessionIds.includes("m1")).toBe(true);
 
-    // 变体 B:恢复先落地,删除随后 → 锁内复验归档成员资格失败,拒绝删除,
-    // 文件保持原状。
+    // 变体 B:恢复先持锁落地,删除随后发起 → 锁内复验归档成员资格失败,
+    // 拒绝删除,文件保持原状。用 registry.unarchiveSession 闸门把「恢复
+    // 进行中」钉成可等待状态,再发起删除,同样不依赖墙钟延时。
     saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-mx2-"));
     const f2 = makeFixture({
       archived: ["m2"],
@@ -632,15 +776,24 @@ describe("session-archive host", () => {
     });
     writeSession("m2", []);
     const archiveHost2 = createArchiveHost(f2.ctx, baseCfg);
+    const unarchiveInCritical = deferred();
+    const releaseUnarchive = deferred();
+    const registry = f2.ctx.workspaceRegistry;
+    const realUnarchiveSession = registry.unarchiveSession.bind(registry);
+    registry.unarchiveSession = async (sessionId) => {
+      unarchiveInCritical.resolve();             // confirm 已通过、恢复仍持锁
+      await releaseUnarchive.promise;
+      return realUnarchiveSession(sessionId);
+    };
     const unP2 = archiveHost2.unarchive(["m2"]);
-    await delay(50);
-    const delP2 = archiveHost2.deleteArchived(["m2"]);
+    await unarchiveInCritical.promise;
+    const delP2 = archiveHost2.deleteArchived(["m2"]); // 必然排在恢复之后
+    releaseUnarchive.resolve();
     const [un2, del2] = await Promise.all([unP2, delP2]);
-    expect(un2.restored.includes("m2")).toBe(true);
-    expect(del2.deleted.length === 0
-      && del2.failed.length === 1
-      && del2.failed[0]!.reason === "not-archived"
-      && fs.existsSync(sessionPath("m2"))).toBe(true);
+    expect(un2).toEqual({ restored: ["m2"], failed: [], removedFromArchive: 1 });
+    expect(del2).toEqual({ deleted: [], failed: [{ sessionId: "m2", reason: "not-archived" }], removedFromArchive: 0, needsRestart: [] });
+    expect(fs.existsSync(sessionPath("m2"))).toBe(true);
+    expect(f2.registryState.archivedSessionIds.includes("m2")).toBe(false);
   });
 
   it("detail:畸形 assistant 事件(缺 message)不炸整个请求", async () => {
@@ -686,7 +839,7 @@ describe("session-archive host", () => {
       && detail.messages[0]!.text === "正常消息").toBe(true);
     // list() 的标题读取路径同样不炸,标题正常折叠。
     const items = await archiveHost.list();
-    expect(items.items.length === 1 && items.items[0].title === "畸形会话").toBe(true);
+    expect(items.items.length === 1 && items.items[0]!.title === "畸形会话").toBe(true);
   });
 
   it("标题/详情分块读取:>块长的事件流不重不漏,标题(块首)与尾部消息都可达", async () => {
@@ -711,7 +864,7 @@ describe("session-archive host", () => {
     const readsBefore = f.eventReads();
 
     const items = await archiveHost.list();
-    expect(items.items.length === 1 && items.items[0].title === "长会话").toBe(true);
+    expect(items.items.length === 1 && items.items[0]!.title === "长会话").toBe(true);
     // 451 条事件跨 3 块(200+200+51),标题读取必须真的分块而不是一次性读。
     expect(f.eventReads() - readsBefore).toBe(3);
 

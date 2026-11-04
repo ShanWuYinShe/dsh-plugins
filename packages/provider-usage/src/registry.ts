@@ -15,8 +15,8 @@
 
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
-import { inferProviderFromBaseUrl, normalizeProviderKey } from './resolve.js'
-import type { AccountWalletBalance, ProviderUsageQuerier, UsageSnapshot } from './types.js'
+import { inferProviderFromBaseUrl, normalizeProviderKey, type ResolvedProvider } from './resolve.js'
+import type { ProviderUsageQuerier, UsageSnapshot } from './types.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -34,19 +34,19 @@ declare module '@deepseek-ai/cordis' {
 }
 
 /** How long one provider's answer is reused before the next read refetches. */
-export const DEFAULT_CACHE_TTL_MS = 60_000
+const DEFAULT_CACHE_TTL_MS = 60_000
 
 /** 失败答案的复用时长:错误没有成功答案的保质期,按更短负缓存处理。 */
-export const DEFAULT_ERROR_CACHE_TTL_MS = 10_000
+const DEFAULT_ERROR_CACHE_TTL_MS = 10_000
 
 /** 无推断结果(`snapshot` 为 undefined)的负缓存时长,过期后才再次尝试推断。 */
-export const DEFAULT_UNRESOLVED_TTL_MS = 60_000
+const DEFAULT_UNRESOLVED_TTL_MS = 60_000
 
 /** How long one query may run before it is abandoned. */
-export const DEFAULT_QUERY_TIMEOUT_MS = 15_000
+const DEFAULT_QUERY_TIMEOUT_MS = 15_000
 
 /** Constructor options. */
-export interface ProviderUsageRegistryOptions {
+interface ProviderUsageRegistryOptions {
   /** Cache lifetime in milliseconds; tests pin this to drive refetches. */
   cacheTtlMs?: number
   /** 失败快照的负缓存时长;过期后第一次读取即重试上游。 */
@@ -62,7 +62,7 @@ export interface ProviderUsageRegistryOptions {
 /**
  * {@link ProviderUsageRegistry.snapshot} 的读取选项。
  */
-export interface ProviderUsageSnapshotOptions {
+interface ProviderUsageSnapshotOptions {
   /**
    * 绕过缓存读(在途合并照常生效):面板手动刷新用,自动轮询不带。
    * 命中在途查询时返回该查询的结果——它至多早于点击一个查询时长,
@@ -84,16 +84,105 @@ interface CacheEntry {
   expiresAt: number
 }
 
-/** What the installed resolver answers for one provider (endpoint + credential). */
-type ResolverAnswer = {
-  baseURL?: string
-  apiKey?: string
-  accountWallets?: AccountWalletBalance[]
-  accountError?: string
+/** The resolver signature; see {@link ProviderUsageRegistry.setResolver}. */
+type Resolver = (provider: string, signal: AbortSignal) => Promise<ResolvedProvider>
+
+/**
+ * Run one operation under a deadline that also aborts the signal it receives.
+ *
+ * 超时先 abort 再 reject：resolver/querier 内部的 I/O（credentials 服务、
+ * 外部账户接口）未必监听 abort，等它自己结束就失去了 deadline 的保护意义；
+ * 只 abort 不 race 也是假的 deadline——操作永不 settle 时在途条目会永久
+ * 残留，该 provider 的每次读取都被同一个挂起 Promise 拖死。race 保证超时
+ * 必然结算，迟到的 rejection 挂空 catch 兜住，不变成 unhandled rejection。
+ *
+ * @param timeoutMs - deadline in milliseconds.
+ * @param timeoutMessage - rejection reason and abort reason on expiry.
+ * @param run - the operation, receiving the abort signal.
+ * @returns the operation's value, or rejects with the timeout reason.
+ */
+async function underDeadline<T>(timeoutMs: number, timeoutMessage: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const reason = new Error(timeoutMessage)
+      controller.abort(reason)
+      reject(reason)
+    }, timeoutMs)
+  })
+  timer?.unref?.()
+  // race 先被操作结算时，timedOut 稍后的 reject 会成为 unhandled rejection；
+  // 同理操作在超时后迟到 reject 时也一样。两边都挂空 catch 吞掉。
+  timedOut.catch(() => {})
+  const work = run(controller.signal)
+  work.catch(() => {})
+  try {
+    return await Promise.race([work, timedOut])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
-/** The resolver signature; see {@link ProviderUsageRegistry.setResolver}. */
-type Resolver = (provider: string, signal: AbortSignal) => Promise<ResolverAnswer>
+/** One querier-answer shape defect, named for the provider that returned it. */
+function invalidSnapshot(provider: string, reason: string): Error {
+  return new Error(`provider-usage: querier for "${provider}" returned an invalid snapshot: ${reason}`)
+}
+
+/**
+ * Validate one querier answer before it reaches the browser.
+ *
+ * A querier is a public extension point, so a third-party implementation can
+ * return anything at runtime. The client renders `windows` and `rateLimit`
+ * directly, so a malformed answer would throw inside the pill's render — and
+ * the host turns a render throw into a permanent entry abdication (the pill
+ * disappears until a page reload). Folding the defect into the ordinary failure
+ * path keeps the surface alive and reports which provider returned what.
+ *
+ * Fields the registry itself overwrites (`provider`, `fetchedAt`) are not
+ * validated; every field the surface renders is.
+ *
+ * @param provider - provider route key the answer belongs to (for the message).
+ * @param value - the querier's raw answer.
+ */
+function assertQuerierSnapshot(provider: string, value: unknown): void {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw invalidSnapshot(provider, 'not an object')
+  const snapshot = value as Record<string, unknown>
+  const windows = snapshot['windows']
+  if (!Array.isArray(windows)) throw invalidSnapshot(provider, 'windows is not an array')
+  for (const [index, item] of windows.entries()) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) throw invalidSnapshot(provider, `windows[${index}] is not an object`)
+    const window = item as Record<string, unknown>
+    for (const key of ['id', 'label', 'unit'] as const) {
+      if (typeof window[key] !== 'string') throw invalidSnapshot(provider, `windows[${index}].${key} is not a string`)
+    }
+    if (window['id'] === '') throw invalidSnapshot(provider, `windows[${index}].id is empty`)
+    for (const key of ['remain', 'limit'] as const) {
+      const amount = window[key]
+      if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount))) {
+        throw invalidSnapshot(provider, `windows[${index}].${key} is not a finite number`)
+      }
+    }
+    const resetsAt = window['resetsAt']
+    if (resetsAt !== undefined && (typeof resetsAt !== 'string' || Number.isNaN(new Date(resetsAt).getTime()))) {
+      throw invalidSnapshot(provider, `windows[${index}].resetsAt is not a parseable instant`)
+    }
+    if (window['blocked'] !== undefined && typeof window['blocked'] !== 'boolean') {
+      throw invalidSnapshot(provider, `windows[${index}].blocked is not a boolean`)
+    }
+  }
+  for (const key of ['plan', 'error'] as const) {
+    if (snapshot[key] !== undefined && typeof snapshot[key] !== 'string') throw invalidSnapshot(provider, `${key} is not a string`)
+  }
+  const rateLimit = snapshot['rateLimit']
+  if (rateLimit !== undefined) {
+    if (typeof rateLimit !== 'object' || rateLimit === null || Array.isArray(rateLimit)) throw invalidSnapshot(provider, 'rateLimit is not an object')
+    const resetAt = (rateLimit as Record<string, unknown>)['resetAt']
+    if (resetAt !== undefined && (typeof resetAt !== 'number' || !Number.isFinite(resetAt))) {
+      throw invalidSnapshot(provider, 'rateLimit.resetAt is not a finite number')
+    }
+  }
+}
 
 /**
  * Registrations, resolution, and the cache, as the `ctx.providerUsage`
@@ -112,6 +201,13 @@ export class ProviderUsageRegistry extends Service {
   private readonly now: () => number
   /** 推断无果的 provider → 负缓存到期时刻;直接/别名注册查表不受它影响。 */
   private readonly unresolved = new Map<string, number>()
+  /**
+   * 端点/凭据解析器，由调用方安装（默认为空答案）。
+   *
+   * 解析器由调用方注入，本模块因此不 import settings/credentials：内置 resolver
+   * 读宿主目录，测试注入 stub。
+   */
+  private resolveProvider: Resolver = async () => ({})
 
   constructor(ctx: Context, options: ProviderUsageRegistryOptions = {}) {
     super(ctx, 'providerUsage')
@@ -194,12 +290,10 @@ export class ProviderUsageRegistry extends Service {
     // 两个别名路由可能配了不同账号,答案不得互串;注册身份校验按
     // 「注册键」走(见 snapshotWithRegistration 的回写核对)。
     const normalized = normalizeProviderKey(provider)
-    let lookupKey = provider
-    let registration = this.registrations.get(provider)
-    if (registration === undefined) {
-      lookupKey = normalized
-      registration = this.registrations.get(normalized)
-    }
+    const direct = this.registrations.get(provider)
+    // 直接注册键优先，别名键次之；缓存/在途合并仍按「请求键」走。
+    const lookupKey = direct !== undefined ? provider : normalized
+    const registration = direct ?? this.registrations.get(normalized)
     if (registration !== undefined) {
       return this.snapshotWithRegistration(provider, lookupKey, registration, options.force === true)
     }
@@ -237,29 +331,11 @@ export class ProviderUsageRegistry extends Service {
   /**
    * Run the resolver under the query deadline.
    *
-   * 与 {@link withDeadline}（querier 路径）同预算：超时先 abort 传给
-   * resolver 的信号，再直接 reject——resolver 内部的 I/O（credentials
-   * 服务、外部账户接口）未必监听 abort，等它自己结束就失去了 deadline
-   * 的保护意义。失败（含超时）由调用方 catch 成 "无推断结果"。
+   * 与 {@link withDeadline}（querier 路径）同预算；失败（含超时）由调用方
+   * catch 成 "无推断结果"。
    */
-  private async resolveWithDeadline(provider: string): Promise<ResolverAnswer> {
-    const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timedOut = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        controller.abort(new Error('provider resolution timed out'))
-        reject(new Error('provider resolution timed out'))
-      }, this.queryTimeoutMs)
-    })
-    timer?.unref?.()
-    // race 先被 resolver 结算时，timedOut 稍后的 reject 会成为 unhandled
-    // rejection；挂一个空 catch 吞掉即可。
-    timedOut.catch(() => {})
-    try {
-      return await Promise.race([this.resolveProvider(provider, controller.signal), timedOut])
-    } finally {
-      clearTimeout(timer)
-    }
+  private async resolveWithDeadline(provider: string): Promise<ResolvedProvider> {
+    return underDeadline(this.queryTimeoutMs, 'provider resolution timed out', signal => this.resolveProvider(provider, signal))
   }
 
   private async snapshotWithRegistration(cacheKey: string, lookupKey: string, registration: Registration, force: boolean): Promise<UsageSnapshot> {
@@ -309,6 +385,9 @@ export class ProviderUsageRegistry extends Service {
     }
     try {
       const snapshot = await this.withDeadline(provider, registration.querier)
+      // 公开扩展点：第三方 querier 的形状缺陷在越过 wire 之前折叠成失败快照，
+      // 绝不让 client 在渲染期抛错（宿主会把该 entry 永久 abdicate）。
+      assertQuerierSnapshot(provider, snapshot)
       return {
         ...base,
         ...snapshot.plan === undefined ? {} : { plan: snapshot.plan },
@@ -338,39 +417,10 @@ export class ProviderUsageRegistry extends Service {
     }
   }
 
-  /** Race one query against the deadline and the caller's abort. */
+  /** Race one query against the deadline (querier 是公开扩展点，同样受 deadline 保护). */
   private async withDeadline(provider: string, querier: ProviderUsageQuerier): Promise<UsageSnapshot> {
-    const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timedOut = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        controller.abort(new Error('query timed out'))
-        reject(new Error('query timed out'))
-      }, this.queryTimeoutMs)
-    })
-    timer?.unref?.()
-    // 只 abort 不 race 是假的 deadline:queryer 是公开扩展点,第三方实现
-    // (以及不接收 signal 的 credentials 服务)未必响应 abort——await 永不
-    // settle 时 inflight 条目永久残留,该 provider 的每次轮询都被同一个
-    // 挂起 Promise 拖死。race 保证超时必然结算;late rejection 挂空 catch
-    // 兜住,不变成 unhandled rejection。
-    const work = this.resolve(provider, querier, controller.signal)
-    work.catch(() => {})
-    try {
-      return await Promise.race([work, timedOut])
-    } finally {
-      clearTimeout(timer)
-    }
+    return underDeadline(this.queryTimeoutMs, 'query timed out', signal => this.resolve(provider, querier, signal))
   }
-
-  /**
-   * Build the query context and run the querier.
-   *
-   * The credential and endpoint come from a resolver the caller installs, so
-   * this module stays free of settings and credentials imports: built-ins use
-   * the harness directory, tests inject a stub.
-   */
-  private resolveProvider: Resolver = async () => ({})
 
   /** Install the resolver used to fill each query's endpoint and credential. */
   setResolver(resolver: Resolver): void {

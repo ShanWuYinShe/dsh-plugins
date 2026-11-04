@@ -8,8 +8,28 @@
 
 import * as React from 'react'
 import { isDarwin, isWindows, analyzeRootsText, hasBlockingProblems, presetsForPlatform, appendRootLine, cleanRootLine } from './roots-preview.js'
+import type { RootProblem } from './roots-preview.js'
+import type { SandboxExtraRootsConfig, SandboxExtraRootsSetRequest, SandboxExtraRootsSetResult } from '../src/types.js'
 
-export function SandboxRootsCard(props: any) {
+/** plugins.bundle.config slot 注入的卡片上下文（只声明本卡片实际消费的字段）。 */
+interface SandboxRootsCardProps {
+  /** slot 分派视图：page 渲染表单，其余（summary 等）渲染一句话摘要。 */
+  view: string;
+  /** locale 绑定后的文案函数。 */
+  t: (key: string) => string;
+  /** 读取当前生效配置（Remote get → result.value.config）。 */
+  getConfig: () => Promise<SandboxExtraRootsConfig>;
+  /** 保存部分配置（Remote set → 官方 configEditor 持久化）。 */
+  setConfig: (partial: SandboxExtraRootsSetRequest) => Promise<SandboxExtraRootsSetResult>;
+}
+
+/** 卡片底部的状态提示：成功提示自动消失，错误常驻。 */
+interface CardStatus {
+  kind: "ok" | "error";
+  text: string;
+}
+
+export function SandboxRootsCard(props: SandboxRootsCardProps) {
   // plugins.bundle.config 契约只 dispatch page 视图；防御性处理其余取值，
   // 一句话 summary 不读配置、不发请求。view 判断留在无 hooks 的外层，
   // 内层表单组件的 hooks 顺序不受影响。
@@ -17,21 +37,21 @@ export function SandboxRootsCard(props: any) {
   return React.createElement(SandboxRootsForm, props);
 }
 
-function SandboxRootsForm(props: any) {
+function SandboxRootsForm(props: SandboxRootsCardProps) {
   const t = props.t;
   const [open, setOpen] = React.useState(false);
-  const [cfg, setCfg] = React.useState<any>(null);
+  const [cfg, setCfg] = React.useState<SandboxExtraRootsConfig | null>(null);
   // textarea 的原始字符串在编辑期就是 source of truth:受控组件若在
   // onChange 里 split/filter 再 join,用户刚敲的换行会被立即吞掉——
   // 输入 "/tmp/a" 回车再输 "b" 会静默拼成 "/tmp/a/b" 并授予错误写权限。
   // 换行/空行/行首尾空格只在保存时解析。
   const [draftText, setDraftText] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
-  const [status, setStatus] = React.useState<any>(null);
+  const [status, setStatus] = React.useState<CardStatus | null>(null);
 
   // 最新基准镜像：展开重读时判断“用户是否动过输入”，避免覆盖编辑
   // （与 WorkBuddy 的 statusesRef/openIdsRef 同一写法）。
-  const cfgRef = React.useRef<any>(null);
+  const cfgRef = React.useRef<SandboxExtraRootsConfig | null>(null);
   cfgRef.current = cfg;
   // 展开时静默重读配置：CLI/别处改过后页面不显示陈旧值。用户没动过
   // 输入（与旧基准一致）才跟进新值；动过则保留编辑，dirty 按新基准
@@ -39,18 +59,18 @@ function SandboxRootsForm(props: any) {
   React.useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    props.getConfig().then((value: any) => {
+    props.getConfig().then((value: SandboxExtraRootsConfig) => {
       if (cancelled) return;
-      const freshRoots = ((value && value.extraWritableRoots) || []).join("\n");
-      const prevRoots = ((cfgRef.current && cfgRef.current.extraWritableRoots) || []).join("\n");
+      const freshRoots = (value?.extraWritableRoots ?? []).join("\n");
+      const prevRoots = (cfgRef.current?.extraWritableRoots ?? []).join("\n");
       setCfg(value);
-      setDraftText((current: any) => {
+      setDraftText((current: string | null) => {
         const text = current === null ? prevRoots : String(current);
         const normalized = text.split("\n").map(cleanRootLine).filter((s: string) => s.length > 0).join("\n");
         return normalized === prevRoots ? freshRoots : current;
       });
-    }).catch((error: any) => {
-      if (!cancelled) setStatus({ kind: "error", text: `${error?.message || String(error)}`.length > 0 ? `${t("loadFailed")}: ${error?.message || String(error)}` : t("loadFailed") });
+    }).catch((error: unknown) => {
+      if (!cancelled) setStatus({ kind: "error", text: `${t("loadFailed")}: ${(error as Error)?.message ?? String(error)}` });
     });
     return () => { cancelled = true; };
   }, [open]);
@@ -67,7 +87,7 @@ function SandboxRootsForm(props: any) {
     : draftText.split("\n").map(cleanRootLine).filter((s: string) => s.length > 0);
   const dirty = cfg !== null && parsedRoots.join("\n") !== cfgRoots.join("\n");
   // 保存前的即时反馈：哪些行会被 host 拒绝/忽略/去重，不再等保存后才发现。
-  const rootProblems = draftText === null ? [] : analyzeRootsText(draftText);
+  const rootProblems: RootProblem[] = draftText === null ? [] : analyzeRootsText(draftText);
   const hasBlocking = hasBlockingProblems(rootProblems);
   const discard = () => {
     setDraftText(cfgRoots.join("\n"));
@@ -76,13 +96,13 @@ function SandboxRootsForm(props: any) {
   const save = () => {
     setSaving(true);
     setStatus(null);
-    const next = { ...(cfg ?? {}), extraWritableRoots: parsedRoots };
+    const next: SandboxExtraRootsConfig = { ...(cfg ?? {}), extraWritableRoots: parsedRoots };
     props.setConfig(next).then(() => {
       setCfg(next);
       setDraftText(parsedRoots.join("\n"));
       setStatus({ kind: "ok", text: t("saved") });
-    }).catch((error: any) => {
-      setStatus({ kind: "error", text: `${t("saveFailed")}: ${error?.message || String(error)}` });
+    }).catch((error: unknown) => {
+      setStatus({ kind: "error", text: `${t("saveFailed")}: ${(error as Error)?.message ?? String(error)}` });
     }).finally(() => setSaving(false));
   };
 
@@ -122,7 +142,7 @@ function SandboxRootsForm(props: any) {
             disabled: saving || cfg === null,
             title: path,
             onClick: () => {
-              setDraftText((current: any) => appendRootLine(current, path));
+              setDraftText((current: string | null) => appendRootLine(current, path));
               setStatus(null); // 同手输编辑：过期的“已保存”提示失效
             }
           },

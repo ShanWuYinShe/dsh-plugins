@@ -1,9 +1,7 @@
 /**
- * pill-format.ts — 纯格式化助手（进度条/状态点/数值/重置时间）
+ * pill-format.ts — 纯格式化助手（进度条/状态点/数值/重置时间）。
  *
- * 2026-10-08 从 474 行的 ProviderUsagePill.tsx 拆出。
- *
- * @module provider-usage/纯格式化助手（进度条/状态点/数值/重置时间）
+ * @module provider-usage/pill-format
  */
 
 import type { CSSProperties } from 'react'

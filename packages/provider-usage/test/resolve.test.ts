@@ -116,6 +116,17 @@ describe('createProviderResolver', () => {
     expect(await createProviderResolver(ctx)('deepseek', signal)).toEqual({})
   })
 
+  it('ignores a profile apiKeyEnv that is not a credential reference name（配置笔误按未配置处理，不抛错）', async () => {
+    const ctx = fakeCtx({
+      entries: [entry('deepseek', 'llm-deepseek')],
+      sections: { 'llm-deepseek': { apiKeyEnv: 'my-key' } },
+      credentials: { DEEPSEEK_API_KEY: 'sk-ambient' },
+    })
+    // credentialRef('my-key') 会抛 TypeError；先 isCredentialRefName 判定后按未配置
+    // 处理，于是落到 ambient DEEPSEEK_API_KEY 兜底，而不是每次查询都失败。
+    await expect(createProviderResolver(ctx)('deepseek', signal)).resolves.toEqual({ apiKey: 'sk-ambient' })
+  })
+
   it('keyless deepseek falls back to OAuth account wallets (grouped per currency)', async () => {
     const ctx = fakeCtx({
       entries: [entry('deepseek', 'llm-deepseek')],

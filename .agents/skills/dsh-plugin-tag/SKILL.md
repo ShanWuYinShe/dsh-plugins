@@ -50,19 +50,9 @@ git tag -v <tag>   # 自验签名
 pending → tag3 排队**把 tag2 顶掉** → tag4 排队**把 tag3 顶掉**——中间的流水被
 取消，对应 Release 永远不建，而推送命令照样全部「成功」。
 
-实测印证（4 个 tag 同推）：Actions 里**零条 push 流水**，
-`dsh-any-connect-v0.4.2`、`provider-usage-v0.1.1`、`sandbox-extra-roots-v0.4.14`、
-`session-archive-v0.3.16` 的 4 个 Release 只能手工 `workflow_dispatch` 补；
-补发时连推同样被顶掉（同一并发组）：
-
-| run | 创建 | 结束 | 结果 |
-|---|---|---|---|
-| 36014030331 | 14:36:45 | 14:37:12 | success |
-| 36014048743 | 14:36:55 | 14:37:02 | **cancelled（7 秒，被顶掉）** |
-| 36014057179 | 14:36:59 | 14:37:41 | success |
-
-等待**不额外增加总时长**：并发组本来就把这些 run 串行化了，一起推也只是排成
-队列、还可能互相顶掉；逐个等反而总耗时相同且结果确定。
+后果：批量推送时中间的 run 会被取消、对应 Release 永远不建，而推送命令照样全部「成功」。
+逐个等待**不额外增加总时长**：并发组本来就把这些 run 串行化了，一起推也只是排成队列、还可能互相顶掉；
+逐个等反而总耗时相同且结果确定。
 
 ## 标准流程（发版 tag）
 
@@ -84,17 +74,16 @@ gh run list --workflow=publish.yml --branch <tag> \
   --jq 'map(select(.event=="push")) | .[0].databaseId // empty'
 ```
 
-**tag 的目标提交必须显式给出，并在推送前回验哈希。** 反例：
-写成 `git tag -a T -m M <错误提交> 2>/dev/null || git tag -a T -m M HEAD` 时，前半段
-在错误提交上**成功**，`||` 根本不触发，tag 静默指向上一个版本的提交（不比对哈希
-直接推就会把错版发出去）。
-两条规则：① 目标提交一律显式写（`HEAD` 或具体哈希），不用「失败再兜底」的写法；
-② 打完立刻 `git rev-parse <tag>^{commit}` 与发布提交逐字符比对。另：tag 命令上的
-`2>/dev/null` 会吞掉失败原因，不要加。
+**tag 的目标提交必须显式给出，并在推送前回验哈希。** 反模式：
+`git tag -a T -m M <旧提交> 2>/dev/null || git tag -a T -m M HEAD`——前半段在旧提交上**成功**，
+`||` 根本不触发，tag 静默指向上一个版本的提交（若直接推就会把错版发出去；靠推送前
+`git rev-parse <tag>^{commit}` 与发布提交比哈希才发现）。两条规则：① 目标提交一律显式写
+（`HEAD` 或具体哈希），不用「失败再兜底」的写法；② 打完立刻 `git rev-parse <tag>^{commit}`
+与发布提交逐字符比对。另：tag 命令上的 `2>/dev/null` 会吞掉失败原因，不要加。
 
 **第 5 步的确认输出为空 = 没触发 push 流水，必须停下排查，不要继续推下一个**
 （多半是批量推送超限或流水被顶掉，通用机制见全局 `git-workflow`）。`--branch` 接受 tag 名
-（实测对真 tag 能返回该 tag 的 push 流水、不存在的 tag 返回空，能正确区分），
+（对真实 tag 返回其 push 流水、不存在的 tag 返回空），
 这一条就是"该 tag 到底有没有触发 CI"的权威判据。
 
 拿到 run id 后 `gh run watch <run-id> --exit-status` 跟随到结束（失败时以非零
@@ -128,24 +117,24 @@ done
   流水被取消，Release 必然没建，删掉重来即可——重推同一个 tag 不会补触发。
   删远程 tag 同样受"一批 3 个"限制（通用纪律见全局 `git-workflow`），也要一个一个删。
 - **C. Release 已建**：永不删、不移动该 tag。升版本号打新 tag 发一版
-  覆盖叙事（CHANGELOG 写明替代关系），原版本号就地停用、不得复用。
+  覆盖叙事（CHANGELOG 写明替代关系），旧版本号就地作废。
 
 ## 不可变铁律
 
 1. 已推的发布 tag 永不 `-f` 移动、不删除重建——tag 即归档，动了等于改历史。
-2. 版本号用过即不可复用：即使删了 tag（情形 B），同一版本号也不得用于第二次
+2. 版本号用过即作废：即使删了 tag（情形 B），同一版本号也不得用于第二次
    发布之外的内容；重打只允许 tag 内容逐字节一致的原样重打。
-3. 现存的轻量 tag（`git cat-file -t <tag>` 显示 commit 的那些）只读不碰：不重写、不补签名，
-   只在门禁比较版本时引用。
+3. 存量轻量 tag 只读不碰：不重写、不补签名，只在门禁比较版本时引用；判据：
+   `git cat-file -t <tag>`（轻量 = commit，annotated = tag）。
 
-## 保护（仓库设置，一次配好）
+## 保护（仓库设置，当前未开启）
 
-GitHub ruleset 给 tag 加两道锁（RELEASING.md「分支保护」）：
+RELEASING.md「分支保护（暂不开启）」写明：单人仓库尚未开启分支保护 / tag ruleset。若未来开放协作或引入 PR，建议加两类锁：
 
 1. tag 名规则保护 `<目录>-v*` 与 `dsh-v*`：禁止删除（防手滑 `push :refs/tags/`）。
-2. 可选：限制这两类 tag 的推送者（单人仓库可先不设）。
+2. 限制这两类 tag 的推送者。
 
-## hygiene
+## 日常 hygiene 命令
 
 ```bash
 git tag -l "<目录>-v*" | sort -V          # 看某包全部已发版
@@ -154,6 +143,8 @@ git fetch --prune --prune-tags        # 同步远程已删的 tag 到本地
 
 ## 与 CI 的关系（一句话）
 
-推 `<目录>-v<版本>` 触发 publish 流水（测试 → 门禁 → 建 Release）；推
-`dsh-v*` 或其他 tag 只跑测试，不发布。门禁打回（形态/annotated/版本
-不一致/落后归档）时按「打错处理」办，不要在 CI 里找绕过办法。
+推已知包的 `<目录>-v<版本>` 触发 publish 流水（测试 → 门禁 → 建 GitHub Release）；推
+`dsh-v*` 只跑测试、门禁跳过发布；不匹配 `*-v*` 的 tag 不触发任何流水；形如
+`<未知目录>-v<版本>` 会被门禁判红灯（先删 tag 重打）。门禁打回（形态/annotated/版本
+不一致/落后归档）时按「打错处理」办，不要在 CI 里找绕过办法。稳定线紧急热修同理：main 的 `publish.yml` 已是
+GitHub Release 流水，推 tag 即产出 Release。

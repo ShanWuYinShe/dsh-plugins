@@ -3,7 +3,7 @@
  *
  * 为什么单独成模块：装配规则里带着**计划语义**——zcode 变体的
  * \`transformCredential\` 把自己的计划固定进读出的凭据（两个 zcode 变体共享同一份
- * 桌面凭据文档，模型路由 / 额度来源 / 夜免资格都只看 \`credential.zcodePlan\`）。
+ * 桌面凭据文档，模型路由 / 额度来源都只看 \`credential.zcodePlan\`）。
  * CLI 曾漏掉这一步，把 zcode-start-plan 的额度查询指到了 coding 池子（2026-10 实测）。
  * 两边共用一份装配后这类漂移在结构上不可能再发生。
  *

@@ -10,14 +10,20 @@ README 面向用户，面向开发者的内容以 RELEASING.md 为准。
 
 ```bash
 bun install             # 依赖安装（切分支后 lockfile 不同，记得重新 install）
-bun run build           # tsc 编译 host + esbuild 打包 client
-bun run typecheck       # host + client 两套 tsconfig --noEmit
-bun run test            # vitest 回归（先跑 scripts/build.mjs 构建，含 tsc + esbuild 产物）
+bun run build           # 四段：tsc 编译 host → typert 工件生成 → esbuild 打包 client → bin 自包含打包
+bun run typert          # 只生成 Typert 工件（./typert + ./remote，scripts/typert.mjs）
+bun run typecheck       # host + client 两套 tsconfig --noEmit（先自动生成 Typert 工件）
+bun run test            # vitest 回归（先跑 scripts/build.mjs 构建，含 typert + esbuild 产物）
 bun run test:ci         # build + typecheck + test（提交/发布前必跑）
+bun run test:stability  # 测试确定性压测：多轮全量 + 多并发档位（见「约定」的确定性要求）
 bun run gate            # 发布门禁干跑：只读，看哪些包会被发布/为何被跳过
 bun run dsh-status      # 两分支 dsh 依赖基线 vs dsh 最新 rc（正式版）对照（详见 RELEASING.md）
 bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览），详见 RELEASING.md
 ```
+
+构建顺序不可交换：client 源码用包自引用子路径 `import "@chaoset/<pkg>/remote"`，
+esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typert 生成必须
+在 client 打包之前。`lib/` 与 `client/client.cjs` 都是 gitignore 的构建产物。
 
 ## 分支选择铁律：动手前必跑 `bun run dsh-status`
 
@@ -40,17 +46,63 @@ bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览�
 
 ## 约定
 
+- **Typert / @Remote**：暴露给 Web client 的服务面用官方 `@Remote` 标准装饰器标在
+  `TypertRemoteService` 子类的**具体业务方法**上，参数/返回类型定义在包的
+  `src/types.ts`（对应 `package.json` 的 `./types` 子路径导出）。`./typert`（Host 工件）
+  与 `./remote`（Client 调用面）由 `@deepseek-ai/dsh-typert-generator` 在构建期生成，
+  **不要手写**；新增/修改 `@Remote` 方法后必须重新 `bun run build`。没有 Remote 服务
+  的包不要声明 `./typert` / `./remote` 导出。
+- **插件索引 / `market` 分支**：站点由长期存在的发布产物分支 `market` 承载，该分支根目录
+  即站点根（`index.json`、`README.md`、`icons/`、`npm/`）——DSH「自定义插件索引」的索引
+  + 静态 npm registry，布局与 URL 见 RELEASING.md「插件索引与静态 registry」。**禁止手工编辑**；
+  只由 `scripts/plugin-market.mjs` 产出，publish workflow 在任一发版 tag 发布后自动更新到
+  `market` 分支（workflow_dispatch 可回填/修复）；它与 `alpha`/`main` 的双分支发布体系正交。
+  新增发布包必须在 `scripts/lib/plugin-market-core.mjs` 的 `PACKAGE_DISPLAY` 补展示元数据，
+  否则 `bun run market:build` 直接报错。
+- **兼容声明**：插件对 DSH 的兼容性用官方 `engines.dsh`，且必须写**精确宿主版本**
+  （如 `0.2.2-rc.1`，不写 `^` / `~` / `>=`）；依赖 range 仍是 `^X`，由
+  `bun run adapt` 同步维护，`dsh-baseline` 严格核对「range 的 `^X` ↔ `engines.dsh`
+  的精确 `X`」。DSH 升级很可能不兼容旧版本，因此每次升级都要重发对应插件版本；
+  不要使用自造字段 `dsh.host`（宿主不认识该字段）。
+- **客户端 inject**：`dsh.client.inject` 声明的是**客户端模块包名**（服务提供方包），
+  不是 cordis 服务名；`cordis` 运行时的服务依赖写在 client 入口的 `export const inject`。
+- **入口面**：Host 入口（`src/index.ts`）只导出 `name` / `inject` / `Config` / `apply`，
+  Client 入口（`client/index.tsx`）只导出 `name` / `inject` / `apply`；禁止
+  `export default` 与 `export *`。测试需要的内部实现从 `../src/<module>.js` /
+  `../client/<module>.js` 相对导入——**不要为了测试方便从入口转发**；入口只允许
+  `name`/`inject`/`Config`/`apply`。根 `test/entry-surface.test.ts` 是这条规则的锁。
+- **独立 CLI**：`dsh-any-connect` 的 `lib/bin.js` 是构建期用 esbuild 打出的**自包含**
+  bundle（内联 MIT 依赖，见包内 THIRD_PARTY_NOTICES.md）：插件源码静态 import 宿主包，
+  而 bin 是独立 node 进程、不经宿主 runtime resolution，所以必须自包含。改 bin 依赖后
+  重新 `bun run build`，回归由包内 `test/bin-self-contained.test.ts` 守住。
 - 发布相关（分支模型、发布纪律、版本号/推送门禁）：详见 skill dsh-plugin-release；跨分支 worktree 操作：详见 skill dsh-plugin-worktree。
 - 提交信息按 skill `git-workflow` 写（全局 Commit 格式 `<分类>(<范围>): <中文描述>`），本项目惯例用
   中文分类前缀（`新增:` / `修复:` / `重构:` / `文档:` / `测试:` / `ci:` 等）。
 - 测试环境通过 vitest 配置里的 `DSH_HOME` 与真实用户目录隔离，不要在测试里
   读写真实的 `~/.dsh`。
+- **测试必须确定性**（同一份代码，任何负载、并发度、执行顺序、上一次跑的残留，
+  结果都必须一致）：
+  - 每个测试文件由 `test/setup-test-home.ts` 分配**全新的空 `DSH_HOME`**，
+    测试不得假设其它测试写下的凭据/缓存/状态存在；需要自定义目录的用例自己
+    `mkdtemp` 并在 `afterEach` 清理。
+  - 禁止用「睡固定时长 + 断言没发生」这种墙钟窗口写负向断言；用事件/可等待的
+    完成信号（必要时加最小测试缝），或 fake timers 断言「没有新增未决定时器」。
+  - 异步资源（定时器、在途 I/O、服务）必须显式 dispose/await 完成后再清理临时
+    目录，避免 `ENOTEMPTY` 这类清理竞态。
+  - 禁止靠 `retry`/`skip`/放大 timeout 掩盖不稳定；偶发假红必须查明根因。
+  - 改测试相关代码后跑 `bun run test:stability`（多轮 + 多并发档位）证明稳定；
+    alpha 分支推送（`test.yml`）与发布流水（`publish.yml`）会自动跑同一脚本。
 - 测试涉及平台差异时必须显式判定平台（如
   `it.skipIf(process.platform !== "darwin")`），或改用运行时取值
   （`canonicalPath`、`dirname(fakeHome)` 等）保持用例平台无关；路径拼写取自运行时，在其他平台也跑得过。新增平台相关用例时
   建议在 Linux 容器实测一遍（`node:24` 镜像 + tar 管道传入源码跑
   `bun run test:ci`；macOS 打 tar 要带 `COPYFILE_DISABLE=1 --no-xattrs`，
   否则 `._*` AppleDouble 文件会被 vitest 当测试文件收集）。
+  **容器实测两个必做前提**（否则会出现一批环境假阳性）：
+  ① 源码里没有 `.git` 时，`publish-gate`/`scripts-cli` 的 `git tag -l` 会抛
+  `fatal: not a git repository`，需在容器内 `git init && git add -A && git commit`
+  （或挂载真实 `.git`）；② 以 **非 root 用户**运行——`electron-discovery` 用
+  `chmod 000` 构造 EACCES，root 会无视权限位导致假红。
 
 ## 按需加载的 skill（`.agents/skills/`）
 
@@ -59,4 +111,4 @@ bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览�
 | `dsh-plugin-release` | 分支模型、发布纪律、版本号与推送门禁 |
 | `dsh-plugin-worktree` | 跨分支 worktree 操作 |
 | `dsh-plugin-tag` | 打发版 tag 的具体步骤（详见 RELEASING.md） |
-| `dsh-any-connect-zcode` | 接入 zcode / 其他 AI 客户端的连接适配 |
+| `dsh-any-connect-channels` | 改 dsh-any-connect 任一渠道 / 排查额度、限流、模型目录时 |

@@ -10,6 +10,7 @@
 import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { regionOf } from './upstream.js'
+import { errorMessage } from './values.js'
 import type { WorkBuddyVariant } from './variants.js'
 import {
   atRestKeyProviderFor,
@@ -78,9 +79,9 @@ export class WorkBuddyCredentialStore {
   }
 
   /**
-   * 后补注入状态域存取：宿主在 storageDomain 服务就绪并完成旧文件迁移后调用
-   * （见 index.ts 的 inject 时序）。注入后自有副本的读写立即切到域；注入前的
-   * 读写走状态目录下的文件回落，两侧由迁移例程衔接。
+   * 后补注入状态域存取：宿主在 storageDomain 服务就绪后调用（见 index.ts 的
+   * inject 时序）。注入后自有副本的读写立即切到域；注入前（或域 open 失败）的
+   * 读写走状态目录下的文件回落。
    */
   setState(state: WorkBuddyStateStore): void {
     this.stateStore = state
@@ -231,7 +232,7 @@ export class WorkBuddyCredentialStore {
         : reasonCodeOf(error)
       return {
         state: 'signed-out',
-        reason: error instanceof Error ? error.message : String(error),
+        reason: errorMessage(error),
         ...reasonCode === undefined ? {} : { reasonCode },
       }
     }

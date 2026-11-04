@@ -5,9 +5,11 @@ import { setTimeout as realSleep } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import * as WorkBuddy from '../src/index.js'
+import * as AnyConnect from '../src/index.js'
 import { catalogRow } from './catalog-harness.js'
-import type { WorkBuddyModelInfo } from '../src/index.js'
+import type { WorkBuddyModelInfo } from '../src/catalog.js'
+import { ZCodeUpstreamClient } from '../src/upstream.js'
+import { PROVIDER_VARIANTS } from '../src/variants.js'
 
 /**
  * Start Plan「领取后恢复」快通道的回归（task-8）。
@@ -80,9 +82,9 @@ async function install(home: string): Promise<Harness> {
   let previewMode: 'available' | 'none' | 'unavailable' = 'available'
   let previewCalls = 0
   let modelsCalls = 0
-  vi.spyOn(WorkBuddy.ZCodeUpstreamClient.prototype, 'fetchModels')
+  vi.spyOn(ZCodeUpstreamClient.prototype, 'fetchModels')
     .mockImplementation(async () => { modelsCalls += 1; return claimed ? [catalogRow('claimed-model')] : [] })
-  vi.spyOn(WorkBuddy.ZCodeUpstreamClient.prototype, 'fetchStartPlanClaimPreview')
+  vi.spyOn(ZCodeUpstreamClient.prototype, 'fetchStartPlanClaimPreview')
     .mockImplementation(async () => {
       previewCalls += 1
       if (previewMode === 'unavailable') throw new Error('probe exploded')
@@ -96,12 +98,12 @@ async function install(home: string): Promise<Harness> {
   await ctx.plugin(LlmRuntime)
   // 假时钟必须在插件安装**之前**开启：60s/1h 的 interval 才注册在假时钟上。
   vi.useFakeTimers()
-  await ctx.plugin(WorkBuddy, {
+  await ctx.plugin(AnyConnect, {
     authFile: join(home, 'no-such-file.info'),
     authFileAI: join(home, 'no-such-ai-file.info'),
     authFileZCode: credentials,
   })
-  await vi.waitFor(() => { expect(ctx.llm.listProviders().length).toBe(WorkBuddy.PROVIDER_VARIANTS.length) }, { timeout: 5000 })
+  await vi.waitFor(() => { expect(ctx.llm.listProviders().length).toBe(PROVIDER_VARIANTS.length) }, { timeout: 5000 })
 
   await drain(() => false, 300)
   return {

@@ -80,6 +80,7 @@ export class WorkBuddyUpstreamClient {
       status: response.status,
       kind: classifyUpstreamError(response.status, text),
       message: text,
+      headers: response.headers,
     }
   }
 

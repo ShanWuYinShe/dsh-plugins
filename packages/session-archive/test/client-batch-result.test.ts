@@ -1,17 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-
-vi.mock("react", () => ({
-  createElement: (...args: any[]) => ({ args }),
-  Fragment: "fragment",
-  useState: (init: any) => [typeof init === "function" ? init() : init, () => {}],
-  useEffect: () => {},
-  useCallback: (fn: any) => fn,
-  useRef: () => ({ current: null }),
-  useMemo: (fn: any) => fn(),
-  default: undefined,
-}));
-
-import { summarizeBatchResult } from "../client/index.tsx";
+import { describe, expect, it } from "vitest";
+import { summarizeBatchResult } from "../client/archive-entries.js";
 
 /**
  * 批量动作结果摘要回归 —— ledger「runBatch 单测」那一条的落点。

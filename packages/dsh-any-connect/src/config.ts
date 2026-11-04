@@ -12,23 +12,18 @@ import z from '@deepseek-ai/schemastery'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 
 /**
- * Fallback settings namespace owning the configuration card.
+ * Legacy settings-namespace identity of the device-name variant.
  *
- * The directory entry's `settingsNs` is the Loader profile entry id
- * (`ctx.fiber.entry?.options.id`); these constants only survive as the
- * fallback when no Loader hosts the plugin (bare-`Context` tests) plus the
- * stable provider-identity strings the client and tests already key on.
+ * 这些常量**不再**用于 `registerConfigurableProviders`（本插件不向
+ * 「设置 → 模型」页声明 provider 目录项：五个渠道没有可在该页填写的
+ * profile，声明只会渲染出 layout=unknown 的死卡片）。保留它们只为变体
+ * 描述符的稳定身份字符串与测试断言；配置面在「内置插件」页的 bundle
+ * 配置卡片（plugins.bundle.config slot，按 npm 包名分发）。
  */
 export const WORKBUDDY_SETTINGS_NS = 'anyconnect' as SettingsNamespace
 
-/** Fallback settings namespace owning the international variant's card. */
+/** Same as {@link WORKBUDDY_SETTINGS_NS}, for the WorkBuddy AI variant. */
 export const WORKBUDDY_AI_SETTINGS_NS = 'anyconnect-ai' as SettingsNamespace
-
-/** Fallback settings namespace owning the ZCode variant's card. */
-export const ZCODE_SETTINGS_NS = 'anyconnect-zcode' as SettingsNamespace
-
-/** Fallback settings namespace owning the OpenCode variant's card. */
-export const OPENCODE_SETTINGS_NS = 'anyconnect-opencode' as SettingsNamespace
 
 /** Plugin configuration: live volatile references committed by the Loader.
  *

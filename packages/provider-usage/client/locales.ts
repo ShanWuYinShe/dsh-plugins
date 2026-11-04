@@ -15,6 +15,11 @@ export type ProviderUsageLocaleKey =
   | 'providerUsageTitle'
   | 'refresh'
   | 'staleData'
+  | 'rateLimited'
+  | 'rateLimitedUntil'
+  | 'rateLimitedUnknown'
+  | 'rateLimitHits'
+  | 'blocked'
 
 export const en: Record<ProviderUsageLocaleKey, string> = {
   loading: 'Loading usage…',
@@ -30,6 +35,11 @@ export const en: Record<ProviderUsageLocaleKey, string> = {
   providerUsageTitle: 'Provider usage',
   refresh: 'Refresh',
   staleData: 'may be stale',
+  rateLimited: 'rate limited',
+  rateLimitedUntil: 'Rate limited · back {time}',
+  rateLimitedUnknown: 'Rate limited · reset time not reported',
+  rateLimitHits: '{count} refusals',
+  blocked: 'blocked',
 }
 
 export const zh: Record<ProviderUsageLocaleKey, string> = {
@@ -46,4 +56,9 @@ export const zh: Record<ProviderUsageLocaleKey, string> = {
   providerUsageTitle: 'Provider 额度',
   refresh: '刷新',
   staleData: '数据可能过期',
+  rateLimited: '限流中',
+  rateLimitedUntil: '限流中 · {time} 恢复',
+  rateLimitedUnknown: '限流中 · 上游未给恢复时间',
+  rateLimitHits: '被拒 {count} 次',
+  blocked: '已用尽',
 }

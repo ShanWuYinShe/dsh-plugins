@@ -11,7 +11,7 @@
 - **多通道模型聚合接入**：
   - **WorkBuddy 国内版 (`workbuddy`)**：安装并登录 WorkBuddy 桌面 App 即可零配置使用。全面支持 WorkBuddy 5.6+ 的 `$wbEncrypted` 加密凭据（自动定位 macOS Bundle 或 Windows 注册表/安装目录的 Electron 二进制充当解密助手）。
   - **WorkBuddy AI 国际版 (`workbuddy-ai`)**：独立接入国际版桌面 App，独立提供「WorkBuddy AI」模型分组（GPT、Gemini 系列等）、独立凭据与账号积分卡片。
-  - **ZCode Coding Plan (`zcode`)**：接入智谱 ZCode 桌面端 Coding Plan 官方渠道；按桌面端 `setting.json` 当前激活计划精准取用 API Key；以客户端本地内置白名单（`zcode-builtin.json`）动态约束模型；支持 23:00–09:00 夜间免费时段自动识别与费率联动。
+  - **ZCode Coding Plan (`zcode`)**：接入智谱 ZCode 桌面端 Coding Plan 官方渠道；按桌面端 `setting.json` 当前激活计划精准取用 API Key；以客户端本地内置白名单（`zcode-builtin.json`）动态约束模型（智谱此前的 23:00–09:00 夜间免费限时活动已下线，现按 150% 额度与模型基准计费如实展示）。
   - **ZCode Start Plan (`zcode-start-plan`)**：独立专属通道（`zcode.z.ai/api/v1/zcode-plan/anthropic`）与独立一次性 Token 额度池；采用账号 JWT + 设备标识认证；每日领取活动自动探测并在设置卡片中醒目提醒（提供一键复制 Plan ID）；动态跟随用户今日实际权益展示模型，未领取或过期如实隐藏。
   - **OpenCode Free (`opencode-free`)**：官方免密免费模型通道（Muse Spark 1.2/1.3、Qwen3.6 Plus、MiniMax 系列、Nemotron 3.5 Super VL、DeepSeek V4.1 Flash、Big Pickle 等）；自动过闸标头与 `read` 只读工具守卫注入，解除 "free tier can only be used from within OpenCode" 网关限制；多协议实时流式转码（OpenAI Responses、Anthropic Messages、OpenAI-compatible Chat Completions 统一转为标准 OpenAI SSE 流，完整支持 `reasoning_content` 思考过程输出）；自动读取本地官方 specs 缓存（`~/.cache/opencode/models.json`）决议精确上下文与多模态能力。
 
@@ -24,7 +24,8 @@
   - 选择器的「默认」档对**只能在思考态工作**的模型（上游 `onlyReasoning`）智能补具体档位（优先 `high`，无则取最高档）；OpenAI 通道补顶层 `reasoning_effort`，Anthropic 通道补 `thinking` 预算对象（`enabled` + `budget_tokens` 并相应抬高 `max_tokens`）。
 
 - **费率比例与限免标注**：
-  - 模型选择列表（`/model` 弹窗与 composer 下拉）中每个模型名后直接显示积分倍率（如 `GLM-5.2 · x0.79`、`Hy3 · x0.00`）；
+  - composer 模型选择器以 DSH 0.2.2 原生徽标（`LlmModelInfo.badge`）标注每个模型：免费模型绿色 `Free` 徽标、上游促销活动蓝色 info 徽标、积分倍率灰色中性徽标（如 `GLM-5.2 ·x0.79`）；
+  - `/model` 弹窗由模型名后缀显示倍率（如 `GLM-5.2 · x0.79`）；
   - 状态卡片实时跟随上游标记当前免费 / 限时免费 / 夜间折扣模型。
 
 - **今日积分消耗统计（WorkBuddy）**：
@@ -33,21 +34,41 @@
   - 口径为**估算**：只有 DSH 运行且轮询到查询时才有样本，两次采样之间「发放+消耗」抵消的量会被低估；跨天首观测不计差分（无法归属到哪一天，宁少不虚记）。今日峰值即稳定的「今天的总额度基准」（今日已用 ≈ 峰值 − 当前剩余）。
 
 - **自定义模型管理**：
-  - 设置页模型列表中支持点击删除图标**自定义隐藏/排除不常用模型**；
-  - 卡头清晰展示排除模型计数，并提供一键「恢复默认」入口；
+  - 设置页模型列表中支持点击「删除」按钮**自定义隐藏/排除不常用模型**；
+  - 卡头展示隐藏计数；展开卡片后下方有独立的「已隐藏的模型」区，列出每个被隐藏
+    模型的名称、倍率、上下文窗口与思考档位，并带**逐条「恢复」按钮**——只放回想
+    要的那几个，其余隐藏项保持不动；
+  - 「全部恢复」仍然保留，作为「清空重来」的出口（按钮 title 已说明其影响范围）；
   - 模型清单可随时折叠/展开，清晰列出倍率、最大/备选上下文窗口、思考档位与特性标签。
 
 ---
 
 ## 安装
 
-> 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段；仓库的 `dsh-v*` git tag 是各次稳定版适配的归档点。
+### 方式一（推荐）：插件索引
+
+启用 DSH 的「自定义插件索引」实验性 bundle 后，在**发现 → 添加索引源**填入：
+
+```text
+https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
+```
+
+即可在发现页一键安装本插件、查看与安装任意历史版本（索引与静态 registry 由 CI 从
+GitHub Releases 生成，发布在发行分支（当前 `alpha`，收敛后 `main`）根下的 `market/` 目录）。重启 DSH 后更新到指定版本
+（DSH 对自建 registry 的自动更新检查只在安装会话内生效）：
+
+```bash
+dsh plugin --profile web add @chaoset/dsh-any-connect@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
+```
+
+### 方式二：tarball URL（手动）
+> 适配的 DSH 版本见本包 `package.json` 的 `engines.dsh` 字段；仓库的 `dsh-v*` git tag 是各次稳定版适配的归档点。
 
 前置条件：若使用桌面 Agent 通道，需在本机安装并登录对应桌面 App（插件自动复用 App 的登录状态，账号切换自动跟随）。使用 OpenCode Free 渠道无需任何前置账号配置。
 
 ```bash
 # 推荐使用 DSH plugin 命令安装（唯一官方支持的界面为 Web）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v0.4.19/chaoset-dsh-any-connect-0.4.19.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v0.4.27/chaoset-dsh-any-connect-0.4.27.tgz
 dsh web
 
 # 从本地源码安装
@@ -58,6 +79,10 @@ dsh plugin --profile web remove @chaoset/dsh-any-connect
 ```
 
 `<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。安装后重启 harness 生效。
+
+> **运行时依赖**：本包不再自带 `@earendil-works/pi-ai` 副本（原 optionalDependency 会装出第二份
+> pi-ai 实例与整棵传递依赖）。pi-ai 随宿主 `dsh-llm-pi-ai` 的依赖闭包解析，与本插件共享同一
+> 实例（宿主 profile runner 的 runtime resolution），既保证单实例，也避免重复安装。
 
 > 给 AI agent：直接执行 `dsh plugin ...` 命令即可，不要手动编辑 `cordis.patch.yml`。
 
@@ -72,6 +97,11 @@ dsh-any-connect doctor     # 全面体检（凭据、登录态、加密助手、
 dsh-any-connect status     # 当前登录态与积分/额度
 dsh-any-connect logout     # 移除本插件的凭据副本（不动桌面 App 的登录）
 ```
+
+该命令是构建期打出的**自包含单文件**（`lib/bin.js`，内联依赖、仅保留 `node:` 内建
+模块）：独立 node 进程即可运行，不依赖宿主包的模块解析路径，也不受当前工作目录影响
+——从 profile 的 `node_modules/.bin` 调用与 `node <包目录>/lib/bin.js` 直接调用等价。
+内联的第三方组件与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 默认操作 WorkBuddy 国内版；使用 `--provider <id>` 切换操作对象（`workbuddy`、`workbuddy-ai`、`zcode`、`zcode-start-plan`、`opencode-free`）：
 
@@ -92,6 +122,12 @@ dsh-any-connect status --provider opencode-free
 | `authFile` | 自动探测 | 显式指定 WorkBuddy 国内版桌面凭据文件路径（覆盖环境变量与平台默认探测） |
 | `authFileAI` | 自动探测 | 同上，作用于 WorkBuddy AI（国际版） |
 | `authFileZCode` | 自动探测 | 同上，作用于 ZCode 桌面端凭据文件（覆盖环境变量与平台默认探测） |
+| `authFileOpenCode` | 免密公开通道 | 同上，作用于 OpenCode Free 通道的凭据 / token 文件路径（默认免密公开通道，一般无需配置） |
+
+> 本插件的五个渠道**不会**出现在 DSH「设置 → 模型」页：它们没有可填写的 provider profile
+> （凭据来自桌面 App / 官方便捷通道），声明进去只会得到一张空的编辑卡片。配置面统一在
+> **「设置 → 内置插件 → dsh-any-connect」的插件卡片**（模型隐藏、额度、今日统计等）以及上表
+> 的 `cordis.patch.yml` 高级字段；模型选择器照常可用，无需任何额外配置。
 
 ### 凭据来源探测顺序与跨系统支持
 
@@ -102,8 +138,57 @@ dsh-any-connect status --provider opencode-free
   - **Coding Plan 与 Start Plan 是两个独立连接**：`zcode` 与 `zcode-start-plan` 各自拥有独立的模型分组、模型名单、额度池与请求通道；
   - **Coding Plan 白名单**：以本机 ZCode 客户端内置目录（`zcode-builtin.json` 的 `builtinModelIds`）为白名单，随客户端发版自动更新（当前为 GLM-5.3、GLM-5.3-Flash）；可用 `ZCODE_BUILTIN_CONFIG` 显式指定该文件路径；
   - **Start Plan 专属通道与每日领取**：走 `zcode.z.ai/api/v1/zcode-plan/anthropic`，扣减一次性 token 包；每日领取需通过客户端完成，插件每天自动探测可领活动并在卡片醒目提示；
-  - **夜间免费专属 Coding Plan**：23:00–09:00 免费窗仅属于 Coding Plan，Start Plan 不享受夜免。
+  - **夜间免费限时活动已下线**：智谱此前的 23:00–09:00 夜间免费窗（曾为 Coding Plan 专属权益，Start Plan 不享受）已下线，插件已移除夜免徽标与费率改写，模型按 150% 额度与基准计费如实展示。
 - **OpenCode Free**：免密直连。支持通过 `OPENCODE_MODELS_CACHE` 环境变量显式指定官方 models specs 缓存文件路径（默认为 `~/.cache/opencode/models.json`）。
+
+### 上游限流（429）的记录与展示
+
+模型通道被上游限流时，插件把观测**落到进程内台账**（`rate-limit.ts`），并在
+两处如实展示：配置页卡片（「上游限流中」提示框）与 composer 的额度 pill。
+
+**台账只观测、不拦截**：它不参与任何请求门禁，也不会因为「上次被限」而拒绝
+后续请求。请求是否放行完全由上游决定——插件的职责只是把上游说过的话显示出来，
+不是替上游做决定；卡片与 pill 也明确写出这一点。一次成功请求只清掉**它自己
+那个模型**的观测（解除由上游事实驱动，不靠推算）。
+
+**限流按模型分账**：WorkBuddy / WorkBuddy AI 的频率限制是**按模型**的（官方
+客户端把 cap-hit 以 modelId 为键记录，错误文案也提示「或换其它模型继续」），
+不是整个 provider 共享。因此台账按 `provider + model` 分行：
+
+- A 模型被限时，B 模型仍可正常调用（插件不会替上游拦掉 B）；
+- A 的请求成功也不会清掉 B 的观测，两个模型的恢复时刻互不覆盖；
+- 卡片**一个模型一个框**；额度 pill 是 provider 级表面，头行带上模型名
+  （`限流中 · glm-5.3`），避免把单模型限流误读成整条通道不可用。
+
+口径只有一条：**恢复时刻只来自上游明说的事实**。
+
+- `Retry-After`（相对秒 / HTTP-date）与 `X-RateLimit-Reset`（秒或毫秒 epoch）
+  能解析出恢复时刻 → 显示「{时间} 恢复」；
+- 错误正文里的时刻也算。WorkBuddy `code:6004` 的文案形如
+  `your usage will reset at 2026-10-30 14:20:02 UTC+8`；官方客户端对时区后缀
+  是**可选**的（缺失时按 UTC+8 上海壁钟解释），插件采用同一口径，同时接受
+  `UTC+08:00` / `(UTC+8)` / `T` 分隔与中文文案（`将于 … 后恢复`）；正文出现
+  多个时刻时取离 reset/重置/恢复 最近的那个；
+- 上游没给 → 显示「已被限 {时长}，上游未提供恢复时间」，并给出被拒次数与模型名。
+  **绝不按固定窗口推算倒计时**。
+
+聊天里的 429 错误文案同样标注范围：WorkBuddy 会写「该限制仅针对模型 `{model}`，
+其它模型仍可继续使用」；智谱的并发限流（1302/1305）是订阅档位维度、不按模型，
+不写这句，避免误导。
+
+各上游的公开口径：
+
+| 上游 | 限流维度 | 是否给恢复时刻 |
+| --- | --- | --- |
+| GLM Coding Plan（`zcode`） | 按订阅档位的**并发数**，平台动态调整；另有每 5 小时 / 每周**积分**额度 | 并发限流**不给**；积分额度走额度通道，由窗口自带的 `resetsAt` 表达（5 小时积分按消耗时刻滚动刷新） |
+| ZCode Start Plan | 一次性 token 池（按模型分池） | 池子的 `expiredAt` 走额度窗口 |
+| OpenCode Free | 免费模型额度（`FreeUsageLimitError`，HTTP 429；按账号/IP 计算）；官方客户端形状校验（`FreeTierError`，HTTP 403） | 429 给 `Retry-After`；403 不给 |
+| WorkBuddy / WorkBuddy AI | **按模型**的频率限制（`code:6004`；官方客户端按 modelId 记 cap-hit，错误文案建议切换其它模型）；计费包积分制 | 6004 在错误正文里写恢复时刻（`reset at <时间> UTC+8`，时区后缀可省略） |
+
+配套的错误分类修正：智谱把欠费（`1113`）、套餐到期（`1309`）、无模型权限
+（`1311`）、风控封禁（`1313`）和**真限流**（`1302`/`1305`）全都塞进 HTTP 429，
+只有真限流值得重试。`classifyUpstreamError` 现在按 `"code"` 字段区分，其余按
+限流重试会永远等不到成功。
 
 ---
 
@@ -117,7 +202,9 @@ dsh-any-connect status --provider opencode-free
 | `.dsh-any-connect/` | `zcode-device-mid` 设备标识；存储域不可用时的凭据副本文件回落 | 正常情况只有设备标识一个文件。 |
 | `cache/dsh-any-connect/` | 模型目录 ×5、档位探测结果、桌面版本记录、host 心跳 | 可再生缓存，删除后自动重建。 |
 
-旧版平铺在 home 根目录的散文件（`.workbuddy-auth.json` 等）在启动时自动迁移进上述位置。
+> **升级说明（0.4.28 起）**：旧版平铺在 home 根目录的散文件（`.workbuddy-auth.json` 等）
+> **不再自动迁移**——从 ≤0.4.13 直接升级的用户需要重新登录一次（桌面端 App 的登录态仍会被
+> 自动复用，不受影响）；旧位置的 `zcode-device-mid` 也会重建为新的设备标识。
 
 **不属于本插件**（只读）：WorkBuddy 桌面端的
 `~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/*.info`

@@ -9,8 +9,15 @@
 
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import { foldSessionTitle } from '@deepseek-ai/dsh-session-title'
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { scanSession, limitedConcurrency, messageText } from './session-scan.js'
 import type { HostContext } from './archive-host-context.js'
+import type {
+  ArchiveCountResult,
+  ArchiveDetailMessage,
+  ArchiveDetailResult,
+  ArchiveListResult,
+} from './types.js'
 
 export function createArchiveQueries(deps: HostContext) {
   const {
@@ -26,7 +33,7 @@ export function createArchiveQueries(deps: HostContext) {
   return {
     /** 归档会话计数（存在性过滤后的真实数量）。侧边栏徽标的关闭态轮询
      * 只调这里：逐 id stat 只读元数据头，不枚举全部历史会话。 */
-    async count() {
+    async count(): Promise<ArchiveCountResult> {
       const archived = [...archivedSet()];
       if (archived.length === 0) return { count: 0 };
       const snapshots = await snapshotsByIds(archived);
@@ -34,7 +41,7 @@ export function createArchiveQueries(deps: HostContext) {
     },
 
     /** 列出全部归档会话（存在性过滤：文件已删的幽灵归档记录不显示）。 */
-    async list() {
+    async list(): Promise<ArchiveListResult> {
       const archived = [...archivedSet()];
       if (archived.length === 0) return { items: [] };
       const snapshots = await snapshotsByIds(archived);
@@ -53,17 +60,21 @@ export function createArchiveQueries(deps: HostContext) {
     },
 
     /** 读取一个归档会话的只读详情（标题 + 文本消息）。仅归档会话可读：
-     * detail 是对外暴露的远程端点,不校验成员资格就能读到任意未归档会话。 */
-    async detail(sessionId: string) {
+     * detail 是对外暴露的远程端点,不校验成员资格就能读到任意未归档会话。
+     * 拒绝走官方 RemoteError：稳定 code + 类型化 details（types.ts 的
+     * RemoteErrorDetailsMap 合并扩展），Client 按 code 判别而非 instanceof。 */
+    async detail(sessionId: string): Promise<ArchiveDetailResult> {
       if (!archivedSet().has(sessionId)) {
-        throw Object.assign(new Error('session not archived: ' + sessionId), { code: 'NOT_ARCHIVED' });
+        throw new RemoteError('session-archive/not-archived', 'session not archived: ' + sessionId, { sessionId });
       }
       const id = sessionId as SessionId;
       // 事件流分块消费（readSession 时代 read(0) 一次性物化全部事件）:
       // 头从句柄上取,消息逐块提取,达到上限后只计数不再拼接文本;
       // title 事件同趟收集(fold 只消费最后一个,全量物化没有必要)。
       const titleEvents: SessionEvent[] = [];
-      const messages: Array<{ role: 'user' | 'assistant'; text: string; time: unknown }> = [];
+      // time 用官方 SessionEvent.time（Unix epoch 毫秒）：边界类型 ArchiveDetailMessage
+      // 是 JSON 契约，不能用 unknown（生成器会拒绝非 JSON 类型）。
+      const messages: ArchiveDetailMessage[] = [];
       let totalMessageCount = 0;
       const meta = await scanSession(persistence, id, (events) => {
         for (const event of events) {

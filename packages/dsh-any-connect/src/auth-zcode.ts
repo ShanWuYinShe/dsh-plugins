@@ -9,7 +9,7 @@
 
 import crypto from 'node:crypto'
 import os from 'node:os'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { WORKBUDDY_STATE_DIRNAME } from './auth-paths.js'
@@ -19,7 +19,7 @@ import type { DecryptZCodeKeyOptions } from './auth-zcode-crypto.js'
 
 
 /** Every plan kind the desktop client can record for an account provider. */
-export const ZCODE_PLAN_KINDS: readonly ZCodePlanKind[] = [
+const ZCODE_PLAN_KINDS: readonly ZCodePlanKind[] = [
   'individual-coding-plan',
   'team-coding-plan',
   'start-plan',
@@ -143,10 +143,7 @@ function readZCodeSelection(desktopPath: string | undefined): ZCodeAccountSelect
 }
 
 /** Basename of the fallback device-id file inside the Harness state directory. */
-export const ZCODE_DEVICE_MID_FILENAME = 'zcode-device-mid'
-
-/** Pre-migration device-id file (the Harness home root); read-migrated on first hit. */
-export const LEGACY_DEVICE_MID_FILENAME = '.zcode-device-mid'
+const ZCODE_DEVICE_MID_FILENAME = 'zcode-device-mid'
 
 /**
  * Resolve the stable device id the account-plan endpoints require
@@ -156,7 +153,7 @@ export const LEGACY_DEVICE_MID_FILENAME = '.zcode-device-mid'
  * least it is stable across requests; per-request randomness is rejected by
  * the upstream (400 code 3001 / 429).
  */
-export function resolveZCodeDeviceMid(desktopPath: string | undefined): string {
+function resolveZCodeDeviceMid(desktopPath: string | undefined): string {
   if (desktopPath !== undefined) {
     try {
       const telemetry = JSON.parse(readFileSync(join(dirname(desktopPath), 'telemetry-state.json'), 'utf8')) as Record<string, unknown>
@@ -165,34 +162,20 @@ export function resolveZCodeDeviceMid(desktopPath: string | undefined): string {
       // absent or unreadable telemetry state — fall through
     }
   }
-  // 2026-10-11 起状态文件收敛进 `.dsh-any-connect/` 子目录；旧根位置文件在
-  // 读取命中时顺手搬过去（先写新成功再删旧，失败保留旧文件）。
+  // 2026-10-11 起状态文件位于 `.dsh-any-connect/` 子目录（WORKBUDDY_STATE_DIRNAME）。
   const stateDir = join(resolveDshHome(), WORKBUDDY_STATE_DIRNAME)
   const fallbackPath = join(stateDir, ZCODE_DEVICE_MID_FILENAME)
-  const legacyPath = join(resolveDshHome(), LEGACY_DEVICE_MID_FILENAME)
   try {
     const persisted = readFileSync(fallbackPath, 'utf8').trim()
     if (persisted !== '') return persisted
   } catch {
-    // no persisted fallback yet — fall through to the legacy location
-  }
-  try {
-    const legacy = readFileSync(legacyPath, 'utf8').trim()
-    if (legacy !== '') {
-      try {
-        mkdirSync(stateDir, { recursive: true, mode: 0o700 })
-        writeFileSync(fallbackPath, `${legacy}\n`, { mode: 0o600 })
-        rmSync(legacyPath, { force: true })
-      } catch {
-        // 搬运失败不影响使用：旧文件仍在，下次再搬。
-      }
-      return legacy
-    }
-  } catch {
-    // no legacy file either — generate one below
+    // no persisted fallback yet — generate one below
   }
   const generated = crypto.randomUUID()
   try {
+    // 目录可能尚未创建（首次运行且状态域 / 其它落盘还没写过）：先建目录，
+    // 否则下面写入失败、每次进程都换一个 device id——上游要求同值复用。
+    mkdirSync(stateDir, { recursive: true, mode: 0o700 })
     writeFileSync(fallbackPath, `${generated}\n`, { mode: 0o600 })
   } catch {
     // 不落盘也只是退化为每次进程内稳定（内存调用方各自读取时会再生成）；

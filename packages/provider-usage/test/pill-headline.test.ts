@@ -33,6 +33,13 @@ describe('headlineText', () => {
     )).toBe('CNY: cny +1')
   })
 
+  it('无 remain 且无单位（订阅有效性窗口）只显示 label，不留冒号', () => {
+    expect(headlineText(
+      { provider: 'acme', windows: [{ id: 'sub', label: 'GLM Coding Pro', unit: '' }], fetchedAt: 1 },
+      'acme', false, t,
+    )).toBe('GLM Coding Pro')
+  })
+
   it('首 window 有 remain 显示格式化额度 + remaining（多 window 带 +N 后缀）', () => {
     expect(headlineText(
       { provider: 'acme', windows: [{ id: 'w', label: 'W', remain: 3, unit: 'credits' }], fetchedAt: 1 },

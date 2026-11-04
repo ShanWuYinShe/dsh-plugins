@@ -61,10 +61,16 @@ jobs:
       - name: Run tests
         run: bun run test:ci
 
-      # 发布基线门禁:所有 dsh-* 依赖必须是 ^<版本> 形态、基线一致、
-      # dsh.host 存在且与基线一致——发布归档的 tag 不允许带糊的状态
-      # (dsh.host 是 npm 消费者可见的适配声明,漂移/缺失此前只由每日
-      # cron 的 follow-status 非阻塞告警兜着)。规则见 scripts/dsh-baseline.mjs。
+      # 稳定性回归（AGENTS.md「测试必须确定性」）：多轮全量 + 并发档位，
+      # 防止把偶发假红/时序竞态带进 release；脚本见 scripts/test-stability.mjs。
+      - name: Test stability
+        run: bun run test:stability
+
+      # 发布基线门禁:所有 dsh-* 依赖必须是 ^<版本> 形态、基线与 engines.dsh
+      # 兼容声明都齐全且彼此一致——发布归档的 tag 不允许带糊的状态
+      # (engines.dsh 是 DSH 官方 manifest 字段,宿主安装/启动据此判定兼容性;
+      # 漂移/缺失此前只由每日 cron 的 follow-status 非阻塞告警兜着)。
+      # 规则见 scripts/dsh-baseline.mjs。
       - name: Verify dsh baseline
         run: node scripts/dsh-baseline.mjs
 
@@ -97,7 +103,7 @@ jobs:
           echo "plan=$PLAN" >> "$GITHUB_OUTPUT"
 
       # 发布 = 每个待发布包 bun pm pack 出标准 npm tarball（与原 npm registry
-      # 产物同格式：lib/、client/、cordis.patch.yml、dsh.host 等字段齐全，
+      # 产物同格式：lib/、client/、cordis.patch.yml、engines.dsh 等字段齐全，
       # dsh 的 plugin add 可直接装 tarball URL），作为 GitHub
       # Release 资产上传。tag 由用户明确打出并推出，CI 绝不创建 tag——
       # gh release create 只建 Release 不建 tag；prerelease 布尔取自门禁计划
@@ -141,3 +147,107 @@ jobs:
             PUBLISHED="$PUBLISHED $dir@$version"
           done < <(node -e 'for (const p of JSON.parse(process.argv[1])) console.log(`${p.dir}@${p.version}@${p.prerelease}`)' "$PLAN")
           echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+
+      # ── 插件市场：索引 + 静态 npm registry（独立发布产物分支 market）────────────
+      # 每次发布后把「GitHub Releases 里已适配各宿主线的版本」汇总成站点，提交到长期存在的
+      # 发布产物分支 market；该分支根目录就是站点根，raw URL 以它为 ref，永久固定：
+      #   index:    https://raw.githubusercontent.com/<repo>/market/index.json
+      #   registry: https://raw.githubusercontent.com/<repo>/market/npm/
+      # 它与 alpha/main 双分支发布体系正交：任一条线（alpha / rc / 正式版）发版都更新同一个
+      # 站点，索引源 URL 不随发行分支切换，收敛期删除 alpha 也不影响已添加索引的用户。
+      # 生成器只下载并读取 tarball，不安装也不执行包代码；输出确定性，同一批 Releases
+      # 重复构建逐字节相同。只有本次真的发布了新版本才生成；workflow_dispatch 无新发布
+      # 也重新生成（回填/修复用：填一个已发布的 tag，发布步骤会因已归档跳过）。
+      - name: Cache plugin market tarballs
+        if: steps.plan.outputs.plan != '[]' || github.event_name == 'workflow_dispatch'
+        uses: actions/cache@v4
+        with:
+          path: .workwork/plugin-market-cache
+          key: plugin-market-${{ github.repository }}-${{ github.run_id }}
+          restore-keys: |
+            plugin-market-${{ github.repository }}-
+
+      - name: Fetch previous market site
+        if: steps.plan.outputs.plan != '[]' || github.event_name == 'workflow_dispatch'
+        env:
+          MARKET_BRANCH: market
+        run: |
+          set -euo pipefail
+          mkdir -p .workwork/plugin-market-previous
+          if git fetch --depth=1 origin "$MARKET_BRANCH" >/dev/null 2>&1 && git cat-file -e "FETCH_HEAD:index.json" 2>/dev/null; then
+            git archive FETCH_HEAD | tar -x -C .workwork/plugin-market-previous
+            echo "已取到 $MARKET_BRANCH 分支既有站点，本次只下载新增版本的 tarball。"
+          else
+            echo "$MARKET_BRANCH 分支还没有站点，本次全量生成。"
+          fi
+
+      - name: Generate plugin market site
+        if: steps.plan.outputs.plan != '[]' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_URL: https://raw.githubusercontent.com/${{ github.repository }}/market
+        run: |
+          node scripts/plugin-market.mjs build --out .workwork/plugin-market-commit --previous .workwork/plugin-market-previous --base-url "$BASE_URL" --registry-url "$BASE_URL/npm/"
+
+      - name: Check plugin market site
+        if: steps.plan.outputs.plan != '[]' || github.event_name == 'workflow_dispatch'
+        env:
+          BASE_URL: https://raw.githubusercontent.com/${{ github.repository }}/market
+        run: |
+          node scripts/plugin-market.mjs check --out .workwork/plugin-market-commit --base-url "$BASE_URL" --registry-url "$BASE_URL/npm/"
+
+      # 用临时 worktree 构造提交并推送到独立的发布产物分支 market（分支根即站点根）：
+      # 首次没有该分支时创建孤立的根提交，之后在其上累积提交。站点树无变化则跳过（幂等）；
+      # 并发推送导致 non-fast-forward 时重新 fetch 最新头、重新生成提交再推，至多重试 3 次。
+      # 用 GITHUB_TOKEN 推送不会触发其它 workflow（GitHub 对 token 事件的限制），
+      # 站点更新因此不会产生测试或发布流水。
+      - name: Publish market branch
+        if: steps.plan.outputs.plan != '[]' || github.event_name == 'workflow_dispatch'
+        env:
+          MARKET_BRANCH: market
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          SITE="$PWD/.workwork/plugin-market-commit"
+          # 身份用 `git -c` 逐命令传，**不要 git config 写仓库配置**：本步骤也会
+          # 在本地手动回填市场时执行，写仓库级 config 会把之后人工提交/tag 的作者
+          # 改成交互机器人（已踩过：本地回填后 alpha 的提交与发版 tag 全成 bot）。
+          AUTHOR=(-c "user.name=github-actions[bot]" -c "user.email=41898282+github-actions[bot]@users.noreply.github.com")
+          WORKTREE="$(mktemp -d)/checkout"
+          for attempt in 1 2 3; do
+            echo "== 尝试 $attempt/3：提交到 $MARKET_BRANCH 分支 =="
+            rm -rf "$WORKTREE"
+            git worktree prune >/dev/null 2>&1 || true
+            if git fetch --depth=1 origin "$MARKET_BRANCH" >/dev/null 2>&1; then
+              PARENT=$(git rev-parse FETCH_HEAD)
+              git worktree add --detach --force "$WORKTREE" "$PARENT" >/dev/null 2>&1
+              rm -rf "$WORKTREE/index.json" "$WORKTREE/README.md" "$WORKTREE/icons" "$WORKTREE/npm"
+            else
+              # 首次：在孤立根提交上建站（分支根即站点根）。
+              PARENT=""
+              git worktree add --detach --force "$WORKTREE" HEAD >/dev/null 2>&1
+              git -C "$WORKTREE" rm -r -f -q . >/dev/null 2>&1 || true
+            fi
+            cp -R "$SITE"/. "$WORKTREE"/
+            git -C "$WORKTREE" add -A
+            if [ -n "$PARENT" ] && git -C "$WORKTREE" diff-index --cached --quiet "$PARENT"; then
+              echo "站点内容无变化，跳过提交。"
+              git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
+              exit 0
+            fi
+            TREE=$(git -C "$WORKTREE" write-tree)
+            if [ -n "$PARENT" ]; then
+              COMMIT=$(git -C "$WORKTREE" "${AUTHOR[@]}" commit-tree "$TREE" -p "$PARENT" -m "市场: 更新插件索引与静态 registry（$TAG）")
+            else
+              COMMIT=$(git -C "$WORKTREE" "${AUTHOR[@]}" commit-tree "$TREE" -m "市场: 初始化插件索引与静态 registry")
+            fi
+            git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
+            if git push origin "$COMMIT:refs/heads/$MARKET_BRANCH"; then
+              echo "已推送 $MARKET_BRANCH 分支：$COMMIT"
+              exit 0
+            fi
+            echo "推送被拒绝（可能远端并发更新），重取 $MARKET_BRANCH 最新头后重试…"
+            sleep 3
+          done
+          echo "::error::market 分支推送重试 3 次仍失败"
+          exit 1

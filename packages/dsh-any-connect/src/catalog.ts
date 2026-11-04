@@ -414,16 +414,6 @@ export class WorkBuddyCatalog {
   private models: readonly WorkBuddyModelInfo[]
   private visible = true
   private readonly kind?: VariantKind
-  /**
-   * Whether this account is entitled to ZCode's 23:00–09:00 free window.
-   *
-   * The window is a Coding Plan benefit. Start Plan accounts run on the
-   * ordinary ZCode channel with the 150% quota and no night window at all, so
-   * showing them `夜间免费` (or a `x0.00` rate) would advertise a discount the
-   * account cannot get. Defaults to true, which is the Coding Plan behavior
-   * and the historical one.
-   */
-  private nightFreeEligible = true
   private excludedModelIds: ReadonlySet<string> = new Set()
 
   constructor(
@@ -432,11 +422,6 @@ export class WorkBuddyCatalog {
   ) {
     this.models = initial
     this.kind = kind
-  }
-
-  /** Set whether the signed-in account may use the night-free window. */
-  setNightFreeEligible(eligible: boolean): void {
-    this.nightFreeEligible = eligible
   }
 
   /** Set the excluded model ids (filtered out from current()). */
@@ -452,6 +437,22 @@ export class WorkBuddyCatalog {
   /** Get the count of excluded models among available models. */
   excludedCount(): number {
     return this.models.filter(model => this.excludedModelIds.has(model.id)).length
+  }
+
+  /**
+   * 被隐藏的模型**完整行**（含名称/窗口/计费/档位），顺序与上游目录一致。
+   *
+   * 卡片要让人「看见隐藏了什么、再单独恢复」，只给数量是不够的——用户报告
+   * 的痛点正是「只能一键全恢复」。这里复用 {@link current} 的同一套促销解析，
+   * 保证隐藏区与可见区对同一个模型显示同一个价格。
+   *
+   * 与 {@link current} 的可见性无关：`visible` 只控制「这个变体有没有可用凭据」，
+   * 隐藏列表是用户自己的配置，未登录时也该能看到自己隐藏过什么。
+   */
+  excludedModels(): readonly WorkBuddyModelInfo[] {
+    return this.models
+      .filter(model => this.excludedModelIds.has(model.id))
+      .map(model => modelWithCurrentPromotion(model, Date.now(), this.kind))
   }
 
   /** Raw un-filtered models list. */
@@ -470,7 +471,7 @@ export class WorkBuddyCatalog {
     if (!this.visible) return []
     return this.models
       .filter(model => !this.excludedModelIds.has(model.id))
-      .map(model => modelWithCurrentPromotion(model, Date.now(), this.kind, this.nightFreeEligible))
+      .map(model => modelWithCurrentPromotion(model, Date.now(), this.kind))
   }
 
   /** Replace the list; the adapter's `getModels` reads the live catalog, so

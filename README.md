@@ -4,10 +4,10 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 
 | 插件包 | 核心功能 | 当前版本 | 适配 DSH |
 |---|---|---|---|
-| [`@chaoset/dsh-any-connect`](packages/dsh-any-connect/) | **多渠道桌面端与免密模型接入**：WorkBuddy（国内/国际版）、ZCode（Coding/Start Plan 双通道）、OpenCode Free 官方免密免费模型通道；支持思考强度自测与补全、积分倍率显示、图片多模态、自定义模型隐藏与 CLI 诊断 | `0.4.29` | `0.2.1-rc.5` |
-| [`@chaoset/provider-usage`](packages/provider-usage/) | **对话底栏模型额度指示器**：在输入框状态栏（composer dock）实时显示当前会话 provider 剩余额度与重置时间，点击展开可视化进度条与详细计费包；内置 8+ 种 Provider 查询器并提供开放注册 Seam | `0.2.1` | `0.2.1-rc.5` |
-| [`@chaoset/sandbox-extra-roots`](packages/sandbox-extra-roots/) | **沙盒额外允许写入目录**：为 `workspace-write` 沙盒安全追加工具缓存目录（npm/pip/cargo/go 等）；跨平台 Seatbelt/bwrap/Landlock 原生沙盒引擎注入；严格防范危险根与 TOCTOU 符号链接逃逸 | `0.4.29` | `0.2.1-rc.5` |
-| [`@chaoset/session-archive`](packages/session-archive/) | **归档会话完整生命周期管理**：Web 侧边栏专属归档面板与实时徽标；抽屉式**只读浏览**历史会话事件流；批量安全恢复到会话树；两段式彻底物理删除与落盘防竞态保护；纯前端毫秒级检索与排序 | `0.3.32` | `0.2.1-rc.5` |
+| [`@chaoset/dsh-any-connect`](packages/dsh-any-connect/) | **多渠道桌面端与免密模型接入**：WorkBuddy（国内/国际版）、ZCode（Coding/Start Plan 双通道）、OpenCode Free 官方免密免费模型通道；支持思考强度自测与补全、积分倍率显示、图片多模态、自定义模型隐藏与 CLI 诊断 | `0.4.30` | `0.2.2-rc.1` |
+| [`@chaoset/provider-usage`](packages/provider-usage/) | **对话底栏模型额度指示器**：在输入框状态栏（composer dock）实时显示当前会话 provider 剩余额度与重置时间，点击展开可视化进度条与详细计费包；内置 8+ 种 Provider 查询器并提供开放注册 Seam | `0.2.2` | `0.2.2-rc.1` |
+| [`@chaoset/sandbox-extra-roots`](packages/sandbox-extra-roots/) | **沙盒额外允许写入目录**：为 `workspace-write` 沙盒安全追加工具缓存目录（npm/pip/cargo/go 等）；跨平台 Seatbelt/bwrap/Landlock 原生沙盒引擎注入；严格防范危险根与 TOCTOU 符号链接逃逸 | `0.4.30` | `0.2.2-rc.1` |
+| [`@chaoset/session-archive`](packages/session-archive/) | **归档会话完整生命周期管理**：Web 侧边栏专属归档面板与实时徽标；抽屉式**只读浏览**历史会话事件流；批量安全恢复到会话树；两段式彻底物理删除与落盘防竞态保护；纯前端毫秒级检索与排序 | `0.3.33` | `0.2.2-rc.1` |
 
 ---
 
@@ -18,9 +18,9 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 接入各类桌面 AI Agent 与免密官方通道的模型到 DSH，无需手动配置复杂的 API Key，开箱即用。
 
 - **多上游通道无缝接入**：
-  - **WorkBuddy 国内版 (`workbuddy`)**：零配置自动读取本机桌面 App 登录态；深度支持 WorkBuddy 5.6+ 针对 `accessToken`/`refreshToken` 的 `$wbEncrypted` 加密信封（自动定位 macOS Bundle 或 Windows 注册表/安装目录的 Electron 二进制充当解密助手，亦支持 `WORKBUDDY_ELECTRON_BIN` 覆盖）；支持图片多模态输入；模型选择器与 `/model` 弹窗直接标明积分倍率（如 `· x0.79`）与限免标签。
+  - **WorkBuddy 国内版 (`workbuddy`)**：零配置自动读取本机桌面 App 登录态；深度支持 WorkBuddy 5.6+ 针对 `accessToken`/`refreshToken` 的 `$wbEncrypted` 加密信封（自动定位 macOS Bundle 或 Windows 注册表/安装目录的 Electron 二进制充当解密助手，亦支持 `WORKBUDDY_ELECTRON_BIN` 覆盖）；支持图片多模态输入；模型选择器以原生徽标标明积分倍率与限免标签（`/model` 弹窗在模型名后缀显示倍率，如 `· x0.79`）。
   - **WorkBuddy AI 国际版 (`workbuddy-ai`)**：独立接入国际版桌面 App，提供独立的「WorkBuddy AI」模型分组（GPT、Gemini 系列等）、独立凭据与账号积分卡片。
-  - **ZCode Coding Plan (`zcode`)**：接入智谱 ZCode 桌面端 Coding Plan 官方渠道；按桌面端 `setting.json` 当前激活计划精准取用 API Key；以客户端本地内置白名单（`zcode-builtin.json`）动态约束模型，随客户端升级自动更新；支持 23:00–09:00 夜间免费时段自动识别与费率联动。
+  - **ZCode Coding Plan (`zcode`)**：接入智谱 ZCode 桌面端 Coding Plan 官方渠道；按桌面端 `setting.json` 当前激活计划精准取用 API Key；以客户端本地内置白名单（`zcode-builtin.json`）动态约束模型，随客户端升级自动更新（智谱此前的 23:00–09:00 夜间免费限时活动已下线，现按 150% 额度与模型基准计费如实展示）。
   - **ZCode Start Plan (`zcode-start-plan`)**：独立专属通道（`zcode.z.ai/api/v1/zcode-plan/anthropic`）与独立额度池；采用账号 JWT + 设备标识认证，扣减当日一次性 Token 包（过期不结转）；每日领取活动自动探测并在设置卡片中醒目提醒（提供一键复制 Plan ID）；动态跟随用户今日实际权益展示模型，未领取或过期如实隐藏。
   - **OpenCode Free (`opencode-free`)**：官方免密免费模型通道（Muse Spark 1.2/1.3、Qwen3.6 Plus、MiniMax 系列、Nemotron 3.5 Super VL、DeepSeek V4.1 Flash、Big Pickle 等）；自动过闸标头与 `read` 只读工具守卫注入，解除 "free tier can only be used from within OpenCode" 网关限制；多协议实时流式转码（OpenAI Responses、Anthropic Messages、OpenAI-compatible Chat Completions 统一转为标准 OpenAI SSE 流，完整支持 `reasoning_content` 思考过程输出）；自动读取本地官方 specs 缓存（`~/.cache/opencode/models.json`）决议精确上下文与多模态能力。
 - **思考强度智能适配**：
@@ -42,14 +42,14 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 在对话区底部的状态栏（composer dock）直观显示当前会话 provider 的剩余额度、余额与重置周期。
 
 - **Composer Dock 状态栏原生呈现**：
-  - 紧随 DSH 自带的 Token 消耗、步数、轮数指标并列展示，形如 `workbuddy · 23 credits left`、`DeepSeek · ¥45.20`、`OpenRouter · $5.00 left`；
+  - 紧随 DSH 自带的 Token 消耗、步数、轮数指标并列展示，形如 `workbuddy 23 credits left`、`deepseek-official 45.2 cny 剩余`、`openrouter 5 credits left`；
   - 额度来源与对话框当前所选模型同源（`ctx.modelDirectories`），切换模型即刻自动联动切换额度 pill。
 - **交互式额度抽屉 (Popover)**：
   - 点击底栏 pill 展开详细计费抽屉；
-  - 每个计费包配有字符级与图形化进度条（`▓▓▓▓▓░░░░░ 23 / 100`）；
-  - 明确展示套餐名称、额度余量/总量、重置倒计时与阶梯限额。
+  - 每个计费包配有图形化进度条（`23 / 100`），颜色随余量分三档告警；
+  - 明确展示套餐名称、额度余量/总量与重置时间。
 - **全面的内置 Provider 查询器**：
-  - **DeepSeek**：全面支持 DSH 0.2.1+ 官方的两条路由——`deepseek-account`（OAuth 账户余额与赠送代金券钱包）和 `deepseek-official`（API Key `GET /user/balance` 现金与代金券），亦兼容自定义 `deepseek` 路由；
+  - **DeepSeek**：全面支持 DSH 0.2.1+ 官方的两条路由——`deepseek-account`（OAuth 账户余额与赠送代金券钱包）和 `deepseek-official`（API Key `GET /user/balance` 余额），亦兼容自定义 `deepseek` 路由；
   - **OpenRouter**：`/api/v1/key` + `/api/v1/credits`，API Key 自身限额优先，回落到账户额度；
   - **Moonshot (Kimi)**：`GET /v1/users/me/balance` 可用余额、现金、代金券分列；
   - **SiliconFlow (硅基流动)**：`GET /v1/user/info` 总额、可用、充值分列；
@@ -88,7 +88,7 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
   - **TOCTOU 符号链接防御**：运行时动态解析软链接真实目标，一旦被替换为危险根立即剔除权限。
 - **可视化配置与即时热生效**：
   - 设置页「插件配置」提供专属卡片，支持路径实时校验预览与错误提示；
-  - 预置常用工具缓存一键快速添加（npm / pip / cargo / go）；
+  - 预置常用工具缓存一键快速添加（npm / bun / pip / cargo / go）；
   - 经官方 config-editor 直接保存到 `cordis.patch.yml`，修改即时热生效，无需重启。
 
 ---
@@ -123,24 +123,65 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 
 ## 安装与使用
 
-推荐使用 DSH 自带的 `dsh plugin` 命令安装：它会自动调用 pnpm 安装依赖，将包加入 `dsh.profile.bundles`，并由 DSH 应用包内自带的 `cordis.patch.yml` 完成插件注册。
+本仓库通过 **GitHub Releases 分发**（Release 资产是标准 npm tarball），并额外提供 DSH 官方的「自定义插件索引」：索引与静态 npm registry 由 CI 从每个 Release 生成，作为站点发布在独立的发布产物分支 `market` 上（该分支根目录即站点根，URL 固定）。下面两种方式任选，**推荐方式一**。
 
-本仓库通过 **GitHub Releases 分发**。Release 资产为标准 npm tarball（命名规则：`chaoset-<包名>-<版本>.tgz`，tag 名 `<包名>-v<版本>`），公开仓库直接安装对应 URL 即可：
+### 方式一：插件索引（推荐，发现页一键安装）
+
+1. 打开 DSH → **插件** → **实验性插件**，打开 **自定义插件索引**（Custom plugin indexes）；插件页会出现**发现**标签页。
+2. **发现** → **添加索引源**，填入：
+
+   ```text
+   https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
+   ```
+
+3. 在**发现**页浏览本仓四个插件并点**安装**（卡片显示的即与你当前 DSH 版本精确匹配的最高版本）；进入插件页的**版本**列表可以安装历史版本（与你的宿主版本不匹配的会标「不兼容」并禁用安装）。
+4. **更新**：DSH 对自建 registry 的自动更新检查只在安装会话内生效（重启后「已安装」页查不到自建 registry 的新版本，这是 DSH 当前的设计限制）——
+   - 安装后**同一会话内**：「已安装」页可直接点**更新**；
+   - **重启 DSH 后**：用 CLI 把插件更新到指定版本（`<版本>` 见「发现」页或 Releases 页）：
+
+     ```bash
+     dsh plugin --profile web add @chaoset/dsh-any-connect@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
+     ```
+
+     provider-usage / sandbox-extra-roots / session-archive 把包名替换成 `@chaoset/<包名>` 即可。
+5. 卸载：`dsh plugin --profile web remove @chaoset/<包名>`。
+
+索引只提供元数据与安装来源（npm 包名 + 静态 registry），安装/更新仍走 DSH 自带的 pnpm 安装与 bundle 对账流程；索引收录的每个版本都对应本仓的一个 GitHub Release 资产。用索引安装时，插件的宿主运行时依赖由宿主 profile runner 的 runtime resolution 提供（不写入 profile 的 `node_modules`）；需要把依赖装进 profile 时请用下面的 tarball 方式。**因此本仓插件发布的 tarball 运行期零依赖**（`dependencies`/`optionalDependencies` 为空，宿主依赖只放 `devDependencies`）——否则 pnpm 会按 tarball 里的依赖声明去静态 registry 解析它们而 `ERR_PNPM_FETCH_404`，装过一个带运行期依赖的版本后，同一 profile 再装/更新其它插件会失败。
+
+> 索引 URL 固定，添加一次永久有效：任一发布线（`alpha`、`rc`、正式版）发版后，同一个索引
+> 都会自动更新，无需重新添加索引源。
+
+索引里的每个版本都**精确声明它所匹配的 DSH 版本**（`engines.dsh` 是精确版本，不是范围），DSH 按精确匹配判定兼容：只有与你当前 DSH 版本完全一致的插件版本会显示可安装，其余版本在列表里标「不兼容」。因此 **DSH 每次升级（含同线 alpha→rc→正式版）后，请安装为那个新版本重新发布的插件版本**。
+
+> 历史代价（如实说明）：0.2.2 适配线之前发布的 tarball 里 `engines.dsh` 是范围，索引按规则把它们 pin 到发布时适配的精确宿主版本（如 `0.2.1-rc.3`）。所以当前稳定参考 `0.2.1-rc.5` 的宿主不会看到旧稳定版可安装——这是「精确匹配、不误导」的代价，收敛期发布对应版本后恢复。已发布 tarball 不可变，索引侧严格、安装期检查对历史版本仍宽松（CLI 仍可强制装旧包）。
+
+> 注：预览线宿主（如 0.2.2-rc.1）下兼容版本可能全是预发布版，而 DSH 的「默认」标签只从兼容的正式版里选，因此卡片可能不打「默认」；「安装」按钮仍指向该宿主兼容的最高版本，功能正常。
+
+> 运行期依赖的历史代价（如实说明，2026-10-30 实测）：2026-10-30T00:00:00Z 之前发布的旧 tarball
+> 里仍带 `dependencies`（例如 `zod`），这些版本按「策略生效前只告警」的规则保留在索引里。若你
+> 安装过这类旧版本，之后在同一 profile 再装/更新其它插件可能报 `ERR_PNPM_FETCH_404`（去静态
+> registry 找 `zod` 等宿主依赖）。变通：先装好其它插件、把这类旧版本放在最后装；或改用「方式二」
+> 的 tarball URL 安装旧版本（tarball 方式从常规 registry 解析依赖，不受影响）。这类版本无法回改，
+> 但**策略生效之后发布的所有版本都强制运行期零依赖**（索引侧 check/build 自校验拦截）。
+
+### 方式二：tarball URL（手动）
+
+Release 资产命名规则为 `chaoset-<包目录>-<版本>.tgz`，tag 名 `<包目录>-v<版本>`，可直接安装对应 URL：
 
 ```bash
-# 查看 Releases 列表获取最新版本：https://github.com/ShanWuYinShe/dsh-plugins/releases
+# 版本以 Releases 页为准：https://github.com/ShanWuYinShe/dsh-plugins/releases
 
 # 1. 安装 @chaoset/dsh-any-connect（模型接入）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v0.4.19/chaoset-dsh-any-connect-0.4.19.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v<版本>/chaoset-dsh-any-connect-<版本>.tgz
 
 # 2. 安装 @chaoset/provider-usage（底栏额度显示）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v0.1.10/chaoset-provider-usage-0.1.10.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v<版本>/chaoset-provider-usage-<版本>.tgz
 
 # 3. 安装 @chaoset/sandbox-extra-roots（沙盒额外目录）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/sandbox-extra-roots-v0.4.24/chaoset-sandbox-extra-roots-0.4.24.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/sandbox-extra-roots-v<版本>/chaoset-sandbox-extra-roots-<版本>.tgz
 
 # 4. 安装 @chaoset/session-archive（归档会话管理）
-dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v0.3.28/chaoset-session-archive-0.3.28.tgz
+dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v<版本>/chaoset-session-archive-<版本>.tgz
 
 # 从本地源码安装（开发调试时使用绝对路径）
 dsh plugin --profile web add /absolute/path/to/dsh-plugins/packages/dsh-any-connect
@@ -163,6 +204,11 @@ dsh plugin --profile web remove @chaoset/session-archive
   4. **重新执行一次 `dsh plugin add` 命令**（首次失败时 bundle 对账未完成，必须重跑以完成注册）。
   > ⚠️ 不要直接用 `pnpm add` 或手动写 profile 的 `package.json`：这样跳过了 bundle 对账，web 启动时会报 `pending (waiting for service: remote.xxx)`。
 
+- **索引安装后，同 profile 再装/更新插件报 `ERR_PNPM_FETCH_404`（宿主依赖，如 `zod`）**：索引安装走静态 registry，pnpm 会按已装 tarball 的 `dependencies` 声明去该 registry 解析依赖；装过「历史版本仍带运行期依赖」的插件后，后续包操作就可能命中 404（详见上文「运行期依赖的历史代价」）。变通：
+  1. 把该历史版本**放到最后装**（先装/更新其它插件），或直接改用「方式二」的 tarball URL 安装它；
+  2. 若失败发生在 `dsh plugin add` 的 bundle 对账之后，删除该 profile 的 `node_modules` 后按同一顺序重装（见下一条「pnpm store 漂移」的删掉重装做法）；
+  3. 策略生效时刻（2026-10-30T00:00:00Z）之后发布的版本运行期零依赖，不会再触发；发布侧由 `check`/build 自校验强制（该时刻之后发布的版本带运行期依赖即失败，见 `RELEASING.md`「收录规则」）。
+
 - **pnpm store 漂移（宿主升级后安装报错，全部 profile 通用）**：宿主升级若更换了内置 pnpm 的大版本，**每一个**旧 profile 的 `node_modules` 都是上一版 pnpm 安装的——只要该 profile 执行过 `dsh plugin add` 就会报 `ERR_PNPM_UNEXPECTED_STORE`（use the new store location …）：node_modules 里的 `.modules.yaml` 记录着旧 store 位置，与新 pnpm 解析出的不一致。**逐 profile 修复**，对每个受影响的 profile 各做一遍：
 
   修复就是**删掉重装**（node_modules 是纯安装产物，删掉连旧 store 记录一起归零；插件配置在 `cordis.patch.yml`，不受影响）：
@@ -172,11 +218,11 @@ dsh plugin --profile web remove @chaoset/session-archive
   dsh plugin --profile <name> add <同一个 tarball URL>
   ```
 
-  一次 `plugin add` 会按 package.json 把该 profile 已装的全部插件一并装回，store 位置直接写对。（2026-10-24 实测：宿主 0.2.1-rc.3 内置 pnpm v11.28.5，web 与 desktop 两个 profile 各用一条命令重装四包；修复后核对 `node_modules/.modules.yaml` 的 `storeDir` 应指向 `$DSH_HOME` 内。）
+  一次 `plugin add` 会按 package.json 把该 profile 已装的全部插件一并装回，store 位置直接写对。（2026-10-24 于宿主 0.2.1-rc.3 时代实测，当时内置 pnpm v11.28.5：web 与 desktop 两个 profile 各用一条命令重装四包；修复后核对 `node_modules/.modules.yaml` 的 `storeDir` 应指向 `$DSH_HOME` 内。）
 
 ### 给 AI Agent
 
-若由 AI Agent 代为在环境中安装，请直接执行 `dsh plugin ...` 命令，**严禁手动编辑 `cordis.patch.yml`**：
+若由 AI Agent 代为在环境中安装：目标环境已启用「自定义插件索引」时，优先引导用户在**发现 → 添加索引源**填入上面的索引 URL（见「方式一」），再在发现页安装；用命令行安装或指定版本更新时执行 `dsh plugin ...` 命令，**严禁手动编辑 `cordis.patch.yml`**：
 1. 确认 `dsh` 与 `pnpm` 处于 PATH 中；
 2. 确定目标 profile（默认为 `web`）；
 3. 执行 `dsh plugin --profile web add <tarball URL>`；
@@ -191,11 +237,12 @@ dsh plugin --profile web remove @chaoset/session-archive
 
 ```bash
 bun install             # 安装依赖（切分支后记得重新 install）
-bun run build           # 全仓构建：tsc 编译 host (src/ -> lib/)，esbuild 打包 client
+bun run build           # 全仓构建：tsc 编译 host → 生成 Typert 工件 → esbuild 打包 client 与独立 CLI
 bun run typecheck       # 类型检查：host + client 两套 tsconfig --noEmit
 bun run test            # 运行 vitest 单元与集成测试
 bun run test:ci         # build + typecheck + test 门禁验证（提交/发版前必跑）
 bun run dsh-status      # 核对本地依赖基线 vs DSH 上游稳定/预发布线
+bun run adapt <版本>    # dsh 宿主升级适配（--dry-run 预览，详见 RELEASING.md）
 bun run gate            # 发布门禁干跑（检查 tag 与待发布包）
 bun run audit           # 依赖漏洞审计（基于 OSV.dev）
 ```

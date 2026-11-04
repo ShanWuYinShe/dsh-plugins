@@ -13,11 +13,13 @@ import { newestFirst } from './probe-store.js'
 
 export function probeSection(runtime: VariantRuntime): WorkBuddyWebProbeSection {
     // 仅 WorkBuddy 变体携带探针服务；status 路由也只对它们启用 probe 字段。
-    if (runtime.probeService === undefined) {
+    // 先取到局部常量再进回调：闭包会丢失属性的类型收窄，之前这里靠非空断言补。
+    const probeService = runtime.probeService
+    if (probeService === undefined) {
       return { running: false, results: [] }
     }
     const results = runtime.catalog.current().flatMap(info => {
-      const record = runtime.probeService!.recordFor(info.id)
+      const record = probeService.recordFor(info.id)
       if (record === undefined) return []
       return [{
         id: info.id,
@@ -28,7 +30,7 @@ export function probeSection(runtime: VariantRuntime): WorkBuddyWebProbeSection 
       }]
     })
     return {
-      running: runtime.probeService.isRunning(),
+      running: probeService.isRunning(),
       results: newestFirst(results),
     }
   }

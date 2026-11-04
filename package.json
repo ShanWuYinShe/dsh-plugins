@@ -27,20 +27,31 @@
     "packages/*"
   ],
   "devDependencies": {
-    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-plugin-market-index": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-typert-generator": "^0.2.2-rc.1",
     "@types/node": "^26.6.5",
     "esbuild": "^0.28.2",
+    "semver": "^7.8.5",
     "typescript": "^7.0.2",
     "vitest": "^4.1.12"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
+    "typert": "node scripts/typert.mjs",
+    "market:plan": "node scripts/plugin-market.mjs plan",
+    "market:build": "node scripts/plugin-market.mjs build --out .workwork/plugin-market-site",
+    "market:check": "node scripts/plugin-market.mjs check --out .workwork/plugin-market-site",
+    "typecheck": "node scripts/typert.mjs && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "node scripts/build.mjs && vitest run",
     "test:ci": "bun run build && bun run typecheck && vitest run",
+    "test:stability": "node scripts/test-stability.mjs",
     "gate": "node scripts/publish-gate.mjs",
     "adapt": "node scripts/adapt-dsh.mjs",
     "dsh-status": "node scripts/dsh-follow-status.mjs",
     "audit": "node scripts/audit-deps.mjs"
+  },
+  "engines": {
+    "dsh": "0.2.2-rc.1"
   }
 }

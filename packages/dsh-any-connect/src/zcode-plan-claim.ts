@@ -38,6 +38,7 @@
 import { deadlineSignal } from './timeout.js'
 import { httpStatusLabel } from './upstream-shared.js'
 import type { StartPlanEntitlement } from './zcode-plan-models.js'
+import { errorMessage } from './values.js'
 import {
   ZCODE_ACCOUNT_BASE,
   CLAIM_TIMEOUT_MS,
@@ -107,7 +108,7 @@ export async function previewStartPlan(
     // plans 为空是合法结果（今日已领取），由调用方渲染成"无待领取"。
     return { status: 'ok', plans: parsePreviewBody(body) }
   } catch (error) {
-    return { status: 'failed', message: error instanceof Error ? error.message : String(error) }
+    return { status: 'failed', message: errorMessage(error) }
   } finally {
     handle.dispose()
   }
@@ -177,7 +178,7 @@ export async function claimStartPlan(
     if (parsed.status === 'captcha-rejected') return { ...parsed, planId: trimmedPlanId }
     return parsed
   } catch (error) {
-    return { status: 'failed', message: error instanceof Error ? error.message : String(error) }
+    return { status: 'failed', message: errorMessage(error) }
   } finally {
     handle.dispose()
   }

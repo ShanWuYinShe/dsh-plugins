@@ -16,10 +16,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import { isLoopbackHost } from '@deepseek-ai/dsh-host-webserver'
 import { safeMessage } from './registry.js'
 import type { ProviderUsageRegistry } from './registry.js'
-import { PROVIDER_USAGE_PATH } from './types.js'
+import { PROVIDER_USAGE_PATH, type ProviderUsageAnswer } from './types.js'
 
 /** Constructor dependencies. */
-export interface ProviderUsageRouteOptions {
+interface ProviderUsageRouteOptions {
   registry: ProviderUsageRegistry
   /** Route path; defaults to the shared constant. */
   path?: string
@@ -136,7 +136,7 @@ export function providerUsageHandler(options: ProviderUsageRouteOptions): (req: 
       // Sequential rather than parallel: these are billing endpoints, and
       // firing twenty at once from one page poll is how an account gets
       // rate-limited for merely displaying a number.
-      const snapshots: unknown[] = []
+      const snapshots: ProviderUsageAnswer[] = []
       for (const provider of providers) {
         const snapshot = await options.registry.snapshot(provider, { force })
         snapshots.push(snapshot ?? { provider, queried: false })
@@ -156,15 +156,11 @@ export function providerUsageHandler(options: ProviderUsageRouteOptions): (req: 
  */
 export function registerProviderUsageRoute(ctx: Context, options: ProviderUsageRouteOptions): void {
   ctx.inject(['webServer'], webCtx => {
-    webCtx.effect(() => {
-      const dispose = webCtx.webServer.register({
-        kind: 'exact',
-        path: options.path ?? PROVIDER_USAGE_PATH,
-        handler: providerUsageHandler(options),
-      })
-      return () => {
-        dispose()
-      }
-    }, 'provider-usage: usage route')
+    // register() 返回的就是幂等反注册器，直接作为 effect 的 disposer。
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: options.path ?? PROVIDER_USAGE_PATH,
+      handler: providerUsageHandler(options),
+    }), 'provider-usage: usage route')
   })
 }

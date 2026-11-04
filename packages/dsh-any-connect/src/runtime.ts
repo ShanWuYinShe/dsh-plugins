@@ -15,11 +15,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { AdapterRegistrationHandle } from '@deepseek-ai/dsh-llm'
 import { WorkBuddyCatalog } from './catalog.js'
-import { FALLBACK_ZCODE_MODELS } from './catalog.js'
-import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
 import { WorkBuddyCatalogStore, workbuddyCatalogPath } from './catalog-store.js'
 import { createWorkBuddyAdapter } from './adapter.js'
 import { createWorkBuddyShim } from './shim.js'
+import { RateLimitLedger } from './rate-limit.js'
+import type { RateLimitObservation } from './rate-limit.js'
+import type { WorkBuddyWebRateLimit } from './status-paths.js'
 import { WorkBuddyUpstreamClient } from './upstream.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { PROVIDER_VARIANTS } from './variants.js'
@@ -38,10 +39,13 @@ import type { Options } from './config.js'
 import { createVariantCredentialStore, upstreamClientFor } from './variant-wiring.js'
 import type { WorkBuddyStateStore } from './state-store.js'
 import type { CreditLedger } from './credit-ledger.js'
+import { errorMessage } from './values.js'
 
 /** apply() 拿到的运行时集合句柄。 */
 export interface VariantRuntimeSet {
   readonly runtimes: readonly VariantRuntime[]
+  /** 上游限流台账（shim 写、卡片与 pill 读）。 */
+  readonly rateLimits: RateLimitLedger
   /** `loader/volatile-update`：把新配置推进每个变体并重拉目录。 */
   applyConfiguredAuthFiles(): void
   /** 状态域就绪后注入自有副本的域存取（见 index.ts 的 inject 时序）。 */
@@ -64,6 +68,17 @@ export function createVariantRuntimeSet(deps: {
 }): VariantRuntimeSet {
   const { ctx, client, current } = deps
   let stopped = false
+  /**
+   * 注册后写心跳是 fire-and-forget（不能拖慢注册），但卸载必须等这些写**落定**
+   * 之后再清文件：在途写会在 clearHostHeartbeat 之后把心跳写回来（宿主退出后
+   * 残留一条 CLI 可见的心跳），测试里则表现为删临时 DSH_HOME 时与在途
+   * mkdir/write 的清理竞态（实测 ENOTEMPTY）。
+   */
+  const heartbeatWrites: Promise<void>[] = []
+  // 上游 429 观测台账（进程内）：shim 写入，provider 卡片与 pill 读取。
+  // 一个实例服务全部变体，按 provider 键分开记——用户切模型组时看到的是
+  // 「这一条通道被限了多久、什么时候恢复」。
+  const rateLimits = new RateLimitLedger()
 
   function createRuntime(variant: WorkBuddyVariant): VariantRuntime {
     const filterStore = new ModelFilterStore(variant.id)
@@ -75,95 +90,42 @@ export function createVariantRuntimeSet(deps: {
     catalog.setVisible(false)
     const configured = configuredAuthFile(current(), variant)
 
-    if (variant.kind === 'zcode') {
-      // Start Plan 是独立变体，走专属模型名单；两个变体的 transform 各自把
-      // 自己的计划语义固定进读出的凭据（credential.zcodePlan 恒为该变体的
-      // 计划）——模型路由（专属 vs 普通通道）、额度来源、夜免资格都只看这
-      // 一个字段。共享同一份桌面凭据文档，互不掺用对方的材料。
-      const zcodeClient = upstreamClientFor(variant, {
-        models: variant.zcodePlanMode === 'start' ? FALLBACK_ZCODE_START_PLAN_MODELS : FALLBACK_ZCODE_MODELS,
-      })
-      const credentialStore = createVariantCredentialStore({
-        variant,
-        client: zcodeClient,
-        desktopPath: configured,
-        onWarning: message => ctx.logger?.warn?.(message),
-      })
-      const catalogStore = new WorkBuddyCatalogStore({ path: workbuddyCatalogPath(variant.catalogFilename) })
-      const shim = createWorkBuddyShim({ kind: 'zcode', store: credentialStore, client: zcodeClient, catalog, logger: ctx.logger })
-      const runtime: VariantRuntime = {
-        variant, store: credentialStore, catalog, shim,
-        client: zcodeClient, credentialStore, catalogStore,
-        probeStore: undefined,
-        probeService: undefined,
-        filterStore,
-        catalogSource: 'fallback',
-        catalogFetchedAtMs: undefined,
-        catalogError: undefined,
-        lastIdentity: undefined,
-        // 指纹来自 catalog 的构造参数（各变体的兜底名单），所以初始值不能是
-        // 'hidden'——未登录时分组本就隐藏，那会让第一次 refresh 误判成"没变"
-        // 而漏掉通知。见 createRuntime 里的说明。
-        publishedCatalog: '',
-        catalogEmpty: false,
-      }
-      return runtime
-    }
-
-    if (variant.kind === 'opencode') {
-      const opencodeClient = upstreamClientFor(variant, {
-        models: fallbackFor(variant),
-      })
-      const credentialStore = createVariantCredentialStore({
-        variant,
-        client: opencodeClient,
-        desktopPath: configured,
-        onWarning: message => ctx.logger?.warn?.(message),
-      })
-      const catalogStore = new WorkBuddyCatalogStore({ path: workbuddyCatalogPath(variant.catalogFilename) })
-      const shim = createWorkBuddyShim({ kind: 'opencode', store: credentialStore, client: opencodeClient, catalog, logger: ctx.logger })
-      const runtime: VariantRuntime = {
-        variant, store: credentialStore, catalog, shim,
-        client: opencodeClient, credentialStore, catalogStore,
-        probeStore: undefined,
-        probeService: undefined,
-        filterStore,
-        catalogSource: 'fallback',
-        catalogFetchedAtMs: undefined,
-        catalogError: undefined,
-        lastIdentity: undefined,
-        publishedCatalog: '',
-        catalogEmpty: false,
-      }
-      return runtime
-    }
-
-
+    // 三种变体共用同一条装配路径，只有两处按 kind 分叉：
+    // 1) WorkBuddy 线复用共享的 WorkBuddyUpstreamClient（CN/AI 两变体同一实例，
+    //    应用版本探测等状态只做一次），其余变体按 kind 新建客户端（兜底名单按
+    //    变体取自 fallbackFor——Start Plan 与 Coding Plan 的名单差异就在其中）；
+    // 2) 只有 WorkBuddy 变体有探针（档位检测是 WorkBuddy 上游的能力）。
+    const kind = variant.kind
+    const variantClient = kind === 'workbuddy' ? client : upstreamClientFor(variant, { models: fallbackFor(variant) })
     const credentialStore = createVariantCredentialStore({
       variant,
-      client,
+      client: variantClient,
       desktopPath: configured,
       onWarning: message => ctx.logger?.warn?.(message),
     })
     const catalogStore = new WorkBuddyCatalogStore({ path: workbuddyCatalogPath(variant.catalogFilename) })
-    const probeStore = new WorkBuddyProbeStore({
-      pluginVersion: ANYCONNECT_VERSION,
-      path: workbuddyProbePath(variant.probeFilename),
-    })
-    const shim = createWorkBuddyShim({ kind: 'workbuddy', store: credentialStore, client, catalog, logger: ctx.logger })
+    const shim = createWorkBuddyShim({ kind, providerId: variant.id, store: credentialStore, client: variantClient, catalog, logger: ctx.logger, rateLimits })
     const runtime: VariantRuntime = {
       variant, store: credentialStore, catalog, shim,
-      client, credentialStore, catalogStore, probeStore,
-      probeService: undefined as unknown as WorkBuddyProbeService,
+      client: variantClient, credentialStore, catalogStore,
       filterStore,
       catalogSource: 'fallback',
       catalogFetchedAtMs: undefined,
       catalogError: undefined,
       lastIdentity: undefined,
-      // 与 ZCode 分支同理：初始指纹必须是"绝不可能等于首次发布"的哨兵。
+      // 指纹来自 catalog 的构造参数（各变体的兜底名单），所以初始值不能是
+      // 'hidden'——未登录时分组本就隐藏，那会让第一次 refresh 误判成"没变"
+      // 而漏掉通知。见 createRuntime 里的说明。
       publishedCatalog: '',
       catalogEmpty: false,
     }
+    if (kind !== 'workbuddy') return runtime
+
+    const probeStore = new WorkBuddyProbeStore({
+      pluginVersion: ANYCONNECT_VERSION,
+      path: workbuddyProbePath(variant.probeFilename),
+    })
+    runtime.probeStore = probeStore
     runtime.probeService = new WorkBuddyProbeService({
       store: probeStore,
       catalog,
@@ -173,11 +135,13 @@ export function createVariantRuntimeSet(deps: {
       // against this identity, so one account's detected levels never answer
       // for another's.
       account: () => runtime.lastIdentity,
+      // 状态 reason 带变体来源：多变体共用宿主日志/状态路由时能区分是哪条通道。
+      variantId: variant.id,
       // 清扫的探针失败必须可见:RegionMismatchError 是用户可修复的配置错误,
       // 静默吞掉会让"为什么模型没检测"无从排查。
       onSweepError: (modelId, error) => {
         ctx.logger?.warn?.(
-          `[anyconnect] background probe for ${variant.id}/${modelId} failed: ${error instanceof Error ? error.message : String(error)}`,
+          `dsh-any-connect: background probe for ${variant.id}/${modelId} failed: ${errorMessage(error)}`,
         )
       },
     })
@@ -200,7 +164,6 @@ export function createVariantRuntimeSet(deps: {
   /** 目录生命周期（拉取 / 发布 / 领取快通道 / 定时器）见 catalog-lifecycle.ts。 */
   const lifecycle = createCatalogLifecycle({
     ctx,
-    client,
     runtimes,
     adapterHandles,
     isStopped: () => stopped,
@@ -214,7 +177,7 @@ export function createVariantRuntimeSet(deps: {
       registerWorkBuddyStatusRoute(webCtx, {
         path: runtime.variant.statusPath,
         store: runtime.store,
-        fetchCredits: credential => runtime.client!.fetchCredits(credential as Parameters<WorkBuddyUpstreamClient['fetchCredits']>[0]),
+        fetchCredits: credential => runtime.client.fetchCredits(credential),
         // 今日消耗台账只属于积分制变体（credit-ledger 的口径说明见该模块头）。
         // ledger 是域就绪后的后补注入，闭包取值即可拿到。
         ...runtime.variant.kind === 'workbuddy'
@@ -233,6 +196,14 @@ export function createVariantRuntimeSet(deps: {
         // 没有账号计划可领，报一个恒为 none 的字段只会误导。
         ...variantIsStartPlan(runtime.variant) ? { fetchStartPlanClaim: lifecycle.claimPreviewFor(runtime) } : {},
         excludedCount: () => runtime.catalog.excludedCount(),
+        // 隐藏区数据：让用户看见隐藏了什么并能逐条恢复（而不是只能一键全恢复）。
+        excludedModels: () => runtime.catalog.excludedModels(),
+        // 上游限流读数：卡片据此说「哪个模型被限、被限多久、几点恢复」。
+        // WorkBuddy 按模型限流，所以这里给逐模型数组（可能同时有多个模型被限）。
+        rateLimits: () => {
+          const actives = rateLimits.activesFor(runtime.variant.id)
+          return actives.length === 0 ? undefined : actives.map(toWebRateLimit)
+        },
         probeKey,
       })
       registerWorkBuddyProbeRoute(webCtx, {
@@ -260,14 +231,23 @@ export function createVariantRuntimeSet(deps: {
         },
         deleteModel: async (modelId: string) => {
           if (stopped) return { state: 'failed', excludedCount: runtime.catalog.excludedCount() }
-          await runtime.filterStore?.exclude(modelId)
-          runtime.catalog.setExcludedModelIds(runtime.filterStore?.getExcluded() ?? [])
+          await runtime.filterStore.exclude(modelId)
+          runtime.catalog.setExcludedModelIds(runtime.filterStore.getExcluded())
           lifecycle.publishCatalog(runtime)
           return { state: 'ok', excludedCount: runtime.catalog.excludedCount() }
         },
+        restoreModel: async (modelId: string) => {
+          if (stopped) return { state: 'failed', excludedCount: runtime.catalog.excludedCount() }
+          const restored = await runtime.filterStore.restoreOne(modelId)
+          // 以 store 的真实状态回填（而不是「恢复成功就清空」）：一键恢复与单条
+          // 恢复可能交错，只信 store 才不会让 catalog 与持久化文件漂移。
+          runtime.catalog.setExcludedModelIds(runtime.filterStore.getExcluded())
+          lifecycle.publishCatalog(runtime)
+          return { state: 'ok', restored, excludedCount: runtime.catalog.excludedCount() }
+        },
         restoreModels: async () => {
           if (stopped) return { state: 'failed', excludedCount: runtime.catalog.excludedCount() }
-          await runtime.filterStore?.restore()
+          await runtime.filterStore.restore()
           runtime.catalog.setExcludedModelIds([])
           lifecycle.publishCatalog(runtime)
           return { state: 'ok', excludedCount: 0 }
@@ -302,6 +282,8 @@ export function createVariantRuntimeSet(deps: {
         ctx.logger?.warn?.(`dsh-any-connect: shim close failed: ${error}`)
       }
     }))
+    // 先等在途心跳写完再清；顺序反过来会让最后一次写把文件"复活"。
+    await Promise.all(heartbeatWrites)
     await clearHostHeartbeat()
   }
 
@@ -334,47 +316,34 @@ export function createVariantRuntimeSet(deps: {
             providerId: variant.id,
             displayName: variant.displayName,
             api: variant.kind === 'zcode' ? 'anthropic-messages' : 'openai-completions',
-            store: runtime.credentialStore!,
+            store: runtime.credentialStore,
             recordFor: modelId => runtime.probeService?.recordFor(modelId),
             resolveAttachments: () => ctx.get('attachments'),
           })
 
-          let releaseAdapter: AdapterRegistrationHandle | undefined
-          let releaseDirectory: (() => void) | undefined
-          try {
-            releaseAdapter = ctx.llm.registerAdapter([variant.id], adapter.adapter)
-            releaseDirectory = ctx.llm.registerConfigurableProviders([{
-              provider: variant.id,
-              displayName: variant.displayName,
-              // Host directory entries point at the Loader profile entry id;
-              // without a Loader (bare-Context installs/tests) fall back to
-              // the plugin's own namespace for a stable, testable identity.
-              settingsNs: ctx.fiber.entry?.options.id ?? variant.settingsNs,
-              settingsPath: [],
-              declared: false,
-            }])
-          } finally {
-            if (releaseAdapter === undefined || releaseDirectory === undefined) {
-              // Registration threw; release whichever half landed.
-              releaseAdapter?.()
-              releaseDirectory?.()
-            }
-          }
+          // 只注册 adapter：provider 路由与模型目录都由此而来。
+          //
+          // **不要再 registerConfigurableProviders**——本插件的五个渠道在
+          // 「设置 → 模型」页没有可填写的 profile（凭据来自桌面 App / 免密
+          // 通道），声明目录项只会让该页渲染出一张 layout=unknown 的死卡片：
+          // 只剩「其余字段在 cordis.patch.yml 中」提示、'应用' 按钮禁用，还
+          // 给用户「这里能配 API key」的错误暗示。配置面在「内置插件」页的
+          // bundle 配置卡片（plugins.bundle.config slot）。模型选择器与模型
+          // 目录来自 llm.listProviders()（adapter 注册），不依赖目录项。
+          const releaseAdapter = ctx.llm.registerAdapter([variant.id], adapter.adapter)
           // 注册成功：记下句柄，目录变化时靠它通知宿主（见 notifyCatalogChanged）。
           // 与下面的释放严格成对——不记的话就是一条挂在已释放注册上的 replace。
           adapterHandles.set(variant.id, releaseAdapter)
           try {
             ctx.effect(() => () => {
               adapterHandles.delete(variant.id)
-              releaseAdapter?.()
-              releaseDirectory?.()
+              releaseAdapter()
             })
           } catch {
             // The plugin was disposed during registration; release immediately —
             // the plugin-level disposer already closed the shim.
             adapterHandles.delete(variant.id)
-            releaseAdapter?.()
-            releaseDirectory?.()
+            releaseAdapter()
           }
           // 注册本身就会发布 llm/adapters-updated，所以这一次通知不是多余的：
           // 客户端在启动到注册之间可能已打开过页面，缓存里存的是空目录。
@@ -383,7 +352,8 @@ export function createVariantRuntimeSet(deps: {
           // The host bundle is live: write a heartbeat so the status CLI can
           // report host health without a browser. Cleared on disposal; a stale
           // heartbeat after a crash is detected by PID in the reader.
-          void writeHostHeartbeat()
+          // 记录 promise 以便 dispose 等它落定（见 heartbeatWrites 的注释）。
+          heartbeatWrites.push(writeHostHeartbeat())
         } catch (error: unknown) {
           ctx.logger.error('dsh-any-connect: provider registration failed', error)
           return
@@ -400,7 +370,7 @@ export function createVariantRuntimeSet(deps: {
   /** 状态域就绪后把域存取推进每个变体的凭据存储（见接口注释）。 */
   function setState(state: WorkBuddyStateStore): void {
     if (stopped) return
-    for (const runtime of runtimes) runtime.credentialStore?.setState(state)
+    for (const runtime of runtimes) runtime.credentialStore.setState(state)
   }
 
   /** 状态域就绪后把台账推进每个变体（runtimes 一次性构建，赋一遍即全覆盖）。 */
@@ -409,5 +379,22 @@ export function createVariantRuntimeSet(deps: {
     for (const runtime of runtimes) runtime.ledger = ledger
   }
 
-  return { runtimes, applyConfiguredAuthFiles, setState, setLedger, start, dispose }
+  return { runtimes, applyConfiguredAuthFiles, setState, setLedger, start, dispose, rateLimits }
+}
+
+/**
+ * 台账观测 → 卡片文档。
+ *
+ * 刻意逐字段搬运而不是展开对象：文档契约在 status-paths.ts 里是对外的
+ * 稳定面，台账内部形状（`kind`/`provider` 等诊断字段）不该顺带漏出去。
+ */
+function toWebRateLimit(observation: RateLimitObservation): WorkBuddyWebRateLimit {
+  return {
+    blockedAt: observation.blockedAtMs,
+    lastSeenAt: observation.lastSeenAtMs,
+    ...observation.resetAtMs === undefined ? {} : { resetAt: observation.resetAtMs },
+    status: observation.status,
+    ...observation.model === undefined ? {} : { model: observation.model },
+    hits: observation.hits,
+  }
 }

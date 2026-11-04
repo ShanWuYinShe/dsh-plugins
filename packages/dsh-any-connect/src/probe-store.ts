@@ -30,10 +30,7 @@ import type { WorkBuddyModelInfo } from './catalog.js'
 import type { WorkBuddyEffort } from './upstream.js'
 
 /** Basename of the probe record inside the Harness home. */
-export const WORKBUDDY_PROBE_FILENAME = '.workbuddy-probe.json'
-
-/** Basename of the international probe record inside the Harness home. */
-export const WORKBUDDY_AI_PROBE_FILENAME = '.workbuddy-ai-probe.json'
+const WORKBUDDY_PROBE_FILENAME = '.workbuddy-probe.json'
 
 /** On-disk format this reader accepts; other versions are discarded. */
 const PROBE_FORMAT_VERSION = 1

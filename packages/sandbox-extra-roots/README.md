@@ -1,8 +1,7 @@
 # @chaoset/sandbox-extra-roots — DSH 沙盒额外允许目录插件
 
 给 dsh 沙盒的 `workspace-write` 模式增加「额外允许写入的目录」列表（工具缓存
-目录等），**官方白名单始终保留**（workspace 根 + /tmp + 平台临时目录），只追加
-不替换：
+目录等），**官方白名单始终保留**（workspace 根 + /tmp + 平台临时目录），只追加不替换：
 
 - **bash**：Seatbelt（macOS）重建 SBPL profile；bwrap / Landlock（Linux）在官方
   profile 基础上插入 `--bind` / `--rw`；Windows ACL runner 无法表达额外根（告警一次）
@@ -11,8 +10,26 @@
 
 ## 安装
 
-> 适配的 DSH 版本见本包 `package.json` 的 `dsh.host` 字段；仓库的 `dsh-v*`
-> git tag 是各次稳定版适配的归档点。
+### 方式一（推荐）：插件索引
+
+启用 DSH 的「自定义插件索引」实验性 bundle 后，在**发现 → 添加索引源**填入：
+
+```text
+https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
+```
+
+即可在发现页一键安装本插件、查看与安装任意历史版本（索引与静态 registry 由 CI 从
+GitHub Releases 生成，发布在发行分支（当前 `alpha`，收敛后 `main`）根下的 `market/` 目录）。重启 DSH 后更新到指定版本
+（DSH 对自建 registry 的自动更新检查只在安装会话内生效）：
+
+```bash
+dsh plugin --profile web add @chaoset/sandbox-extra-roots@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
+```
+
+### 方式二：tarball URL（手动）
+> 适配的 DSH 版本见本包 `package.json` 的 `engines.dsh` 字段（官方兼容声明）；
+> 宿主 0.2.2 起要求 **Node.js >= 24.9**（`engines.node` 同步声明）。
+> 仓库的 `dsh-v*` git tag 是各次稳定版适配的归档点。
 
 本包是 DSH bundle：自带 `cordis.patch.yml`，`dsh plugin` 安装后自动加入
 profile 的 `dsh.profile.bundles`，无需手改 `cordis.patch.yml`。
@@ -37,18 +54,30 @@ dsh plugin --profile web remove @chaoset/sandbox-extra-roots
 3. 用户 profile/home 的 `cordis.patch.yml` 覆盖
 4. **DSH 设置页 → 插件配置 → 沙盒额外允许目录**（经官方 config-editor
    保存到当前 profile 的 `cordis.patch.yml` 本行 config，立即热生效；
-   0.4.x 及之前的 `~/.dsh/plugins/<name>/config.json` 会在启动时一次性
-   自动迁入，旧文件改名 `*.imported` 保留）
+   配置只走官方通道，旧版自建 `config.json` 迁移已删除）
 
 `extraWritableRoots`：绝对路径数组（设置页里每行一个，支持 `~` 表示用户主目录）。
 相对路径/空值会被拒绝并告警；危险根（`/`、盘根、主目录本身及其父目录，如
 macOS 的 `/Users`）保存时直接拒绝，系统目录（`/etc` `/usr` `/bin` `/sbin` 及
 macOS 的 `/private`，仅 POSIX——Windows 暂无对应条目）被过滤，重复行自动去重。
 设置页卡片在保存前就地预览这些问题行（危险/无效行会禁用保存按钮；系统目录
-行保存成功但不生效）。常用工具缓存（npm/pip/cargo/go）可一键添加进列表，
+行保存成功但不生效）。常用工具缓存（npm/bun/pip/cargo/go）可一键添加进列表，
 点选即视为用户显式确认；含明文凭证的目录不在预设内。运行期每次
-沙盒判定都会对目录的最新真实指向（跟随符号链接后）重新做危险根复查——目录
-被替换成指向 `/` 等危险根的符号链接时立即剔除，不授予。
+沙盒判定都会校验目录身份：配置期已按 realpath 规范化，运行期若 `canon(目录)`
+与配置的物理路径不再一致（目录或路径组件被替换成符号链接），该根**直接剔除并
+告警，绝不跟随重定向**（与官方 `dsh-sandbox` 对额外根「realpath 不等即拒绝」的
+姿态一致）；身份一致的根再做一层危险根复查，防止配置后目录被换成危险根。因此
+沙盒内的 agent 无法通过替换目录扩大授权。
 
 > 安全提示：这些目录可获得「写」权限（读本就不受限），请只保留确需写入的工具
 > 缓存；含明文凭证的目录（如 `~/.docker`、`~/.dotnet`、`~/.gradle`）谨慎列入。
+
+## 实现说明
+
+- 强制路径：包装官方 `ctx.sandbox.confine`（按 runner 追加额外根）与 `ctx.fs.checkedTarget`
+  （fs fence 放行），官方逻辑始终优先执行、插件只做追加。fs 侧对官方不透明的
+  `FsTarget.targetKey` 只做防御性校验（必须是本地绝对路径），契约不符时保持官方
+  拒绝（fail-closed），不会按不透明 key 猜测授权。
+- 设置页读写走 Remote 服务面：`src/remote.ts` 用官方 `@Remote` 标准装饰器声明，
+  参数/返回类型在 `src/types.ts`；客户端消费的 `./remote` 调用面与宿主侧 `./typert`
+  工件由官方 `@deepseek-ai/dsh-typert-generator` 在构建期生成（**不要手写工件**）。

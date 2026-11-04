@@ -173,7 +173,7 @@ export function useArchiveActions(deps: {
           return map[String(reason)] ?? String(reason ?? "error");
         };
         const detail = outcome.failures
-          .map((item) => shortId(item.sessionId) + ": " + reasonText(item.reason))
+          .map((item) => shortId(item.sessionId as string) + ": " + reasonText(item.reason))
           .join("; ");
         const more = outcome.hiddenFailures > 0 ? " (+" + outcome.hiddenFailures + ")" : "";
         const failText = t(failKey).replace("{n}", String(outcome.failures.length + outcome.hiddenFailures)) + " — " + detail + more;

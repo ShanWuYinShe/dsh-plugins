@@ -1,8 +1,87 @@
-## 0.3.32 (2026-11-01)
+## 0.3.33 (2026-11-04)
+
+### 新增
+
+* **适配 DSH 0.2.2-rc.1 正式版（稳定线）**：`@deepseek-ai/dsh-*` 依赖 range → `^0.2.2-rc.1`，`engines.dsh` → 精确 `0.2.2-rc.1`；vendor 依赖随宿主稳定线前移（`@deepseek-ai/cordis ~4.1.0`）。
+* 文件定位改用宿主公开快照 `SessionPersistenceSnapshot.location.path`；Remote 服务面 @Remote 装饰器化、Typert 工件由官方生成器产出。
+
+### 修复
+
+* **批量删除 / 恢复的会话级授权**：`delete` / `unarchive` 把批量 `sessionIds` 逐项声明为 session 资源，非 owner 调用也按每个会话逐项授权，不再退化成 global 判定。
+* **彻底删除的降级路径**清理同目录同会话的旧代际文件；仍有残留或归属无法确认时该 id 记 `failed` 而非 `deleted`。
+* detail 的「非归档成员」错误改用官方 `RemoteError`（稳定 code `session-archive/not-archived` + details）。
+* 客户端入口面收敛 / 删除死元数据导出。
 
 ### 优化
 
-* **适配 DSH 宿主 0.2.1-rc.5 稳定线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-rc.5`。
+* 行为不变的模块化收敛与类型收紧；精确匹配宿主 `engines.dsh`。
+
+## 0.3.33-alpha.2 (2026-11-03)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.3`**：全部 `@deepseek-ai/dsh-*` 依赖 range → `^0.2.2-alpha.3`，`engines.dsh` → 精确 `0.2.2-alpha.3`；vendor 依赖 `@deepseek-ai/cordis` 前移到 `~4.0.6-alpha.2`。`dsh-session` / `dsh-session-persistence` / `dsh-session-query` / `dsh-session-title` / `dsh-workspace` 在 alpha.3 均无源码变化；`dsh-api-session-controller` 的投影帧内部改动不影响本插件（仅作为客户端模块图依赖声明），无代码适配。
+
+## 0.3.33-alpha.1 (2026-11-01)
+
+### 优化
+
+* **版本线前移到 `0.3.33` 预发布线**：稳定线已归档 `0.3.32`，发布门禁要求预发布版本必须高于所有已归档版本（含稳定线），本次仅前移版本号、无功能改动；后续 alpha 迭代与收敛转正都在 `0.3.33` 线上推进。
+
+## 0.3.32-alpha.6 (2026-10-30)
+
+### 破坏性变更
+
+* **批量删除/恢复的 `@Remote` 声明 session 资源**：`delete`/`unarchive` 增加 resources reader，把批量 `sessionIds` 逐项声明为 session 资源。官方访问控制不会检查方法未声明的资源——此前批量删除/恢复在非 owner 调用下按 global 判定，可绕过会话级授权；现在按每个会话逐项授权（owner 正常使用不受影响）。
+
+### 变更
+
+* detail 的「非归档成员」错误改用官方 `RemoteError`（稳定 code `session-archive/not-archived` + details），调用方不再只拿到 gateway/internal 折叠错误。
+* 彻底删除的降级路径清理同目录同会话的旧代际文件（`session[.vN].jsonl[.zstd]`）：仍有残留或归属无法确认时该 id 记 `failed` 而非 `deleted`，不再出现「报告已删除、旧代际仍留在磁盘」。
+* 新增 `test/remote-resources.test.ts`，用官方反射 API 钉住各 Remote 方法的资源声明与端点集合。
+
+## 0.3.32-alpha.5 (2026-10-30)
+
+### 破坏性变更
+
+* **兼容声明改为精确匹配宿主版本**：`engines.dsh` 由 `^0.2.2-alpha.2` 改为 `0.2.2-alpha.2`（不带范围操作符）。每个插件版本只声明它发布时实际适配的 DSH 版本——DSH 升级（含同线 alpha→rc→下一 alpha）后必须安装对应重新发布的插件版本；宿主安装/启动会严格按精确版本判定兼容性，确需跨版本使用可用宿主 `allow-version <包>@<版本> --dsh-version <版本> --accept-risk` 显式接受风险。插件索引（market）同步对每个版本做精确 pin。
+## 0.3.32-alpha.4 (2026-10-30)
+
+### 重构
+
+* **行为不变的优雅化**（与 sandbox-extra-roots 同批）：`limitedConcurrency<T>` 泛型化 + `SNAPSHOT_CONCURRENCY` 常量替代魔法数；`messageText` 去 `(b.function as any)` 强转；client `archive-format` 的 formatBytes/formatTime/shortId/sameItems 具体类型化（structured row）；locales `en` 改为 `Record<keyof typeof zh, string>`（缺键即 typecheck 红）；删死代码 `validateConfig`、悬空焦点陷阱注释与两处未使用变量；修正 `rowFor` 错位文档块。
+
+## 0.3.32-alpha.3 (2026-10-29)
+
+### 重构
+
+* **客户端入口面收敛**：`client/index.tsx` 只保留 `apply` / `inject`；11 个值转发、3 个类型转发与 `css` 转发删除，测试改从 `../client/archive-entries.js` / `../client/styles.js` 直接导入；`styles.ts` 的 CSS 注入改为入口显式副作用 `import './styles.js'`（行为等价）。
+* **删除死元数据导出**：服务入口不再导出小写 `config`（Cordis 只认大写 `Config`，entry 的 config 来自 profile patch，小写导出从未被读取）。
+
+## 0.3.32-alpha.2 (2026-10-29)
+
+### 重构
+
+* **适配 DSH 宿主 `0.2.2-alpha.2` 契约**：`dsh.host` → 官方 `engines.dsh`（`^0.2.2-alpha.2`）；`engines.node` 提升到 `>=24.9.0`；补 `dsh.manifestVersion: 1`；`dsh.client.inject` 由 cordis 服务名改为真实客户端包名（`@deepseek-ai/dsh-client-ui-renderer` / `dsh-client-locale` / `dsh-api-remotes` / `dsh-api-workspace-controller` / `dsh-api-session-controller`）并声明 devDependencies。
+* **Typert 工件改官方生成器产出**：`./typert` 与 `./remote` 由 `@deepseek-ai/dsh-typert-generator` 在构建期生成；删除手写 `typert.host.ts`、`typert-loader.ts`（createRequire 多级 fallback + 手写装饰器模拟）、入口的动态 import 兜底与类型别名 `dsh.d.ts`；入口不再导出测试便利值 `createArchiveHost`（测试改相对路径导入）。
+* **Remote 服务面 @Remote 装饰器化**：`src/remote.ts` 直接 `import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'`（`super(ctx, 'sessionArchive')` 字面量服务键），方法参数/返回类型收敛到新增的 `src/types.ts`（`./types` 子路径）；客户端改为消费生成的 `./remote` 工件，删除手写 `REMOTE_CONTRIBUTION` 与 passthrough codec。
+* **清除旧兼容实现**：删除 `legacy-migrate.ts` 与未使用的 `config-store.ts`（会话归档没有配置保存入口；配置迁移随旧版删除）；`archive-host-queries` 的消息时间标注改为官方 `number` 以对齐 Remote 边界类型。
+
+## 0.3.32-alpha.1 (2026-10-29)
+
+### 文档
+
+* README 对齐当前实现：删除 `unarchiveSession` 缺失降级的过时描述（宿主必填契约，缺失即 typecheck 红灯）；`failed` 词表 `live` 标注 0.3.20 起宿主不再产出；删除拒绝统一为 busy 沉降观察口径。顺带修正仓库内 0.3.32-alpha.0 小节的 locate 表述（该节原文「回退 locate 诊断钩子」与实现相反）。
+
+## 0.3.32-alpha.0 (2026-10-28)
+
+### 新增
+
+* **文件定位改用宿主公开快照 `SessionPersistenceSnapshot.location.path`**：`fileInfo` 先读 `persistence.stat()` 快照里的标准 `location`（DSH 0.2.2 新增）；location 缺失按 `unknown` 谨慎拒绝，不再回退已废弃的 `locate` 诊断钩子——本次适配整体移除了 locate 兼容分支（宿主 0.2.2 公开契约的 `SessionPersistence` 只剩 `create`/`open`/`flush`/`stat`/`list`）。
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.2` 预发布线**：`dsh.host` 与全部 `@deepseek-ai/dsh-*` 依赖对齐 `^0.2.2-alpha.2`，vendor 依赖同步前移。
 
 ## 0.3.31 (2026-10-24)
 

@@ -1,15 +1,16 @@
 /**
  * confine-runners.ts — bash 侧 confine 的按 runner argv 改写（纯函数，可单测）。
  *
- * 2026-10-10 从 apply.ts 拆出：Seatbelt/bwrap/Landlock/Windows 四分支与
- * 运行期危险根复查各成模块函数，apply 只保留装配。所有分支 fail-closed：
- * 返回 null 表示"保持官方 argv 原样"，调用方不得自行追加。
+ * Seatbelt/bwrap/Landlock/Windows 四分支与运行期根身份校验/危险根复查各成
+ * 模块函数，apply 只保留装配。所有分支 fail-closed：返回 null 表示"保持官方
+ * argv 原样"，调用方不得自行追加。
  *
  * @module sandbox-extra-roots/confine-runners
  */
 
+import type { SandboxExecutionPolicy } from "@deepseek-ai/dsh-sandbox";
 import { seatbeltProfileArgs } from "./common.js";
-import { classifyRoot, extraGrantRoots } from "./roots.js";
+import { canon, classifyRoot, extraGrantRoots } from "./roots.js";
 import { existingDirectoryRoots } from "./roots-filter.js";
 
 /** 改写分支需要的装配回调（apply 侧闭包提供）。 */
@@ -20,7 +21,7 @@ export interface ConfineRunnerDeps {
    * Seatbelt profile 漂移自检：官方 profile（空额外目录）应与本实现重建
    * 结果一致。返回 true 表示已漂移（调用方保持官方 argv 原样）。
    */
-  checkSeatbeltDrift(policy: any, profile: string): boolean;
+  checkSeatbeltDrift(policy: SandboxExecutionPolicy, profile: string): boolean;
 }
 
 /**
@@ -33,7 +34,7 @@ export interface ConfineRunnerDeps {
  * 一次(每次 confine 都会走到这里,不能按调用告警)。
  */
 export function safeRuntimeRoots(
-  roots: string[],
+  roots: readonly string[],
   warned: Set<string>,
   side: string,
   warn: (message: string) => void,
@@ -54,10 +55,64 @@ export function safeRuntimeRoots(
 }
 
 /**
+ * 运行期额外根身份校验 + 危险根复查（confine 与 fs fence 共用）。
+ *
+ * 配置期 normalizeRoots 已把每个根 canonical 化后写入 state.extraRoots，因此
+ * 运行期 canon(root) !== root 只有一个解释：路径身份已被替换。额外根位于
+ * 沙盒可写区（如 /tmp、workspace）时，沙盒内的 agent 可以把根换成符号链接
+ * 或含链接的拼写，下一次调用若跟随重定向，就等于给新目标追加授权——例如
+ * 指向 ~/.ssh 这类 home 下的敏感目录（classifyRoot 只拒绝 home 本体与危险
+ * 祖先，home 的后代本身是"安全"的，仅靠危险根复查挡不住）。
+ *
+ * 官方 @deepseek-ai/dsh-sandbox 的 additionalRoot 对额外根是「realpath !==
+ * resolve 即拒绝」（lib/index.js additionalRoot：rejects missing,
+ * non-directory, and symlinked entries on each call），这里保持同一姿态：
+ * 不跟随、warnOnce、剔除该根。身份未变的根再走 safeRuntimeRoots 的现有
+ * 危险根复查（两层都保留：身份校验挡"换成任意目录"，危险根复查挡配置期
+ * 就已危险的拼写）。
+ *
+ * canon 解析失败时返回原拼写（官方 canonicalPath 语义），此时身份校验退化
+ * 为"拼写未变"，由危险根复查与目录存在性过滤兜底；解析成功才可能跟随
+ * 重定向，正是本函数要拦的情形。
+ *
+ * @param roots - state.extraRoots 的去重副本（元素已是配置期 canonical 拼写）。
+ * @param warned - 同一侧同一根只告警一次（每次 confine 都会走到这里）。
+ * @param side - 告警文案中的使用方（"bash commands" / "the fs fence"）。
+ * @param warn - logger.warn。
+ * @returns 可授予的根（保持入参顺序）。
+ */
+export function stableRuntimeRoots(
+  roots: readonly string[],
+  warned: Set<string>,
+  side: string,
+  warn: (message: string) => void,
+): string[] {
+  const stable: string[] = [];
+  for (const root of roots) {
+    const physical = canon(root);
+    if (physical === root) {
+      stable.push(root);
+      continue;
+    }
+    const key = `runtime-alias:${side}:${root}`;
+    if (!warned.has(key)) {
+      warned.add(key);
+      warn(`sandbox-extra-roots: extra writable root is no longer the physical path it was configured as (symlink swap?); not granting it to ${side}: ${root} -> ${physical}`);
+    }
+  }
+  return safeRuntimeRoots(stable, warned, side, warn);
+}
+
+/**
  * Seatbelt:官方 argv 为 [sandbox-exec, -p, <profile>, --, ...inner]。
  * 返回重建后的完整 argv；null = 保持官方原样（漂移/分隔符缺失/错位）。
  */
-export function seatbeltArgv(a: string[], roots: string[], policy: any, deps: ConfineRunnerDeps): string[] | null {
+export function seatbeltArgv(
+  a: readonly string[],
+  roots: readonly string[],
+  policy: SandboxExecutionPolicy,
+  deps: ConfineRunnerDeps,
+): string[] | null {
   if (typeof a[0] !== "string" || typeof a[2] !== "string") return null;
   // 漂移自检:官方 profile(空额外目录)应与本实现重建结果一致。检出
   // 漂移后**放弃重建**、保持官方 argv 原样(fail-closed)——用本插件
@@ -70,7 +125,7 @@ export function seatbeltArgv(a: string[], roots: string[], policy: any, deps: Co
   // 额外根、保持官方 argv 原样(fail-safe,与 bwrap/Landlock 同策略)。
   const sbSep = a.indexOf("--");
   if (sbSep === -1) {
-    deps.warnOnce("seatbelt-separator", "seatbelt argv has no -- separator; cannot add extra writable roots");
+    deps.warnOnce("seatbelt-separator", "[sandbox-extra-roots] seatbelt argv has no -- separator; cannot add extra writable roots");
     return null;
   }
   // 分隔符不在期望位置(profile 后紧跟 --)同样是契约漂移:官方若在
@@ -78,7 +133,7 @@ export function seatbeltArgv(a: string[], roots: string[], policy: any, deps: Co
   // 更宽。与分隔符缺失同策略:放弃追加,保持官方 argv 原样。
   // 漂移自检只比对 profile 文本,检不出这种形态,必须在这里挡。
   if (sbSep !== 3) {
-    deps.warnOnce("seatbelt-separator-position", "seatbelt argv shape changed (args between profile and --); refusing to rebuild it — bash-side extra roots stay OFF (the fs fence still grants them)");
+    deps.warnOnce("seatbelt-separator-position", "[sandbox-extra-roots] seatbelt argv shape changed (args between profile and --); refusing to rebuild it — bash-side extra roots stay OFF (the fs fence still grants them)");
     return null;
   }
   // 分隔符必须原样保留：a.slice(sbSep + 1) 是从 -- **之后**取的 inner 命令，
@@ -86,14 +141,14 @@ export function seatbeltArgv(a: string[], roots: string[], policy: any, deps: Co
   // [ -p, <profile>, bash, -c, ... ] —— 缺分隔符它会把 bash 当 profile/参数
   // 解析，macOS 上每条受限 bash 命令都执行不了（2026-10-10 实测发现：
   // 重建后 argv 长度 6、已无 "--"，而官方是 7 且含 "--"）。
-  return [a[0], ...seatbeltProfileArgs(policy, roots), "--", ...a.slice(sbSep + 1)];
+  return [a[0], ...seatbeltProfileArgs(policy, [...roots]), "--", ...a.slice(sbSep + 1)];
 }
 
 /**
  * 每 root 产出一段 runner 授权 argv 片段。bwrap 无官方 grant API，
- * \`--bind <root> <root>\` 拼写留在插件侧（bindMountGrant）；Landlock 必须走
- * 官方 grantArgs（apply 侧注入）——node-addon-landlock-run 的 README 契约
- * 明文要求消费者不得自拼 launcher flag。
+ * `--bind <root> <root>` 拼写留在插件侧（bindMountGrant）；Landlock 必须走
+ * 官方 grantArgs（apply 侧注入）——@deepseek-ai/node-addon-system/landlock-run
+ * 的契约明文要求消费者不得自拼 launcher flag。
  */
 export type GrantFragmentBuilder = (root: string) => string[];
 
@@ -106,9 +161,9 @@ export const bindMountGrant: GrantFragmentBuilder = (root) => ["--bind", root, r
  * 返回插入后的完整 argv；null = 保持官方原样。
  */
 export function bindMountArgv(
-  a: string[],
-  roots: string[],
-  policy: any,
+  a: readonly string[],
+  roots: readonly string[],
+  policy: SandboxExecutionPolicy,
   warned: Set<string>,
   warn: (message: string) => void,
   warnOnce: (key: string, message: string) => void,
@@ -117,7 +172,7 @@ export function bindMountArgv(
 ): string[] | null {
   const dashDash = a.indexOf("--");
   if (dashDash === -1) {
-    warnOnce(`${runnerName}-separator`, `${runnerName} argv has no -- separator; cannot add extra writable roots`);
+    warnOnce(`${runnerName}-separator`, `[sandbox-extra-roots] ${runnerName} argv has no -- separator; cannot add extra writable roots`);
     return null;
   }
   const extra: string[] = [];

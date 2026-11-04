@@ -1,12 +1,15 @@
 /**
- * pill-styles.ts — 样式表与 data-plugin-css 去重注入
+ * pill-styles.ts — 注入的样式表与组件共用的样式对象。
  *
- * 2026-10-08 从 474 行的 ProviderUsagePill.tsx 拆出。
- *
- * @module provider-usage/样式表与 data-plugin-css 去重注入
+ * @module provider-usage/pill-styles
  */
 
 import type { CSSProperties } from 'react'
+
+/** 折叠态主读数/正文的排版基线。 */
+const BODY_TEXT = { fontSize: 12, lineHeight: '18px' } as const
+/** 次要说明文字（窗口元信息、限流统计）的排版基线。 */
+const META_TEXT = { fontSize: 11, lineHeight: '16px' } as const
 
 const PU_STYLE_ID = '@chaoset/provider-usage/pill.css'
 if (typeof document !== 'undefined' && document.querySelector(`style[data-plugin-css="${PU_STYLE_ID}"]`) === null) {
@@ -91,8 +94,7 @@ export const rootStyle: CSSProperties = {
   alignItems: 'center',
   gap: 6,
   minWidth: 0,
-  fontSize: 12,
-  lineHeight: '18px',
+  ...BODY_TEXT,
   color: 'var(--dsw-alias-label-tertiary)',
 }
 export const pillStyle: CSSProperties = {
@@ -106,8 +108,7 @@ export const pillStyle: CSSProperties = {
   background: 'transparent',
   color: 'inherit',
   font: 'inherit',
-  fontSize: 12,
-  lineHeight: '18px',
+  ...BODY_TEXT,
   cursor: 'pointer',
 }
 export const labelStyle: CSSProperties = {
@@ -160,9 +161,42 @@ export const refreshButtonStyle: CSSProperties = {
 }
 export const panelTitleStyle: CSSProperties = { margin: '0 0 8px', fontSize: 13, fontWeight: 600, lineHeight: '20px' }
 export const windowRowStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 0' }
-export const windowHeadStyle: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, fontSize: 12, lineHeight: '18px' }
-export const windowMetaStyle: CSSProperties = { fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)' }
+export const windowHeadStyle: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, ...BODY_TEXT }
+export const windowMetaStyle: CSSProperties = { ...META_TEXT, color: 'var(--dsw-alias-label-tertiary)' }
 export const trackStyle: CSSProperties = { height: 6, overflow: 'hidden', borderRadius: 999, background: 'var(--dsw-alias-bg-layer-2)' }
-export const noteStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
+export const noteStyle: CSSProperties = { margin: 0, ...BODY_TEXT, color: 'var(--dsw-alias-label-tertiary)' }
 export const errorStyle: CSSProperties = { ...noteStyle, color: 'var(--dsw-alias-state-error-primary)' }
+
+/**
+ * 限流块：用告警色的浅底把「现在发不出请求」和下面的额度数字分开。
+ *
+ * 刻意不用 error 红：限流是**会自愈**的状态，不是故障；红色会让用户以为
+ * 账号/配置出了问题。用 warn 色（与进度条 20% 以下同一套语义）。
+ */
+export const rateLimitBoxStyle: CSSProperties = {
+  margin: '0 0 10px',
+  padding: '8px 10px',
+  border: '1px solid var(--dsw-alias-state-warn-primary, #faad14)',
+  borderRadius: 10,
+  // 宿主没有 warn 的 hover 底色变量（只有 -danger 那支），而这里要的是
+  // 「会自愈的告警」而不是错误色：从真实存在的 warn 主色派生一个淡底，
+  // 主题换色时自动跟随，也避免引用不存在的变量名（css-tokens 回归会抓）。
+  background: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent)',
+}
+export const rateLimitTitleStyle: CSSProperties = {
+  margin: 0,
+  ...BODY_TEXT,
+  fontWeight: 600,
+  color: 'var(--dsw-alias-state-warn-primary, #faad14)',
+}
+export const rateLimitLineStyle: CSSProperties = {
+  margin: '2px 0 0',
+  ...BODY_TEXT,
+  color: 'var(--dsw-alias-label-primary)',
+}
+export const rateLimitMetaStyle: CSSProperties = {
+  margin: '2px 0 0',
+  ...META_TEXT,
+  color: 'var(--dsw-alias-label-tertiary)',
+}
 

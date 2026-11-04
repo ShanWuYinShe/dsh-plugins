@@ -4,7 +4,7 @@ import {
   isStartPlanActivityActive,
   startPlanModelInfo,
   startPlanModelsFromEntitlements,
-} from '../src/index.js'
+} from '../src/zcode-plan-models.js'
 
 /**
  * Start Plan's roster follows the activity's entitlements, not the client's

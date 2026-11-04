@@ -86,6 +86,7 @@ export async function chatStreamStartPlan(
       kind: classifyUpstreamError(response.status, text),
       message: 'Start Plan 请求被上游风控拦截（code 3012），本次请求未消耗任何额度。'
         + '插件已按官方客户端的请求体指纹发送，仍被拦说明上游新增了判据——请报告此情况，不要改扣 Coding Plan。',
+      headers: response.headers,
     }
   }
   if (response.status === 401) {
@@ -101,6 +102,7 @@ export async function chatStreamStartPlan(
     status: response.status,
     kind: classifyUpstreamError(response.status, text),
     message: text,
+    headers: response.headers,
   }
 }
 

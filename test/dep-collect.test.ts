@@ -140,8 +140,8 @@ describe("collectDirectDeps", () => {
     expect(deps.size).toBe(0);
   });
 
-  it("dsh.host 等非依赖字段不参与", () => {
-    const deps = collectDirectDeps([{ dsh: { host: "0.2.1-alpha.1" } }], new Set(), () => "9.9.9");
+  it("engines.dsh 等非依赖字段不参与", () => {
+    const deps = collectDirectDeps([{ engines: { dsh: "^0.2.1-alpha.1" } }], new Set(), () => "9.9.9");
     expect(deps.size).toBe(0);
   });
 });

@@ -50,6 +50,57 @@ describe('ModelFilterStore', () => {
     expect(reloaded.isExcluded('deepseek-flash')).toBe(true)
   })
 
+  // 2026-10-29 新增：单条恢复是用户的主路径。此前只有 restore()（全量清空），
+  // 想放回一两个就得全部恢复、再把其余重新隐藏一遍。
+  describe('restoreOne（逐条恢复）', () => {
+    it('只恢复指定模型，其余隐藏项保持不动', async () => {
+      const store = new ModelFilterStore('test-variant', { path: testFilePath })
+      await store.exclude('model-1')
+      await store.exclude('model-2')
+      await store.exclude('model-3')
+
+      expect(await store.restoreOne('model-2')).toBe(true)
+      // 关键断言：另外两个**没有**被一起放回来（这正是旧实现的问题）。
+      expect(store.getExcluded()).toEqual(['model-1', 'model-3'])
+      expect(store.isExcluded('model-2')).toBe(false)
+      expect(store.isExcluded('model-1')).toBe(true)
+      expect(store.isExcluded('model-3')).toBe(true)
+    })
+
+    it('持久化到磁盘，重新加载后仍只恢复了那一个', async () => {
+      const store = new ModelFilterStore('test-variant', { path: testFilePath })
+      await store.exclude('model-1')
+      await store.exclude('model-2')
+      await store.restoreOne('model-1')
+
+      const reloaded = new ModelFilterStore('test-variant', { path: testFilePath })
+      expect(reloaded.getExcluded()).toEqual(['model-2'])
+    })
+
+    it('恢复本来就没隐藏的模型返回 false 且不改动其它项', async () => {
+      const store = new ModelFilterStore('test-variant', { path: testFilePath })
+      await store.exclude('model-1')
+      expect(await store.restoreOne('never-hidden')).toBe(false)
+      expect(store.getExcluded()).toEqual(['model-1'])
+    })
+
+    it('空 id 不产生副作用', async () => {
+      const store = new ModelFilterStore('test-variant', { path: testFilePath })
+      await store.exclude('model-1')
+      expect(await store.restoreOne('')).toBe(false)
+      expect(await store.restoreOne('   ')).toBe(false)
+      expect(store.getExcluded()).toEqual(['model-1'])
+    })
+
+    it('restore() 回报被恢复的 id 列表（供调用方说清影响范围）', async () => {
+      const store = new ModelFilterStore('test-variant', { path: testFilePath })
+      await store.exclude('model-1')
+      await store.exclude('model-2')
+      expect(await store.restore()).toEqual(['model-1', 'model-2'])
+      expect(store.getExcluded()).toEqual([])
+    })
+  })
+
   it('restores defaults by clearing excluded models and updating disk', async () => {
     const store = new ModelFilterStore('test-variant', { path: testFilePath })
     await store.exclude('model-1')

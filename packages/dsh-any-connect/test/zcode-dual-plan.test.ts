@@ -3,7 +3,8 @@ import os from 'node:os'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ZCodeUpstreamClient, parseZCodeAuth, type WorkBuddyCredential } from '../src/index.js'
+import { parseZCodeAuth, type WorkBuddyCredential } from '../src/auth.js'
+import { ZCodeUpstreamClient } from '../src/upstream.js'
 
 /**
  * 「同时支持 code plan 与 start plan」的核心保证：不论客户端选了哪条账号计划，

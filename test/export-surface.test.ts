@@ -22,7 +22,9 @@ const SOURCE_RE = /\.tsx?$/;
 
 /** 由包外消费者按路径加载、因此必须保留的转发导出。 */
 const EXTERNAL_CONSUMERS = new Set<string>([
-  // 例：'./src/typert.host.js :: TYPERT'（宿主加载器按 exports map 的 ./typert 取用）。
+  // 例：'./src/foo.js :: something'（宿主加载器按 exports map 的某个子路径取用）。
+  // 注：typert 工件自 2026-10-29 起由官方生成器在构建期产出到 lib/，不再有
+  // 手写 src/typert.host.ts 转发导出。
 ]);
 
 function collect(dir: string, out: string[] = []): string[] {

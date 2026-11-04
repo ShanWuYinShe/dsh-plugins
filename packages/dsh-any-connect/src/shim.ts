@@ -24,6 +24,9 @@ import { applyDefaultEffort, applyDefaultThinking } from './reasoning-default.js
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { prepareChatBody, WorkBuddyUpstreamClient, type UpstreamErrorKind } from './upstream.js'
 import { isJsonContentType, KIND_STATUS, writeJson, writeOpenAIError, writeAnthropicError, RequestBodyTooLarge, readBody, upstreamFailureMessage } from './shim-http.js'
+import { observeRateLimit } from './rate-limit.js'
+import type { RateLimitObservation } from './rate-limit.js'
+import { safeMessage } from './values.js'
 
 /** Minimal logger surface the plugin context already provides. */
 export interface ShimLogger {
@@ -48,26 +51,69 @@ export interface WorkBuddyShim {
   close(): Promise<void>
 }
 
+/**
+ * The model id a prepared request body names, for rate-limit attribution.
+ *
+ * The prepared body is the exact JSON about to go upstream, so reading it back
+ * reports the model the upstream actually refused rather than whatever the
+ * catalog currently lists. Malformed input yields undefined instead of throwing:
+ * attribution is diagnostics, never a reason to fail a request.
+ */
+function preparedModelId(prepared: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(prepared)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    const model = (parsed as { model?: unknown }).model
+    return typeof model === 'string' && model !== '' ? model : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** Constructor dependencies. */
 export interface WorkBuddyShimOptions {
   kind: 'workbuddy' | 'zcode' | 'opencode'
+  /** Provider route key (variant id); used to file rate-limit observations. */
+  providerId?: string
   store: Pick<WorkBuddyCredentialStore, 'resolve'>
   client: Pick<WorkBuddyUpstreamClient, 'chatStream'>
   catalog: WorkBuddyCatalog
   logger?: ShimLogger
+  /**
+   * Records upstream 429s so the provider card and the usage pill can say when
+   * the channel opens again. Optional: a shim without a ledger still proxies.
+   */
+  rateLimits?: RateLimitRecorder
+}
+
+/**
+ * The slice of {@link RateLimitLedger} the shim reports into.
+ *
+ * Structural rather than the class so tests can pass a stub, and so a shim
+ * constructed without the plugin runtime (CLI paths) simply omits it.
+ */
+export interface RateLimitRecorder {
+  record(observation: RateLimitObservation): unknown
+  /** 清掉观测：一次成功只证明该模型的限流解除；省略 model 表示清整个 provider。 */
+  clear(provider: string, model?: string): void
 }
 
 
 
 /**
- * Start the loopback endpoint. Requests carry any bearer; the loopback bind
- * is the boundary, and the upstream credential comes from the store alone.
+ * Start the loopback endpoint. Every request must present the per-process
+ * shared secret minted below (`Authorization: Bearer` or `x-api-key`); the
+ * loopback bind only limits who can reach the port — the secret is the
+ * authentication boundary, and a missing or wrong secret gets a 401. The
+ * upstream credential comes from the store alone, never from the request.
  */
 export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShim {
   const logger = options.logger
   const catalog = options.catalog
   const store = options.store
   const client = options.client
+  const rateLimits = options.rateLimits
+  const providerId = options.providerId ?? options.kind
 
   // Per-process shared secret. Lives only in memory; the adapter resolves it
   // as the client apiKey — the OpenAI SDK sends it as `Authorization: Bearer
@@ -121,6 +167,42 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
       throw new Error('workbuddy shim has no listening address')
     }
     return `http://127.0.0.1:${address.port}`
+  }
+
+  /**
+   * File an upstream refusal into the rate-limit ledger.
+   *
+   * Called on both success and failure so the ledger self-heals: a request that
+   * gets through proves that **this model** is usable again, which is the only
+   * way to clear an observation whose upstream never sent a reset header. The
+   * clear is scoped to the same model: WorkBuddy limits per model, so a
+   * success on model B must not erase model A's still-active observation.
+   *
+   * Never throws: bookkeeping must not turn a model answer into an error, and
+   * it never gates a request — the upstream alone decides whether to answer.
+   */
+  function trackRateLimit(
+    result: { ok: false; status: number; kind: string; message?: string; headers?: Headers } | { ok: true },
+    model?: string,
+  ): void {
+    if (rateLimits === undefined) return
+    try {
+      if (result.ok) {
+        rateLimits.clear(providerId, model)
+        return
+      }
+      const observation: RateLimitObservation | undefined = observeRateLimit({
+        provider: providerId,
+        status: result.status,
+        kind: result.kind,
+        ...model === undefined || model === '' ? {} : { model },
+        ...result.headers === undefined ? {} : { headers: result.headers },
+        ...result.message === undefined ? {} : { body: result.message },
+      })
+      if (observation !== undefined) rateLimits.record(observation)
+    } catch (error: unknown) {
+      logger?.warn('dsh-any-connect: rate-limit bookkeeping failed', error)
+    }
   }
 
   /** Kind-shaped auth failure so the calling SDK can parse the rejection. */
@@ -198,7 +280,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         return
       }
       if (!res.headersSent) {
-        writeOpenAIError(res, 500, 'internal', String(error))
+        writeOpenAIError(res, 500, 'internal', safeMessage(error))
       } else {
         res.end()
       }
@@ -214,7 +296,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     try {
       credential = await store.resolve()
     } catch (error: unknown) {
-      writeOpenAIError(res, 401, 'not_signed_in', String(error))
+      writeOpenAIError(res, 401, 'not_signed_in', safeMessage(error))
       return
     }
 
@@ -234,6 +316,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     // 正常结束与提前断开时都触发,事后 abort 是无害 no-op。
     res.once('close', () => controller.abort())
     const result = await client.chatStream(credential, prepared, controller.signal)
+    trackRateLimit(result, preparedModelId(prepared))
 
     if (!result.ok) {
       // 客户端已断开（pi-ai 取消生成 / 请求中止）：响应写进已销毁的 socket
@@ -243,7 +326,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         res,
         KIND_STATUS[result.kind],
         result.kind,
-        upstreamFailureMessage(options.kind, result.kind, result.status, result.message),
+        upstreamFailureMessage(options.kind, result.kind, result.status, result.message, result.headers, preparedModelId(prepared)),
       )
       return
     }
@@ -292,7 +375,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     try {
       credential = await store.resolve()
     } catch (error: unknown) {
-      writeAnthropicError(res, 401, 'authentication_error', String(error))
+      writeAnthropicError(res, 401, 'authentication_error', safeMessage(error))
       return
     }
 
@@ -308,6 +391,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
     // 'close' 在响应开始后不再触发)。
     res.once('close', () => controller.abort())
     const result = await client.chatStream(credential, prepared, controller.signal)
+    trackRateLimit(result, preparedModelId(prepared))
 
     if (!result.ok) {
       if (controller.signal.aborted || res.destroyed) return
@@ -315,7 +399,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         res,
         KIND_STATUS[result.kind],
         result.kind === 'hard_credit' ? 'billing_error' : 'api_error',
-        upstreamFailureMessage(options.kind, result.kind, result.status, result.message),
+        upstreamFailureMessage(options.kind, result.kind, result.status, result.message, result.headers, preparedModelId(prepared)),
       )
       return
     }

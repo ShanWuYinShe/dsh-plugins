@@ -12,7 +12,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { AdapterRegistrationHandle } from '@deepseek-ai/dsh-llm'
 import type { WorkBuddyCredential } from './auth.js'
-import type { WorkBuddyUpstreamClient } from './upstream.js'
 import type { StartPlanPreviewResult } from './zcode-plan-claim.js'
 import type { VariantRuntime } from './variant-runtime.js'
 import { createCatalogRefresh } from './catalog-refresh.js'
@@ -21,8 +20,6 @@ import { createCatalogTimers } from './catalog-timers.js'
 /** 生命周期依赖（由 index.ts 的 apply() 提供）。 */
 export interface CatalogLifecycleDeps {
   ctx: Context
-  /** 无自有 client 的变体（WorkBuddy 线）用的共享客户端。 */
-  client: WorkBuddyUpstreamClient
   runtimes: readonly VariantRuntime[]
   /** provider → 适配器注册句柄；目录变化时靠它通知宿主。 */
   adapterHandles: Map<string, AdapterRegistrationHandle>

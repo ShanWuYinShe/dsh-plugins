@@ -1,14 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { css } from "../client/index.tsx";
-
-// 同 client-focus.test.ts：模块求值期引用 React，给空桩通过即可。
-vi.mock("react", () => ({
-  createElement: (...args: any[]) => ({ args }),
-  useState: (init: any) => [typeof init === "function" ? init() : init, () => {}],
-  useEffect: () => {},
-  useCallback: (fn: any) => fn,
-  useRef: () => ({ current: null }),
-}));
+import { describe, expect, it } from "vitest";
+import { css } from "../client/styles.js";
 
 /**
  * 会话详情文本可读性回归：用户气泡是品牌色填充面，文字颜色必须随之

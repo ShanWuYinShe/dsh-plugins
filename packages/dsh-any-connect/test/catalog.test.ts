@@ -5,7 +5,7 @@ import {
   FALLBACK_ZCODE_MODELS,
   WorkBuddyCatalog,
 } from '../src/catalog.js'
-import * as WorkBuddy from '../src/index.js'
+import { modelWithCurrentPromotion } from '../src/upstream.js'
 
 /**
  * 可见性开关的回归：无凭据的变体必须服务空列表（而不是让用户看到一份
@@ -106,14 +106,14 @@ describe('Provider model parameter & billing isolation', () => {
     expect(flashNight?.billing?.badges).not.toContain('夜间免费')
 
     const zcodeDayModel = FALLBACK_ZCODE_MODELS.find(m => m.id === 'glm-5.3-flash')!
-    const resolvedDay = WorkBuddy.modelWithCurrentPromotion(zcodeDayModel, dayTime, 'zcode')
+    const resolvedDay = modelWithCurrentPromotion(zcodeDayModel, dayTime, 'zcode')
     expect(resolvedDay.billing?.free).toBe(false)
     expect(resolvedDay.billing?.credits).toBe('x0.06')
     expect(resolvedDay.billing?.badges).toContain('150% 额度')
     expect(resolvedDay.billing?.badges).not.toContain('夜间免费')
 
     // 夜间也不再改写为免费 x0.00
-    const resolvedNight = WorkBuddy.modelWithCurrentPromotion(zcodeDayModel, nightTime, 'zcode')
+    const resolvedNight = modelWithCurrentPromotion(zcodeDayModel, nightTime, 'zcode')
     expect(resolvedNight.billing?.free).toBe(false)
     expect(resolvedNight.billing?.credits).toBe('x0.06')
     expect(resolvedNight.billing?.badges).toContain('150% 额度')
@@ -121,7 +121,7 @@ describe('Provider model parameter & billing isolation', () => {
 
     // WorkBuddy Hy4 during night is NOT altered by ZCode offpeak
     const hy4Model = FALLBACK_WORKBUDDY_MODELS.find(m => m.id === 'hy4-preview')!
-    const resolvedWbHy4 = WorkBuddy.modelWithCurrentPromotion(hy4Model, nightTime, 'workbuddy')
+    const resolvedWbHy4 = modelWithCurrentPromotion(hy4Model, nightTime, 'workbuddy')
     expect(resolvedWbHy4.billing?.credits).toBe('x0.29')
     expect(resolvedWbHy4.billing?.free).toBe(false)
   })
@@ -131,14 +131,14 @@ describe('Provider model parameter & billing isolation', () => {
     const flash = FALLBACK_ZCODE_MODELS.find(m => m.id === 'glm-5.3-flash')!
 
     // Coding Plan：夜间保持基准计费，不带已下线的夜间免费徽标。
-    const codingPlan = WorkBuddy.modelWithCurrentPromotion(flash, nightTime, 'zcode')
+    const codingPlan = modelWithCurrentPromotion(flash, nightTime, 'zcode')
     expect(codingPlan.billing?.free).toBe(false)
     expect(codingPlan.billing?.credits).toBe('x0.06')
     expect(codingPlan.billing?.badges).toContain('150% 额度')
     expect(codingPlan.billing?.badges).not.toContain('夜间免费')
 
     // Start Plan：走普通通道，150% 额度，不带夜免徽标。
-    const startPlan = WorkBuddy.modelWithCurrentPromotion(flash, nightTime, 'zcode', false)
+    const startPlan = modelWithCurrentPromotion(flash, nightTime, 'zcode')
     expect(startPlan.billing?.free).toBe(false)
     expect(startPlan.billing?.credits).toBe('x0.06')
     expect(startPlan.billing?.badges).not.toContain('夜间免费')
@@ -177,5 +177,36 @@ describe('Provider model parameter & billing isolation', () => {
     catalog.setExcludedModelIds([])
     expect(catalog.excludedCount()).toBe(0)
     expect(catalog.current().length).toBe(FALLBACK_WORKBUDDY_MODELS.length)
+  })
+
+  // 2026-10-29：隐藏区需要**完整行**而不只是数量，否则用户只能一键全恢复。
+  it('excludedModels() 给出被隐藏模型的完整行（卡片逐条恢复用）', () => {
+    const catalog = new WorkBuddyCatalog(FALLBACK_WORKBUDDY_MODELS, 'workbuddy')
+    catalog.setExcludedModelIds(['hy4-preview', 'kimi-k3-1'])
+
+    const hidden = catalog.excludedModels()
+    expect(hidden.map(m => m.id)).toEqual(['hy4-preview', 'kimi-k3-1'])
+    // 完整行：名称、窗口、计费这些卡片要显示的字段都在，不是只有 id。
+    const first = hidden[0]!
+    expect(first.name).not.toBe('')
+    expect(typeof first.contextWindow).toBe('number')
+    // 与可见区同源：同一模型两处必须一致（否则隐藏后像"变了"）。
+    const visibleRows = catalog.current()
+    expect(visibleRows.map(m => m.id)).not.toContain('hy4-preview')
+  })
+
+  it('没有隐藏项时 excludedModels() 为空数组', () => {
+    const catalog = new WorkBuddyCatalog(FALLBACK_WORKBUDDY_MODELS, 'workbuddy')
+    expect(catalog.excludedModels()).toEqual([])
+  })
+
+  it('visible=false（无凭据）时仍能看到自己隐藏过什么', () => {
+    const catalog = new WorkBuddyCatalog(FALLBACK_WORKBUDDY_MODELS, 'workbuddy')
+    catalog.setExcludedModelIds(['hy4-preview'])
+    catalog.setVisible(false)
+    // current() 是「这个变体现在能用什么」，未登录时为空；
+    // excludedModels() 是「用户自己的配置」，两者语义不同。
+    expect(catalog.current()).toEqual([])
+    expect(catalog.excludedModels().map(m => m.id)).toEqual(['hy4-preview'])
   })
 })

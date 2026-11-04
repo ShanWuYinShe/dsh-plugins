@@ -20,6 +20,11 @@
 //      所有已归档版本（含稳定线）；正式版目标只与
 //      已归档的稳定版比较——低于 alpha 在途预发布是
 //      合法的晋升/热修路径（semver 保证转正号更大）。
+//   2.5 声明了运行期依赖（dependencies / optionalDependencies 非空）→ 失败：
+//       插件索引的静态 registry 只托管本仓发布包，pnpm 后续包操作会按 tarball
+//       manifest 去 registry 解析这些依赖并 404，表现为「装过本仓一个插件后
+//       再装第二个必失败」（2026-10-30 实测）。运行期依赖由宿主 runtime
+//       resolution 供给，发布包只允许 devDependencies / peerDependencies。
 //   3. 否则                                         → 发布（bun pm pack → GitHub Release
 //                                                      资产，tag 与资产名见 workflow）
 //
@@ -39,7 +44,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 // semver 比较与 CHANGELOG 小节判定的共享实现（此前四份手抄曾漂移，见 issue #6）。
-import { VERSION_RE, compareVersions, isPrerelease, isStable, findChangelogSection } from "./lib/version-checks.mjs";
+import { VERSION_RE, compareVersions, isPrerelease, isStable, findChangelogSection, runtimeDependenciesOf } from "./lib/version-checks.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -144,7 +149,7 @@ for (const { dir, expectVersion } of targets) {
     process.exit(1);
   }
   const pkgJson = JSON.parse(manifestSource ?? readFileSync(join(ROOT, "packages", dir, "package.json"), "utf8"));
-  const { name, version, dsh } = pkgJson;
+  const { name, version, engines } = pkgJson;
 
   if (typeof version !== "string" || !VERSION_RE.test(version)) {
     log(`✗ ${name} 的版本号 ${JSON.stringify(version)} 不是合法 semver，拒绝发布。请修正 package.json 的 version。`);
@@ -152,14 +157,23 @@ for (const { dir, expectVersion } of targets) {
     continue;
   }
 
-  // 待命期安全门禁：若包版本包含 -alpha / -beta 预发布标识，其 dsh.host 必须为已适配的 alpha/beta 预发布宿主线。
-  // 若 dsh.host 仍为 rc 稳定候选或纯 semver，说明 DSH 当前处于待命期或尚未适配新宿主，严禁发布 -alpha 预发布版本。
+  // 零运行期依赖门禁：见头注释规则 2.5。运行期宿主依赖由宿主 profile runner 的
+  // runtime resolution 提供，发布包只允许 devDependencies / peerDependencies。
+  const runtimeDeps = runtimeDependenciesOf(pkgJson);
+  if (runtimeDeps.length > 0) {
+    log(`✗ ${name}@${version} 声明了运行期依赖（${runtimeDeps.join(", ")}）：索引安装链会因静态 registry 找不到这些包而 404，导致多插件安装失败。请移到 devDependencies（运行期由宿主 runtime resolution 供给，与宿主包同一纪律）后重新发布。`);
+    failed = true;
+    continue;
+  }
+
+  // 待命期安全门禁：若包版本包含 -alpha / -beta 预发布标识，其 engines.dsh 必须精确声明为已适配的 alpha/beta 预发布宿主版本（精确 SemVer，不写范围）。
+  // 若 engines.dsh 缺失、非精确、或指向 rc/稳定线，说明尚未适配新宿主，严禁发布 -alpha 预发布版本。
   if (/-alpha|-beta/i.test(version)) {
-    const host = dsh?.host;
-    const hostPre = typeof host === "string" ? host.replace(/^[\^~>=< ]+/, "").split("-")[1] : null;
-    const isHostAlpha = hostPre && /^(alpha|beta)/i.test(hostPre);
+    const dshPin = engines?.dsh;
+    const hostPrerelease = typeof dshPin === "string" && VERSION_RE.test(dshPin) ? dshPin.split("-")[1] : undefined;
+    const isHostAlpha = typeof hostPrerelease === "string" && /^(alpha|beta)/i.test(hostPrerelease);
     if (!isHostAlpha) {
-      log(`✗ ${name}@${version} 为 -alpha 预发布版本，但 dsh.host 声明为 ${host ?? "未声明"}（非进行中的 alpha 宿主线）。待命期禁止发 -alpha 版本；日常功能与修复请在 main 分支推进并使用纯 semver 发布正式版。若 DSH 已出新预发布线，请先执行 bun run adapt <新线版本>。`);
+      log(`✗ ${name}@${version} 为 -alpha 预发布版本，但 engines.dsh 声明为 ${dshPin ?? "未声明"}（不是进行中的 alpha/beta 宿主版本；兼容声明必须写精确版本）。待命期禁止发 -alpha 版本；日常功能与修复请在 main 分支推进并使用纯 semver 发布正式版。若 DSH 已出新预发布线，请先执行 bun run adapt <新线版本>。`);
       failed = true;
       continue;
     }

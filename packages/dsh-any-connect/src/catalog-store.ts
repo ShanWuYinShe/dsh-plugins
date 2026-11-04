@@ -59,7 +59,7 @@ interface CatalogDocument {
 export function workbuddyCatalogPath(filename: string = WORKBUDDY_CATALOG_FILENAME): string {
   // 2026-10-11 起目录缓存收敛进宿主官方 cache 目录（`<DSH_HOME>/cache/`，
   // dsh-attachment-local 同款）：`cache/dsh-any-connect/<name>.json`。文件名去掉
-  // 点前缀（子目录已隔离）；旧根位置文件由启动迁移例程搬运。
+  // 点前缀（子目录已隔离）。目录缓存是可再生的优化，旧位置文件不做迁移。
   return dshCachePath(CACHE_DIRNAME, filename.replace(/^\./u, ''))
 }
 

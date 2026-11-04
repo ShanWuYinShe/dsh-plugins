@@ -16,14 +16,11 @@
  * @module provider-usage/pill
  */
 
-import { rootStyle, pillStyle, labelStyle, dotStyle, panelStyle, panelTitleStyle, refreshButtonStyle, noteStyle, errorStyle } from './pill-styles.js'
-import { getDotColor } from './pill-format.js'
+import { rootStyle, pillStyle, labelStyle, dotStyle, panelStyle, panelTitleStyle, refreshButtonStyle, noteStyle, errorStyle, rateLimitBoxStyle, rateLimitTitleStyle, rateLimitLineStyle, rateLimitMetaStyle } from './pill-styles.js'
+import { formatReset, getDotColor } from './pill-format.js'
 import { WindowRow } from './WindowRow.js'
 import { useProviderUsage } from './useProviderUsage.js'
 import type { ProviderUsagePillProps } from './pill-types.js'
-
-// 入口（index.tsx）从本模块取注入面类型：再导出以保持既有导入路径不变。
-export type { ProviderUsagePillInjected, ProviderUsagePillProps } from './pill-types.js'
 
 /**
  * The usage pill itself.
@@ -38,7 +35,8 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
   // 组件原样早退（与原实现同一分支）。
   const usage = useProviderUsage(props)
   if (usage === null) return null
-  const { t, provider, answer, open, setOpen, busy, stale, alignRight, setAlignRight, rootRef, buttonRef, panelRef, refresh, queried, snapshot, headlineText } = usage
+  const { t, provider, answer, open, setOpen, busy, stale, alignRight, setAlignRight, rootRef, buttonRef, panelRef, refresh, queried, snapshot, headlineText, resetHint } = usage
+  const rateLimit = snapshot?.rateLimit
 
   return (
     <span ref={rootRef} style={{ ...rootStyle, position: 'relative' }}>
@@ -52,7 +50,10 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
         }}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={headlineText}
+        // 折叠态放不下恢复时刻（dock 是一行窄读数），但它必须可达：
+        // 额度用尽时 title/aria-label 带上「几点恢复」，悬停即见。
+        aria-label={resetHint === undefined ? headlineText : `${headlineText} · ${resetHint}`}
+        title={resetHint}
         onClick={() => {
           if (!open && buttonRef.current) {
             // 面板默认左对齐；触发按钮靠右缘时 320px 面板会溢出视口，
@@ -98,7 +99,7 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
               aria-label={busy ? t('refreshing') : t('refresh')}
               // 手动刷新要真刷新:force 让宿主绕过缓存读——否则轮询间隔与
               // 宿主 TTL 同为 60s,缓存恒新鲜,按钮永远拿回上一轮轮询的数。
-              onClick={() => { void refresh(undefined, { force: true }) }}
+              onClick={() => { void refresh() }}
             >
               <svg
                 className={busy ? 'pu-spin-icon' : undefined}
@@ -120,12 +121,27 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
             </button>
           </div>
           <div style={{ opacity: busy ? 0.65 : 1, transition: 'opacity 0.2s ease', pointerEvents: busy ? 'none' : 'auto' }}>
-            {!queried
+            {/* 限流块排在额度之前：通道被拒时它是用户此刻唯一能行动的信息。 */}
+            {rateLimit !== undefined ? (
+              <div style={rateLimitBoxStyle} role="status">
+                <p style={rateLimitTitleStyle}>{t('rateLimited')}</p>
+                <p style={rateLimitLineStyle}>
+                  {rateLimit.resetAt === undefined
+                    ? t('rateLimitedUnknown')
+                    : t('rateLimitedUntil', { time: formatReset(new Date(rateLimit.resetAt).toISOString()) })}
+                </p>
+                <p style={rateLimitMetaStyle}>
+                  {t('rateLimitHits', { count: rateLimit.hits })}
+                  {rateLimit.model === undefined ? null : ` · ${rateLimit.model}`}
+                </p>
+              </div>
+            ) : null}
+            {snapshot === undefined
               ? <p style={noteStyle}>{t('noQuerierHint')}</p>
-              : snapshot!.windows.length === 0
-                ? <p style={noteStyle}>{snapshot!.error === undefined ? t('noWindows') : t('failed')}</p>
-                : snapshot!.windows.map(window => <WindowRow key={window.id} window={window} t={t} />)}
-            {queried && snapshot!.error !== undefined ? <p style={errorStyle}>{snapshot!.error}</p> : null}
+              : snapshot.windows.length === 0
+                ? <p style={noteStyle}>{snapshot.error === undefined ? t('noWindows') : t('failed')}</p>
+                : snapshot.windows.map(usageWindow => <WindowRow key={usageWindow.id} window={usageWindow} t={t} />)}
+            {snapshot?.error === undefined ? null : <p style={errorStyle}>{snapshot.error}</p>}
           </div>
         </div>
       ) : null}

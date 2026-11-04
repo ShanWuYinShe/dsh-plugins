@@ -9,6 +9,7 @@
 
 import { type StartPlanEntitlement } from './zcode-plan-models.js'
 import { ERROR_BODY_LIMIT, JSON_TIMEOUT_MS, httpStatusLabel } from './upstream-shared.js'
+import { isObject } from './values.js'
 
 export { ERROR_BODY_LIMIT }
 
@@ -67,10 +68,6 @@ export type StartPlanPreviewResult =
 export interface StartPlanPlatformInfo {
   appVersion: string
   platform: string
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /** 把上游的 `code` 归一成数字；缺失或非数字都算 0（HTTP 200 的常规成功体）。 */

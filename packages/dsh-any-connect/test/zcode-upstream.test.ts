@@ -4,21 +4,18 @@ import os from 'node:os'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { FALLBACK_APP_VERSION } from '../src/app-version.js'
 import {
-  FALLBACK_APP_VERSION,
-  FALLBACK_ZCODE_MODELS,
-  FALLBACK_ZCODE_START_PLAN_MODELS,
-  ZCodeUpstreamClient,
   decryptZCodeEncryptedKey,
   parseZCodeAuth,
   parseZCodePlanSelection,
-  prepareAnthropicBody,
-  prepareStartPlanBody,
   selectZCodeAccountKey,
-  ZCODE_CLIENT_IDENTITY,
-  ZCODE_CLIENT_PREFIX,
   type WorkBuddyCredential,
-} from '../src/index.js'
+} from '../src/auth.js'
+import { FALLBACK_ZCODE_MODELS } from '../src/catalog.js'
+import { ZCodeUpstreamClient, prepareAnthropicBody } from '../src/upstream.js'
+import { FALLBACK_ZCODE_START_PLAN_MODELS } from '../src/zcode-plan-models.js'
+import { prepareStartPlanBody, ZCODE_CLIENT_IDENTITY, ZCODE_CLIENT_PREFIX } from '../src/zcode-plan-prompt.js'
 import type { ZCodeClientSigner } from '../src/zcode-signer.js'
 import { codingPlanWhitelistFromConfig, filterByCodingPlanWhitelist, readZcodeCodingPlanWhitelist } from '../src/zcode-builtin-catalog.js'
 

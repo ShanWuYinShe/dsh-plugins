@@ -5,13 +5,16 @@ import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { ProviderUsagePill } from '../client/ProviderUsagePill.js'
-import type { ProviderUsagePillProps } from '../client/ProviderUsagePill.js'
+import type { ProviderUsagePillProps } from '../client/pill-types.js'
 import type { ProviderUsageLocaleKey } from '../client/locales.js'
+import type { SnapshotAnswer } from '../client/fetch-snapshot.js'
 
 /**
- * 面板焦点管理回归：面板挂着 role="dialog" 就必须可进入——打开移焦进
- * 面板（键盘用户才能读到可滚内容），Esc 关闭归还触发按钮。真组件在
- * jsdom 里渲染，fetch 用桩拦住（答案内容与焦点断言无关）。
+ * 面板焦点管理与手动刷新回归：面板挂着 role="dialog" 就必须可进入——打开移焦
+ * 进面板（键盘用户才能读到可滚内容），Esc 关闭归还触发按钮。
+ *
+ * 额度数据由 resources 的 live 流交付（useResource 桩）；面板刷新按钮是流之外
+ * 唯一的手动入口，走 force fetch 直达宿主 registry，本文件只断言这条交互链。
  */
 
 const t = (key: ProviderUsageLocaleKey): string => key
@@ -30,7 +33,22 @@ const directory = {
   getSnapshot: () => snapshot,
 }
 
-const PROPS = { t, directory } as unknown as ProviderUsagePillProps
+const goodSnapshot: SnapshotAnswer = {
+  provider: 'deepseek',
+  windows: [{ id: 'w', label: 'W', remain: 3, limit: 10, unit: 'credits' }],
+  fetchedAt: 1,
+}
+
+function propsWith(answer: SnapshotAnswer): ProviderUsagePillProps {
+  return {
+    t,
+    sessionId: 'session-1',
+    resolveSeat: () => ({ directory, load: () => {} }),
+    useResource: () => ({ status: 'live', value: answer, failure: undefined }),
+  } as unknown as ProviderUsagePillProps
+}
+
+const PROPS = propsWith(goodSnapshot)
 
 let root: Root | null = null
 let container: HTMLDivElement
@@ -78,18 +96,10 @@ describe('ProviderUsagePill 焦点管理', () => {
 })
 
 describe('ProviderUsagePill 刷新与过期', () => {
-  const goodSnapshot = {
-    provider: 'deepseek',
-    windows: [{ id: 'w', label: 'W', remain: 3, limit: 10, unit: 'credits' }],
-    fetchedAt: 1,
-  }
-
-  async function openPanel(): Promise<HTMLButtonElement> {
+  async function openPanel(props: ProviderUsagePillProps = PROPS): Promise<HTMLButtonElement> {
     await act(async () => {
-      root!.render(createElement(ProviderUsagePill, PROPS))
+      root!.render(createElement(ProviderUsagePill, props))
     })
-    // 首答落地（mount 触发一次 refresh）。
-    await act(async () => {})
     const button = container.querySelector('.pu-pill-btn') as HTMLButtonElement
     await act(async () => {
       button.click()
@@ -105,19 +115,27 @@ describe('ProviderUsagePill 刷新与过期', () => {
     return found as HTMLButtonElement
   }
 
-  it('面板刷新按钮会重新请求（60s 轮询之外的主动入口）', async () => {
+  it('面板刷新按钮会 force 重新请求（live 流之外的主动入口）', async () => {
     const calls: string[] = []
+    const refreshed: SnapshotAnswer = {
+      provider: 'deepseek',
+      windows: [{ id: 'w', label: 'W', remain: 8, limit: 10, unit: 'credits' }],
+      fetchedAt: 2,
+    }
     vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
       calls.push(String(input))
-      return { ok: true, json: async () => ({ snapshots: [goodSnapshot] }) } as unknown as Response
+      return { ok: true, json: async () => ({ snapshots: [refreshed] }) } as unknown as Response
     }))
-    await openPanel()
-    const before = calls.length
-    expect(before).toBeGreaterThan(0)
+    const button = await openPanel()
+    // 流已交付首帧，组件本身不再自动 fetch。
+    expect(calls).toHaveLength(0)
     await act(async () => {
       refreshButton().click()
     })
-    expect(calls.length).toBeGreaterThan(before)
+    expect(calls.length).toBeGreaterThan(0)
+    // force 走刷新参数，而不是吃宿主缓存。
+    expect(calls[0]).toContain('refresh=1')
+    expect(button.textContent).toContain('8')
   })
 
   it('失败保旧值时标过期：圆点降饱和 + 文案后缀', async () => {
@@ -132,7 +150,7 @@ describe('ProviderUsagePill 刷新与过期', () => {
     await act(async () => {
       refreshButton().click()
     })
-    // 旧值保留（ headline 还是 3 credits），但标了过期。
+    // 旧值保留（headline 还是 3 credits，来自 live 流），但标了过期。
     expect(button.getAttribute('aria-label')).toContain('staleData')
     expect(button.textContent).toContain('3')
   })

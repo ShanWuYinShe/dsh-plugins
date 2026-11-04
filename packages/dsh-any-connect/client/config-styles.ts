@@ -133,6 +133,17 @@ export const deleteButtonStyle: CSSProperties = {
   cursor: 'pointer',
 }
 
+/**
+ * 隐藏区行内的「恢复」按钮。
+ *
+ * 用品牌色而不是删除按钮的错误红：恢复是**把东西拿回来**，是正向动作；
+ * 红色在这里会读成「又要删点什么」。
+ */
+export const restoreButtonStyle: CSSProperties = {
+  ...deleteButtonStyle,
+  color: 'var(--dsw-alias-brand-primary, #1677ff)',
+}
+
 export const errorStyle: CSSProperties = { ...bodyStyle, color: 'var(--dsw-alias-state-error-primary)' }
 
 export const hintStyle: CSSProperties = { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
@@ -226,6 +237,34 @@ export const claimUnknownBoxStyle: CSSProperties = {
 
 export const claimTitleStyle: CSSProperties = { fontSize: 13, lineHeight: '20px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }
 
+/**
+ * 上游限流提示框：用 warn 色而非 error 色——限流是**会自愈**的状态，
+ * 不是故障；红色会让用户以为账号或配置坏了（而实际只需等一会儿）。
+ */
+export const rateLimitBoxStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  marginBottom: 8,
+  padding: '10px 12px',
+  borderRadius: 8,
+  border: '1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary, #faad14) 40%, transparent)',
+  background: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary, #faad14) 8%, var(--dsw-alias-bg-layer-2))',
+}
+
+export const rateLimitTitleStyle: CSSProperties = {
+  fontSize: 12,
+  lineHeight: '18px',
+  fontWeight: 600,
+  color: 'var(--dsw-alias-state-warn-primary, #faad14)',
+}
+
+export const rateLimitLineStyle: CSSProperties = {
+  fontSize: 12,
+  lineHeight: '18px',
+  color: 'var(--dsw-alias-label-primary)',
+}
+
 export const claimIdRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }
 
 export const claimCodeStyle: CSSProperties = {
@@ -236,13 +275,6 @@ export const claimCodeStyle: CSSProperties = {
   background: 'var(--dsw-alias-bg-base)',
   border: '1px solid var(--dsw-alias-border-l2)',
   wordBreak: 'break-all',
-}
-
-export const planChipOffStyle: CSSProperties = {
-  ...privilegeChipStyle,
-  background: 'var(--dsw-alias-bg-layer-3, rgba(128, 128, 128, 0.12))',
-  color: 'var(--dsw-alias-label-tertiary)',
-  borderColor: 'transparent',
 }
 
 export const signedOutRowStyle: CSSProperties = {

@@ -22,9 +22,9 @@
  * @module provider-usage/resolve
  */
 
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { credentialRef, isCredentialRefName } from '@deepseek-ai/dsh-credentials'
 import type { Context } from '@deepseek-ai/cordis'
-import type { AccountClientMetadata, AccountWallet } from '@deepseek-ai/dsh-deepseek-account'
+import type { AccountClientMetadata, AccountDetails, AccountWallet } from '@deepseek-ai/dsh-deepseek-account'
 import { str } from './provider-shared.js'
 import type { AccountWalletBalance } from './types.js'
 import type {} from '@deepseek-ai/dsh-llm'
@@ -42,26 +42,23 @@ export interface ResolvedProvider {
   accountError?: string
 }
 
-/** Read a nested path out of one settings section. */
-function atPath(section: unknown, path: readonly string[]): unknown {
-  let current = section
+/**
+ * Walk `path` from one settings section and return the provider's profile
+ * object, or `undefined` when the directory has none at that path.
+ */
+function profileOf(section: unknown, path: readonly string[]): Record<string, unknown> | undefined {
+  let current: unknown = section
   for (const segment of path) {
     if (typeof current !== 'object' || current === null || Array.isArray(current)) return undefined
     current = (current as Record<string, unknown>)[segment]
   }
-  return current
-}
-
-/** The provider's profile object, or `undefined` when the directory has none. */
-function profileOf(section: unknown, path: readonly string[]): Record<string, unknown> | undefined {
-  const value = atPath(section, path)
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
+  return typeof current === 'object' && current !== null && !Array.isArray(current)
+    ? current as Record<string, unknown>
     : undefined
 }
 
 /** Known provider route aliases normalized to their canonical provider keys. */
-export const CANONICAL_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+const CANONICAL_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   kimi: 'moonshot',
   moonshot: 'moonshot',
   silicon: 'siliconflow',
@@ -75,7 +72,7 @@ export const CANONICAL_ALIASES: Readonly<Record<string, string>> = Object.freeze
   minimaxi: 'minimax',
   openrouter: 'openrouter',
   deepseek: 'deepseek',
-  // 官方 DeepSeek 的两条路由键（宿主 0.2.1-rc.2：deepseek-account 走 OAuth 钱包、
+  // 官方 DeepSeek 的两条路由键（0.2.1-rc.2 起如此：deepseek-account 走 OAuth 钱包、
   // deepseek-official 走 API key）归一到 canonical `deepseek`：前者拿不到别名就
   // 只剩「有 entry 但无 apiKeyEnv」的静默路径，后者则会漏掉 DEEPSEEK_API_KEY 兜底
   // 与无键时的 OAuth 钱包回退。表键必须是去标点后的规范化形式——normalizeProviderKey
@@ -90,6 +87,20 @@ export const CANONICAL_ALIASES: Readonly<Record<string, string>> = Object.freeze
   opencodefree: 'opencode-free',
   opencodego: 'opencode-go',
 })
+
+/**
+ * 无 profile 时仍值得尝试的「公开环境变量」兜底，按 provider 路由键索引。
+ *
+ * 只保留这三条路由：它们的 ambient key 名是厂商公开文档里的事实（且与我方
+ * profile 模板一致）。其它 provider 只经 profile 的 apiKeyEnv 解析——猜一个
+ * MOONSHOT_API_KEY 这样的名字只会悄悄捡走无关的导出变量。
+ */
+const AMBIENT_KEY_REFS: Readonly<Record<string, readonly string[]>> = {
+  opencode: ['OPENCODE_API_KEY', 'OPENCODE_GO_API_KEY'],
+  'opencode-go': ['OPENCODE_GO_API_KEY', 'OPENCODE_API_KEY'],
+  'opencode-free': [],
+  deepseek: ['DEEPSEEK_API_KEY'],
+}
 
 /** Normalize provider names (stripping punctuation, lowering case, applying aliases). */
 export function normalizeProviderKey(key: string): string {
@@ -117,21 +128,36 @@ export function inferProviderFromBaseUrl(baseURL?: string): string | undefined {
   return undefined
 }
 
+/** 一条钱包余额：金额已从上游的十进制字符串解析成数字。 */
+interface WalletAmount {
+  currency: string
+  amount: number
+}
+
+/** 解析一份钱包列表：金额是十进制字符串，非法/负数条目跳过。 */
+function parseWalletAmounts(list: readonly AccountWallet[]): WalletAmount[] {
+  const out: WalletAmount[] = []
+  for (const entry of list) {
+    // currency 在宿主声明里是字面量联合(CNY/USD 等)；typeof/trim 只为运行时兜
+    // 非字符串与空串，顺带把比较操作数放宽成 string。金额非法(非数字/负数)跳过。
+    if (typeof entry.currency !== 'string' || entry.currency.trim() === '' || typeof entry.balance !== 'string') continue
+    const amount = Number(entry.balance)
+    if (!Number.isFinite(amount) || amount < 0) continue
+    out.push({ currency: entry.currency, amount })
+  }
+  return out
+}
+
 /**
  * DeepSeek OAuth wallets for the keyless fallback: when the provider has no
  * API key but the harness holds a signed-in DeepSeek account, read its
  * recharge + bonus wallets so OAuth users still see a number.
  *
- * 契约（@deepseek-ai/dsh-deepseek-account@0.2.1-alpha.2，同 optionalDependencies）：
+ * 契约（@deepseek-ai/dsh-deepseek-account，版本基线见本包 devDependencies）：
  * 服务名 `deepseekAccount` 由宿主挂载（Context augmentation 声明，非本包提供——
  * owner 在宿主侧，故本包只做具名消费 + 版本声明，不自建影子服务）；`getBalance`
  * 必带 `AccountClientMetadata`，返回 `{status:'ready', value, bonusWallets} |
  * {status:'failed'} | null`（null = 未登录/授权变更中，按无钱包处理）。
- *
- * 注意 dsh-agent 也必须钉在 optionalDependencies（0.2.1-alpha.2 精确版）：
- * account 包的 d.ts 经 account-tasks 引用 dsh-agent 类型，其 SessionId branding
- * 必须与本仓其余宿主包（alpha.2）同源，否则 session-archive 出现双版本
- * SessionId 类型冲突。agent 仅参与编译期，运行时从不加载。
  *
  * Amounts arrive as decimal strings; parsed per currency, unparseable entries
  * skipped. Recharge and bonus stay separate here (no summation — the querier
@@ -142,43 +168,31 @@ async function readDeepSeekAccountWallets(ctx: Context, signal: AbortSignal): Pr
   error?: string
 }> {
   const account = ctx.get('deepseekAccount')
-  if (account === undefined || account === null || typeof account.getBalance !== 'function') return {}
+  if (account === undefined) return {}
   const client: AccountClientMetadata = {
     version: 'provider-usage',
     locale: 'en',
     timezoneOffsetSeconds: -new Date().getTimezoneOffset() * 60,
   }
-  let balance: Awaited<ReturnType<typeof account.getBalance>> | undefined
+  let balance: AccountDetails['balance'] | null
   try {
     balance = await account.getBalance(client)
   } catch (error: unknown) {
     return { error: error instanceof Error ? error.message : String(error) }
   }
   if (signal.aborted) return {}
-  if (balance === null || typeof balance !== 'object') return {}
+  if (balance === null) return {}
   if (balance.status !== 'ready') return { error: 'DeepSeek account balance unavailable' }
-  const parseWallets = (list: readonly AccountWallet[]): Array<{ currency: string; amount: number }> => {
-    const out: Array<{ currency: string; amount: number }> = []
-    for (const entry of list) {
-      const currency = entry.currency as string
-      if (typeof entry.currency !== 'string' || currency === '' || typeof entry.balance !== 'string') continue
-      const amount = Number(entry.balance)
-      if (!Number.isFinite(amount) || amount < 0) continue
-      out.push({ currency, amount })
-    }
-    return out
-  }
   const grouped = new Map<string, AccountWalletBalance>()
-  for (const wallet of parseWallets(balance.value)) {
-    const slot = grouped.get(wallet.currency) ?? { currency: wallet.currency, recharge: 0, bonus: 0 }
-    slot.recharge += wallet.amount
-    grouped.set(wallet.currency, slot)
+  const slotFor = (currency: string): AccountWalletBalance => {
+    const existing = grouped.get(currency)
+    if (existing !== undefined) return existing
+    const created: AccountWalletBalance = { currency, recharge: 0, bonus: 0 }
+    grouped.set(currency, created)
+    return created
   }
-  for (const wallet of parseWallets(balance.bonusWallets)) {
-    const slot = grouped.get(wallet.currency) ?? { currency: wallet.currency, recharge: 0, bonus: 0 }
-    slot.bonus += wallet.amount
-    grouped.set(wallet.currency, slot)
-  }
+  for (const wallet of parseWalletAmounts(balance.value)) slotFor(wallet.currency).recharge += wallet.amount
+  for (const wallet of parseWalletAmounts(balance.bonusWallets)) slotFor(wallet.currency).bonus += wallet.amount
   return { wallets: [...grouped.values()] }
 }
 
@@ -205,6 +219,8 @@ export function createProviderResolver(ctx: Context): (provider: string, signal:
 
     let baseURL: string | undefined
     let apiKey: string | undefined
+    /** 提前返回时只带已经解析出的端点，不带未解析的凭据。 */
+    const baseOnly = (): ResolvedProvider => baseURL === undefined ? {} : { baseURL }
     const credentials = ctx.get('credentials')
 
     if (entry !== undefined) {
@@ -217,37 +233,33 @@ export function createProviderResolver(ctx: Context): (provider: string, signal:
       baseURL = str(profile?.['baseURL'])
       const apiKeyEnv = str(profile?.['apiKeyEnv'])
 
-      if (apiKeyEnv !== undefined && credentials !== undefined) {
+      // apiKeyEnv 来自用户可编辑的 profile：先按官方判据确认它是合法的
+      // credential reference name（POSIX 标识符），再 brand + resolve。直接
+      // credentialRef() 会在名字非法时抛 TypeError，把一处配置笔误变成每次
+      // 查询都复现的失败；官方 dsh-credentials 对 isCredentialRefName 的文档
+      // 明确要求对来自 settings/hook 的外部名字先做这一步，非法名按未配置处理。
+      if (apiKeyEnv !== undefined && credentials !== undefined && isCredentialRefName(apiKeyEnv)) {
         const resolved = await credentials.resolve(credentialRef(apiKeyEnv))
-        if (signal.aborted) return baseURL === undefined ? {} : { baseURL }
+        if (signal.aborted) return baseOnly()
         apiKey = resolved?.value
       }
     }
 
     // Fallback: check ambient or well-known credentials if still unresolved.
-    // Deliberately only these three routes: they are the ones whose ambient
-    // key names are stable public knowledge (documented by the vendors and
-    // mirrored in our own profile templates). Other providers resolve keys
-    // exclusively through their profile's apiKeyEnv — guessing names like
-    // MOONSHOT_API_KEY would silently pick up unrelated exports.
     if (apiKey === undefined && credentials !== undefined) {
-      const fallbackRefs: Record<string, string[]> = {
-        'opencode': ['OPENCODE_API_KEY', 'OPENCODE_GO_API_KEY'],
-        'opencode-go': ['OPENCODE_GO_API_KEY', 'OPENCODE_API_KEY'],
-        'opencode-free': [],
-        'deepseek': ['DEEPSEEK_API_KEY'],
-      }
-      const refs = fallbackRefs[provider] ?? fallbackRefs[normalized]
+      const refs = AMBIENT_KEY_REFS[provider] ?? AMBIENT_KEY_REFS[normalized]
       if (refs !== undefined) {
         for (const ref of refs) {
           try {
             const resolved = await credentials.resolve(credentialRef(ref))
-            if (signal.aborted) return baseURL === undefined ? {} : { baseURL }
+            if (signal.aborted) return baseOnly()
             if (resolved?.value) {
               apiKey = resolved.value
               break
             }
-          } catch {}
+          } catch {
+            // 单项读取失败按「未配置」处理，继续尝试下一个 ambient ref。
+          }
         }
       }
     }
@@ -259,7 +271,7 @@ export function createProviderResolver(ctx: Context): (provider: string, signal:
     let accountError: string | undefined
     if ((apiKey === undefined || apiKey === '') && normalized === 'deepseek') {
       const read = await readDeepSeekAccountWallets(ctx, signal)
-      if (signal.aborted) return { ...baseURL === undefined ? {} : { baseURL } }
+      if (signal.aborted) return baseOnly()
       accountWallets = read.wallets
       accountError = read.error
     }

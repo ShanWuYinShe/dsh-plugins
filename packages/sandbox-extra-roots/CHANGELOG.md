@@ -1,14 +1,89 @@
-## 0.4.29 (2026-11-01)
+## 0.4.30 (2026-11-04)
+
+### 新增
+
+* **适配 DSH 0.2.2-rc.1 正式版（稳定线）**：`@deepseek-ai/dsh-*` 依赖 range → `^0.2.2-rc.1`，`engines.dsh` → 精确 `0.2.2-rc.1`；vendor 依赖随宿主稳定线前移（`@deepseek-ai/cordis ~4.1.0`）。
+* **「额外允许写入目录」设置卡片**：per-profile 配置（官方 configEditor 持久化），支持一键添加常用工具缓存预设；保存校验拒绝根目录 / 整盘 / 用户主目录祖先，破坏隔离边界的路径一律禁止保存。
+* **Remote 服务面 @Remote 装饰器化**，Typert 工件由官方生成器产出；Landlock 启动器换官方新包。
 
 ### 修复
 
-* **运行期依赖归零（可被插件索引 / 静态 registry 安装）**：把 `@deepseek-ai/node-addon-landlock-run` 从 `optionalDependencies` 移入 `devDependencies`。该包本就只在 Linux 惰性加载、缺失时 Landlock 引擎自动降级（其余沙盒引擎不受影响）；0.4.28 的声明方式会让 DSH 用静态 registry 安装索引版本时解析它并 404，本版本修正。
-
-## 0.4.28 (2026-11-01)
+* **运行期额外根身份校验**：配置期按 realpath 规范化，运行期若 canon(目录) 与配置物理路径不一致（目录或路径组件被换成符号链接），该根直接剔除并告警，绝不跟随重定向；身份一致的根再做危险根复查。
+* 修复 macOS 上配置额外根后受限命令全部执行失败、设置页保存的目录列表整体失效；配置作用域从全局一份改为 per-profile 并自动迁移旧配置。
+* 宿主日志告警带插件来源；客户端入口面收敛为官方三导出。
 
 ### 优化
 
-* **适配 DSH 宿主 0.2.1-rc.5 稳定线**：依赖范围与 `dsh.host` 对齐 `^0.2.1-rc.5`。
+* 行为不变的模块化收敛与类型收紧；精确匹配宿主 `engines.dsh`。
+
+## 0.4.30-alpha.2 (2026-11-03)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.3`**：全部 `@deepseek-ai/dsh-*` 依赖 range → `^0.2.2-alpha.3`，`engines.dsh` → 精确 `0.2.2-alpha.3`；vendor 依赖 `@deepseek-ai/cordis` 前移到 `~4.0.6-alpha.2`。`@deepseek-ai/dsh-sandbox` 在 alpha.3 只有版本号变化（sandbox / sandbox-local / sandbox-policy 的 src 未改），包装契约无变化，无代码适配。
+
+## 0.4.30-alpha.1 (2026-11-01)
+
+### 优化
+
+* **版本线前移到 `0.4.30` 预发布线**：稳定线已归档 `0.4.29`，发布门禁要求预发布版本必须高于所有已归档版本（含稳定线），本次仅前移版本号、无功能改动；后续 alpha 迭代与收敛转正都在 `0.4.30` 线上推进。
+
+## 0.4.28-alpha.6 (2026-10-30)
+
+### 破坏性变更
+
+* **运行期额外根改为身份校验，符号链接重定向一律拒绝**：配置期已 canonical 化的根，运行期若 `canon(root)` 与配置的物理路径不一致（目录或祖先被换成符号链接）即剔除并告警、不再跟随重定向；身份一致的根再做危险根复查。此前实现会跟随重定向、只复查危险根：若额外根位于 agent 可写区（/tmp、workspace、或嵌套在另一个已授权根下），沙盒内 agent 可把它换成指向 `~/.ssh` 等 home 敏感目录的链接，下一次沙盒调用就会被追加写权限（条件性沙盒逃逸，与官方 `dsh-sandbox` 对额外根「realpath !== resolve 即拒绝」的姿态不一致）。**若你配置的额外根本身位于符号链接路径下，升级后该根会被拒绝授予——请改配真实物理路径（绝对且无链接的路径不受影响）。**
+
+### 变更
+
+* fs fence 包装 fail-closed 硬化：官方 `checkedTarget` 不是函数时不再安装包装（不凭空新增属性）；返回的 `targetKey` 不是本地绝对路径时保持官方 `FS_SANDBOX_DENIED`（官方契约明确 `FsTargetKey` 是不透明身份、消费者不得解析），不再按不透明 key 猜测放行。
+* 移除对官方 `Context.sandboxPolicy` 的自写类型增强（与官方 `SandboxPolicyService` 属性类型不同，消费者同时看到两份官方类型会 TS2717），改为局部类型 + 使用点取用，并新增 host-contract 锁。
+* mounts 引用计数移入 `ctx.effect` 注册体内：effect 注册失败不再留下永不回收的计数（此前会导致卸载不还原包装）。
+* 发布产物零运行期依赖：`@deepseek-ai/node-addon-system` 由 `optionalDependencies` 移入 `devDependencies`（运行期由宿主 runtime resolution 供给），配合插件索引安装链修复。
+
+## 0.4.28-alpha.5 (2026-10-30)
+
+### 破坏性变更
+
+* **兼容声明改为精确匹配宿主版本**：`engines.dsh` 由 `^0.2.2-alpha.2` 改为 `0.2.2-alpha.2`（不带范围操作符）。每个插件版本只声明它发布时实际适配的 DSH 版本——DSH 升级（含同线 alpha→rc→下一 alpha）后必须安装对应重新发布的插件版本；宿主安装/启动会严格按精确版本判定兼容性，确需跨版本使用可用宿主 `allow-version <包>@<版本> --dsh-version <版本> --accept-risk` 显式接受风险。插件索引（market）同步对每个版本做精确 pin。
+## 0.4.28-alpha.4 (2026-10-30)
+
+### 重构
+
+* **行为不变的优雅化**（29 文件 + 新模块 `wrap.ts`，净 −72 行，`any` 词元 225→157）：`apply.ts` 278→96 行，两个宿主服务的包装安装与共享挂载生命周期抽到 `wrap.ts`（消除 sandbox/fs 两套逐字重复的挂载还原逻辑）；远程配置校验收敛到 `config-validate` 单点；session 侧 `statOrNull`/`warn` 助手去重、补 Remote 边界返回类型；官方 `SandboxExecutionPolicy` 类型贯通 seatbelt/confine-runners/roots，删 `as never` 等断言 hack；配置全链 `SessionArchiveConfig` 类型化；客户端入口与配置卡 8 处 any 类型化；删死代码 `validateConfig` 与错位/过期注释。
+
+## 0.4.28-alpha.3 (2026-10-29)
+
+### 重构
+
+* **客户端入口面收敛**：`client/index.tsx` 只保留 `apply` / `inject`；原先供测试使用的 5 个纯函数转发导出（`analyzeRootsText` 等）删除，测试改从 `../client/roots-preview.js` 直接导入（DSH client 入口纪律：实现值不冻结为包 API；根新增入口面锁 `test/entry-surface.test.ts`）。
+* **删除死元数据导出**：服务入口不再导出小写 `config`——Cordis 只认大写 `Config` schema，entry 的 config 来自 profile patch，小写导出从未被读取。
+
+## 0.4.28-alpha.2 (2026-10-29)
+
+### 重构
+
+* **适配 DSH 宿主 `0.2.2-alpha.2` 契约**：`dsh.host` → 官方 `engines.dsh`（`^0.2.2-alpha.2`）；`engines.node` 提升到 `>=24.9.0`；补 `dsh.manifestVersion: 1`；`dsh.client.inject` 由 cordis 服务名改为真实客户端包名（`@deepseek-ai/dsh-client-ui-renderer` / `dsh-client-locale` / `dsh-api-remotes`）并声明 devDependencies。
+* **Typert 工件改官方生成器产出**：`./typert`（宿主工件）与 `./remote`（客户端调用面）由 `@deepseek-ai/dsh-typert-generator` 在构建期生成；删除手写 `typert.host.ts`、`typert-loader.ts`（createRequire 多级 fallback + 手写装饰器模拟）与 `gateway.ts` 的动态 import 兜底。
+* **Remote 服务面 @Remote 装饰器化**：`src/remote.ts` 直接 `import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'`，方法参数/返回类型收敛到新增的 `src/types.ts`（`./types` 子路径）；客户端改为消费生成的 `./remote` 工件，删除手写 `REMOTE_CONTRIBUTION` 与 passthrough codec。
+* **清除旧兼容实现**：删除 `legacy-migrate.ts` 与 `config-store.ts` 的旧版 `config.json` 迁移（配置只走官方 config-editor）；官方 sandbox 依赖改静态导入（`@deepseek-ai/dsh-sandbox` 的 `canonicalPath`/`writableRoots`），移除 profile 依赖树/createRequire 回退与模块求值期 await；`src/dsh.d.ts` 收敛为 `sandboxPolicy.resolve` 的最小 augmentation（引用官方 `SandboxExecutionPolicy` 并注明出处）。
+* **Landlock 启动器换官方新包**：`@deepseek-ai/node-addon-landlock-run` 已不在 0.2.2 宿主安装内，改依赖 `@deepseek-ai/node-addon-system/landlock-run`（官方 `launcherPath`/`grantArgs` 契约不变）。
+
+## 0.4.28-alpha.1 (2026-10-29)
+
+### 修复
+
+* **宿主日志告警带插件来源**：`warnOnce` 五条告警（windows-acl / unknown-runner / seatbelt 分隔符×2 / bwrap-Landlock 分隔符）统一加 `[sandbox-extra-roots]` 前缀，宿主日志中可区分错误源。
+
+### 文档
+
+* README 与设置卡片 hint 对齐宿主 0.2.2：官方白名单枚举补策略级 `additionalWritableRoots`；一键添加预设补 Bun（实际 6 条，含 `~/.bun/install/cache`）。
+
+## 0.4.28-alpha.0 (2026-10-28)
+
+### 优化
+
+* **适配 DSH 宿主 `0.2.2-alpha.2` 预发布线**：`dsh.host` 与全部 `@deepseek-ai/dsh-*` 依赖对齐 `^0.2.2-alpha.2`，vendor 依赖同步前移。宿主 0.2.2 新增策略级 `additionalWritableRoots` / `workspaceWritableRoots`，但那是部署配置（运行时改需重配宿主行，且 Windows ACL 后端直接拒绝），本插件继续走包装 `confine`/`checkedTarget` 的运行时注入，行为不变。
 
 ## 0.4.27 (2026-10-24)
 
