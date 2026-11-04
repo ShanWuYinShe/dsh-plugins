@@ -92,7 +92,7 @@ main 分支的每次 dsh 稳定版适配都归档为一个 git tag，**由用户
 
   ```bash
   git checkout dsh-v0.1.2-rc.1          # 查看某次适配的代码状态
-  git worktree add -b hotfix/dsh-0.1.2 dsh-v0.1.2-rc.1   # 以它为基线热修
+  git worktree add -b hotfix/dsh-0.1.2 .agents/worktrees/hotfix/dsh-0.1.2 dsh-v0.1.2-rc.1   # 以它为基线热修
   ```
 
   回退后重新发布需要按「版本号规则」把包版本跳到高于已归档版本（tag
