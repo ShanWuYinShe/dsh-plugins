@@ -326,7 +326,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         res,
         KIND_STATUS[result.kind],
         result.kind,
-        upstreamFailureMessage(options.kind, result.kind, result.status, result.message, result.headers),
+        upstreamFailureMessage(options.kind, result.kind, result.status, result.message, result.headers, preparedModelId(prepared)),
       )
       return
     }
@@ -399,7 +399,7 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         res,
         KIND_STATUS[result.kind],
         result.kind === 'hard_credit' ? 'billing_error' : 'api_error',
-        upstreamFailureMessage(options.kind, result.kind, result.status, result.message, result.headers),
+        upstreamFailureMessage(options.kind, result.kind, result.status, result.message, result.headers, preparedModelId(prepared)),
       )
       return
     }

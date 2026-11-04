@@ -61,6 +61,8 @@ export function upstreamFailureMessage(
   status: number,
   message: string,
   headers?: { get(name: string): string | null },
+  /** 本次请求的模型 id（已知时）：WorkBuddy 的 429 按模型计，文案要说清范围。 */
+  model?: string,
 ): string {
   const suffix = `${variantId} upstream ${kind} (${httpStatusLabel(status)}): ${message.slice(0, 400)}`
   const lower = message.toLowerCase()
@@ -91,7 +93,13 @@ export function upstreamFailureMessage(
     const when = resetAtMs === undefined
       ? '上游未提供恢复时间。'
       : `上游表示 ${formatResetAt(resetAtMs)}（本地时间）恢复。`
-    return `上游限流（${httpStatusLabel(429)}）。${when}原文：${suffix}`
+    // WorkBuddy 的 429 是**按模型**的频率限制（官方文案本身也建议切换其它模型）：
+    // 说清只影响这个模型，避免用户把单模型限流误读成整条通道被封、不敢再发请求。
+    // 智谱的 1302/1305 是订阅档位并发，不按模型，不能套用这句话。
+    const scope = variantId === 'workbuddy' || variantId === 'workbuddy-ai'
+      ? (model === undefined || model === '' ? '' : `该限制仅针对模型 ${model}，其它模型仍可继续使用。`)
+      : ''
+    return `上游限流（${httpStatusLabel(429)}）。${when}${scope}原文：${suffix}`
   }
   if (status === 403) {
     return `上游拒绝了本次请求（授权未通过 / auth_forbidden，非密钥失效、非内容审核）。`

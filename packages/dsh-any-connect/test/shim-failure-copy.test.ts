@@ -162,6 +162,27 @@ describe('upstreamFailureMessage', () => {
     expect(message).toContain(localStamp)
   })
 
+  it('WorkBuddy 429 文案标明只影响本次模型（按模型限流）', () => {
+    const message = upstreamFailureMessage(
+      'workbuddy', 'soft_rate', 429,
+      '{"code":6004,"msg":"您的使用量已超出频率限制，请稍后再试。"}',
+      undefined,
+      'glm-5.3',
+    )
+    expect(message).toContain('glm-5.3')
+    expect(message).toContain('其它模型仍可继续使用')
+  })
+
+  it('智谱 429（订阅档位并发）不套用「仅该模型」文案', () => {
+    const message = upstreamFailureMessage(
+      'zcode', 'soft_rate', 429,
+      '{"error":{"code":"1302","message":"触发用户速率限制"}}',
+      undefined,
+      'glm-5.3',
+    )
+    expect(message).not.toContain('其它模型仍可继续使用')
+  })
+
   it('429 且上游既没给头也没给文案时刻时，如实说未提供', () => {
     const message = upstreamFailureMessage('workbuddy', 'soft_rate', 429, '{"code":6004,"msg":"slow down"}')
     expect(message).toContain('上游未提供恢复时间')
