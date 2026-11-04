@@ -15,8 +15,8 @@ description: DSH 插件跨分支 worktree 操作纪律。触发：在 main 与 a
 
 ```bash
 git checkout -b alpha main                                # 主检出停在活跃线（待命期无 alpha，见上）
-git worktree add .worktrees/main main                     # 稳定线另建工作树（.worktrees/ 已 gitignore）
-cd .worktrees/main && bun install && bun run build        # 每个工作树独立安装构建
+git worktree add .agents/worktrees/main main              # 稳定线另建工作树（DSH 工作树池，池内自带忽略文件）
+cd .agents/worktrees/main && bun install && bun run build # 每个工作树独立安装构建
 ```
 
 跨分支 cherry-pick 直接在两个工作树目录之间进行，互不污染；每次进入 worktree 或主检出后先确认 `lib/` 是当前分支的产物（不确定就重新 build）。

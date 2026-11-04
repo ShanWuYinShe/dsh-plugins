@@ -55,7 +55,7 @@ grep -a -m2 "usage will reset at" /Applications/WorkBuddy.app/Contents/Resources
 grep -a -m2 "isConversationRateLimitCapError" /Applications/WorkBuddy.app/Contents/Resources/app.asar
 ```
 
-需要看上下文时按 asar 文件表取出命中文件（`.worktrees/<branch>/.workwork/` 下可写临时脚本，
+需要看上下文时按 asar 文件表取出命中文件（`.agents/worktrees/<branch>/.workwork/` 下可写临时脚本，
 不要提交）。`WorkBuddy AI.app` 是独立 bundle，口径按同一方式核对。
 
 ## 插件侧的实现边界（`rate-limit.ts`）
@@ -77,7 +77,7 @@ grep -a -m2 "isConversationRateLimitCapError" /Applications/WorkBuddy.app/Conten
 ## 回归命令
 
 ```bash
-cd .worktrees/alpha
+cd .agents/worktrees/alpha
 bunx vitest run \
   packages/dsh-any-connect/test/rate-limit.test.ts \
   packages/dsh-any-connect/test/shim-rate-limit.test.ts \
