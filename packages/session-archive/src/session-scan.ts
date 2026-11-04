@@ -13,14 +13,6 @@ import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-se
 import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { foldSessionTitle } from '@deepseek-ai/dsh-session-title'
 
-/** 「可能活跃」的 mtime 窗口：内存中的会话 60s 内写过文件才值得做增长
- * 观察（生成流可能把半截日志 append 回刚删的路径；窗口外的静默文件无
- * 疑似写入方，直接删）。是否真的忙碌由沉降观察的体积增长判定。 */
-export const BUSY_WRITE_WINDOW_MS = 60_000;
-
-/** 复验前的沉降等待：活跃写入方重建路径的典型间隔。 */
-export const REAPPEAR_SETTLE_MS = 300;
-
 /** 官方 jsonl 后端的会话日志代际命名：session.jsonl / session.vN.jsonl /
  * session.jsonl.zstd / session.vN.jsonl.zstd。官方布局「一会话一目录」下，
  * 目录内该命名族文件都是同一会话的历史代际，不算他者日志。 */
@@ -181,12 +173,17 @@ const READ_CHUNK_EVENTS = 200;
 /**
  * 分块遍历一条会话的事件流（升序、全量），每块交给 onChunk 消费后即可弃，
  * 返回句柄上的会话头。用完 close——不 close 会漏句柄。
+ *
+ * 取消（RULE-037）：signal 由 Gateway 注入，透传给 persistence.open/read
+ * （官方两者都接受 options.signal）；每块前检查一次，避免 aborted 后继续
+ * 消费事件流。
  */
-export async function scanSession(persistence: SessionPersistence, sessionId: SessionId, onChunk: (events: readonly SessionEvent[]) => void): Promise<SessionHeader> {
-  const handle: SessionHandle = await persistence.open(sessionId, 'read');
+export async function scanSession(persistence: SessionPersistence, sessionId: SessionId, onChunk: (events: readonly SessionEvent[]) => void, signal?: AbortSignal): Promise<SessionHeader> {
+  const handle: SessionHandle = await persistence.open(sessionId, 'read', { signal });
   try {
     for (let offset = 0; ; offset += READ_CHUNK_EVENTS) {
-      const { events } = await handle.read(offset, READ_CHUNK_EVENTS);
+      signal?.throwIfAborted();
+      const { events } = await handle.read(offset, READ_CHUNK_EVENTS, { signal });
       // 损坏/异构日志里可能混进 null 或非对象行（合法 JSON 但不是事件）——
       // 在这里统一剔除，两个消费方（标题折叠、detail 提取）都不必各自防御；
       // 分页终止判定仍用原始长度，空块语义不因剔除改变。
@@ -205,30 +202,26 @@ export async function scanSession(persistence: SessionPersistence, sessionId: Se
  * session/title 事件——只收集 title 事件再折叠，与全量折叠语义一致
  * （latest-wins），内存 O(title 事件数)（正常日志恒为 1）。
  */
-export async function readTitle(persistence: SessionPersistence, sessionId: SessionId): Promise<string | null> {
+export async function readTitle(persistence: SessionPersistence, sessionId: SessionId, signal?: AbortSignal): Promise<string | null> {
   const titleEvents: SessionEvent[] = [];
   await scanSession(persistence, sessionId, (events) => {
     for (const event of events) {
       if (event.type === 'session/title') titleEvents.push(event);
     }
-  });
+  }, signal);
   return foldSessionTitle(titleEvents)?.title ?? null;
-}
-
-/** 等待 ms 毫秒（沉降观察、删除窗口用）。 */
-export function delay(ms: number): Promise<void> {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 /** 并发限制器：最多 N 个任务并行，其余排队。宽度下限 1——直调
  * createArchiveHost 传 0/负数时若产出 0 个 worker，会静默返回全 undefined
  * 的数组而非报错。 */
-export function limitedConcurrency<T>(limit: number, tasks: ReadonlyArray<() => Promise<T>>): Promise<T[]> {
+export function limitedConcurrency<T>(limit: number, tasks: ReadonlyArray<() => Promise<T>>, signal?: AbortSignal): Promise<T[]> {
   const results = new Array<T>(tasks.length);
   let cursor = 0;
   const width = Math.max(1, Math.min(limit, tasks.length));
   const workers = Array.from({ length: width }, async () => {
     while (cursor < tasks.length) {
+      signal?.throwIfAborted();
       const at = cursor++;
       const task = tasks[at]!;
       results[at] = await task();

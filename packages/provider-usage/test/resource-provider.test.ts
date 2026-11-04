@@ -11,7 +11,7 @@ vi.mock('../client/fetch-snapshot.js', () => ({ fetchSnapshot: fetchMock }))
 
 import { type SnapshotAnswer } from '../client/fetch-snapshot.js'
 import type { UsageSnapshot } from '../src/types.js'
-import { RESOURCE_POLL_INTERVAL_MS, providerOfAddress, registerProviderUsageResources, usageResourceAddress, usageStream } from '../client/resource-provider.js'
+import { RESOURCE_POLL_INTERVAL_MS, RESOURCE_POLL_MARGIN_MS, RESOURCE_POLL_STEP_MS, providerOfAddress, registerProviderUsageResources, usageResourceAddress, usageStream } from '../client/resource-provider.js'
 function answer(overrides: Partial<UsageSnapshot> = {}): SnapshotAnswer {
   return { provider: 'acme', windows: [{ id: 'w', label: 'W', remain: 3, unit: 'credits' }], fetchedAt: 1, ...overrides }
 }
@@ -142,9 +142,16 @@ describe('registerProviderUsageResources', () => {
   })
 })
 
-// 定时节奏常量与 useResource 流同源:改这里就同步改了抑制窗的宽度基准。
-describe('RESOURCE_POLL_INTERVAL_MS', () => {
-  it('保持 60s(与宿主 registry 缓存同量级)', () => {
+// 定时节奏常量与 useResource 流同源。
+describe('RESOURCE_POLL_*', () => {
+  it('节拍保持 60s(与宿主 registry 缓存同量级)', () => {
     expect(RESOURCE_POLL_INTERVAL_MS).toBe(60_000)
+  })
+
+  it('步长 = 节拍 + 相位余量：下一次读取落在宿主缓存过期之后', () => {
+    // 宿主成功缓存默认 TTL 与节拍同为 60s；不加余量时某一帧可能命中未过期
+    // 缓存，实际更新间隔被拉长到 ~120s。
+    expect(RESOURCE_POLL_MARGIN_MS).toBe(5_000)
+    expect(RESOURCE_POLL_STEP_MS).toBe(RESOURCE_POLL_INTERVAL_MS + RESOURCE_POLL_MARGIN_MS)
   })
 })

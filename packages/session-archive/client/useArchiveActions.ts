@@ -11,21 +11,24 @@ import * as React from "react";
 import { downloadMarkdown, detailToMarkdown, mergeArchivedMarkdown, needsDeleteAck, remoteErrorMessage, summarizeBatchResult } from "./archive-entries.js";
 import { shortId } from "./archive-format.js";
 import type { TFunc } from "./locales.js";
+import type { ArchiveCall, ArchiveDetailEntry, ArchiveItem } from "./panel-types.js";
+import { isDetailError } from "./panel-types.js";
+import type { BatchActionResult } from "./archive-entries.js";
 
 export function useArchiveActions(deps: {
   /** 宿主会话列表的刷新口（可选；删除/恢复后同步原生页）。 */
-  refreshSessions: any
-  busy: any
-  call: any
-  confirmingDelete: any
-  deleteAcked: any
-  detailLoading: any
-  details: any
-  expanded: any
-  items: any
-  load: any
-  selectable: any
-  selected: any
+  refreshSessions: (() => Promise<void> | undefined) | undefined
+  busy: boolean
+  call: ArchiveCall
+  confirmingDelete: boolean
+  deleteAcked: boolean
+  detailLoading: ReadonlySet<string>
+  details: ReadonlyMap<string, ArchiveDetailEntry>
+  expanded: string | null
+  items: readonly ArchiveItem[]
+  load: () => Promise<void>
+  selectable: readonly ArchiveItem[]
+  selected: ReadonlySet<string>
   setBusy: any
   setConfirmingDelete: any
   setDetailLoading: any
@@ -36,7 +39,9 @@ export function useArchiveActions(deps: {
   setSelected: any
   t: TFunc
 }) {
-  const { refreshSessions, busy, call, confirmingDelete, deleteAcked, detailLoading, details, expanded, items, load, selectable, selected, setBusy, setConfirmingDelete, setDetailLoading, setDetails, setExpanded, setItems, setNotice, setSelected, t } = deps
+  // refreshSessions 可选：宿主 sessions 服务不可用时为 undefined。
+  const { refreshSessions, busy, call, confirmingDelete, deleteAcked, detailLoading, details, expanded, items, load, selectable, selected } = deps
+  const { setBusy, setConfirmingDelete, setDetailLoading, setDetails, setExpanded, setItems, setNotice, setSelected, t } = deps
 
   const confirmTimer = React.useRef<any>(0);
   // 卸载（插件 fiber 卸载/HMR）时清掉挂着的确认计时器：armed 态的 4s 窗口
@@ -83,7 +88,7 @@ export function useArchiveActions(deps: {
     const cached = details.get(item.sessionId);
     // 失败结果不缓存拦截:之前把 {error} 写进 Map 后 has() 恒真,唯一出路是
     // 刷新页面;现在再次点击即重新请求。
-    if (cached === void 0 || cached.error !== void 0) {
+    if (cached === void 0 || isDetailError(cached)) {
       setDetailLoading((current: any) => new Set(current).add(item.sessionId));
       call("detail", item.sessionId).then((detail: any) => {
         setDetails((current: any) => new Map(current).set(item.sessionId, detail));
@@ -147,7 +152,7 @@ export function useArchiveActions(deps: {
     setBusy(true);
     setNotice(null);
     try {
-      const result = await call(action, ids);
+      const result = await call(action, ids) as BatchActionResult;
       // 结果摘要的抽取（deleted/restored 取法、失败明细截断、needsRestart 计数）
       // 收敛进 archive-entries.summarizeBatchResult——纯函数可单测，行为不变。
       const outcome = summarizeBatchResult(result);

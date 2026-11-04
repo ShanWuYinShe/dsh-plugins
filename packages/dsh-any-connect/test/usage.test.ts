@@ -22,7 +22,7 @@ interface Registration {
   displayName: string | undefined
   query: (context: { provider: string; signal?: AbortSignal }) => Promise<{
     provider: string
-    windows: readonly { id: string; label: string; remain?: number; limit?: number; unit: string }[]
+    windows: readonly { id: string; label: string | { en: string; zh?: string }; remain?: number; limit?: number; unit: string }[]
     displayName?: string
   }>
 }
@@ -159,7 +159,7 @@ describe('WorkBuddy usage querier', () => {
     // 24 + (5 + 1×5): the untouched package counts its future cycle, the
     // drained grant counts for nothing; denominators summed for the bar.
     expect(snapshot.windows).toEqual([
-      { id: 'total', label: '总计', remain: 34, unit: 'credits', limit: 110 },
+      { id: 'total', label: { en: 'Total', zh: '总计' }, remain: 34, unit: 'credits', limit: 110 },
     ])
   })
 
@@ -178,7 +178,7 @@ describe('WorkBuddy usage querier', () => {
 
     const entry = registry.registered.find(candidate => candidate.provider === 'workbuddy')!
     expect((await entry.query({ provider: 'workbuddy' })).windows).toEqual([
-      { id: 'total', label: '总计', remain: 0, unit: 'credits' },
+      { id: 'total', label: { en: 'Total', zh: '总计' }, remain: 0, unit: 'credits' },
     ])
   })
 
@@ -209,7 +209,7 @@ describe('WorkBuddy usage querier', () => {
     const entry = registry.registered.find(candidate => candidate.provider === 'workbuddy')!
     const snapshot = await entry.query({ provider: 'workbuddy' })
     expect(snapshot.windows).toEqual([
-      { id: 'total', label: '总计', remain: 3, unit: 'credits' },
+      { id: 'total', label: { en: 'Total', zh: '总计' }, remain: 3, unit: 'credits' },
     ])
   })
 
@@ -221,13 +221,13 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
     expect(totalCreditsWindows([
       { packageName: 'A', remain: 0, size: 100 },
     ])).toEqual([
-      { id: 'total', label: '总计', remain: 0, unit: 'credits' },
+      { id: 'total', label: { en: 'Total', zh: '总计' }, remain: 0, unit: 'credits' },
     ])
     expect(totalCreditsWindows([
       { packageName: 'A', remain: 24, size: 100 },
       { packageName: 'B', remain: 0, size: 500 },
       { packageName: 'C', remain: 10, size: 0 },
-    ])).toEqual([{ id: 'total', label: '总计', remain: 34, unit: 'credits', limit: 100 }])
+    ])).toEqual([{ id: 'total', label: { en: 'Total', zh: '总计' }, remain: 34, unit: 'credits', limit: 100 }])
   })
 
   it('台账有今日样本时追加「今日已用」窗口；无样本保持单窗口', () => {
@@ -239,11 +239,11 @@ describe('totalCreditsWindows / currentPlanWindow', () => {
       history: [],
     }
     expect(totalCreditsWindows(accounts)).toEqual([
-      { id: 'total', label: '总计', remain: 693, unit: 'credits', limit: 800 },
+      { id: 'total', label: { en: 'Total', zh: '总计' }, remain: 693, unit: 'credits', limit: 800 },
     ])
     expect(totalCreditsWindows(accounts, today)).toEqual([
-      { id: 'total', label: '总计', remain: 693, unit: 'credits', limit: 800 },
-      { id: 'today', label: '今日已用', remain: 45, unit: 'credits' },
+      { id: 'total', label: { en: 'Total', zh: '总计' }, remain: 693, unit: 'credits', limit: 800 },
+      { id: 'today', label: { en: 'Used today', zh: '今日已用' }, remain: 45, unit: 'credits' },
     ])
   })
 

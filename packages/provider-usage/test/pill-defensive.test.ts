@@ -65,6 +65,7 @@ async function renderPill(localeId?: string): Promise<string> {
   const props: Record<string, unknown> = {
     sessionId: 'session-1',
     resolveSeat: () => ({ directory, load: () => {} }),
+    useModelDirectory: () => readyState,
     useResource: () => ({ status: 'live', value: answer, failure: undefined }),
   }
   if (localeId !== undefined) {

@@ -27,6 +27,21 @@
 * 发布产物只含运行时文件（`lib/*.js`、`lib/*.d.ts`、`client/client.cjs`），不再发布
   client 源码与 sourcemap。
 
+### 重构
+
+* **向官方能力收敛（去私有面）**：强制力改为包装官方 `ctx.sandboxPolicy.resolve()`，把配置根并入
+  `SandboxExecutionPolicy.additionalWritableRoots`，由官方 Seatbelt / bwrap / Landlock 与文件系统围栏
+  从同一来源消费（与官方 headless `--add-dir` 同字段）。删除对私有面 `ctx.fs.checkedTarget`、
+  `ctx.sandbox.confine` 的包装，以及 SBPL/bwrap/containerd 参数拼接、`isPathUnder`/landlock-exec 等
+  宿主内部实现复制；`inject` 收敛为 `['sandboxPolicy']`。
+* 保留设置卡的 UX 与护栏：危险根/相对路径校验、常用缓存预设、缺失目录过滤、realpath 身份校验
+  （canon 变化即剔除并告警，官方 enforcement 侧同样拒绝符号链接根）。
+* 降级可见：初始化失败不再静默，`get()` 返回 `degraded` 原因，设置卡顶部展示「额外根当前未生效」。
+* 依赖：新增 `@deepseek-ai/dsh-sandbox-policy` / `@deepseek-ai/cordis-plugin-loader`（dev）；
+  删除已无引用的 `@deepseek-ai/node-addon-system`。
+* 测试：新增真实 Loader + 真实 `SandboxPolicyService` 的 REAL-composition 用例、设置卡 jsdom 行为用例；
+  重写策略合并/引用计数/还原/过滤用例；删除 wrap/confine/landlock 旧测试。
+
 ## 0.4.30 (2026-11-04)
 
 ### 新增

@@ -22,6 +22,21 @@
 * 模块级 `WeakMap` 缓存移入 inject 面私有缓存；发布展示元数据（icon/locale）；
   发布产物只含运行时文件。
 
+### 修复
+
+* **速度与响应性**：额度 pill 的 resources 轮询节拍改为「宿主缓存 TTL + 5s 相位余量」（默认 65s），
+  消除 60s 节拍与 60s 缓存对齐时最长 ~120s 才更新的问题；手刷按钮改为与流值按 `fetchedAt`
+  比较的显式观测（删除墙钟抑制窗），弱网迟到的旧流帧不再覆盖刚手刷的新值。
+* **取消与预算**：`registry.snapshot` 支持调用方 AbortSignal 并与 15s deadline 融合（预取消短路、
+  在途合并按各自预算结算）；`GET /plugins/provider-usage/usage` 单请求总预算 20s、`/usage` 默认 20s、
+  `/usage refresh` 60s，超时折叠为逐 provider 失败快照后仍返回完整 JSON。
+* **组件域订阅**：额度 pill 不再在组件内直接 `useSyncExternalStore` 订阅 ModelDirectory，改注入
+  `keyedHooks.modelDirectory`（官方 `KeyedStandardSource` 形态），组件只读框架提供的 selector hook。
+* 额度窗口 `label` 支持本地化映射 `{ en, [locale] }`（客户端按 DSH 语言解析，命令文本取 en）；
+  any-connect 的窗口名（总计/今日已用等）已改为 `{en, zh}`。
+* 运行时校验补齐 label 形状（非法折叠为失败快照）；HMR dispose→协议/字典注册移除用例；
+  入口 Loader `unwrapExports` 守卫（无 default、四件导出原样）。
+
 ## 0.2.2 (2026-11-04)
 
 ### 新增

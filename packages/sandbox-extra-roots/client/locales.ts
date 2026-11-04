@@ -32,6 +32,7 @@ export const zh = {
   rootSystem: "第 {n} 行“{v}”为系统受限目录，宿主将自动过滤忽略此目录",
   saveConfigUnavailable: "此部署未启用配置持久化（没有 configEditor 服务），无法保存",
   saveInvalidConfig: "配置校验失败：{message}",
+  degraded: "额外可写根当前未生效：{reason}",
 };
 /** 英文文案必须覆盖中文全部键（缺键在 typecheck 阶段报错）。 */
 export const en: Record<keyof typeof zh, string> = {
@@ -57,4 +58,5 @@ export const en: Record<keyof typeof zh, string> = {
   rootSystem: "Line {n} “{v}” is a protected system directory and will be filtered out by host",
   saveConfigUnavailable: "Configuration persistence is unavailable in this deployment (no configEditor service)",
   saveInvalidConfig: "Config validation failed: {message}",
+  degraded: "Extra writable roots are NOT in effect: {reason}",
 };

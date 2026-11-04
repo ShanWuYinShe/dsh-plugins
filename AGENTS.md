@@ -16,8 +16,10 @@ bun run typecheck       # host + client 两套 tsconfig --noEmit（先自动生�
 bun run test            # vitest 回归（先跑 scripts/build.mjs 构建，含 typert + esbuild 产物）
 bun run test:ci         # build + typecheck + test（提交/发布前必跑）
 bun run test:stability  # 测试确定性压测：多轮全量 + 多并发档位（见「约定」的确定性要求）
+bun run test:coverage   # 覆盖率（v8；阈值是防回退基线，官方 RULE-088 的逐文件 100% 为长期目标）
 bun run gate            # 发布门禁干跑：只读，看哪些包会被发布/为何被跳过
 bun run dsh-status      # 两分支 dsh 依赖基线 vs dsh 最新 rc（正式版）对照（详见 RELEASING.md）
+bun run dsh-status --strict  # 严格模式：main 基线 ≠ npm 最新正式版时 exit 1（发布流水门禁用）
 bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览），详见 RELEASING.md
 ```
 
@@ -82,7 +84,9 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
 - **独立 CLI**：`dsh-any-connect` 的 `lib/bin.js` 是构建期用 esbuild 打出的**自包含**
   bundle（内联 MIT 依赖，见包内 THIRD_PARTY_NOTICES.md）：插件源码静态 import 宿主包，
   而 bin 是独立 node 进程、不经宿主 runtime resolution，所以必须自包含。改 bin 依赖后
-  重新 `bun run build`，回归由包内 `test/bin-self-contained.test.ts` 守住。
+  重新 `bun run build`，回归由包内 `test/bin-self-contained.test.ts` 守住。bin 的第三方内联闭包
+  由构建期 esbuild metafile 写出 `.workwork/bin-closure.json`，`test/third-party-notices.test.ts`
+  核对 `THIRD_PARTY_NOTICES.md` 表格与闭包完全一致——改 bin 依赖后重跑 build 并按测试提示同步表格。
 - 发布相关（分支模型、发布纪律、版本号/推送门禁）：详见 skill dsh-plugin-release；跨分支 worktree 操作：详见 skill dsh-plugin-worktree。
 - 提交信息按 skill `git-workflow` 写（全局 Commit 格式 `<分类>(<范围>): <中文描述>`），本项目惯例用
   中文分类前缀（`新增:` / `修复:` / `重构:` / `文档:` / `测试:` / `ci:` 等）。

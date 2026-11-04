@@ -1,5 +1,10 @@
 /**
- * plugin-config.ts — 插件身份（name/inject）与配置默认值。
+ * 插件身份与配置默认值。
+ *
+ * inject 只剩官方 policy 服务：enforcement 已收敛到
+ * `sandboxPolicy.additionalWritableRoots`（见 policy-merge.ts），不再需要
+ * `sandbox`（confine 包装）/ `fs`（fs fence 包装）——那两个私有面随 SB-01
+ * 收敛删除。缺 sandboxPolicy 时 apply 显式降级（Remote get 返回 degraded）。
  *
  * @module @chaoset/sandbox-extra-roots/plugin-config
  */
@@ -8,7 +13,7 @@ import type { SandboxExtraRootsConfig } from './types.js';
 
 export const name = "sandbox-extra-roots";
 
-export const inject = ["sandbox", "fs", "sandboxPolicy"];
+export const inject = ["sandboxPolicy"];
 
 /**
  * 默认配置。apply 时与 YAML 传入的 config 合并。

@@ -1,10 +1,15 @@
 /**
  * pill-types.ts — pill 的注入面与组件 props。
  *
- * 注入面只剩「文案 t」「渲染期解析模型目录的 resolveSeat」与 locale 快照源
- * （`hooks.locale`，宿主 renderer 绑定成组件侧 `useLocale`）；会话 id 与
- * resources 的 useResource 由宿主 standard kit 提供(renderer 无条件注入)，
- * 不在这里重复声明。目录类型直接取宿主 ui-model-selection 的官方
+ * 注入面三块：
+ * - `t`：本包 locale 命名空间的文案；
+ * - `keyedHooks.modelDirectory`：会话 → 模型目录快照源（官方 `KeyedStandardSource`
+ *   形态，renderer 绑定成组件侧 `useModelDirectory`；组件因此**不再**自己
+ *   `useSyncExternalStore` 订阅注入的裸 store）；
+ * - `hooks.locale`：DSH 当前语言快照源（renderer 绑定成 `useLocale`）。
+ * 另加 `resolveSeat`（渲染期解析会话目录的惰性 load 入口）与会话 id 的说明。
+ * 会话 id 与 resources 的 useResource 由宿主 standard kit 提供(renderer 无条件
+ * 注入)，不在这里重复声明。目录类型直接取宿主 ui-model-selection 的官方
  * ModelDirectory.store，不再手写 { subscribe, getSnapshot } 影子形状。
  *
  * @module provider-usage/pill-types
@@ -12,7 +17,7 @@
 
 import type { LocaleSnapshot } from '@deepseek-ai/dsh-client-locale/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ModelDirectory } from '@deepseek-ai/dsh-client-ui-model-selection/client'
+import type { ModelDirectory, ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 // 仅加载 resources 对 GlobalStandardProps 的 useResource 合并声明。
 import type {} from '@deepseek-ai/dsh-client-resources/client'
 import type { ProviderUsageLocaleKey } from './locales.js'
@@ -42,12 +47,24 @@ export interface ProviderUsageLocaleSource {
 /** 组件侧 locale selector hook（宿主 renderer 由 inject.hooks 绑定生成）。 */
 export type ProviderUsageLocaleHook = <Selected>(selector: (snapshot: LocaleSnapshot) => Selected) => Selected
 
+/**
+ * 组件侧模型目录 keyed selector hook（renderer 由 `keyedHooks.modelDirectory`
+ * 绑定生成，官方 `KeyedSnapshotSelectorHook` 同形）。
+ */
+export interface ProviderUsageModelDirectoryHook {
+  /** 读 key（session id）对应的目录快照；目录不可解析时返回 undefined。 */
+  (key: string): ModelDirectoryState | undefined
+  /** 读并投影：selector 接收 `ModelDirectoryState | undefined`。 */
+  <Selected>(key: string, selector: (state: ModelDirectoryState | undefined) => Selected): Selected
+}
+
 /** 由浏览器侧入口注入的本地化与目录解析面。 */
 export interface ProviderUsagePillInjected {
   /** 本包 locale 命名空间的文案函数。 */
   t: (key: ProviderUsageLocaleKey, params?: Record<string, unknown>) => string
   /**
-   * 渲染期解析会话的模型目录。
+   * 渲染期解析会话的模型目录，供组件取**惰性 load 入口**（无订阅语义的普通
+   * 回调）。目录的响应式快照走下面的 `keyedHooks`，组件不再直接订阅 store。
    *
    * 注册期(常量 inject)不解析任何会话/服务状态——宿主按 (entry × 会话绑定)
    * 永久缓存 inject 结果，且 render 期抛错会把 entry 永久 abdicate，两者都会
@@ -57,11 +74,22 @@ export interface ProviderUsagePillInjected {
   resolveSeat: (sessionId: unknown) => ProviderUsageSeat | undefined
   /**
    * 可观察伴侣隔间：renderer 把这里的每个源绑定成组件侧 selector hook，
-   * 不参与 render-occurrence 上下文（`hooks` 键本身不会出现在组件 props 上）。
+   * 不参与 render-occurrence 上下文（`hooks` / `keyedHooks` 键本身不会出现在
+   * 组件 props 上）。
    */
   hooks: {
     /** DSH 当前语言快照源 → 组件侧 `useLocale`。 */
     locale: ProviderUsageLocaleSource
+  }
+  /**
+   * 按会话 keyed 的目录快照源 → 组件侧 `useModelDirectory`。
+   *
+   * 官方 reactive 事实通道：业务组件不持有订阅机器，由 renderer 绑定的
+   * keyed hook 完成 uSES 订阅；key 用 `String(sessionId)`（无会话时为空串，
+   * resolver 返回 undefined，hook 返回 undefined → 组件不渲染）。
+   */
+  keyedHooks: {
+    modelDirectory: (sessionId: string) => ModelDirectory['store'] | undefined
   }
 }
 
@@ -84,7 +112,7 @@ interface ProviderUsagePillSessionProps {
 export type ProviderUsagePillProps =
   PropsRuntime<'conversation.composer.dock'>
   & ProviderUsagePillSessionProps
-  & Partial<Omit<ProviderUsagePillInjected, 'hooks'>>
+  & Partial<Omit<ProviderUsagePillInjected, 'hooks' | 'keyedHooks'>>
   & {
     /**
      * 宿主 renderer 从 inject.hooks.locale 绑定的 selector hook。
@@ -93,4 +121,10 @@ export type ProviderUsagePillProps =
      * 绝不因 locale 面缺失而抛错。
      */
     useLocale?: ProviderUsageLocaleHook
+    /**
+     * 宿主 renderer 从 inject.keyedHooks.modelDirectory 绑定的 keyed hook。
+     *
+     * 缺席（旧宿主/契约漂移）时目录视为不可解析：组件这一帧不渲染，但绝不抛错。
+     */
+    useModelDirectory?: ProviderUsageModelDirectoryHook
   }

@@ -45,6 +45,15 @@ describe('formatUsageLine', () => {
     expect(formatUsageLine(snapshot({ windows: [] }))).toBe('acme: the provider reported no usable balance')
   })
 
+  it('本地化 label 取 en 基线（命令文本只有一种语言）', () => {
+    expect(formatUsageLine(snapshot({
+      windows: [
+        { id: 'total', label: { en: 'Total', zh: '总计' }, remain: 34, unit: 'credits' },
+        { id: 'plan', label: { en: 'Start Plan' }, unit: '' },
+      ],
+    }))).toBe('acme: Total 34 credits, Start Plan —')
+  })
+
   it('缺 remain 的窗口用 — 占位（不输出 undefined），空单位不留尾随空格', () => {
     expect(formatUsageLine(snapshot({
       windows: [
@@ -69,18 +78,63 @@ describe('usageCommand handler', () => {
   })
 
   it('refresh 参数绕过缓存(force=true)', async () => {
-    const snapshotFn = vi.fn(async () => snapshot())
+    const snapshotFn = vi.fn(async (_provider: string, _options?: { signal?: AbortSignal }) => snapshot())
     const registry = makeRegistry({ snapshot: snapshotFn })
     await usageCommand(registry).handler(invocation('refresh'))
-    expect(snapshotFn).toHaveBeenCalledWith('acme', { force: true })
+    expect(snapshotFn).toHaveBeenCalledWith('acme', expect.objectContaining({ force: true }))
+    // 总预算信号随每次读取传入（同一次命令共享一个）。
+    expect(snapshotFn.mock.calls[0]![1]?.signal).toBeInstanceOf(AbortSignal)
   })
 
   it('点名 provider 时规范化并单查', async () => {
     const snapshotFn = vi.fn(async () => snapshot({ displayName: 'Acme' }))
     const registry = makeRegistry({ snapshot: snapshotFn })
     const result = await usageCommand(registry).handler(invocation('  DeepSeek '))
-    expect(snapshotFn).toHaveBeenCalledWith('deepseek', { force: false })
+    expect(snapshotFn).toHaveBeenCalledWith('deepseek', expect.objectContaining({ force: false }))
     expect((result as { text: string }).text).toBe('Acme: W 3 credits')
+  })
+
+  it('默认预算到点时取消在途读取，命令仍给出逐 provider 的失败行', async () => {
+    vi.useFakeTimers()
+    try {
+      const snapshotFn = vi.fn((_provider: string, options: { signal?: AbortSignal }) => new Promise<UsageSnapshot>(resolve => {
+        options.signal?.addEventListener('abort', () => resolve(snapshot({ error: String(options.signal?.reason) })), { once: true })
+      }))
+      const registry = makeRegistry({ snapshot: snapshotFn })
+      const command = usageCommand(registry, { budgetMs: 5, refreshBudgetMs: 50 })
+      const pending = command.handler(invocation(''))
+      await vi.advanceTimersByTimeAsync(5)
+      const result = await pending
+      // 默认路径用 budgetMs：命令在有限时间内结算并如实报告预算耗尽。
+      expect((result as { text: string }).text).toContain('budget')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('refresh 路径使用更长的预算（显式刷新允许真打上游）', async () => {
+    vi.useFakeTimers()
+    try {
+      let aborted = false
+      const snapshotFn = vi.fn((_provider: string, options: { signal?: AbortSignal }) => new Promise<UsageSnapshot>(resolve => {
+        options.signal?.addEventListener('abort', () => {
+          aborted = true
+          resolve(snapshot({ error: String(options.signal?.reason) }))
+        }, { once: true })
+      }))
+      const registry = makeRegistry({ snapshot: snapshotFn })
+      const command = usageCommand(registry, { budgetMs: 5, refreshBudgetMs: 50 })
+      const pending = command.handler(invocation('refresh'))
+      // 默认预算 5ms 已过，但 refresh 预算 50ms 未到：不取消。
+      await vi.advanceTimersByTimeAsync(5)
+      expect(aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(45)
+      const result = await pending
+      expect(aborted).toBe(true)
+      expect((result as { text: string }).text).toContain('budget')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('推断无果(undefined)输出不可查行', async () => {

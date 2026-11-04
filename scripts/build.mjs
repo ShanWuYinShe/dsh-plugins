@@ -12,7 +12,7 @@
 // esbuild 解析到 lib/typert.remote-client.js，故生成必须早于 client 打包；
 // bin 覆盖的是 tsc 阶段写出的同名产物，故打包必须在 tsc 之后（见阶段 4）。
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -166,6 +166,54 @@ function binEntries(pkgDir, pkgJson) {
   });
 }
 
+/**
+ * 从 esbuild metafile 的 input 路径提取 node_modules 里的包名。
+ * bun 的隔离安装布局（node_modules/.bun/<name@version>/node_modules/<name>/…）
+ * 与普通布局都按「最后一个 node_modules/ 之后」取名，scoped 包取两段。
+ * @param input - metafile.inputs 的 key（相对仓库根的路径）。
+ * @returns 裸包名，或 undefined（仓库自身源码/入口）。
+ */
+function packageNameOfInput(input) {
+  const marker = input.lastIndexOf("node_modules/");
+  if (marker === -1 || marker === input.length - "node_modules/".length) return undefined;
+  const rest = input.slice(marker + "node_modules/".length);
+  const parts = rest.split("/");
+  if (parts.length === 0 || parts[0] === "") return undefined;
+  return parts[0].startsWith("@") ? `${parts[0]}/${parts[1]}` : parts[0];
+}
+
+/**
+ * 从 metafile 收集 bin 的内联第三方闭包（包名 + 构建时实际解析版本）。
+ *
+ * 版本从该 input 所属包目录的 package.json 读取（构建期真实解析结果，与
+ * THIRD_PARTY_NOTICES.md 表格里的版本必须一致）。本仓 workspace 包
+ * （@chaoset/*）是 bin 入口自身，不是需要告知的第三方组件，排除。
+ *
+ * @param metafile - esbuild build({ metafile: true }) 返回的 metafile。
+ * @returns [{ name, version }]，按包名排序、去重。
+ */
+function collectBinClosure(metafile) {
+  const byName = new Map();
+  for (const input of Object.keys(metafile.inputs)) {
+    const name = packageNameOfInput(input);
+    if (name === undefined || name.startsWith("@chaoset/")) continue;
+    if (byName.has(name)) continue;
+    const marker = input.lastIndexOf("node_modules/");
+    const pkgDir = join(ROOT, input.slice(0, marker + "node_modules/".length), name);
+    let version = "(unresolved)";
+    try {
+      version = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")).version ?? version;
+    } catch {
+      // 包目录解析失败不阻断构建；闭包版本写 (unresolved) 让 test 侧报红。
+    }
+    byName.set(name, { name, version });
+  }
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** bin 闭包聚合结果：包目录 → 该包 bin 的内联第三方依赖清单。 */
+const binClosures = [];
+
 /** 打包一个包声明的全部 bin；无 bin 声明的包是空操作。 */
 async function buildBin(pkg, pkgDir) {
   const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
@@ -180,6 +228,9 @@ async function buildBin(pkg, pkgDir) {
       // 分发产物同 client bundle：调试看源码，发布跑压缩版本。
       minify: true,
       write: false,
+      // 许可告知自动化：记录被内联的第三方包闭包（test/third-party-notices 核对）。
+      metafile: true,
+      absWorkingDir: ROOT,
     });
     const output = result.outputFiles?.[0];
     if (output === undefined) throw new Error(`bin 打包 ${source} 无输出`);
@@ -189,10 +240,22 @@ async function buildBin(pkg, pkgDir) {
     writeFileSync(target, output.text);
     // tsc 阶段写出的 .map 描述的是未打包的产物，被 bundle 覆盖后即成过期文件。
     rmSync(`${target}.map`, { force: true });
-    console.log(`built ${pkg} bin (${Buffer.byteLength(output.text)} bytes)`);
+    const closure = result.metafile === undefined ? [] : collectBinClosure(result.metafile);
+    binClosures.push({ dir: pkg, bin: target.slice(pkgDir.length + 1).split("\\").join("/"), closure });
+    console.log(`built ${pkg} bin (${Buffer.byteLength(output.text)} bytes, ${closure.length} inline packages)`);
   }
 }
 
 for (const { pkg, pkgDir } of compiled) {
   await buildBin(pkg, pkgDir);
 }
+
+// bin 闭包写入 gitignore 的 .workwork/：test/third-party-notices 用它核对
+// THIRD_PARTY_NOTICES.md 表格与构建期实际内联面一致（版本也逐条比对）。
+// 无 bin 的仓同样写空结构，便于 test 区分「构建没跑」与「没有 bin」。
+mkdirSync(join(ROOT, ".workwork"), { recursive: true });
+writeFileSync(
+  join(ROOT, ".workwork", "bin-closure.json"),
+  `${JSON.stringify({ packages: Object.fromEntries(binClosures.map(({ dir, bin, closure }) => [dir, { bin, closure }])) }, null, 2)}\n`,
+);
+console.log(`bin closure written: .workwork/bin-closure.json (${binClosures.length} bin package(s))`);

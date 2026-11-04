@@ -52,6 +52,32 @@ describe('WindowRow', () => {
     expect(container.textContent).toContain('30 t')
   })
 
+  it('本地化 label 按 localeId 解析（纯字符串 label 原样渲染）', () => {
+    act(() => {
+      root!.render(createElement(WindowRow, {
+        window: { id: 'w', label: { en: 'Total', zh: '总计' }, unit: 'credits', remain: 3 },
+        t,
+        localeId: 'zh',
+      }))
+    })
+    expect(container.textContent).toContain('总计')
+    act(() => {
+      root!.render(createElement(WindowRow, {
+        window: { id: 'w', label: { en: 'Total', zh: '总计' }, unit: 'credits', remain: 3 },
+        t,
+        localeId: 'en',
+      }))
+    })
+    expect(container.textContent).toContain('Total')
+    act(() => {
+      root!.render(createElement(WindowRow, {
+        window: { id: 'w', label: 'Plain name', unit: 'credits', remain: 3 },
+        t,
+      }))
+    })
+    expect(container.textContent).toContain('Plain name')
+  })
+
   it('localeId 透传给数值格式化（跟随 DSH 语言）', () => {
     act(() => {
       root!.render(createElement(WindowRow, {

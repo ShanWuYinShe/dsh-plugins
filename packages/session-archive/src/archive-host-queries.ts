@@ -32,18 +32,18 @@ export function createArchiveQueries(deps: HostContext) {
 
   /** 存在性过滤后的归档 id（幽灵记录不计；只逐 id stat，不读事件流/标题）。
    * count 与 Remote 层逐项 remoteAccess 过滤共用这一个轻量口径。 */
-  async function existingIds(): Promise<string[]> {
+  async function existingIds(signal?: AbortSignal): Promise<string[]> {
     const archived = [...archivedSet()];
     if (archived.length === 0) return [];
-    const snapshots = await snapshotsByIds(archived);
+    const snapshots = await snapshotsByIds(archived, signal);
     return archived.filter((sessionId) => snapshots.has(sessionId));
   }
 
   return {
     /** 归档会话计数（存在性过滤后的真实数量）。侧边栏徽标的关闭态轮询
      * 只调这里：逐 id stat 只读元数据头，不枚举全部历史会话。 */
-    async count(): Promise<ArchiveCountResult> {
-      return { count: (await existingIds()).length };
+    async count(signal?: AbortSignal): Promise<ArchiveCountResult> {
+      return { count: (await existingIds(signal)).length };
     },
 
     /** 存在性过滤后的归档 id 列表：Remote 层对每项做 remoteAccess 过滤用。
@@ -51,10 +51,10 @@ export function createArchiveQueries(deps: HostContext) {
     existingIds,
 
     /** 列出全部归档会话（存在性过滤：文件已删的幽灵归档记录不显示）。 */
-    async list(): Promise<ArchiveListResult> {
+    async list(signal?: AbortSignal): Promise<ArchiveListResult> {
       const archived = [...archivedSet()];
       if (archived.length === 0) return { items: [] };
-      const snapshots = await snapshotsByIds(archived);
+      const snapshots = await snapshotsByIds(archived, signal);
       const rows: Array<{ sessionId: string; header: SessionHeader }> = [];
       for (const sessionId of archived) {
         const snapshot = snapshots.get(sessionId);
@@ -64,8 +64,8 @@ export function createArchiveQueries(deps: HostContext) {
       // 标题优先走官方索引批量读（无 sessionQuery/整单失败时 readTitlesBulk
       // 返回 null，逐行回退直读；单行 rejected 同理）。存在性过滤与体积/mtime
       // 仍以文件为准，不受索引影响。
-      const bulk = await readTitlesBulk(rows.map(({ sessionId }) => sessionId as SessionId));
-      const items = await limitedConcurrency(cfg.titleReadConcurrency, rows.map(({ sessionId, header }) => () => rowFor(sessionId as SessionId, header, bulk)));
+      const bulk = await readTitlesBulk(rows.map(({ sessionId }) => sessionId as SessionId), signal);
+      const items = await limitedConcurrency(cfg.titleReadConcurrency, rows.map(({ sessionId, header }) => () => rowFor(sessionId as SessionId, header, bulk, signal)), signal);
       return { items };
     },
 
@@ -73,7 +73,7 @@ export function createArchiveQueries(deps: HostContext) {
      * detail 是对外暴露的远程端点,不校验成员资格就能读到任意未归档会话。
      * 拒绝走官方 RemoteError：稳定 code + 类型化 details（types.ts 的
      * RemoteErrorDetailsMap 合并扩展），Client 按 code 判别而非 instanceof。 */
-    async detail(sessionId: string): Promise<ArchiveDetailResult> {
+    async detail(sessionId: string, signal?: AbortSignal): Promise<ArchiveDetailResult> {
       if (!archivedSet().has(sessionId)) {
         throw new RemoteError('session-archive/not-archived', 'session not archived: ' + sessionId, { sessionId });
       }
@@ -116,7 +116,7 @@ export function createArchiveQueries(deps: HostContext) {
           });
           totalMessageCount++;
         }
-      });
+      }, signal);
       const title = foldSessionTitle(titleEvents)?.title ?? null;
       return {
         sessionId,

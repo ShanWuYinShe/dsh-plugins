@@ -1,25 +1,17 @@
 /**
- * roots.ts — 额外根目录的规范化、分类（reject/filter）与授予集合计算。
+ * roots.ts — 额外根目录的 canonical 化与风险分类（reject/filter）。
+ *
+ * enforcement 已收敛到官方 `sandboxPolicy.additionalWritableRoots`（Seatbelt/
+ * bwrap/Landlock/fs fence 同源消费，见 policy-merge.ts），本模块只保留配置面
+ * 需要的能力：把用户填写 / patch 传入的路径 canonical 化，并按危险级别分类。
+ * 原 confine argv 改写所需的官方授予集合计算已无消费方，随 SB-01 收敛删除。
  *
  * @module @chaoset/sandbox-extra-roots/roots
  */
 
 import { homedir } from 'node:os'
 import { sep } from 'node:path'
-import { symbols } from '@deepseek-ai/cordis'
-import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
-import { canonicalPath, writableRoots } from './common.js'
-
-/** 包装状态标记:挂在被包装的底层实例上,保证幂等与跨挂载点共享。 */
-export const STATE = Symbol("sandbox-extra-roots.state");
-
-/**
- * 取底层实例(sandbox/fs 通常就是 raw,防御性写法)。
- * 用 cordis 官方 registry symbol,不再手写 Symbol.for("cordis.original"):
- * 同一个全局 symbol 由官方维护,宿主调整 registry 拼写时插件自动跟随
- * (rc.1 `@deepseek-ai/cordis` 的 symbols.original === Symbol.for("cordis.original"))。
- */
-export const ORIGINAL = symbols.original;
+import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
 
 /** 官方 @deepseek-ai/dsh-sandbox 的 canonical 化（符号链接按真实目标解析；解析失败返回原拼写）。 */
 export function canon(path: string): string {
@@ -64,31 +56,4 @@ function isLexicalAncestor(ancestor: string, path: string): boolean {
   if (ancestor === "" || path === "" || ancestor === path) return false;
   const prefix = ancestor.endsWith(sep) ? ancestor : ancestor + sep;
   return path.startsWith(prefix);
-}
-
-/**
- * 官方白名单在 bwrap/Landlock 分支已授予的根。
- *
- * 官方 writableRoots 会对缺失/非目录/符号链接的额外根抛 SandboxInvalidRootError；
- * 这里宁可按"官方未授予任何根"处理（最多重复插入同一根的授权片段，对
- * bwrap --bind / landlock --rw 都是幂等无害的），也不让自查异常打断 confine 包装。
- */
-function officialWritableRoots(policy: SandboxExecutionPolicy): string[] {
-  try {
-    const roots = writableRoots(policy);
-    return Array.isArray(roots) ? roots : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * bwrap/Landlock 分支的插入集合:与 Seatbelt 相同的 [官方根 ∪ 额外根]
- * 去重合并,再减去官方 argv 已授予的官方根——官方参数不动,插入段只补
- * 差额,避免对同一根重复 --bind/--rw(与 Seatbelt 的整表重建语义对齐)。
- */
-export function extraGrantRoots(policy: SandboxExecutionPolicy, roots: readonly string[]): string[] {
-  const official = officialWritableRoots(policy);
-  const officialSet = new Set(official);
-  return [...new Set([...official, ...roots])].filter((root) => !officialSet.has(root));
 }

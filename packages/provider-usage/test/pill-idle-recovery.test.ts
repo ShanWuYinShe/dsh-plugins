@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react'
+import { act, createElement, useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -140,16 +140,23 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** 渲染 pill：目录经 resolveSeat 交付（与生产注入面同形），额度经 useResource 流交付。 */
+/**
+ * 渲染 pill：目录快照走 keyed hook（与 renderer 绑定同形：组件不订阅裸 store，
+ * 订阅发生在注入的 hook 里），惰性 load 走 resolveSeat，额度经 useResource 流交付。
+ */
 async function renderPill(parts: {
   directory: MutableStore
   load: () => void
   resource: ReturnType<typeof makeResource>
 }): Promise<void> {
+  /** 与 renderer 绑定的 keyed hook 同形：uSES 订阅宿主目录 store。 */
+  const useModelDirectory = (_key: string): ModelDirectoryState =>
+    useSyncExternalStore(parts.directory.subscribe, parts.directory.getSnapshot)
   const props = {
     t,
     sessionId: 'session-1',
     resolveSeat: () => ({ directory: parts.directory, load: parts.load }),
+    useModelDirectory,
     useResource: parts.resource.useResource,
   } as unknown as ProviderUsagePillProps
   await act(async () => {

@@ -21,9 +21,14 @@
 // 0.1.5-rc.1、更新的 0.1.5-rc.2 挂在 next），拿 dist-tag 当目标会把正确的
 // 基线误报成超前。
 //
-// 用法：node scripts/dsh-follow-status.mjs [--ci]
-//   --ci  落后/漂移时输出 GitHub Actions `::warning::` annotation
-//         （非阻塞，永远 exit 0——这是提醒，不是门禁）。
+// 用法：node scripts/dsh-follow-status.mjs [--ci] [--strict]
+//   --ci      落后/漂移时输出 GitHub Actions `::warning::` annotation
+//             （非阻塞，永远 exit 0——这是提醒，不是门禁）。
+//   --strict  发布门禁用：main 分支的 dsh 依赖基线必须等于 npm 最新正式版
+//             （最新 rc；本项目把 rc 视为该线正式版），或任一分支 engines.dsh
+//             与基线不一致时报错 exit 1，拒绝发布旧基线插件；npm registry
+//             不可达时仍按「永远 exit 0」降级为 warning（网络抖动不阻塞发布，
+//             下一次运行/人工核对补上）。
 //
 // 本脚本只读：不改任何文件、不 install、不发布。
 
@@ -35,6 +40,9 @@ import { aggregateBaseline, manifestPaths, ROOT } from "./lib/dsh-deps.mjs";
 import { VERSION_RE, compareVersions, parseVersion } from "./lib/version-checks.mjs";
 
 const ci = process.argv.includes("--ci");
+// 发布门禁严格模式：main 基线 ≠ npm 最新正式 rc（或 engines 声明与基线不一致）
+// 时 exit 1；npm 不可达时保持降级 exit 0（见文件头「永远 exit 0」承诺）。
+const strict = process.argv.includes("--strict");
 // 与 publish-gate 钉定同一 registry：本地 .npmrc 指向镜像时，两个脚本对
 // 同一 npm 状态必须得出同一结论。
 const REGISTRY = "https://registry.npmjs.org";
@@ -272,5 +280,31 @@ for (const { branch, baseline, target, state } of rows) {
   const message = `dsh 跟随: ${branch} 分支依赖基线 ${baseline} 与跟随目标不一致（${state}，目标 ${target}）。${advice}`;
   if (ci) console.log(`::warning::${message}`);
   console.log(`⚠ ${message}`);
+}
+
+// 发布门禁严格模式：正式版发布前，main 必须已经跟到 npm 最新正式版（最新 rc）。
+// 注意：npm 不可达已在上面提前 exit 0，不会走到这里（网络抖动不阻塞发布）。
+if (strict) {
+  const mainRow = rows.find((row) => row.branch === "main");
+  const followed = mainRow !== undefined
+    && !mainRow.unreadable
+    && mainRow.baseline === stable
+    && mainRow.state.startsWith("就位");
+  if (!followed) {
+    const message = `dsh 跟随(严格): main 依赖基线 ${mainRow?.baseline ?? "(缺失)"}`
+      + ` ≠ npm 最新正式版 ${stable}（当前状态 ${mainRow?.state ?? "缺失"}）`
+      + `——发布正式版前必须先在 main 执行 bun run adapt ${stable} 并重发插件；`
+      + `预发布（-alpha/-rc）不受此门禁约束。`;
+    if (ci) console.log(`::error::${message}`);
+    console.error(`✗ ${message}`);
+    process.exit(1);
+  }
+  if (problems > 0) {
+    const message = `dsh 跟随(严格): 存在 ${problems} 项基线/engines 声明问题（见上方 ⚠/✖ 行），拒绝发布。`;
+    if (ci) console.log(`::error::${message}`);
+    console.error(`✗ ${message}`);
+    process.exit(1);
+  }
+  console.log(`✔ dsh 跟随(严格): main 基线 = npm 最新正式版 ${stable}`);
 }
 process.exit(0);

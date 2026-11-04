@@ -9,16 +9,18 @@
 
 import * as React from "react";
 import type { TFunc } from "./locales.js";
+import type { ArchiveItem } from "./panel-types.js";
 
 export function ArchiveHeader(props: {
   t: TFunc
-  closePanel: any
-  items: any
-  loading: any
-  busy: any
-  load: any
-  filter: any
-  sortedItems: any
+  closePanel: () => void
+  items: readonly ArchiveItem[]
+  loading: boolean
+  /** 批量动作进行中（刷新按钮同样禁用，避免与删除/恢复的写操作交错）。 */
+  busy: boolean
+  load: () => Promise<void> | void
+  filter: string
+  sortedItems: readonly ArchiveItem[]
 }): React.ReactNode {
   const { t, closePanel, items, loading, busy, load, filter, sortedItems } = props
   const isRefreshing = Boolean(busy || loading)

@@ -1,12 +1,17 @@
 // scripts/audit-deps.mjs — 依赖漏洞审计（OSV.dev 公共 API，零外部依赖）。
-// 收集根 + 各包 manifest 声明的全部依赖（workspace 自有包排除），从根
-// node_modules 读实际安装版本，批量查询 OSV（Google 的漏洞数据库，
-// npm advisory 的上游聚合），命中即列出并 exit 1（可直接接 CI）。
+// 收集根 + 各包 manifest 声明的依赖（workspace 自有包排除）并批量查询 OSV
+// （Google 的漏洞数据库，npm advisory 的上游聚合），命中即列出并 exit 1
+// （可直接接 CI）。
 // 用法：node scripts/audit-deps.mjs [--deep]   或   bun run audit [--deep]
-//   默认审计直接依赖（manifest 声明 + hoisted 版本，快）；
-//   --deep 递归收集 node_modules 全树的每个 name@version（传递依赖也审，
-//   供应链攻击常藏在传递树里；数百包按 100/批分批查询，实测约 280 个）。
-// 需要网络（api.osv.dev 公共接口，无需认证）。
+//   默认审计直接依赖：按**每个 manifest 自己的解析面**（createRequire）取实际
+//     安装版本——bun 是隔离安装，多数依赖不在根 node_modules，只看根目录会静默
+//     漏查 2/3（2026-11-04 审计实测 15/49）。
+//   --deep 审计传递依赖：解析 bun 隔离布局 node_modules/.bun 的一层目录名
+//     （剥掉 `+<hex>` 平台/peer 变体后缀并按 name@version 去重），覆盖 lock
+//     解析集合（当前约 1500 条），供应链攻击常藏在传递树里。
+// 命中项分两类：本仓确定无法消解的登记在 ACCEPTED_ADVISORIES 并逐条写理由
+// （仍打印 △ 提醒），其余列为 ✗ 并 exit 1。
+// 需要网络（api.osv.dev 公共接口，无需认证）；网络不可达 exit 2。
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";

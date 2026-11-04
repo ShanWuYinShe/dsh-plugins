@@ -10,7 +10,7 @@
 import { stat, rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { BUSY_WRITE_WINDOW_MS, REAPPEAR_SETTLE_MS, removeSessionDirIfOwned } from './session-scan.js'
+import { removeSessionDirIfOwned } from './session-scan.js'
 import type { HostContext } from './archive-host-context.js'
 import type { ArchiveDeleteResult, ArchiveFailure, ArchiveUnarchiveResult } from './types.js'
 
@@ -20,12 +20,11 @@ export function createArchiveMutations(deps: HostContext) {
     persistence,
     archivedSet,
     snapshotsByIds,
-    settleStat,
     exclusive,
     removeFromArchiveSet,
     resolveGenerationFile,
     fileInfo,
-    filePresentAfterSettle,
+    filePresent,
   } = deps
 
   /** 插件日志通道（所有告警统一走宿主 logger）。 */
@@ -67,7 +66,8 @@ export function createArchiveMutations(deps: HostContext) {
      * 或归属无法确认）时抛错——此处 catch 把真实原因记入 failed，绝不把
      * 「仍有本会话数据残留」的 id 记成 deleted。
      */
-    async deleteArchived(sessionIds: string[]): Promise<ArchiveDeleteResult> {
+    async deleteArchived(sessionIds: string[], signal?: AbortSignal): Promise<ArchiveDeleteResult> {
+      signal?.throwIfAborted();
       const unique = [...new Set(sessionIds)];
       const deleted: string[] = [];
       const failed: ArchiveFailure[] = [];
@@ -83,12 +83,26 @@ export function createArchiveMutations(deps: HostContext) {
       // 两道保护被不可逆物理删除。快照只 stat 归档成员:非成员在循环里
       // 前置拒绝,不必查持久层。
       const archived = archivedSet();
-      const snapshots = await snapshotsByIds(unique.filter((id) => archived.has(id)));
+      const snapshots = await snapshotsByIds(unique.filter((id) => archived.has(id)), signal);
+
+      /** 删除前置的显式状态判定（RULE-049：正确性来自显式状态，不来自计时）。
+       * 宿主 `sessions` 服务已 inject：会话仍在内存中即视为「可能活跃」，
+       * 拒绝不可逆删除（README 的 busy 语义）。归档会话理论上不应再写盘，
+       * 但宿主重启/客户端恢复 tab 都可能把归档会话重新挂进内存——此时删它
+       * 存在「删掉活跃写入方正在 append 的日志」的风险，拒绝比启发式探测安全。
+       * 返回 true（busy）时调用方已记账。 */
+      const busyIfLive = (sessionId: string): boolean => {
+        if (ctx.sessions.get(sessionId as SessionId) === undefined) return false;
+        failed.push({ sessionId, reason: 'busy' });
+        return true;
+      };
 
       /** 常规删除流（located 路径），必须在 exclusive 临界区内调用：
-       * TOCTOU 复核 → busy 沉降观察 → rm → 重现复验。 */
+       * 显式状态复核 → TOCTOU 复核 → rm → 立即复验（重建则再删一次）。 */
       const deleteLocatedFile = async (sessionId: string, path: string): Promise<void> => {
         try {
+          // 锁内再次读宿主内存状态（循环外可能已被恢复/进入），保持显式判定。
+          if (busyIfLive(sessionId)) return;
           // TOCTOU 复核:fileInfo 的 stat 是快照,检查与 rm 之间文件可能
           // 恰好变化;rm 前重取一次。只有 ENOENT 才是「已消失」,其余错误
           // 上抛以真实原因计入 failed。
@@ -110,35 +124,13 @@ export function createArchiveMutations(deps: HostContext) {
               return;
             }
           }
-          // 生成流兜底:内存中的会话且 mtime 在窗口内,沉降观察一次,文件
-          // 仍在增长说明活跃写入方在 append(删除后会把半截日志写回来),
-          // 拒绝;体积静止则只是一次性落盘/迁移/flush 刷新过 mtime,照删。
-          const inMemory = ctx.sessions.get(sessionId as SessionId) !== undefined;
-          if (inMemory && Date.now() - fresh.mtimeMs < BUSY_WRITE_WINDOW_MS) {
-            const second = await settleStat(path);
-            if (second === null) {
-              markDeleted(sessionId);
-              return;
-            }
-            if (second.size > fresh.size) {
-              failed.push({ sessionId, reason: 'busy' });
-              return;
-            }
-            fresh = second;
-          }
           await rm(path, { force: true });
           await removeSessionDirIfOwned(sessionId, path, warn);
-          // rm 后复验：防宿主 materialize 的 mkdir -p 把路径在删除窗口内重建。
-          // 重现只可能来自活跃写入方（内存中的生成流，或刚写完不久、客户端
-          // 重连即恢复的 tab）。据此分两档：
-          //   - 可能活跃（内存存在 或 60s 内有写入）：维持原 300ms settle 两段
-          //     复验；重现则再删一次，仍未删掉计入 failed('reappeared')。
-          //   - 冷文件（不在内存且超过 60s 无写入）：未来写入需要用户主动继续
-          //     对话，不会落在删除窗口内——做零等待的即时复验即可。批量清理
-          //     陈旧归档不再为每个文件白付 2×300ms。
-          const plausiblyActive = inMemory || Date.now() - fresh.mtimeMs < BUSY_WRITE_WINDOW_MS;
-          const settleMs = plausiblyActive ? REAPPEAR_SETTLE_MS : 0;
-          if (await filePresentAfterSettle(path, settleMs)) {
+          // 删除后的**立即**复验（无 sleep）：防宿主 materialize 的
+          // mkdir -p / 写入方竞态把路径重建。重现则再删一次；仍压不掉计
+          // failed('reappeared')。安全性已由删除前的显式状态判定承担，
+          // 这里的复验只负责「不谎报已彻底删除」。
+          if (await filePresent(path)) {
             try {
               await rm(path, { force: true });
               await removeSessionDirIfOwned(sessionId, path, warn);
@@ -149,7 +141,7 @@ export function createArchiveMutations(deps: HostContext) {
               failed.push({ sessionId, reason: (error as Error)?.message ?? 'delete-failed' });
               return;
             }
-            if (await filePresentAfterSettle(path, settleMs)) {
+            if (await filePresent(path)) {
               failed.push({ sessionId, reason: 'reappeared' });
               return;
             }
@@ -161,16 +153,15 @@ export function createArchiveMutations(deps: HostContext) {
       };
 
       for (const sessionId of unique) {
-        const id = sessionId as SessionId;
+        signal?.throwIfAborted();
         if (!archived.has(sessionId)) {
           failed.push({ sessionId, reason: 'not-archived' });
           continue;
         }
         // 无独立的 'live' 检查:本端点只删归档成员,而归档成员按 isLive 的
-        // 定义(内存存在且未归档)恒非 live——「内存中仍挂着的归档会话」的
-        // 删除保护由 deleteLocatedFile 的 busy 沉降观察承担(活跃生成流会
-        // 被增长判定拒绝),不是 live 判定。此前的 'live' 分支在该前置检查
-        // 之后永不可达(死代码),已删;词表保留 'busy'/'not-archived'。
+        // 定义(内存存在且未归档)恒非 live。「内存中仍挂着」的删除保护由
+        // deleteLocatedFile / absent 分支的显式状态判定（busyIfLive）承担,
+        // 不是 live 判定。词表保留 'busy'/'not-archived'。
         const snapshot = snapshots.get(sessionId);
         if (snapshot === undefined) {
           // ghost id(枚举不到)。"枚举不到 ≠ 文件不存在":首行损坏的日志会被
@@ -182,7 +173,8 @@ export function createArchiveMutations(deps: HostContext) {
           continue;
         }
         const header = snapshot.header;
-        const file = await fileInfo(header);
+        signal?.throwIfAborted();
+        const file = await fileInfo(header, signal);
         if (file.state === 'unknown') {
           // 文件存在(枚举得到)但无法定位路径:删不得也不该谎报成功。
           failed.push({ sessionId, reason: 'unlocatable' });
@@ -202,7 +194,10 @@ export function createArchiveMutations(deps: HostContext) {
               failed.push({ sessionId, reason: 'not-archived' });
               return;
             }
-            const fresh = await fileInfo(header);
+            // 文件不存在也要先判显式状态：内存中的会话可能马上要重建日志，
+            // 此时报「幂等删除成功」会让 later 写入把会话复活成幽灵数据。
+            if (busyIfLive(sessionId)) return;
+            const fresh = await fileInfo(header, signal);
             if (fresh.state === 'unknown') {
               failed.push({ sessionId, reason: 'unlocatable' });
               return;
@@ -239,15 +234,17 @@ export function createArchiveMutations(deps: HostContext) {
      * 每个请求 id 都必须在 failed 里有下落——客户端据此把「已恢复 0 个」
      * 渲染为失败而非成功。
      */
-    async unarchive(sessionIds: string[]): Promise<ArchiveUnarchiveResult> {
+    async unarchive(sessionIds: string[], signal?: AbortSignal): Promise<ArchiveUnarchiveResult> {
+      signal?.throwIfAborted();
       const unique = [...new Set(sessionIds)];
       const archived = archivedSet();
-      const snapshots = await snapshotsByIds(unique.filter((id) => archived.has(id)));
+      const snapshots = await snapshotsByIds(unique.filter((id) => archived.has(id)), signal);
       const failed: ArchiveFailure[] = [];
       // 锁外先做一遍廉价过滤(明显不可恢复的直接淘汰),锁内由 confirm 复核,
       // 消除与并发 deleteArchived 的检查-移除窗口。
       const candidates: string[] = [];
       for (const sessionId of unique) {
+        signal?.throwIfAborted();
         if (!archived.has(sessionId)) {
           failed.push({ sessionId, reason: 'not-archived' });
           continue;
@@ -262,7 +259,7 @@ export function createArchiveMutations(deps: HostContext) {
         try {
           const snapshot = snapshots.get(sessionId);
           if (snapshot === undefined) return false;
-          const file = await fileInfo(snapshot.header);
+          const file = await fileInfo(snapshot.header, signal);
           if (file.state !== 'located') {
             // located 才确认文件在:absent(快照后文件消失)/unknown(无法确认)
             // 谨慎拒绝,并如实计入 failed。

@@ -3,9 +3,13 @@
  *
  * 额度数据只有一条通道：本包在 apply 里为协议 'provider-usage' 注册的
  * ResourceProvider，经宿主 standard kit 的 `useResource(address)` 订阅 live
- * 流（首帧立即、之后每 60s 由 provider 侧取一次、有变化才推帧）。组件内
+ * 流（首帧立即、之后每 65s 由 provider 侧取一次、有变化才推帧）。组件内
  * 不再有轮询定时器、唤醒监听或第二条取数路径；provider 切换即换地址、
  * 流自动重开。
+ *
+ * 目录快照走官方 inject `keyedHooks`（renderer 绑定成 `useModelDirectory`），
+ * 组件不持有 uSES 订阅机器（RULE-065/068）。手动刷新只是**第二个观测源**：
+ * 流值与手刷值按 fetchedAt 比较谁更晚用谁（没有墙钟抑制窗）。
  *
  * 防御姿态（RULE-079）：缺 `t`（宿主 inject 契约漂移）不抛错，退回包内英文
  * 字典继续渲染；缺 locale 钩子退回浏览器默认格式化。两者都只降低语言保真度，
@@ -14,24 +18,31 @@
  * @module provider-usage/useProviderUsage
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { fetchSnapshot, isQueriedAnswer, type SnapshotAnswer } from './fetch-snapshot.js'
 import { fallbackTranslate } from './locales.js'
-import { RESOURCE_POLL_INTERVAL_MS, usageResourceAddress } from './resource-provider.js'
+import { usageResourceAddress } from './resource-provider.js'
 import { isStaleDisplay } from './pill-format.js'
 import { exhaustedResetText, headlineText } from './pill-headline.js'
 import type { ProviderUsagePillProps } from './pill-types.js'
 
-/** 手动强刷写回本地答案后压住流内旧帧的窗口：流下一帧 ≤ 一个轮询周期。 */
-const MANUAL_HOLD_MS = RESOURCE_POLL_INTERVAL_MS + 5_000
+/**
+ * 一份答案的观测时刻；「该 provider 未注册查询器」标记没有 fetchedAt，视为最旧。
+ *
+ * 两个数据源（resource 流、手动 force 刷新）只按这个时刻决定谁更新——不用
+ * 墙钟抑制窗：弱网迟到的一帧旧流值 fetchedAt 更早，不会覆盖刚手刷到的新值。
+ */
+function observedAt(answer: SnapshotAnswer | undefined): number {
+  return answer !== undefined && isQueriedAnswer(answer) ? answer.fetchedAt : Number.NEGATIVE_INFINITY
+}
 
 /**
  * 目录尚未解析时的占位快照。
  *
- * 必须是**同一份对象**：useSyncExternalStore 要求 getSnapshot 在数据未变时返回
- * 相同引用，每次新建对象会被判定为「一直在变」而无限重渲染。本包不写这份
- * 占位值，由宿主 ModelDirectory 交付的 store 快照只读使用。
+ * 必须是**同一份对象**：renderer 的 keyed hook 内部用 uSES，getSnapshot 在
+ * 数据未变时必须返回相同引用，每次新建对象会被判定为「一直在变」而无限重渲染。
+ * 本包不写这份占位值，由宿主 ModelDirectory 交付的 store 快照只读使用。
  */
 const ABSENT_DIRECTORY: ModelDirectoryState = {
   current: null,
@@ -43,12 +54,7 @@ const ABSENT_DIRECTORY: ModelDirectoryState = {
   error: null,
 }
 
-/** 无目录时 uSES 的空订阅。 */
-function noopSubscribe(): () => void {
-  return () => {}
-}
-
-export function useProviderUsage({ t, sessionId, useResource, resolveSeat, useLocale }: ProviderUsagePillProps) {
+export function useProviderUsage({ t, sessionId, useResource, resolveSeat, useLocale, useModelDirectory }: ProviderUsagePillProps) {
   // 注入面漂移（宿主契约变更、延迟注入）时 t 可能缺席。此前这里直接 throw：
   // render 期抛错会被宿主 `SlotErrorBoundary` → `reportEntryError({abdicate:true})`
   // 永久移出投影，pill 再也不显示——恰好是「绝不让 pill 弄坏页面」要防的失效路径。
@@ -65,33 +71,20 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat, useLo
   // 退回浏览器默认 locale，格式化仍可用；该 hook 的在场性由宿主缓存的 inject
   // 面决定，同一组件实例内恒定，不破坏 hook 调用顺序。
   const localeId = typeof useLocale === 'function' ? useLocale(snapshot => snapshot.active) : undefined
-  // 目录在**渲染期**解析，不在注册期（宿主自带 pill 同样如此：它们的 inject 是
-  // 无参常量，会话数据走 standard kit）。resolveSeat 从不抛错，拿不到就返回
-  // undefined，这一次渲染不显示，下一帧自动重试——不存在「坏 props 被永久缓存」
-  // 或「render 抛错被宿主 abdicate」这两条失效路径。
-  //
-  // useMemo 按 (resolveSeat, sessionId) 缓存：同一会话的重渲染不该反复问服务，
-  // 切换会话才重解析。
-  const seat = useMemo(
-    () => resolveSeat?.(sessionId),
+  // 会话 key：renderer 的 keyed hook 按它解析目录；无会话时用空串（resolver
+  // 返回 undefined，hook 也返回 undefined）。
+  const sessionKey = typeof sessionId === 'string' ? sessionId : ''
+  // 目录快照走官方 keyed hook：renderer 用它自己的 uSES 订阅注入面提供的
+  // ModelDirectory.store（与 composer 模型选择器同源），业务组件不持有任何
+  // 订阅机器（RULE-065/068）。hook 缺席/目录解析失败 → 这一帧按无目录处理，
+  // 组件不渲染但绝不抛错；下一次 render 自动重试。
+  const state = useModelDirectory?.(sessionKey) ?? ABSENT_DIRECTORY
+  // 惰性目录加载入口仍是普通注入回调（无订阅语义）：目录是 lazy 的，current
+  // 首次读取前恒为 null，没人 load 的话 pill 永远空白。
+  const load = useMemo(
+    () => resolveSeat?.(sessionId)?.load,
     [resolveSeat, sessionId],
   )
-  const directory = seat?.directory
-  const load = seat?.load
-  // subscribe/getSnapshot 引用按目录缓存：uSES 在 subscribe 引用变化时会重订阅，
-  // 每帧新建闭包会让目录订阅抖动。
-  const subscribe = useMemo(
-    () => directory === undefined ? noopSubscribe : (listener: () => void) => directory.subscribe(listener),
-    [directory],
-  )
-  const getSnapshot = useMemo(
-    () => directory === undefined ? () => ABSENT_DIRECTORY : () => directory.getSnapshot(),
-    [directory],
-  )
-  // Subscribe to the same per-session directory the composer's model seat
-  // renders from, so a model switch moves the pill with no coordination and a
-  // brand-new session (empty durable projection) still reports.
-  const state = useSyncExternalStore(subscribe, getSnapshot)
   // The directory is lazy: `current` stays null until someone loads it.
   // 此外，会话长期搁置或宿主重连（connection/reset）时目录可能被重置为 null；
   // 此时若只在 mount 调一次 load，pill 会因为 provider 为空而永久消失。
@@ -121,22 +114,21 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat, useLo
   // 字段的 ok 帧，因此这里只在协议缺失等异常态出现）→ 视为数据过期。
   const streamFailed = resource.status === 'failed'
 
-  const [answer, setAnswer] = useState<SnapshotAnswer | undefined>(undefined)
+  // 手刷答案（显式观测源）：成功时写回宿主 force 后的答案，失败时只保留旧值/
+  // 失败占位；与流值的取舍见下方 effectiveAnswer。
+  const [manualAnswer, setManualAnswer] = useState<SnapshotAnswer | undefined>(undefined)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   // 保旧值时的“数据可能过期”信号：只有展示更早成功答案时才亮。
   const [stale, setStale] = useState(false)
   // 面板左右对齐：触发按钮靠右缘时左对齐面板会溢出视口，提前翻转。
   const [alignRight, setAlignRight] = useState(false)
-  const answerRef = useRef<SnapshotAnswer | undefined>(undefined)
+  const manualAnswerRef = useRef<SnapshotAnswer | undefined>(undefined)
   const mounted = useRef(true)
   const rootRef = useRef<HTMLSpanElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const prevOpenRef = useRef(false)
-  // 手动强刷的抑制窗：force 结果写回本地 answer 并压住流里的旧帧，直到流下一帧
-  // （≤60s+余量）带着宿主强刷后的新缓存值接管，强值不倒退。
-  const manualUntilRef = useRef(0)
 
   // 组件卸载后不再写回异步结果；StrictMode 的 mount→cleanup→mount 需要重新置 true。
   useEffect(() => {
@@ -197,30 +189,30 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat, useLo
     const canApply = (): boolean => mounted.current && signal?.aborted !== true && providerRef.current === provider
     setBusy(true)
     try {
-      // 手动刷新要真刷新：force 让宿主绕过缓存读——否则流间隔与宿主 registry
-      // TTL 同为 60s，按钮永远拿回上一轮的数。
+      // 手动刷新要真刷新：force 让宿主绕过缓存读。自动轮询要等下一个节拍
+      // （60s + 相位余量）才重读，按钮必须立刻打一次上游。
       const snapshot = await fetchSnapshot(provider, signal, { force: true })
       if (canApply() && snapshot !== undefined) {
-        answerRef.current = snapshot
-        setAnswer(snapshot)
+        // 手刷值写回为**一个观测**：它的 fetchedAt 来自宿主，比流里的旧帧晚；
+        // 之后的流帧只要 fetchedAt 更晚就自然接管。不再有按墙钟维持的抑制窗。
+        manualAnswerRef.current = snapshot
+        setManualAnswer(snapshot)
         setStale(false)
-        // 流下一帧带新值接管前压住流里的旧帧，强值永不倒退。
-        manualUntilRef.current = Date.now() + MANUAL_HOLD_MS
       }
     } catch (error: unknown) {
       // Keep the last good answer: a transient failure must not blank the
       // number the user is reading. Showing an older success is flagged stale.
       // 最近一次成功可能来自资源流（liveAnswer）而不是手刷，两者都算「旧值」。
       const liveGood = isQueriedAnswer(liveAnswer) && liveAnswer.error === undefined ? liveAnswer : undefined
-      const previous = answerRef.current ?? liveGood
+      const previous = manualAnswerRef.current ?? liveGood
       if (previous !== undefined) {
         if (canApply()) setStale(true)
         return
       }
       if (canApply()) {
         const failed: SnapshotAnswer = { provider, windows: [], fetchedAt: Date.now(), error: error instanceof Error ? error.message : String(error) }
-        answerRef.current = failed
-        setAnswer(failed)
+        manualAnswerRef.current = failed
+        setManualAnswer(failed)
       }
     } finally {
       // 手动刷新与旧请求并发时，迟到的旧请求不得提前关掉新请求的 busy。
@@ -235,18 +227,18 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat, useLo
     if (provider === undefined || provider === '') return
     if (activeProviderRef.current === provider) return
     activeProviderRef.current = provider
-    answerRef.current = undefined
-    setAnswer(undefined)
+    // 切 provider 换地址，流自动重开；手刷观测属于旧 provider，一并作废。
+    manualAnswerRef.current = undefined
+    setManualAnswer(undefined)
     setStale(false)
-    // 切 provider 换地址，流自动重开；抑制窗一并作废。
-    manualUntilRef.current = 0
   }, [provider])
 
   if (provider === undefined || provider === '') return null
 
-  // 合成答案：抑制窗内手刷值优先；其余时候流值优先（手刷答案留作流断档时的
-  // 兜底，直到下一次 provider 切换清空）。
-  const effectiveAnswer = Date.now() < manualUntilRef.current ? answer : (liveAnswer ?? answer)
+  // 两个观测源按**观测时刻**合并：谁更晚用谁。弱网下迟到的旧流帧（fetchedAt
+  // 早于手刷值）不会把刚刷新的数字顶回去；宿主在 force 之后产出的新流帧
+  // （fetchedAt 更晚）自然接管，无需墙钟窗口。两者都没有时返回 undefined。
+  const effectiveAnswer = observedAt(liveAnswer) >= observedAt(manualAnswer) ? liveAnswer ?? manualAnswer : manualAnswer
   const queried = isQueriedAnswer(effectiveAnswer)
   const snapshot = queried ? effectiveAnswer : undefined
   const isDisconnected = state.current === null && lastProviderRef.current !== undefined

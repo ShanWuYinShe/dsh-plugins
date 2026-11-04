@@ -21,7 +21,14 @@
  *   的数量）——官方 session/list 的同款模型（api-session-controller 的 list
  *   先取全量再逐行 filter），非 owner 只能看到自己的归档元数据。
  *
- * 所有逻辑委托给 host 模块（index.ts 传入的 archiveHost）。
+ * 取消（RULE-037）：5 个方法末尾都声明 `signal: AbortSignal`——typert
+ * 生成器把它识别为 Gateway 注入项（不是 JSON wire 参数），调用侧不传；
+ * host 层把 signal 透传给 persistence.open/read/stat 与标题索引，并在
+ * 批量循环/分块读取处 cooperative 检查。
+ *
+ * 能力方法（RULE-032）：@Remote 方法体负责入口业务编排——入参断言、
+ * 归档成员资格闸门、逐项结果归类与 remoteAccess 过滤；持久化/文件系统原语
+ * 仍由 host 模块（index.ts 传入的 archiveHost）提供。不再只是单行转发。
  *
  * @module @chaoset/session-archive/remote
  */
@@ -29,7 +36,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-api-remote-access';
 import type { SessionId } from '@deepseek-ai/dsh-session';
-import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
+import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { assertSessionId, assertSessionIdArray } from './session-id.js';
 import type { ArchiveHost } from './archive-host.js';
 import type {
@@ -82,8 +89,9 @@ export class SessionArchiveGateway extends TypertRemoteService {
    * 无具体会话参数，入口按 global 判定；返回前逐行过滤，非 owner 只看到
    * 自己的会话（官方 session/list 同款）。 */
   @Remote('list')
-  async list(): Promise<ArchiveListResult> {
-    const result = await this.host.list();
+  async list(signal: AbortSignal): Promise<ArchiveListResult> {
+    signal.throwIfAborted();
+    const result = await this.host.list(signal);
     return {
       items: result.items.filter((item) =>
         this.ctx.remoteAccess.allows({ kind: 'session', id: item.sessionId as SessionId })),
@@ -93,8 +101,9 @@ export class SessionArchiveGateway extends TypertRemoteService {
   /** 归档会话计数（侧边栏徽标的关闭态轮询只调这里）。
    * 无具体会话参数，入口按 global 判定；计数用逐项过滤后的数量。 */
   @Remote('count')
-  async count(): Promise<ArchiveCountResult> {
-    const ids = await this.host.existingIds();
+  async count(signal: AbortSignal): Promise<ArchiveCountResult> {
+    signal.throwIfAborted();
+    const ids = await this.host.existingIds(signal);
     return {
       count: ids.filter((sessionId) =>
         this.ctx.remoteAccess.allows({ kind: 'session', id: sessionId as SessionId })).length,
@@ -106,11 +115,18 @@ export class SessionArchiveGateway extends TypertRemoteService {
    * @param sessionId - 归档会话 id；非归档会话拒绝读取。
    */
   @Remote('detail')
-  detail(sessionId: string): Promise<ArchiveDetailResult> {
+  async detail(sessionId: string, signal: AbortSignal): Promise<ArchiveDetailResult> {
     // 方法层断言与 host 层共享同一实现（session-id.ts）：单测直调方法不经
     // 生成 codec，多层防御保持一致。
     assertSessionId(sessionId);
-    return this.host.detail(sessionId);
+    signal.throwIfAborted();
+    // 归档成员资格是 detail 的业务前置（不是可转发的细节）：非归档会话
+    // 拒绝读取，走官方 RemoteError（稳定 code + types.ts 声明的 details）。
+    // host 侧保留同一检查作纵深防御（直调 host 的测试/内部路径也受控）。
+    if (!this.host.archivedSet().has(sessionId)) {
+      throw new RemoteError('session-archive/not-archived', 'session not archived: ' + sessionId, { sessionId });
+    }
+    return this.host.detail(sessionId, signal);
   }
 
   /**
@@ -118,8 +134,18 @@ export class SessionArchiveGateway extends TypertRemoteService {
    * @param sessionIds - 归档会话 id 列表；非归档成员拒绝、活跃生成流拒绝。
    */
   @Remote({ name: 'delete', resources: { session: sessionIdsAsResources } })
-  delete(sessionIds: readonly string[]): Promise<ArchiveDeleteResult> {
-    return this.host.deleteArchived(assertSessionIdArray(sessionIds));
+  async delete(sessionIds: readonly string[], signal: AbortSignal): Promise<ArchiveDeleteResult> {
+    signal.throwIfAborted();
+    const unique = [...new Set(assertSessionIdArray(sessionIds))];
+    // 入口业务闸门：只有归档成员进入 host 的删除流程；非成员在这里逐项
+    // 归类为 not-archived（与 host 同一词表），不进入删除循环、不谎报成功。
+    const archived = this.host.archivedSet();
+    const members = unique.filter((sessionId) => archived.has(sessionId));
+    const foreign = unique
+      .filter((sessionId) => !archived.has(sessionId))
+      .map((sessionId) => ({ sessionId, reason: 'not-archived' }));
+    const result = await this.host.deleteArchived(members, signal);
+    return { ...result, failed: [...foreign, ...result.failed] };
   }
 
   /**
@@ -127,7 +153,17 @@ export class SessionArchiveGateway extends TypertRemoteService {
    * @param sessionIds - 归档会话 id 列表。
    */
   @Remote({ name: 'unarchive', resources: { session: sessionIdsAsResources } })
-  unarchive(sessionIds: readonly string[]): Promise<ArchiveUnarchiveResult> {
-    return this.host.unarchive(assertSessionIdArray(sessionIds));
+  async unarchive(sessionIds: readonly string[], signal: AbortSignal): Promise<ArchiveUnarchiveResult> {
+    signal.throwIfAborted();
+    const unique = [...new Set(assertSessionIdArray(sessionIds))];
+    // 与 delete 对称的入口闸门：非归档成员直接归入 not-archived，不进入
+    // host 的 confirm → unarchiveSession 临界区（避免无谓的持久化读）。
+    const archived = this.host.archivedSet();
+    const members = unique.filter((sessionId) => archived.has(sessionId));
+    const foreign = unique
+      .filter((sessionId) => !archived.has(sessionId))
+      .map((sessionId) => ({ sessionId, reason: 'not-archived' }));
+    const result = await this.host.unarchive(members, signal);
+    return { ...result, failed: [...foreign, ...result.failed] };
   }
 }

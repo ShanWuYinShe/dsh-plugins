@@ -29,19 +29,22 @@ import { useArchivePanelChrome } from './useArchivePanelChrome.js'
 import { useArchiveBadgeVisibility } from './useArchiveBadgeVisibility.js'
 import { useArchivePanelOpen } from './useArchivePanelOpen.js'
 import type { TFunc } from './locales.js'
+import type { ArchivePanelComponentProps } from './ArchivePanel.js'
+import type { ArchiveDetailEntry } from './panel-types.js'
 
-export function useArchivePanel(props: any) {
+export function useArchivePanel(props: ArchivePanelComponentProps) {
   const t: TFunc = props.t;
   const call = props.call;
   const { collapsed, iconOnly, badgeRef } = useArchiveBadgeVisibility(props.wide)
 
   const { rootRef, open, setOpen, closing, closePanel, reopenPanel } = useArchivePanelOpen()
 
-  const [selected, setSelected] = React.useState<Set<any>>(new Set());
-  const [expanded, setExpanded] = React.useState<any>(null);
-  const [details, setDetails] = React.useState<Map<any, any>>(new Map());
-  const [detailLoading, setDetailLoading] = React.useState<Set<any>>(new Set());
-  const { items, loading, error, badgeCount, visibleCount, load, setItems, setVisibleCount } = useArchiveList({
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  /** 展开中的会话 id（null = 全部收起）。 */
+  const [expanded, setExpanded] = React.useState<string | null>(null);
+  const [details, setDetails] = React.useState<Map<string, ArchiveDetailEntry>>(new Map());
+  const [detailLoading, setDetailLoading] = React.useState<Set<string>>(new Set());
+  const { items, loading, error, badgeCount, load, setItems } = useArchiveList({
     call,
     t,
     open,
@@ -60,18 +63,20 @@ export function useArchivePanel(props: any) {
   }, [confirmingDelete]);
   const [notice, setNotice] = React.useState<any>(null);
 
+  // 提示的清空属于「打开手势」而非 effect 回写：徽标点击（openPanel/
+  // reopen）里同步清 notice，effect 只负责数据加载。
+  const openPanel = React.useCallback(() => { setNotice(null); setOpen(true); }, [setOpen]);
+  const reopen = React.useCallback(() => { setNotice(null); reopenPanel(); }, [reopenPanel]);
   React.useEffect(() => {
-    if (open) { setNotice(null); load(); }
+    if (open) load();
   }, [open, load]);
   const { panelRef } = useArchivePanelChrome({ open, notice, setNotice, closePanel, badgeRef, rootRef })
 
 
   // 筛选:大归档量下逐页翻找效率低,标题/工作区路径/ID 子串前端过滤
   // (列表本就全量在内存,过滤纯展示层,不发请求)。
-  const { filter, setFilter, sortKey, setSortKey, filteredItems, sortedItems, visibleItems } = useArchiveViewState({
+  const { filter, setFilter, sortKey, setSortKey, filteredItems, sortedItems, visibleItems, visibleCount, setVisibleCount } = useArchiveViewState({
     items,
-    visibleCount,
-    setVisibleCount,
   })
 
   // 全选只作用于筛选结果:用户筛出一组会话后点全选,期望选中的是
@@ -119,10 +124,10 @@ export function useArchivePanel(props: any) {
     iconOnly,
     rootRef,
     open,
-    setOpen,
     closing,
     closePanel,
-    reopenPanel,
+    openPanel,
+    reopen,
     items,
     loading,
     error,

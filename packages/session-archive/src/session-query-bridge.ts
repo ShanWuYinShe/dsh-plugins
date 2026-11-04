@@ -22,9 +22,11 @@
 
 import type { SessionQueryEngine, SessionTitleObservationResult } from '@deepseek-ai/dsh-session-query'
 
-/** 批量标题查询函数：吃一组 id，返回逐 id 的观测结果（失败的 id 由调用方回退直读）。 */
+/** 批量标题查询函数：吃一组 id（可选取消信号），返回逐 id 的观测结果
+ * （失败的 id 由调用方回退直读）。 */
 export type SessionQueryTitles = (
   ids: readonly string[],
+  signal?: AbortSignal,
 ) => Promise<readonly SessionTitleObservationResult[]>
 
 /** 官方服务键。抽成常量是为了让注入面与测试桩用同一处字面量。 */
@@ -52,5 +54,5 @@ export function resolveSessionQueryTitles(
   const read = (query as Partial<SessionQueryEngine>).readTitleSnapshots
   if (typeof read !== 'function') return undefined
   const engine = query as SessionQueryEngine
-  return (ids) => engine.readTitleSnapshots(ids as Parameters<SessionQueryEngine['readTitleSnapshots']>[0])
+  return (ids, signal) => engine.readTitleSnapshots(ids as Parameters<SessionQueryEngine['readTitleSnapshots']>[0], signal)
 }

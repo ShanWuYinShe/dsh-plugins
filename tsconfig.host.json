@@ -16,6 +16,9 @@
     "declarationMap": false,
     "sourceMap": false,
     "types": ["node"],
+    // typert 生成器要求 Remote 取消参数使用标准库 lib.dom.d.ts 的全局 AbortSignal
+    // （否则 src/remote.ts 里要靠 /// <reference lib="dom" /> 源级 workaround）。
+    "lib": ["ES2022", "DOM", "esnext.disposable"],
     "typeRoots": ["./node_modules/@types"],
     // 见 scripts/lib/typert-protocol.d.ts 的头部说明：只给生成器 program 提供
     // 可识别的 @Remote / TypertRemoteService 声明；包编译与 typecheck 不走这里。

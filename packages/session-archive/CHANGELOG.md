@@ -24,6 +24,22 @@
   助手消息计入总数与占位摘要。
 * 清理死代码/无效 props，`t: any` 统一为 `TFunc`；发布产物只含运行时文件。
 
+### 重构
+
+* **破坏性删除的保护从墙钟启发式改为显式状态**：删除前读宿主 `ctx.sessions` 判断会话是否
+  仍在内存（命中即 `busy` 拒绝），删除后做一次无等待的文件复验；移除 60s mtime 窗、300ms
+  沉降窗与体积增长判定。内存中的归档会话不再可删，宿主重启/会话卸载后可删；`needsRestart`
+  在实践中不再产生（字段保留为删除竞态兜底）。
+* **Remote 取消能力（RULE-037）**：5 个方法末尾声明 `signal: AbortSignal`（Gateway 注入，
+  非 wire 参数），透传持久化 `open/read/stat`、标题索引、并发限流与批量循环；入口预取消即拒。
+* **@Remote 能力方法**：detail 在方法内做归档成员闸门并抛 `RemoteError`；delete/unarchive
+  在方法内完成入参断言/去重、归档成员分流与结果合并，不再是单行转发。
+* **客户端类型取生成面**：删除手写 Remote 形状，`ArchiveRemoteService` 从
+  `TypertRemoteNamespaceMap` 推导；面板组件 props 改为官方 `PropsRuntime`/`InjectFace`/
+  `PropsLocale` 组合，去掉 `any`；分页/可见数量改 render 期派生，notice 清空移入手势。
+* **测试分层**：新增真实 `cordis-plugin-loader` 装配真实包入口 + 真实文件世界的
+  composition 用例（含 dispose→移除→重装）、jsdom 面板行为用例、Remote 取消用例。
+
 ## 0.3.33 (2026-11-04)
 
 ### 新增

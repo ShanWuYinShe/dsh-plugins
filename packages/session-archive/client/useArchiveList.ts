@@ -9,40 +9,37 @@
  */
 
 import { sameItems } from './archive-format.js'
-import { ARCHIVE_PAGE_SIZE } from './archive-entries.js'
 import * as React from 'react'
 import type { TFunc } from './locales.js'
+import type { ArchiveCall, ArchiveDetailEntry, ArchiveItem } from './panel-types.js'
+import type { ArchiveDetailResult } from '@chaoset/session-archive/types'
 
 export function useArchiveList({ call, t, open, subscribeArchived, archivedCountOf, setSelected }: {
-  call: any
+  call: ArchiveCall
   t: TFunc
   open: boolean
   /** 宿主归档集合 store 的订阅/计数口（不可用时静默退回纯轮询）。 */
-  subscribeArchived: any
-  archivedCountOf: any
+  subscribeArchived?: (listener: () => void) => () => void
+  archivedCountOf?: () => number
   /** 落地新列表时顺带剔除已消失 id 的残留勾选（见 applyItems 注释）。 */
-  setSelected: any
+  setSelected: (updater: (current: Set<string>) => Set<string>) => void
 }) {
-  const [items, setItems] = React.useState<any[]>([]);
+  const [items, setItems] = React.useState<ArchiveItem[]>([]);
   const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<any>(null);
+  const [error, setError] = React.useState<string | null>(null);
 
   // 关闭态徽标计数（由 count() 轻端点轮询维护；列表落地时也会同步）。
   const [badgeCount, setBadgeCount] = React.useState(0);
-  // 列表分页：只渲前 visibleCount 行；打开/手动刷新回到第一页，
-  // 静默刷新不碰（不打断用户已展开的“更多”）。
-  const [visibleCount, setVisibleCount] = React.useState(ARCHIVE_PAGE_SIZE);
-
   // 列表落地（加载与静默刷新共用）：sameItems 比较避免无变化时整表
   // reconcile；同时剔除已消失 id 的残留勾选——否则"已选 N 项"虚高，
   // 还可能把幽灵 id 发给批量操作（host 有幂等兜底，但不该依赖它）。
   // 顺手用列表长度同步徽标计数：count() 端点失败时，开/关一次面板徽标也能
   // 自我纠正，不会卡在 0。
-  const applyItems = React.useCallback((next: any[]) => {
+  const applyItems = React.useCallback((next: ArchiveItem[]) => {
     setItems((current) => (sameItems(current, next) ? current : next));
     setBadgeCount(next.length);
-    const nextIds = new Set(next.map((item: any) => item.sessionId));
-    setSelected((currentSelected: Set<any>) => {
+    const nextIds = new Set(next.map((item) => item.sessionId));
+    setSelected((currentSelected) => {
       const pruned = [...currentSelected].filter((id) => nextIds.has(id));
       return pruned.length === currentSelected.size ? currentSelected : new Set(pruned);
     });
@@ -56,14 +53,13 @@ export function useArchiveList({ call, t, open, subscribeArchived, archivedCount
     const seq = ++listSeqRef.current;
     setLoading(true);
     setError(null);
-    setVisibleCount(ARCHIVE_PAGE_SIZE);
     try {
       const result = await call("list");
       if (seq !== listSeqRef.current) return;
       applyItems(Array.isArray(result.items) ? result.items : []);
-    } catch (loadError: any) {
+    } catch (loadError: unknown) {
       if (seq !== listSeqRef.current) return;
-      setError(t("loadFailed") + ": " + (loadError && loadError.message || loadError));
+      setError(t("loadFailed") + ": " + (loadError instanceof Error ? loadError.message : String(loadError)));
     } finally {
       // 纪元守卫:旧 load 迟到时不得提前关掉更新的、仍在途的 load 的 spinner。
       if (seq === listSeqRef.current) setLoading(false);
@@ -149,9 +145,7 @@ export function useArchiveList({ call, t, open, subscribeArchived, archivedCount
     loading,
     error,
     badgeCount,
-    visibleCount,
     load,
     setItems,
-    setVisibleCount,
   }
 }

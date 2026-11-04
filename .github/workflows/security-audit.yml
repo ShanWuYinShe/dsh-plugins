@@ -1,8 +1,10 @@
 name: Security audit (deep)
 
-# 每周一次全量依赖审计（含传递依赖）：bun run audit --deep 解析 bun 隔离
-# 安装布局（node_modules/.bun/<name@version>）覆盖 lock 解析集合（同一
-# name@version 去重；当前约 1500 个条目）批量查 OSV.dev。命中已知漏洞 exit 1 让本 workflow 红灯（GitHub 会发失败通知）；
+# 每周一次全量依赖审计（含传递依赖）：`node scripts/audit-deps.mjs --deep`
+# 解析 bun 隔离安装布局（node_modules/.bun/<name@version>），剥掉 `+<hex>`
+# 平台/peer 变体后缀并按 name@version 去重后覆盖 lock 解析集合，批量查
+# OSV.dev。命中已知漏洞（ACCEPTED_ADVISORIES 逐条登记理由的已接受风险除外）
+# exit 1 让本 workflow 红灯（GitHub 会发失败通知）；
 # 网络不可达同样红灯——下个周期会重试，也可手动 workflow_dispatch。日常
 # 的直接依赖审计由 test.yml（分支推送）与 publish.yml（发布门禁）覆盖；
 # 本 workflow 是传递依赖的周期性深查。脚本见 scripts/audit-deps.mjs。

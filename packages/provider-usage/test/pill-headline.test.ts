@@ -33,6 +33,12 @@ describe('headlineText', () => {
     )).toBe('CNY: cny +1')
   })
 
+  it('本地化 label 按 localeId 解析（无 remain 的 label 形头行）', () => {
+    const snapshot = { provider: 'acme', windows: [{ id: 'plan', label: { en: 'Start Plan', zh: '开始套餐' }, unit: '' }], fetchedAt: 1 }
+    expect(headlineText(snapshot, 'acme', false, t, 'zh')).toBe('开始套餐')
+    expect(headlineText(snapshot, 'acme', false, t, 'en')).toBe('Start Plan')
+  })
+
   it('无 remain 且无单位（订阅有效性窗口）只显示 label，不留冒号', () => {
     expect(headlineText(
       { provider: 'acme', windows: [{ id: 'sub', label: 'GLM Coding Pro', unit: '' }], fetchedAt: 1 },

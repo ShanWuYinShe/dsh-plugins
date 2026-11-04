@@ -1,6 +1,52 @@
 /** Node-free vocabulary shared by the host and browser halves of provider-usage. */
 
 /**
+ * A provider-supplied window label that a surface may localize.
+ *
+ * 字符串按原文渲染（provider 的套餐/余额名是专有名词，翻译反而失真）；
+ * 需要本地化的 provider 给 `{ en, [locale] }` 结构：`en` 是必备的英语回退基线，
+ * 其余键是 DSH locale id（如 `zh`、`ja`）。client 按 DSH 当前语言解析，
+ * `/usage` 命令与任何 host 侧文本取 `en`。
+ */
+export interface LocalizedUsageLabel {
+  /** English baseline；也是当前语言无对应条目时的回退。 */
+  en: string
+  /** 其他语言，键为 DSH locale id（如 `zh`）；值必须是字符串。 */
+  readonly [locale: string]: string | undefined
+}
+
+/** A window label: plain provider text, or a localizable structure. */
+export type UsageLabel = string | LocalizedUsageLabel
+
+/**
+ * Resolve one window label for a locale.
+ *
+ * 回退链：精确 locale → 主语言子标签（`zh-CN` → `zh`）→ `en` → 第一个非空值。
+ * host 侧传 `'en'`（命令行文本只有一种语言）；client 传注入面拿到的当前语言。
+ *
+ * @param label - provider 给的 label。
+ * @param localeId - DSH locale id；缺席时用 `en`。
+ * @returns 永远返回字符串（结构异常时返回空串，不把 undefined 交给渲染层）。
+ */
+export function resolveUsageLabel(label: UsageLabel, localeId?: string): string {
+  if (typeof label === 'string') return label
+  if (localeId !== undefined && localeId !== '') {
+    const exact = label[localeId]
+    if (typeof exact === 'string' && exact !== '') return exact
+    const language = localeId.split('-', 1)[0]
+    if (language !== undefined && language !== localeId) {
+      const primary = label[language]
+      if (typeof primary === 'string' && primary !== '') return primary
+    }
+  }
+  if (typeof label.en === 'string' && label.en !== '') return label.en
+  for (const value of Object.values(label)) {
+    if (typeof value === 'string' && value !== '') return value
+  }
+  return ''
+}
+
+/**
  * One quota or balance window a provider reports.
  *
  * Providers disclose wildly different things — a prepaid credit balance, a
@@ -16,10 +62,10 @@ export interface UsageWindow {
    */
   id: string
   /**
-   * Provider-supplied label. Providers name their packages, so this is free
-   * text and the surface renders it verbatim rather than translating it.
+   * Provider-supplied label — a package/balance name rendered verbatim, or a
+   * localizable `{ en, [locale] }` structure (see {@link UsageLabel}).
    */
-  label: string
+  label: UsageLabel
   /** Remaining amount, when the provider reports one. */
   remain?: number
   /** Denomination of `remain`/`limit`, e.g. `credits`, `usd`, `requests`. */

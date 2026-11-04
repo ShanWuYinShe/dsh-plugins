@@ -64,6 +64,11 @@ interface ProviderUsageSnapshotOptions {
    * 不为连点按钮放大账单接口压力。
    */
   force?: boolean
+  /**
+   * 调用方的取消信号（route/命令的**总预算**）。到点时本次读取立即结算为
+   * 失败快照，而不是等满单查询 deadline；与 queryTimeoutMs 取先到者。
+   */
+  signal?: AbortSignal
 }
 
 /** One registered querier plus its registration-time metadata. */
@@ -94,9 +99,20 @@ type Resolver = (provider: string, signal: AbortSignal) => Promise<ResolvedProvi
  * @param timeoutMs - deadline in milliseconds.
  * @param timeoutMessage - rejection reason and abort reason on expiry.
  * @param run - the operation, receiving the abort signal.
- * @returns the operation's value, or rejects with the timeout reason.
+ * @param externalSignal - 调用方（route/命令的总预算）的取消信号；与 deadline
+ *   融合：任一先到都会 abort 内部 controller 并结算，迟到的另一侧 rejection
+ *   由空 catch 吞掉。
+ * @returns the operation's value, or rejects with the timeout/abort reason.
  */
-async function underDeadline<T>(timeoutMs: number, timeoutMessage: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+async function underDeadline<T>(
+  timeoutMs: number,
+  timeoutMessage: string,
+  run: (signal: AbortSignal) => Promise<T>,
+  externalSignal?: AbortSignal,
+): Promise<T> {
+  // 已取消的请求不必再起查询/定时器：直接按取消原因抛给调用方（由 run 的
+  // catch 折叠成失败快照）。
+  if (externalSignal?.aborted === true) throw externalSignal.reason ?? new Error('request aborted')
   const controller = new AbortController()
   let timer: ReturnType<typeof setTimeout> | undefined
   const timedOut = new Promise<never>((_, reject) => {
@@ -110,21 +126,54 @@ async function underDeadline<T>(timeoutMs: number, timeoutMessage: string, run: 
   // race 先被操作结算时，timedOut 稍后的 reject 会成为 unhandled rejection；
   // 同理操作在超时后迟到 reject 时也一样。两边都挂空 catch 吞掉。
   timedOut.catch(() => {})
+  // 外部取消同样走 race：调用方的总预算到点时，在途查询/挂死的 resolver
+  // 必须立即结算，而不是等满单查询 deadline。
+  let onExternalAbort: (() => void) | undefined
+  const externallyAborted = externalSignal === undefined ? undefined : new Promise<never>((_, reject) => {
+    onExternalAbort = () => {
+      const reason = externalSignal.reason ?? new Error('request aborted')
+      controller.abort(reason)
+      reject(reason)
+    }
+    externalSignal.addEventListener('abort', onExternalAbort, { once: true })
+  })
+  externallyAborted?.catch(() => {})
   try {
     // run 必须进 try：resolver 是公开注入点（setResolver），同步抛错时
     // `work.catch` 与 deadline 清理都会被跳过，定时器残留到进程退出。
     // 放进 try 后同步抛错走 finally 的 clearTimeout，再原样抛给调用方。
     const work = run(controller.signal)
     work.catch(() => {})
-    return await Promise.race([work, timedOut])
+    return await (externallyAborted === undefined ? Promise.race([work, timedOut]) : Promise.race([work, timedOut, externallyAborted]))
   } finally {
     clearTimeout(timer)
+    if (onExternalAbort !== undefined) externalSignal?.removeEventListener('abort', onExternalAbort)
   }
 }
 
 /** One querier-answer shape defect, named for the provider that returned it. */
 function invalidSnapshot(provider: string, reason: string): Error {
   return new Error(`provider-usage: querier for "${provider}" returned an invalid snapshot: ${reason}`)
+}
+
+/**
+ * 窗口 label 形状判定：字符串（原文）或本地化结构 `{ en, [locale] }`。
+ *
+ * 本地化结构要求 `en` 为非空串（英语是回退基线，client 在缺少当前语言时
+ * 一定读它），其余键的值必须是字符串；多余/非字符串值一律拒收。
+ *
+ * @param value - querier 返回的 label 原始值。
+ * @returns 是否是渲染层可安全解析的 label。
+ */
+function isValidUsageLabel(value: unknown): boolean {
+  if (typeof value === 'string') return true
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const localized = value as Record<string, unknown>
+  if (typeof localized['en'] !== 'string' || localized['en'] === '') return false
+  for (const text of Object.values(localized)) {
+    if (typeof text !== 'string') return false
+  }
+  return true
 }
 
 /**
@@ -151,10 +200,15 @@ function assertQuerierSnapshot(provider: string, value: unknown): void {
   for (const [index, item] of windows.entries()) {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) throw invalidSnapshot(provider, `windows[${index}] is not an object`)
     const window = item as Record<string, unknown>
-    for (const key of ['id', 'label', 'unit'] as const) {
+    for (const key of ['id', 'unit'] as const) {
       if (typeof window[key] !== 'string') throw invalidSnapshot(provider, `windows[${index}].${key} is not a string`)
     }
     if (window['id'] === '') throw invalidSnapshot(provider, `windows[${index}].id is empty`)
+    // label 允许字符串（provider 专有名词，原文渲染）或本地化结构
+    // `{ en, [locale] }`（en 必备）；非法形状绝不能进 client 渲染层。
+    if (!isValidUsageLabel(window['label'])) {
+      throw invalidSnapshot(provider, `windows[${index}].label is neither a string nor a localized label with a non-empty "en"`)
+    }
     for (const key of ['remain', 'limit'] as const) {
       const amount = window[key]
       if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount))) {
@@ -301,6 +355,7 @@ export class ProviderUsageRegistry extends Service {
    * number the user was reading.
    *
    * @param provider - provider route key to resolve.
+   * @param options - cache bypass and the caller's aggregate-budget signal.
    * @returns the snapshot, or `undefined` when no querier is registered.
    */
   async snapshot(provider: string, options: ProviderUsageSnapshotOptions = {}): Promise<UsageSnapshot | undefined> {
@@ -313,7 +368,7 @@ export class ProviderUsageRegistry extends Service {
     const lookupKey = direct !== undefined ? provider : normalized
     const registration = direct ?? this.registrations.get(normalized)
     if (registration !== undefined) {
-      return this.snapshotWithRegistration(provider, lookupKey, registration, options.force === true)
+      return this.snapshotWithRegistration(provider, lookupKey, registration, options.force === true, options.signal)
     }
 
     // 推断无果的负缓存:未注册且推断不出 querier 的 provider,每次轮询
@@ -330,12 +385,12 @@ export class ProviderUsageRegistry extends Service {
     // 挂死的 resolver 若无 deadline 会把轮询端点整个拖住（route 层没有
     // 整体超时兜底，浏览器只能干等到自身超时）。
     try {
-      const resolved = await this.resolveWithDeadline(provider)
+      const resolved = await this.resolveWithDeadline(provider, options.signal)
       const inferred = inferProviderFromBaseUrl(resolved.baseURL)
       if (inferred !== undefined) {
         const inferredReg = this.registrations.get(inferred)
         if (inferredReg !== undefined) {
-          return this.snapshotWithRegistration(provider, inferred, inferredReg, options.force === true)
+          return this.snapshotWithRegistration(provider, inferred, inferredReg, options.force === true, options.signal)
         }
       }
     } catch {
@@ -349,14 +404,14 @@ export class ProviderUsageRegistry extends Service {
   /**
    * Run the resolver under the query deadline.
    *
-   * 与 {@link withDeadline}（querier 路径）同预算；失败（含超时）由调用方
-   * catch 成 "无推断结果"。
+   * 与 {@link withDeadline}（querier 路径）同预算；失败（含超时/调用方取消）
+   * 由调用方 catch 成 "无推断结果"。
    */
-  private async resolveWithDeadline(provider: string): Promise<ResolvedProvider> {
-    return underDeadline(this.queryTimeoutMs, 'provider resolution timed out', signal => this.resolveProvider(provider, signal))
+  private async resolveWithDeadline(provider: string, externalSignal?: AbortSignal): Promise<ResolvedProvider> {
+    return underDeadline(this.queryTimeoutMs, 'provider resolution timed out', signal => this.resolveProvider(provider, signal), externalSignal)
   }
 
-  private async snapshotWithRegistration(cacheKey: string, lookupKey: string, registration: Registration, force: boolean): Promise<UsageSnapshot> {
+  private async snapshotWithRegistration(cacheKey: string, lookupKey: string, registration: Registration, force: boolean, signal?: AbortSignal): Promise<UsageSnapshot> {
     const now = this.now()
     if (!force) {
       const cached = this.cache.get(cacheKey)
@@ -364,9 +419,20 @@ export class ProviderUsageRegistry extends Service {
     }
 
     const pending = this.inflight.get(cacheKey)
-    if (pending !== undefined) return pending
+    if (pending !== undefined) {
+      if (signal === undefined) return pending
+      if (signal.aborted === true) return this.failureSnapshot(cacheKey, registration, signal.reason ?? new Error('request aborted'))
+      // 有总预算的调用方不能被别人的在途查询拖过预算：race 自己的取消信号，
+      // 到点返回失败快照；底层查询继续为其它读者服务。
+      const aborted = new Promise<UsageSnapshot>(resolve => {
+        const onAbort = (): void => resolve(this.failureSnapshot(cacheKey, registration, signal.reason ?? new Error('request aborted')))
+        signal.addEventListener('abort', onAbort, { once: true })
+        void pending.finally(() => signal.removeEventListener('abort', onAbort))
+      })
+      return Promise.race([pending, aborted])
+    }
 
-    const query = this.run(cacheKey, registration).then(snapshot => {
+    const query = this.run(cacheKey, registration, signal).then(snapshot => {
       // 回写前核对注册身份:热替换/注销后结算的旧查询仍要把结果交还给
       // 发起它的调用方,但不得把它描述的已不存在的行为写进缓存——否则
       // 下一个 TTL 内每次读取都在供应旧 querier 的答案。
@@ -393,16 +459,44 @@ export class ProviderUsageRegistry extends Service {
     else this.clearCacheFor(provider)
   }
 
-  /** Run one query under a deadline, folding every failure into the snapshot. */
-  private async run(provider: string, registration: Registration): Promise<UsageSnapshot> {
-    const fetchedAt = this.now()
+  /**
+   * 一次失败读取的快照：保留上次成功窗口/计划/限流观测，标 degraded。
+   *
+   * 从 {@link run} 的 catch 与「在途查询被调用方预算取消」两处共用——同一份
+   * 「失败时保留用户正在读的信息」姿态，避免两处各写一份而漂移。
+   */
+  private failureSnapshot(provider: string, registration: Registration, error: unknown): UsageSnapshot {
     const previous = this.cache.get(provider)?.snapshot
+    // 承接旧答案时带上 degraded:客户端据此调暗展示,不把旧数字当作
+    // 新鲜值呈现——没有这个标记,圆点照绿、文案照常,过期无从感知。
+    const degraded = previous !== undefined
+    return {
+      provider,
+      ...registration.displayName === undefined ? {} : { displayName: registration.displayName },
+      // A failed refetch keeps the last good windows: the previous answer is
+      // stale, not wrong, and blanking it hides the very number the user
+      // opened the pill to read.
+      ...previous?.plan === undefined ? {} : { plan: previous.plan },
+      // 限流观测同理不能丢：窗口还有额度但通道正在拒收时，用户需要的是
+      // 「什么时候恢复」；失败一次就抹掉限流块，会让「何时能继续用」的
+      // 答案消失。degraded 已标明这是上一次观测，不是本轮结果。
+      ...previous?.rateLimit === undefined ? {} : { rateLimit: previous.rateLimit },
+      windows: previous?.windows ?? [],
+      fetchedAt: this.now(),
+      error: safeMessage(error),
+      ...degraded ? { degraded: true } : {},
+    }
+  }
+
+  /** Run one query under a deadline, folding every failure into the snapshot. */
+  private async run(provider: string, registration: Registration, externalSignal?: AbortSignal): Promise<UsageSnapshot> {
+    const fetchedAt = this.now()
     const base = {
       provider,
       ...registration.displayName === undefined ? {} : { displayName: registration.displayName },
     }
     try {
-      const snapshot = await this.withDeadline(provider, registration.querier)
+      const snapshot = await this.withDeadline(provider, registration.querier, externalSignal)
       // 公开扩展点：第三方 querier 的形状缺陷在越过 wire 之前折叠成失败快照，
       // 绝不让 client 在渲染期抛错（宿主会把该 entry 永久 abdicate）。
       assertQuerierSnapshot(provider, snapshot)
@@ -422,30 +516,16 @@ export class ProviderUsageRegistry extends Service {
         fetchedAt,
       }
     } catch (error: unknown) {
-      // 承接旧答案时带上 degraded:客户端据此调暗展示,不把旧数字当作
-      // 新鲜值呈现——没有这个标记,圆点照绿、文案照常,过期无从感知。
-      const degraded = previous !== undefined
-      return {
-        ...base,
-        // A failed refetch keeps the last good windows: the previous answer is
-        // stale, not wrong, and blanking it hides the very number the user
-        // opened the pill to read.
-        ...previous?.plan === undefined ? {} : { plan: previous.plan },
-        // 限流观测同理不能丢：窗口还有额度但通道正在拒收时，用户需要的是
-        // 「什么时候恢复」；失败一次就抹掉限流块，会让「何时能继续用」的
-        // 答案消失。degraded 已标明这是上一次观测，不是本轮结果。
-        ...previous?.rateLimit === undefined ? {} : { rateLimit: previous.rateLimit },
-        windows: previous?.windows ?? [],
-        fetchedAt,
-        error: safeMessage(error),
-        ...degraded ? { degraded: true } : {},
-      }
+      return this.failureSnapshot(provider, registration, error)
     }
   }
 
-  /** Race one query against the deadline (querier 是公开扩展点，同样受 deadline 保护). */
-  private async withDeadline(provider: string, querier: ProviderUsageQuerier): Promise<UsageSnapshot> {
-    return underDeadline(this.queryTimeoutMs, 'query timed out', signal => this.resolve(provider, querier, signal))
+  /**
+   * Race one query against the deadline (querier 是公开扩展点，同样受 deadline
+   * 保护)；调用方的总预算信号与 deadline 融合，先到者结算。
+   */
+  private async withDeadline(provider: string, querier: ProviderUsageQuerier, externalSignal?: AbortSignal): Promise<UsageSnapshot> {
+    return underDeadline(this.queryTimeoutMs, 'query timed out', signal => this.resolve(provider, querier, signal), externalSignal)
   }
 
   /** Install the resolver used to fill each query's endpoint and credential. */

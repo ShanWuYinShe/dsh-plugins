@@ -9,7 +9,7 @@
  *
  * 数据通道仍是既有同源 route(fetchSnapshot)——resource 模型不改变取数
  * 语义，只改变「谁来轮询、谁被多个视图共享」。手动刷新(force)会更新宿主
- * registry 的缓存，流的下一帧(≤60s)自然带上强刷后的值。
+ * registry 的缓存，流的下一帧(≤一个节拍)自然带上强刷后的值。
  *
  * @module provider-usage/resource-provider
  */
@@ -54,8 +54,24 @@ export function providerOfAddress(address: string): string | undefined {
  * 这是**客户端协议节拍**（resource 流的轮询周期），不是部署可变量:它由
  * 浏览器侧固定装配，宿主 Config 不跨端传递；改宿主 registry 的 cacheTtlMs
  * 只影响服务端缓存寿命，不影响这里推帧的频率。
+ *
+ * 这段节拍同时是「下一次读取该落在宿主缓存过期之后」的基准，见
+ * {@link RESOURCE_POLL_MARGIN_MS}。
  */
 export const RESOURCE_POLL_INTERVAL_MS = 60_000
+
+/**
+ * 轮询相位余量（毫秒）：下一次读取排在宿主成功缓存过期**之后**。
+ *
+ * 宿主成功缓存的默认 TTL 与这里的轮询节拍同为 60s（两个独立常量）。两者恰好
+ * 对齐时，某一帧可能刚好命中「还差一点才过期」的缓存 → 读到的是上一轮答案，
+ * 再等 60s 才轮到下一帧，实际更新间隔被拉长到 ~120s。多等 5s 让每次读取都
+ * 落在缓存过期之后，把最坏更新间隔压回一个节拍。
+ */
+export const RESOURCE_POLL_MARGIN_MS = 5_000
+
+/** 一次轮询的完整步长：节拍 + 相位余量。 */
+export const RESOURCE_POLL_STEP_MS = RESOURCE_POLL_INTERVAL_MS + RESOURCE_POLL_MARGIN_MS
 
 /** abort 可打断的 sleep;abort 后 resolve,由调用方检查后退出。 */
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -72,13 +88,13 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * 一条地址的 live 流:首帧立即,之后每 RESOURCE_POLL_INTERVAL_MS 取一次,
+ * 一条地址的 live 流:首帧立即,之后每 RESOURCE_POLL_STEP_MS(节拍+相位余量)取一次,
  * 序列化结果有变化才推帧(fetchSnapshot 每次带新 fetchedAt,值变检测按
  * 业务内容比较,避免恒推)。取数错误折叠成带 error 字段的 UsageSnapshot——
  * pill 的失败渲染走既有 error 路径;不构造 RemoteFailure(错误码表由宿主
  * 拥有,本包不为它造影子映射)。
  */
-export async function* usageStream(address: string, signal: AbortSignal, intervalMs: number = RESOURCE_POLL_INTERVAL_MS): AsyncGenerator<RemoteResult<SnapshotAnswer>> {
+export async function* usageStream(address: string, signal: AbortSignal, intervalMs: number = RESOURCE_POLL_STEP_MS): AsyncGenerator<RemoteResult<SnapshotAnswer>> {
   const provider = providerOfAddress(address)
   if (provider === undefined) return
   let last: string | undefined

@@ -74,13 +74,20 @@ describe('providerUsageHandler', () => {
     expect(body.snapshots).toHaveLength(2)
   })
 
+  /** 请求总预算信号：每次读取都带同一个 AbortSignal（一次请求共享预算）。 */
+  function budgetSignalOf(spy: ReturnType<typeof vi.spyOn>): AbortSignal | undefined {
+    const options = spy.mock.calls[0]?.[1] as { signal?: AbortSignal } | undefined
+    return options?.signal
+  }
+
   it('refresh=1 以 force 透传 registry（手动刷新穿透宿主缓存）', async () => {
     const registry = makeRegistry()
     const spy = vi.spyOn(registry, 'snapshot').mockResolvedValue(undefined)
     const handler = providerUsageHandler({ registry })
     const exchange = fakeExchange({ url: '/?providers=acme&refresh=1' })
     await handler(exchange.req, exchange.res)
-    expect(spy).toHaveBeenCalledWith('acme', { force: true })
+    expect(spy).toHaveBeenCalledWith('acme', expect.objectContaining({ force: true }))
+    expect(budgetSignalOf(spy)).toBeInstanceOf(AbortSignal)
   })
 
   it('不带 refresh 参数时不开 force（自动轮询保持走缓存）', async () => {
@@ -89,7 +96,7 @@ describe('providerUsageHandler', () => {
     const handler = providerUsageHandler({ registry })
     const exchange = fakeExchange({ url: '/?providers=acme' })
     await handler(exchange.req, exchange.res)
-    expect(spy).toHaveBeenCalledWith('acme', { force: false })
+    expect(spy).toHaveBeenCalledWith('acme', expect.objectContaining({ force: false }))
   })
 
   it('refresh 取值 1/true 之外不生效', async () => {
@@ -98,7 +105,42 @@ describe('providerUsageHandler', () => {
     const handler = providerUsageHandler({ registry })
     const exchange = fakeExchange({ url: '/?providers=acme&refresh=yes' })
     await handler(exchange.req, exchange.res)
-    expect(spy).toHaveBeenCalledWith('acme', { force: false })
+    expect(spy).toHaveBeenCalledWith('acme', expect.objectContaining({ force: false }))
+  })
+
+  it('总预算到点时取消在途读取并仍返回完整响应（不悬挂整个请求）', async () => {
+    vi.useFakeTimers()
+    try {
+      const seen: AbortSignal[] = []
+      // 复刻真实 registry 的失败姿态：取消折叠成带 error 的失败快照（不 reject），
+      // 已取消的信号在入口直接结算（不等下一次 abort 事件）。
+      const registry = {
+        snapshot: vi.fn((provider: string, options: { signal?: AbortSignal }) => new Promise(resolve => {
+          const signal = options.signal
+          if (signal === undefined) return
+          if (signal.aborted) {
+            resolve({ provider, windows: [], fetchedAt: 0, error: String(signal.reason) })
+            return
+          }
+          seen.push(signal)
+          signal.addEventListener('abort', () => resolve({ provider, windows: [], fetchedAt: 0, error: String(signal.reason) }), { once: true })
+        })),
+      } as never
+      const handler = providerUsageHandler({ registry, budgetMs: 5 })
+      const exchange = fakeExchange({ url: '/?providers=a,b' })
+      const pending = handler(exchange.req, exchange.res)
+      await vi.advanceTimersByTimeAsync(5)
+      await pending
+      // 请求在预算时刻完整结算：两个 provider 都有失败行，没有悬挂。
+      const { status, body } = exchange.result() as { status: number; body: { snapshots: { error?: string }[] } }
+      expect(status).toBe(200)
+      expect(body.snapshots).toHaveLength(2)
+      expect(body.snapshots.every(snapshot => snapshot.error?.includes('budget') === true)).toBe(true)
+      expect(seen.length).toBeGreaterThan(0)
+      expect(seen.every(signal => signal.aborted)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('refuses a non-GET method', async () => {

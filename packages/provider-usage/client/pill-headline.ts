@@ -4,7 +4,7 @@
  * @module provider-usage/pill-headline
  */
 
-import type { UsageRateLimit, UsageSnapshot } from '../src/types.js'
+import { resolveUsageLabel, type UsageRateLimit, type UsageSnapshot } from '../src/types.js'
 import { isQueriedAnswer, type SnapshotAnswer } from './fetch-snapshot.js'
 import { formatAmount, formatReset } from './pill-format.js'
 import type { ProviderUsageLocaleKey } from './locales.js'
@@ -58,7 +58,7 @@ export function headlineText(answer: SnapshotAnswer | undefined, provider: strin
     /** 多个窗口只在头行报第一个，「 +N」提示展开还有更多。 */
     const more = snapshot.windows.length > 1 ? ` +${snapshot.windows.length - 1}` : ''
     headline = first.remain === undefined
-      ? `${first.label}${first.unit === '' ? '' : `: ${first.unit}`}${more}`
+      ? `${resolveUsageLabel(first.label, localeId)}${first.unit === '' ? '' : `: ${first.unit}`}${more}`
       : `${formatAmount(first.remain, localeId)}${unitSuffix(first.unit)} ${t('remaining')}${more}`
   }
   return stale ? `${headline} · ${t('staleData')}` : headline

@@ -8,6 +8,10 @@
  */
 
 import * as React from 'react'
+import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+// type-only：把 sidebar 的 SlotMap 声明（sidebar.footer.action 的 owner props）
+// 并入本编译单元；运行期不 import 该包（slot 由宿主 sidebar 提供）。
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { ARCHIVE_PAGE_SIZE } from './archive-entries.js'
 import { useArchivePanel } from './useArchivePanel.js'
 import { ArchiveRow } from './ArchiveRow.js'
@@ -15,8 +19,20 @@ import { ArchiveBadge } from './ArchiveBadge.js'
 import { ArchiveHeader } from './ArchiveHeader.js'
 import { ArchiveToolbar } from './ArchiveToolbar.js'
 import { ArchiveDeleteAck } from './ArchiveDeleteAck.js'
+import type { ArchivePanelInjected } from './panel-types.js'
+import { NS } from './locales.js'
 
-export function ArchivePanel(props: any) {
+/**
+ * 槽位组件 props 的官方组合（RULE-065/066）：owner 运行时份额
+ * （sidebar.footer.action 的 { wide }）+ 本插件 inject 工厂的业务面 +
+ * locale 命名空间坐席。各份额都从单一来源推导，组件不手写副本。
+ */
+export type ArchivePanelComponentProps =
+  PropsRuntime<'sidebar.footer.action'>
+  & InjectFace<ArchivePanelInjected>
+  & PropsLocale<typeof NS>
+
+export function ArchivePanel(props: ArchivePanelComponentProps) {
   const {
     t,
     collapsed,
@@ -24,10 +40,10 @@ export function ArchivePanel(props: any) {
     iconOnly,
     rootRef,
     open,
-    setOpen,
+    openPanel,
+    reopen,
     closing,
     closePanel,
-    reopenPanel,
     items,
     loading,
     error,
@@ -70,7 +86,7 @@ export function ArchivePanel(props: any) {
   return React.createElement(
     "div",
     { className: "sa_root", ref: rootRef },
-      React.createElement(ArchiveBadge, { t, badgeRef, iconOnly, open, setOpen, closing, closePanel, reopenPanel, items, badgeCount, badgeTitle }),
+      React.createElement(ArchiveBadge, { t, badgeRef, iconOnly, open, openPanel, reopen, closing, closePanel, items, badgeCount, badgeTitle }),
     open || closing ? React.createElement(React.Fragment, null,
       React.createElement("div", { className: "sa_overlay" + (closing ? " sa_overlay--closing" : ""), onClick: closePanel }),
       React.createElement(

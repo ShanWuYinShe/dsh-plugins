@@ -7,8 +7,18 @@
  * @module @chaoset/session-archive/client/locales
  */
 
+import type {} from '@deepseek-ai/dsh-client-ui-slots'
+
 /** locale 命名空间（侧边栏徽标与归档面板文案）。 */
 export const NS = "sidebar.sessionArchive";
+
+// 让官方 PropsLocale<typeof NS> 能推导出 t 的键集：命名空间到本包字典键
+// 的唯一映射（根 test/locale-keys 保证 en/zh 键集与字典一致）。
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface LocaleNamespaceMap {
+    'sidebar.sessionArchive': keyof typeof zh;
+  }
+}
 
 export const zh = {
   badge: "归档",

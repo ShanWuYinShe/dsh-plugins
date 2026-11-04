@@ -96,7 +96,9 @@ async function apply(ctx: ClientContext) {
   if (configService === void 0) throw new Error("sandbox-extra-roots: remote.sandboxExtraRootsConfig did not materialize after mount");
   const getConfig = () => configService.get().then((result) => {
     if (!result.ok) throw new Error("sandboxExtraRootsConfig.get failed: " + result.error.code + ": " + result.error.message);
-    return result.value.config;
+    // 返回整个 get 结果（config + 可选 degraded）：enforcement 未生效时
+    // 卡片必须能显示原因（SB-12），不能只取 config 把降级状态吞掉。
+    return result.value;
   });
   const setConfig = (partial: SandboxExtraRootsSetRequest) => configService.set(partial).then((result) => {
     if (!result.ok) {

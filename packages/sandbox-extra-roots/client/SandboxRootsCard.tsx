@@ -9,7 +9,7 @@
 import * as React from 'react'
 import { isDarwin, isWindows, analyzeRootsText, hasBlockingProblems, presetsForPlatform, appendRootLine, cleanRootLine } from './roots-preview.js'
 import type { RootProblem } from './roots-preview.js'
-import type { SandboxExtraRootsConfig, SandboxExtraRootsSetRequest, SandboxExtraRootsSetResult } from '../src/types.js'
+import type { SandboxExtraRootsConfig, SandboxExtraRootsGetResult, SandboxExtraRootsSetRequest, SandboxExtraRootsSetResult } from '../src/types.js'
 
 /** plugins.bundle.config slot 注入的卡片上下文（只声明本卡片实际消费的字段）。 */
 interface SandboxRootsCardProps {
@@ -17,8 +17,8 @@ interface SandboxRootsCardProps {
   view: string;
   /** locale 绑定后的文案函数。 */
   t: (key: string) => string;
-  /** 读取当前生效配置（Remote get → result.value.config）。 */
-  getConfig: () => Promise<SandboxExtraRootsConfig>;
+  /** 读取当前生效配置与降级状态（Remote get → result.value）。 */
+  getConfig: () => Promise<SandboxExtraRootsGetResult>;
   /** 保存部分配置（Remote set → 官方 configEditor 持久化）。 */
   setConfig: (partial: SandboxExtraRootsSetRequest) => Promise<SandboxExtraRootsSetResult>;
 }
@@ -48,6 +48,9 @@ function SandboxRootsForm(props: SandboxRootsCardProps) {
   const [draftText, setDraftText] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [status, setStatus] = React.useState<CardStatus | null>(null);
+  // enforcement 初始化失败原因（SB-12）：配置能读能存但额外根未生效时，
+  // 必须在卡片上可见，而不是静默失效。
+  const [degradedReason, setDegradedReason] = React.useState<string | null>(null);
 
   // 最新基准镜像：展开重读时判断“用户是否动过输入”，避免覆盖编辑
   // （与 WorkBuddy 的 statusesRef/openIdsRef 同一写法）。
@@ -59,11 +62,13 @@ function SandboxRootsForm(props: SandboxRootsCardProps) {
   React.useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    props.getConfig().then((value: SandboxExtraRootsConfig) => {
+    props.getConfig().then((value: SandboxExtraRootsGetResult) => {
       if (cancelled) return;
-      const freshRoots = (value?.extraWritableRoots ?? []).join("\n");
+      const freshConfig = value?.config ?? { extraWritableRoots: [] };
+      const freshRoots = (freshConfig.extraWritableRoots ?? []).join("\n");
       const prevRoots = (cfgRef.current?.extraWritableRoots ?? []).join("\n");
-      setCfg(value);
+      setCfg(freshConfig);
+      setDegradedReason(value?.degraded?.reason ?? null);
       setDraftText((current: string | null) => {
         const text = current === null ? prevRoots : String(current);
         const normalized = text.split("\n").map(cleanRootLine).filter((s: string) => s.length > 0).join("\n");
@@ -125,6 +130,13 @@ function SandboxRootsForm(props: SandboxRootsCardProps) {
     open ? React.createElement(
       "div",
       { className: "ser_body", id: "ser-roots-body" },
+      // 降级可见性：配置已保存但 enforcement 未生效（如 policy 服务缺失/
+      // 包装安装失败）。错误样式块，role=alert 让读屏立即播报。
+      degradedReason !== null ? React.createElement(
+        "p",
+        { className: "ser_error", role: "alert" },
+        t("degraded").replace("{reason}", () => degradedReason)
+      ) : null,
       React.createElement("p", { className: "ser_hint" }, t("hint")),
       React.createElement(
         "div",

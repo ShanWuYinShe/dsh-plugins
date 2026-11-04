@@ -22,6 +22,15 @@ import type { WorkBuddyCredential } from './auth.js'
 import type { WorkBuddyCreditAccount, ZCodeUpstreamClient } from './upstream.js'
 
 /**
+ * 与 provider-usage 的 wire 契约同构的窗口 label。
+ *
+ * 本包不 import provider-usage 的类型（两包独立安装），只镜像结构：普通字符串
+ * 按原文渲染；`{ en, zh }` 由 pill 按 DSH 当前语言解析、`/usage` 命令取 `en`。
+ * 新增语言时在这里补键，无需改 provider-usage。
+ */
+export type UsageWindowLabel = string | { en: string; zh?: string }
+
+/**
  * The slice of @chaoset/provider-usage's registry this plugin calls.
  *
  * Declared structurally instead of imported: the two packages install
@@ -41,7 +50,7 @@ export interface ProviderUsageRegistryLike {
     plan?: string
     windows: readonly {
       id: string
-      label: string
+      label: UsageWindowLabel
       remain?: number
       unit: string
       limit?: number
@@ -83,7 +92,7 @@ export function totalCreditsWindows(
   todaySummary?: CreditLedgerSummary,
 ): Array<{
   id: string
-  label: string
+  label: UsageWindowLabel
   remain: number
   unit: string
   limit?: number
@@ -98,7 +107,7 @@ export function totalCreditsWindows(
     if (accounts.length === 0) return []
     return [{
       id: 'total',
-      label: '总计',
+      label: { en: 'Total', zh: '总计' },
       remain: 0,
       unit: 'credits',
     }]
@@ -107,13 +116,13 @@ export function totalCreditsWindows(
   const limit = live.reduce((sum, account) => sum + (account.size > 0 ? account.size : 0), 0)
   const windows: Array<{
     id: string
-    label: string
+    label: UsageWindowLabel
     remain: number
     unit: string
     limit?: number
   }> = [{
     id: 'total',
-    label: '总计',
+    label: { en: 'Total', zh: '总计' },
     remain,
     unit: 'credits',
     ...limit > 0 ? { limit } : {},
@@ -121,7 +130,7 @@ export function totalCreditsWindows(
   if (todaySummary !== undefined) {
     windows.push({
       id: 'today',
-      label: '今日已用',
+      label: { en: 'Used today', zh: '今日已用' },
       remain: todaySummary.today.consumed,
       unit: 'credits',
     })
@@ -144,7 +153,7 @@ export function totalCreditsWindows(
  */
 export function currentPlanWindow(accounts: readonly WorkBuddyCreditAccount[]): Array<{
   id: string
-  label: string
+  label: UsageWindowLabel
   remain?: number
   limit?: number
   unit: string
@@ -185,7 +194,7 @@ export function currentPlanWindow(accounts: readonly WorkBuddyCreditAccount[]): 
  */
 export function startPlanWindows(accounts: readonly WorkBuddyCreditAccount[]): Array<{
   id: string
-  label: string
+  label: UsageWindowLabel
   remain?: number
   limit?: number
   unit: string

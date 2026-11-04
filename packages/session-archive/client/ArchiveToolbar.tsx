@@ -10,25 +10,27 @@
 import * as React from "react";
 import { ARCHIVE_SORT_KEYS, needsDeleteAck } from "./archive-entries.js";
 import type { TFunc } from "./locales.js";
+import type { ArchiveSortKey } from "./archive-entries.js";
+import type { ArchiveItem } from "./panel-types.js";
 
 export function ArchiveToolbar(props: {
   t: TFunc
-  selected: any
-  detailLoading: any
-  busy: any
-  confirmingDelete: any
-  deleteAcked: any
-  filter: any
-  setFilter: any
-  sortKey: any
-  setSortKey: any
-  selectable: any
-  allSelected: any
-  toggleAll: any
-  exportSelected: any
-  restoreSelected: any
-  deleteSelected: any
-  hasSelection: any
+  selected: ReadonlySet<string>
+  detailLoading: ReadonlySet<string>
+  busy: boolean
+  confirmingDelete: boolean
+  deleteAcked: boolean
+  filter: string
+  setFilter: (value: string) => void
+  sortKey: ArchiveSortKey
+  setSortKey: (next: ArchiveSortKey) => void
+  selectable: readonly ArchiveItem[]
+  allSelected: boolean
+  toggleAll: (checked: boolean) => void
+  exportSelected: () => void
+  restoreSelected: () => void
+  deleteSelected: () => void
+  hasSelection: boolean
 }): React.ReactNode {
   const { t, selected, detailLoading, busy, confirmingDelete, deleteAcked, filter, setFilter, sortKey, setSortKey, selectable, allSelected, toggleAll, exportSelected, restoreSelected, deleteSelected, hasSelection } = props
 
@@ -45,7 +47,7 @@ export function ArchiveToolbar(props: {
       placeholder: t("filterPlaceholder"),
       "aria-label": t("filterPlaceholder"),
       value: filter,
-      onChange: (e: any) => setFilter(e.target.value),
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => setFilter(e.target.value),
     }),
     React.createElement("button", {
       className: "sa_action",
@@ -71,9 +73,9 @@ export function ArchiveToolbar(props: {
         type: "checkbox",
         checked: allSelected,
         // 部分选中时半选态：否则半选显示为全不选，误导用户以为没勾上。
-        ref: (el: any) => { if (el !== null && el !== undefined) el.indeterminate = hasSelection && !allSelected; },
+        ref: (el: HTMLInputElement | null) => { if (el !== null) el.indeterminate = hasSelection && !allSelected; },
         disabled: busy || selectable.length === 0,
-        onChange: (e) => toggleAll(e.target.checked)
+        onChange: (e: React.ChangeEvent<HTMLInputElement>) => toggleAll(e.target.checked)
       }),
       t("selectAll")
     ),

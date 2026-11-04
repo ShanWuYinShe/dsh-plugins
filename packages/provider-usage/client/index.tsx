@@ -20,7 +20,9 @@
  * （`SlotRegistry.abdicated` 只增不减）。两条都表现为「pill 莫名其妙消失、刷新
  * 才好」。因此会话数据一律在**渲染期**取：组件从 standard kit 拿 `sessionId`
  * （renderer 无条件提供），经注入的 `resolveSeat` 现解析；解析失败只影响这一次
- * 渲染，`resolveSeat` 永不抛错。
+ * 渲染，`resolveSeat` 永不抛错。目录快照的响应式订阅走 inject 的
+ * `keyedHooks.modelDirectory`（renderer 绑定成组件侧 `useModelDirectory`），
+ * 业务组件因此不持有任何订阅机器。
  *
  * 额度数据只有一条通道：apply 里为协议 'provider-usage' 注册的
  * ResourceProvider（`resource-provider.ts`），pill 用 standard kit 的
@@ -116,7 +118,7 @@ export function apply(ctx: ClientContext): void {
     registerProviderUsageResources(ctx)
     // 与宿主自带 activity / usage pill 同形：`inject` 是无参常量函数，注册期不碰
     // 会话/服务状态（原因见文件头「注册期绝不解析」）。会话数据由组件在渲染期
-    // 经 standard kit 的 `sessionId` + 注入的 `resolveSeat` 现取。
+    // 经 standard kit 的 `sessionId` + 注入的 keyedHooks/resolveSeat 现取。
     ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
       name: 'conversation.composer.dock',
       id: 'provider-usage',
@@ -133,8 +135,17 @@ export function apply(ctx: ClientContext): void {
         const loadCache = new WeakMap<ModelDirectory, () => void>()
         return {
           t,
+          // 组件只能拿到惰性 load；目录快照走下面的 keyedHooks（官方 reactive
+          // 事实通道），组件因此不持有任何订阅机器。
           resolveSeat: (sessionId: unknown) => resolveSeat(ctx, sessionId, loadCache),
           hooks: { locale: localeSource },
+          keyedHooks: {
+            // 与宿主 ui-plan 的 `plans: (turn) => ObservableSnapshot` 同形：
+            // key 是会话 id，值是官方 ModelDirectory.store（getSnapshot +
+            // subscribe），renderer 负责把它绑成组件侧 useModelDirectory。
+            // 解析失败返回 undefined → hook 返回 undefined，组件这一帧不渲染。
+            modelDirectory: (sessionId: string) => resolveSeat(ctx, sessionId, loadCache)?.directory,
+          },
         }
       },
     }, ProviderUsagePill))

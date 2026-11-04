@@ -7,6 +7,9 @@ packages/*/config.json
 packages/*/lib/
 packages/*/client/client.cjs
 
+# coverage 报告（vitest --coverage 产物）
+coverage/
+
 # AI 工作目录(会话中间文件与 worktree)
 .workwork/
 # 临时提交消息（-F 文件用）：历史上曾写到根目录并被 add -A 带进提交，

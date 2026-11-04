@@ -38,6 +38,11 @@ function markerOf(method: string) {
   return marker
 }
 
+/** 未取消的 signal：Remote 方法要求末尾注入 signal（SA-07），用例显式传入。 */
+function liveSignal(): AbortSignal {
+  return new AbortController().signal
+}
+
 function row(sessionId: string): ArchiveListRow {
   return { sessionId, title: null, cwd: null, createdAt: 0, updatedAt: 0, size: 0, live: false }
 }
@@ -99,7 +104,7 @@ describe('list/count 逐项 remoteAccess 过滤（SA-01）', () => {
         count: async () => ({ count: allRows.length }),
       } as unknown as ArchiveHost,
     })
-    const result = await gateway.list()
+    const result = await gateway.list(liveSignal())
     expect(result.items.map((item) => item.sessionId)).toEqual(['s1', 's3'])
   })
 
@@ -111,7 +116,7 @@ describe('list/count 逐项 remoteAccess 过滤（SA-01）', () => {
         count: async () => ({ count: allRows.length }),
       } as unknown as ArchiveHost,
     })
-    expect((await gateway.count()).count).toBe(1)
+    expect((await gateway.count(liveSignal())).count).toBe(1)
   })
 
   it('全部被拒绝时 list 为空、count 为 0', async () => {
@@ -122,8 +127,8 @@ describe('list/count 逐项 remoteAccess 过滤（SA-01）', () => {
         count: async () => ({ count: allRows.length }),
       } as unknown as ArchiveHost,
     })
-    expect((await gateway.list()).items).toEqual([])
-    expect((await gateway.count()).count).toBe(0)
+    expect((await gateway.list(liveSignal())).items).toEqual([])
+    expect((await gateway.count(liveSignal())).count).toBe(0)
   })
 
   it('owner（allows 恒 true）看到全部行', async () => {
@@ -134,7 +139,61 @@ describe('list/count 逐项 remoteAccess 过滤（SA-01）', () => {
         count: async () => ({ count: allRows.length }),
       } as unknown as ArchiveHost,
     })
-    expect((await gateway.list()).items).toHaveLength(3)
-    expect((await gateway.count()).count).toBe(3)
+    expect((await gateway.list(liveSignal())).items).toHaveLength(3)
+    expect((await gateway.count(liveSignal())).count).toBe(3)
+  })
+})
+
+describe('Gateway 业务编排（SA-08）', () => {
+  const archivedRow = row('s1')
+
+  it('detail 在方法体做归档成员闸门：非成员抛 session-archive/not-archived', async () => {
+    const gateway = gatewayWithAccess(['s1'], {
+      host: {
+        archivedSet: () => new Set(['s1']),
+        detail: async () => ({ sessionId: 's1' }),
+      } as unknown as ArchiveHost,
+    })
+    await expect(gateway.detail('other', new AbortController().signal)).rejects.toMatchObject({ code: 'session-archive/not-archived' })
+    await expect(gateway.detail('s1', new AbortController().signal)).resolves.toEqual({ sessionId: 's1' })
+  })
+
+  it('delete 在方法体分流归档成员：非成员直接归入 not-archived，成员才进 host', async () => {
+    const calls: string[][] = []
+    const gateway = gatewayWithAccess(['s1'], {
+      host: {
+        archivedSet: () => new Set(['s1', 's2']),
+        deleteArchived: async (ids: string[]) => {
+          calls.push(ids)
+          return { deleted: [], failed: [{ sessionId: 's1', reason: 'busy' }], removedFromArchive: 0, needsRestart: [] }
+        },
+      } as unknown as ArchiveHost,
+    })
+    const result = await gateway.delete(['s1', 'foreign', 'foreign'], new AbortController().signal)
+    expect(calls).toEqual([['s1']])
+    expect(result.failed).toEqual([
+      { sessionId: 'foreign', reason: 'not-archived' },
+      { sessionId: 's1', reason: 'busy' },
+    ])
+    expect(result.deleted).toEqual([])
+  })
+
+  it('unarchive 与 delete 对称：非成员不进 host，成员结果原样合并', async () => {
+    const calls: string[][] = []
+    const gateway = gatewayWithAccess(['s1'], {
+      host: {
+        archivedSet: () => new Set(['s1']),
+        unarchive: async (ids: string[]) => {
+          calls.push(ids)
+          return { restored: ids, failed: [], removedFromArchive: ids.length }
+        },
+      } as unknown as ArchiveHost,
+    })
+    expect(await gateway.unarchive(['s1', 'foreign'], new AbortController().signal)).toEqual({
+      restored: ['s1'],
+      failed: [{ sessionId: 'foreign', reason: 'not-archived' }],
+      removedFromArchive: 1,
+    })
+    expect(calls).toEqual([['s1']])
   })
 })

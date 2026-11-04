@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -94,7 +94,9 @@ describe("dsh-follow-status", () => {
    * versions JSON（把「网络依赖」变成确定化输入）；FAKE_NPM_MODE=broken 时以非零
    * 退出，用于触发降级路径。
    */
-  function fakePath(mode: "ok" | "broken"): string {
+  const DEFAULT_VERSIONS = ["0.1.0-rc.1", "0.2.0-rc.1", "0.2.0-rc.2", "0.2.1-alpha.1"];
+
+  function fakePath(mode: "ok" | "broken", versions: string[] = DEFAULT_VERSIONS): string {
     const dir = mkdtempSync(join(tmpdir(), "dsh-follow-fakebin-"))
     dirs.push(dir)
     symlinkSync(process.execPath, join(dir, "node"))
@@ -105,12 +107,30 @@ describe("dsh-follow-status", () => {
       mode === "broken" ? "exit 1" : "true",
       'case "$*" in',
       '  *dist-tags*) echo \'{"latest":"0.2.0","next":"0.2.1-alpha.1"}\' ;;',
-      '  *versions*) echo \'["0.1.0-rc.1","0.2.0-rc.1","0.2.0-rc.2","0.2.1-alpha.1"]\' ;;',
+      `  *versions*) echo '${JSON.stringify(versions)}' ;;`,
       '  *) echo "{}" ;;',
       'esac',
     ].join("\n")
     writeFileSync(join(dir, "npm"), npm, { mode: 0o755 })
     return dir
+  }
+
+  /**
+   * 当前 main 分支的依赖基线（engines.dsh / dsh-* range 的 ^ 锚点），按
+   * `main` → `origin/main` → 工作区顺序回退。--strict 的通过用例必须与仓库
+   * 当前基线联动，否则下一次 adapt 后测试就假红。
+   */
+  function mainBaseline(): string {
+    for (const ref of ["main", "origin/main"]) {
+      try {
+        const manifest = JSON.parse(execFileSync("git", ["show", `${ref}:package.json`], { cwd: ROOT, encoding: "utf8" })) as { engines?: { dsh?: string } };
+        if (typeof manifest.engines?.dsh === "string") return manifest.engines.dsh;
+      } catch {
+        // 没有该 ref：继续回退
+      }
+    }
+    const manifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { engines?: { dsh?: string } };
+    return manifest.engines?.dsh ?? "";
   }
 
   it("活跃期判定（假 npm 供数）：输入定，输出定", () => {
@@ -126,6 +146,52 @@ describe("dsh-follow-status", () => {
     expect(stdout).toContain("当前处于【活跃期】")
     expect(stdout).toContain("main")
     expect(stdout).toContain("alpha")
+  })
+
+  /** 当前 checkout 能否读到 main 分支的 package.json（CI 浅克隆时可能只有当前提交）。 */
+  function mainRefReadable(): boolean {
+    for (const ref of ["main", "origin/main"]) {
+      try {
+        execFileSync("git", ["show", `${ref}:package.json`], { cwd: ROOT, encoding: "utf8", stdio: "pipe" });
+        return true;
+      } catch {
+        // 继续试下一个 ref
+      }
+    }
+    return false;
+  }
+
+  it.skipIf(!mainRefReadable())("--strict：main 基线 = npm 最新正式 rc 时通过（exit 0）", () => {
+    const baseline = mainBaseline()
+    expect(baseline).toMatch(/^\d+\.\d+\.\d+/)
+    const { code, stdout } = runWithEnv("dsh-follow-status.mjs", {
+      PATH: fakePath("ok", ["0.1.0-rc.1", baseline]),
+      FAKE_NPM_MODE: "ok",
+    }, "--strict")
+    expect(code, stdout).toBe(0)
+    expect(stdout).toContain("dsh 跟随(严格)")
+    expect(stdout).toContain(baseline)
+  })
+
+  it("--strict：main 基线落后/超前 npm 最新正式 rc 时 exit 1 并说明原因", () => {
+    // 默认假 npm 的稳定线是 0.2.0-rc.2：当前仓库基线（0.2.2-rc.1 及以后）必然
+    // 高于它 → main 判「超前」，严格门禁必须拒绝发布。
+    const { code, stdout, stderr } = runWithEnv("dsh-follow-status.mjs", {
+      PATH: fakePath("ok"),
+      FAKE_NPM_MODE: "ok",
+    }, "--strict")
+    expect(code).toBe(1)
+    const output = stdout + stderr
+    expect(output).toContain("dsh 跟随(严格)")
+    expect(output).toContain("main")
+    expect(output).toContain("最新正式版")
+  })
+
+  it("--strict：npm 不可达仍保持 exit 0（网络抖动不阻塞发布，降级 warning）", () => {
+    const { code, stdout } = runWithEnv("dsh-follow-status.mjs", { PATH: fakePath("broken") }, "--strict")
+    expect(code).toBe(0)
+    expect(stdout).toContain("npm registry 查询失败")
+    expect(stdout).not.toContain("dsh 跟随(严格)")
   })
 
   it("npm 不可达：降级为单行说明、退出 0，绝不输出半截周期判定", () => {

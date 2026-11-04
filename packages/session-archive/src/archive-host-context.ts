@@ -20,14 +20,20 @@ import type { SessionQueryTitles } from './session-query-bridge.js'
 import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import { name } from './plugin-config.js'
 import type { SessionArchiveConfig } from './plugin-config.js'
-import { REAPPEAR_SETTLE_MS, readTitle, delay, limitedConcurrency } from './session-scan.js'
+import { readTitle, limitedConcurrency } from './session-scan.js'
 import type { ArchiveListRow } from './types.js'
 import type { Context } from '@deepseek-ai/cordis'
 
 /** 批量 stat 快照的并发宽度（本地文件元数据读，8 路足够摊薄目录遍历成本）。 */
 const SNAPSHOT_CONCURRENCY = 8
 
-export function createHostContext(ctx: Context, cfg: SessionArchiveConfig) {
+/** 文件 stat 的最小测试缝：仅供测试构造「删除后被重建」的确定性窗口。
+ * 生产路径永远用 node:fs/promises 的 stat（默认值）。 */
+export type StatFile = (path: string) => Promise<{ size: number; mtimeMs: number }>
+
+const defaultStatFile: StatFile = (path) => stat(path)
+
+export function createHostContext(ctx: Context, cfg: SessionArchiveConfig, statFile: StatFile = defaultStatFile) {
   /**
    * sessionQuery 标题批量查询（可选服务，运行时探测）。
    * 探测与契约见 session-query-bridge.ts：命中时返回批量读函数，
@@ -67,35 +73,20 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig) {
    * list() 同样静默跳过首行损坏的日志；stat 抛错按枚举不到处理方向更保守
    * （删除/恢复一律拒绝）。
    */
-  async function snapshotsByIds(ids: readonly string[]): Promise<Map<string, SessionPersistenceSnapshot>> {
+  async function snapshotsByIds(ids: readonly string[], signal?: AbortSignal): Promise<Map<string, SessionPersistenceSnapshot>> {
     const result = new Map<string, SessionPersistenceSnapshot>();
     if (ids.length === 0) return result;
     await limitedConcurrency(SNAPSHOT_CONCURRENCY, ids.map((id) => async () => {
       try {
-        const snapshot = await persistence.stat(id as SessionId);
+        const snapshot = await persistence.stat(id as SessionId, { signal });
         if (snapshot !== undefined) result.set(id, snapshot);
-      } catch {}
-    }));
+      } catch (error) {
+        // 取消不是「枚举不到」：必须上抛，让 Gateway 按 gateway/cancelled 呈现。
+        if (signal?.aborted === true) throw signal.reason ?? error;
+      }
+    }), signal);
     return result;
   }
-
-  /**
-   * 沉降观察：等一个写入沉降窗口后重取文件 stat（null = 文件已消失）。
-   * 归档瞬间的生成流兜底用：归档会话会因 web 客户端重连恢复 tab 而长期
-   * 挂在宿主内存（SessionStore.get 恒命中），而宿主的批量落盘 timer、
-   * write-open 格式迁移、flush 检查点都会在**没有生成**的情况下刷新
-   * mtime——只看"内存存在 + mtime 新鲜"会把早已停止的会话永远判成 busy
-   * （面板报"请先停止"，用户无流可停）。活跃生成流是持续 append，一个
-   * 沉降窗口内体积必然增长；一次性落盘不会。增长与否由调用点对比前后
-   * 两次 stat 的 size 判定。
-   */
-  const settleStat = (path: string): Promise<{ size: number; mtimeMs: number } | null> =>
-    delay(REAPPEAR_SETTLE_MS).then(() => stat(path).then(
-      (info) => ({ size: info.size, mtimeMs: info.mtimeMs }),
-      // 只有 ENOENT 才是「文件已消失」:EACCES 等错误下把 null 当已消失会
-      // 谎报 deleted;上抛交给删除临界区的 catch 以真实原因计入 failed。
-      (error) => { if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null; throw error; },
-    ));
 
   /**
    * delete ↔ unarchive 临界区的互斥串行化（插件闭包内的 promise 链）。
@@ -192,12 +183,12 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig) {
     return latest?.path ?? null;
   }
 
-  async function fileInfo(header: SessionHeader): Promise<FileStatus> {
+  async function fileInfo(header: SessionHeader, signal?: AbortSignal): Promise<FileStatus> {
     // 宿主公开契约：stat(id) 返回的快照携带标准 `location`（0.2.2 起），
     // 这就是该会话当前代际落盘文件的权威路径；stat 返回 undefined 即会话不存在。
     let locationPath: string | undefined;
     try {
-      const snapshot = await persistence.stat(header.id);
+      const snapshot = await persistence.stat(header.id, { signal });
       locationPath = snapshot?.location?.path;
     } catch {
       // stat 抛错（后端异常/契约漂移）——既不能确认存在也不能确认缺失，
@@ -226,14 +217,14 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig) {
     return { state: 'absent' };
   }
 
-  /** 删除后的复验:先等 settleMs 给进行中的写入留出落盘时间,再确认文件没有
-   * 被宿主 materialize 的 mkdir -p 整体重建。返回 true 表示文件仍在(重现)。
-   * 只有 ENOENT 视为已消失;EACCES 等 stat 错误按「仍在」处理,让上层走
-   * 二次删除并以真实错误上报,不谎报 deleted。 */
-  async function filePresentAfterSettle(path: string, settleMs: number): Promise<boolean> {
-    if (settleMs > 0) await delay(settleMs);
+  /** 删除后的立即复验：确认文件没有被宿主 materialize 的 mkdir -p 或
+   * 写入方整体重建。返回 true 表示文件仍在(重现)。只有 ENOENT 视为已消失;
+   * EACCES 等 stat 错误按「仍在」处理,让上层走二次删除并以真实错误上报,
+   * 不谎报 deleted。不等待任何墙钟窗口——删除是否安全由删除前的显式状态
+   * 判定（宿主内存中即 busy）承担,不靠 timing（RULE-049）。 */
+  async function filePresent(path: string): Promise<boolean> {
     try {
-      await stat(path);
+      await statFile(path);
       return true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return false;
@@ -250,13 +241,13 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig) {
    * 再写持久化文件，内存与文件中的标题必然收敛；展示用标题取 fresher
    * 的一方无害（体积/mtime 等安全关键字段仍以文件为准）。
    */
-  async function readTitlesBulk(ids: readonly SessionId[]): Promise<Map<string, string | null> | null> {
+  async function readTitlesBulk(ids: readonly SessionId[], signal?: AbortSignal): Promise<Map<string, string | null> | null> {
     if (sessionQueryTitles === undefined) return null;
     // 桥的契约只承诺「一组观测结果」，逐项形状仍按官方语义在这里防御性读取
     // （整单抛错 → null 全量回退；单行 rejected/异形 → 该行缺席 Map → 逐行回退）。
     let results: readonly unknown[];
     try {
-      results = await sessionQueryTitles(ids);
+      results = await sessionQueryTitles(ids, signal);
     } catch {
       return null;
     }
@@ -282,8 +273,8 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig) {
    * 时跳过缓存直接读，标题仍然可得。折叠用官方 foldSessionTitle。
    * 缓存有上限（FIFO 淘汰最旧条目）：已删除会话的条目不再被 mtime 命中
    * 更新，长驻 host 进程下无界累积。 */
-  async function rowFor(sessionId: SessionId, header: SessionHeader, titles: Map<string, string | null> | null): Promise<ArchiveListRow> {
-    const file = await fileInfo(header);
+  async function rowFor(sessionId: SessionId, header: SessionHeader, titles: Map<string, string | null> | null, signal?: AbortSignal): Promise<ArchiveListRow> {
+    const file = await fileInfo(header, signal);
     const located = file.state === 'located' ? file : null;
     let title: string | null = null;
     if (titles !== null && titles.has(sessionId)) {
@@ -296,7 +287,7 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig) {
       } else {
         let readFailed = false;
         try {
-          title = await readTitle(persistence, sessionId);
+          title = await readTitle(persistence, sessionId, signal);
         } catch {
           readFailed = true;
         }
@@ -313,7 +304,7 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig) {
       }
     } else {
       try {
-        title = await readTitle(persistence, sessionId);
+        title = await readTitle(persistence, sessionId, signal);
       } catch {}
     }
     return {
@@ -333,12 +324,11 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig) {
     archivedSet,
     isLive,
     snapshotsByIds,
-    settleStat,
     exclusive,
     removeFromArchiveSet,
     resolveGenerationFile,
     fileInfo,
-    filePresentAfterSettle,
+    filePresent,
     readTitlesBulk,
     rowFor,
   }

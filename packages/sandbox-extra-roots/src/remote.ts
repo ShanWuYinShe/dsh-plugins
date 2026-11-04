@@ -23,6 +23,7 @@ import { resolveConfigPersist } from './config-store.js';
 import { validateSandboxConfig } from './config-validate.js';
 import type {
   SandboxExtraRootsConfig,
+  SandboxExtraRootsDegraded,
   SandboxExtraRootsGetResult,
   SandboxExtraRootsSetRequest,
   SandboxExtraRootsSetResult,
@@ -64,32 +65,42 @@ function invalidConfigDetails(partial: unknown): { field: string; value: string 
 }
 
 /**
- * 配置远程服务：get() 返回当前生效配置；set(partial) 经官方 configEditor
- * 合并写入 profile patch，由 Loader 对账生效。通过
- * ctx.plugin(PluginConfigGateway, { config }) 注册。
+ * 配置远程服务：get() 返回当前生效配置（以及 enforcement 初始化失败时的
+ * degraded 原因）；set(partial) 经官方 configEditor 合并写入 profile patch，
+ * 由 Loader 对账生效。通过 ctx.plugin(PluginConfigGateway, { config, degraded })
+ * 注册（即使 enforcement 初始化失败也要注册：失败必须在设置卡上可见）。
  */
 export class PluginConfigGateway extends TypertRemoteService {
   /** 当前生效配置（apply 收到的 cordis 注入 config；保存成功后原地更新）。 */
   private config: SandboxExtraRootsConfig;
+  /** enforcement 初始化失败原因（undefined = 已生效）。apply 时固定，不随保存变化。 */
+  private degraded: SandboxExtraRootsDegraded | undefined;
   private pluginCtx: Context;
   /** 保存串行化：提交按调用顺序落盘，前一笔失败不阻塞后续。 */
   private saves: Promise<void>;
 
   /**
    * @param ctx - 插件上下文。
-   * @param config - { config: 插件生效 config 引用 }。
+   * @param config - { config: 插件生效 config 引用；degraded: 可选降级原因 }。
    */
-  constructor(ctx: Context, config: { config: SandboxExtraRootsConfig }) {
+  constructor(ctx: Context, config: { config: SandboxExtraRootsConfig; degraded?: SandboxExtraRootsDegraded }) {
     super(ctx, 'sandboxExtraRootsConfig');
     this.config = config.config;
+    this.degraded = config.degraded;
     this.pluginCtx = ctx;
     this.saves = Promise.resolve();
   }
 
-  /** 读取当前生效配置。 */
+  /**
+   * 读取当前生效配置与降级状态。
+   * @returns 生效配置快照；enforcement 未生效时附带 degraded 原因。
+   */
   @Remote('get')
   get(): SandboxExtraRootsGetResult {
-    return { config: { ...this.config } };
+    return {
+      config: { ...this.config },
+      ...(this.degraded === undefined ? {} : { degraded: { ...this.degraded } }),
+    };
   }
 
   /**

@@ -57,7 +57,7 @@ export function sortArchived<T extends { updatedAt: unknown; size: unknown; titl
 /** 把 detail（标题 + user/assistant 文本消息）格式化为 Markdown 文本。 */
 export function detailToMarkdown(item: { title: unknown; sessionId: unknown; cwd: unknown }, detail: {
   sessionId?: unknown
-  messages?: Array<{ role?: unknown; text?: unknown; time?: unknown }>
+  messages?: ReadonlyArray<{ role?: unknown; text?: unknown; time?: unknown }>
 }): string {
   const lines: string[] = [];
   lines.push("# " + (String(item.title ?? "") || String(item.sessionId ?? "")));

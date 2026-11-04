@@ -57,5 +57,41 @@ export default defineConfig({
     // 两次运行之间也不留残留。
     setupFiles: ["./test/setup-test-home.ts"],
     globalSetup: ["./test/global-setup.ts"],
+    coverage: {
+      // 官方规则 RULE-088（docs/testing.md「Coverage gate」）：CI 的门禁口径是
+      // `packages/*/*/src` 逐文件 100%；未覆盖行往往是死代码，应由门禁提示删除
+      // 而不是补测试凑数。本仓当前只有本文件 + `bun run test:coverage`：
+      //   - 覆盖率面 = 四包 host src 与 client 源文件（不含测试、d.ts、bin 产物）；
+      //   - 阈值是**基线棘轮**：2026-11-04 首次接入时按实测值留 ~1pp 余量，
+      //     之后只许上调不许下调；逐文件 100% 是目标，尚未达成（先保证门禁可运行、
+      //     数字可追踪，再分期拉齐）。下调阈值等同放宽门禁，必须在提交信息里说明。
+      provider: "v8",
+      reporter: ["text", "json-summary"],
+      reportsDirectory: "coverage",
+      include: [
+        "packages/*/src/**/*.ts",
+        "packages/*/client/**/*.ts",
+        "packages/*/client/**/*.tsx",
+      ],
+      exclude: [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.d.ts",
+        // bin 入口是构建期自包含 bundle 的源码，运行路径由包内 bin 测试覆盖；
+        // 它不是宿主插件面（不计入 RULE-088 的插件源码覆盖目标）。
+        "packages/*/src/bin.ts",
+        // 构建产物（gitignore），不计入覆盖率面。
+        "packages/*/client/client.cjs",
+      ],
+      thresholds: {
+        // 2026-11-04 基线实测（`npx vitest run --coverage`，排除当时因他人 WIP
+        // 变红的根锁）：stmts 81.34 / branch 75.24 / funcs 79.29 / lines 84.51。
+        // 阈值 = 基线向下取整并留 ~1pp 抖动余量：只允许上调（棘轮），不得下调。
+        statements: 80,
+        branches: 74,
+        functions: 78,
+        lines: 83,
+      },
+    },
   },
 });

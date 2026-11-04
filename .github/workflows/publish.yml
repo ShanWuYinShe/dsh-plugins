@@ -102,6 +102,23 @@ jobs:
           PLAN=$(node scripts/publish-gate.mjs --tag "$TAG")
           echo "plan=$PLAN" >> "$GITHUB_OUTPUT"
 
+      # 正式版（非 prerelease）发布必须基于「npm 最新正式版（最新 rc）」的宿主基线：
+      # main 基线落后/超前时说明本仓还在跟旧宿主线，发布正式版会把旧基线插件当新版
+      # 发出去（engines.dsh 精确 pin 会让宿主拒绝安装）。预发布（-alpha/-rc 线）不
+      # 适用——活跃期 main 按设计搁置，由 alpha 分支跟进 dev 线。
+      # 严格检查依赖 npm registry 的版本列表；npm 不可达时脚本降级 exit 0（网络抖动
+      # 不阻塞发布），但仍会打印 warning 供人工核对。
+      - name: Verify stable release baseline follows the latest DSH release
+        if: steps.plan.outputs.plan != '[]'
+        env:
+          PLAN: ${{ steps.plan.outputs.plan }}
+        run: |
+          if node -e 'process.exit(JSON.parse(process.argv[1]).some((entry) => entry.prerelease === false) ? 0 : 1)' "$PLAN"; then
+            node scripts/dsh-follow-status.mjs --strict
+          else
+            echo "本次计划只含预发布版本（-alpha/-rc），跳过 main 基线严格检查（活跃期 main 按设计搁置）。"
+          fi
+
       # 发布 = 每个待发布包 bun pm pack 出标准 npm tarball（与原 npm registry
       # 产物同格式：lib/、client/、cordis.patch.yml、engines.dsh 等字段齐全，
       # dsh 的 plugin add 可直接装 tarball URL），作为 GitHub

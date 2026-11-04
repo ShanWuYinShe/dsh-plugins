@@ -85,7 +85,17 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 ```
 
 非法值（0/负数/非整数/超上限/未知字段）在 apply 时 fail loud，不会被静默接受。
-客户端的额度 pill 轮询间隔（60s）是浏览器侧协议节拍、不属于部署可变量，不在此 schema。
+客户端的额度 pill 轮询节拍是「宿主缓存 TTL（默认 60s）+ 5s 相位余量」= 65s，
+属浏览器侧协议节拍、不属于部署可变量；把宿主 `cacheTtlMs` 调到 >65s 时二者会重新
+相位耦合（已知限制）。
+
+同源路由 `GET /plugins/provider-usage/usage` 与 `/usage` 命令都有**总预算**：route 单请求
+20s（所有 provider 顺序查询共享，超时折叠为逐 provider 的失败快照后仍返回完整 JSON）；
+`/usage` 默认 20s、`/usage refresh` 60s。单个 provider 的查询仍受 15s deadline 约束。
+
+额度窗口的 `label` 字段支持两种形态：纯字符串（原样渲染），或
+`{ en: string, [locale]: string }` 本地化映射（客户端按 DSH 当前语言解析，回退链
+精确语言 → 主语言 → en；命令文本取 en）。
 
 ## 为其他 provider 注册查询器
 

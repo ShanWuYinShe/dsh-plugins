@@ -44,6 +44,8 @@ function propsWith(answer: SnapshotAnswer): ProviderUsagePillProps {
     t,
     sessionId: 'session-1',
     resolveSeat: () => ({ directory, load: () => {} }),
+    // 目录快照走 renderer 绑定的 keyed hook；测试直接返回静态快照。
+    useModelDirectory: () => snapshot,
     useResource: () => ({ status: 'live', value: answer, failure: undefined }),
   } as unknown as ProviderUsagePillProps
 }
@@ -153,6 +155,41 @@ describe('ProviderUsagePill 刷新与过期', () => {
     // 旧值保留（headline 还是 3 credits，来自 live 流），但标了过期。
     expect(button.getAttribute('aria-label')).toContain('staleData')
     expect(button.textContent).toContain('3')
+  })
+
+  it('弱网迟到的旧流帧不覆盖刚手刷的新值（按 fetchedAt 比较，不用墙钟窗）', async () => {
+    // 手刷值：fetchedAt=5，额度 8。
+    const refreshed: SnapshotAnswer = {
+      provider: 'deepseek',
+      windows: [{ id: 'w', label: 'W', remain: 8, limit: 10, unit: 'credits' }],
+      fetchedAt: 5,
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ snapshots: [refreshed] }),
+    }) as unknown as Response))
+
+    // 初始 live 帧：fetchedAt=1，额度 3。
+    await openPanel()
+    expect(container.querySelector('.pu-pill-btn')!.textContent).toContain('3')
+    await act(async () => { refreshButton().click() })
+    expect(container.querySelector('.pu-pill-btn')!.textContent).toContain('8')
+
+    // 弱网：旧流帧（fetchedAt=1，额度 3）迟到 → 观测更早，不得顶回 3。
+    await act(async () => {
+      root!.render(createElement(ProviderUsagePill, propsWith(goodSnapshot)))
+    })
+    expect(container.querySelector('.pu-pill-btn')!.textContent).toContain('8')
+
+    // 宿主在 force 之后产出的更新流帧（fetchedAt=6）自然接管。
+    await act(async () => {
+      root!.render(createElement(ProviderUsagePill, propsWith({
+        provider: 'deepseek',
+        windows: [{ id: 'w', label: 'W', remain: 4, limit: 10, unit: 'credits' }],
+        fetchedAt: 6,
+      })))
+    })
+    expect(container.querySelector('.pu-pill-btn')!.textContent).toContain('4')
   })
 
   it('点击刷新时按钮文案保持稳定且无突兀插行，弹窗尺寸稳定零抖动', async () => {

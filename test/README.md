@@ -23,18 +23,22 @@
 | 文件 | 判据（一句话） |
 | --- | --- |
 | `module-map.test.ts` | 每个包入口的「模块一览」与实际磁盘模块一一对应（新增模块必须登记） |
+| `disposer-static-scan.test.ts` | 每处 `.register(` 都在可回收原语（`ctx.effect`/`ctx.inject`/`slots.inject`/`useEffect`）内；`setTimeout`/`setInterval` 都有赋值+配对 clear（例外白名单带理由且必须真实命中） |
 | `module-graph.test.ts` | 没有孤儿模块：每个模块都要被别的模块引用（副作用模块如 styles 必须被导入） |
 | `import-paths.test.ts` | 每条相对导入都能解析到真实文件，且大小写与磁盘一致（macOS 上写错大小写、Linux 才炸） |
 | `source-structure.test.ts` | 源码结构卫生：`export` 不与注释粘连、文件以换行结尾、无 CRLF 与制表符缩进、shipped 代码无 console.log/debug/info |
 | `comment-references.test.ts` | 注释里的「见 <文件>」「见 <符号>」都真实存在 |
 | `export-surface.test.ts` | 非入口模块的值转发导出必须真的有人从这个模块导入（包外消费者登记白名单） |
 | `internal-dead-code.test.ts` | 未导出的顶层声明必须在同文件里被用到 |
+| `root-declared-deps.test.ts` | 根 `scripts/**` 与 `test/**` 的第三方 import 都在根 `package.json` 声明（`declared-deps` 只覆盖 packages/*，根工具链此前无锁） |
 | `declared-deps.test.ts` | `devDependencies` 里的每个包都要在包内源码中出现（声明了不用 = 依赖清单不可信；客户端 inject 提供方与 Typert 工件的运行时依赖登记在 ALLOWED_UNREFERENCED 并写明理由） |
 | `entry-surface.test.ts` | Host 入口只导出 `name/inject/Config/apply`、Client 入口只导出 `name/inject/apply`，禁止 default / export *——测试用内部实现走相对路径，不冻结成包 API |
 | `client-inject-manifest.test.ts` | 清单里的 `dsh.client.inject` 写的是**客户端包名**（模块图依赖），不是 cordis 服务名——写错会被 `graphRows.get()` 静默跳过、悄悄失去加载顺序保证 |
+| `client-hardcoded-copy.test.ts` | client TSX 的产品可见文案必须走 typed locale 字典/`t(...)`：可见属性的字符串字面量与 JSX 文本节点不得直写（等价官方 `verify-client-ui-i18n`） |
 | `locale-keys.test.ts` | 文案 key 都有引用；同一包内 en 与 zh 的键集完全一致 |
 | `css-classes.test.ts` | 样式表里的每个类名都在本包 client 源码里出现 |
 | `css-tokens.test.ts` | 插件手写的样式只引用宿主真实存在的 CSS 变量 |
+| `config-patch-schema.test.ts` | `cordis.patch.yml` 的 `config` 顶层键 ⊆ 该包 `Config` 的 Schemastery schema 键（未知键会被静默剥离 = 用户配置被吞） |
 | `bundle.test.ts` | 构建产物与元数据：manifest 契约（engines.dsh / manifestVersion / client inject / exports 标准键）、**零运行期依赖**（插件索引安装链前提）、Typert 工件导出与产物齐全、client bundle 冒烟、四个包的兜底边界、files 清单有货 |
 | `loopback-parity.test.ts` | 两个包各自持有的回环守卫不许静默分叉；差异须逐项登记在根 test 的真值表里——当前是 provider-usage 委托宿主后的 4 项放宽 + 空串 Origin 这一处收紧 |
 | `skill-facts.test.ts` | 技能文档里引用的标识符在实现里真实存在（外部事实走 `EXTERNAL_FACTS` 白名单） |
@@ -48,13 +52,13 @@
 | `deprecated-api.test.ts` | 源码不使用 0.2.2-rc.1 已废弃的 4 个宿主调用面（`eventAt`/`snapshotEvents`/`ownEvents`/`SessionController.page`） |
 | `client-manifest-contract.test.ts` | `dsh.client` 取值域：`platform: 'web'`、导出 `./client`，feature 插件不设 `immediately`/`external` |
 | `dep-resolution-baseline.test.ts` | 声明 range、实际解析版本与 bun.lock 三方都等于 `engines.dsh` 基线（混入 pre-rc 实例即红） |
-| `third-party-notices.test.ts` | client 产物内联第三方代码（typert remote-info）的包必须附 THIRD_PARTY_NOTICES 并进 `files` |
+| `third-party-notices.test.ts` | client 产物内联第三方代码（typert remote-info）的包必须附 THIRD_PARTY_NOTICES 并进 `files`；**bin 构建闭包（esbuild metafile → `.workwork/bin-closure.json`）与 notices 表格的组件/版本逐条相等** |
 | `lock-index.test.ts` | 锁文件与索引表双向一致（单测在 UNIT_TESTS 登记，防索引腐烂） |
 | `no-focused-tests.test.ts` | 测试文件里没有 .only / 裸 .skip / .todo（条件跳过 skipIf 不在此限） |
 
-目录里另有 5 个**普通脚本测试**，不是守卫锁、不在此表：`dep-collect` /
-`dsh-deps` / `publish-gate` / `scripts-cli` / `version-checks`（测的是
-`scripts/` 的行为，不是架构不变式）。
+目录里另有 6 个**普通脚本测试**，不是守卫锁、不在此表：`dep-collect` /
+`dsh-deps` / `plugin-market` / `publish-gate` / `scripts-cli` / `version-checks`
+（测的是 `scripts/` 的行为，不是架构不变式）。
 
 > **Typert 工件不再有手写三面一致锁**（原 `typert-surface-parity.test.ts` 已删）：
 > 2026-10-29 起 `./typert` / `./remote` 由官方 `@deepseek-ai/dsh-typert-generator`

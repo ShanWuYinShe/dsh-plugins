@@ -196,7 +196,9 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
 ## 日常发布流程
 
 **发布门槛：功能完全实现 + 本地 `bun run test:ci` 全绿 + dsh 测试实例真实
-验证通过，三者齐备才 bump 版本并推送。** 版本一旦归档（git tag + Release）不可
+验证通过，三者齐备才 bump 版本并推送。** 正式版 tag 的 publish 流水还会执行
+`node scripts/dsh-follow-status.mjs --strict`：main 基线必须等于 npm 最新正式版
+（最新 rc），否则阻断发布；活跃期 alpha 预发布不受此约束（main 按设计搁置）。 版本一旦归档（git tag + Release）不可
 撤回，"发布后
 再验证发现问题再发一版"会产生大量无意义的版本号（2026-09-03 单日 6+ 版本、
 2026-09-05 连发 0.10.4/0.10.5 的教训——后者是改动散落两个工作树，提交信息

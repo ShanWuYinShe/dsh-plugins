@@ -4,18 +4,18 @@
  * 2026-10-08 从 545 行的 src/index.ts 拆出：配置、根目录判定、landlock 解析、
  * 网关与 apply 各自成模块，入口只保留 name/inject 与 re-export。
  *
+ * enforcement 自 0.4.31 起收敛到官方 sandbox policy：本包不再包装 confine/fs
+ * 私有面，只把配置的额外根并入 `sandboxPolicy.additionalWritableRoots`。
+ *
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * - index.ts — 插件入口：name/inject 与 re-export
- * - apply.ts — 插件主体：配置解析、包装装配与 Remote 服务注册
- * - wrap.ts — sandbox/fs 包装安装与共享挂载生命周期（引用计数/还原）
- * - confine-runners.ts — confine 按 runner 改写 + 运行期根身份校验/危险根复查（纯函数）
+ * - apply.ts — 插件主体：配置解析、policy 包装装配与 Remote 服务注册（含降级）
+ * - policy-merge.ts — 包装官方 ctx.sandboxPolicy.resolve()，把生效根并入 additionalWritableRoots（引用计数/还原）
  * - roots-filter.ts config-validate.ts — 实例级目录存在性过滤（工厂）与配置校验/规范化
- * - roots.ts — 额外根目录规范化、分类与授予集合
+ * - roots.ts — 额外根目录 canonical 化与风险分类（reject/filter）
  * - config.ts — 插件配置 schema（Loader 读取的 Config 导出）
  * - plugin-config.ts — 插件身份（name/inject）与配置默认值
- * - common.ts — 沙盒能力探测与宿主路径工具（官方 dsh-sandbox 静态导入）
- * - landlock-exec.ts — 官方 landlock-run 启动器解析缓存（仅 Linux）
  * - types.ts — Remote 服务面的公共边界类型（typert 生成器引用）
  * - config-store.ts remote.ts — 官方 configEditor 持久化适配与 Remote 服务
  *

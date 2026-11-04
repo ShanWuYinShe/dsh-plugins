@@ -36,6 +36,14 @@
   未知变体 id 静默回落（改 fail loud）、手写 `join(resolveDshHome)`（改 `dshHomePath`）。
 * 发布产物只含运行时文件（`lib/*.js`、`lib/*.d.ts`、`client/client.cjs`）。
 
+### 测试与文案
+
+* 额度窗口 label 改为可本地化结构（`{en, zh}`：Total/Used today 等），随 DSH 语言切换显示。
+* 新增经官方 Loader 的最小 REAL-composition 测试（真实 `dsh-llm` + 真实 `dsh-host-webserver`
+  真实 HTTP：入口 ACTIVE、5 条 provider、status/probe 路由、跨端口 Origin 拒绝、HMR dispose 后
+  路由 404 / adapter 全回滚 / usage 注册 5→0 并可干净重建）。
+* 新增 client 组件 props 直喂 jsdom 用例（ModelRow/VariantCard/WorkBuddyConfigPage 的用户可见行为）。
+
 ## 0.4.30 (2026-11-04)
 
 ### 新增

@@ -34,7 +34,8 @@
     "esbuild": "^0.28.2",
     "semver": "^7.8.5",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.12"
+    "vitest": "^4.1.12",
+    "@vitest/coverage-v8": "^4.1.12"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -44,6 +45,7 @@
     "market:check": "node scripts/plugin-market.mjs check --out .workwork/plugin-market-site",
     "typecheck": "node scripts/typert.mjs && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "node scripts/build.mjs && vitest run",
+    "test:coverage": "node scripts/build.mjs && vitest run --coverage",
     "test:ci": "bun run build && bun run typecheck && vitest run",
     "test:stability": "node scripts/test-stability.mjs",
     "gate": "node scripts/publish-gate.mjs",

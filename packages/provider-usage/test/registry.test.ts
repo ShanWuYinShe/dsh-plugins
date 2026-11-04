@@ -557,6 +557,51 @@ describe('ProviderUsageRegistry', () => {
     expect(sfQuerier).not.toHaveBeenCalled()
   })
 
+  it('调用方总预算取消在途查询：立即折叠成失败快照', async () => {
+    const { registry } = makeRegistry({ timeoutMs: 60_000 })
+    // 永不 settle 的查询：只有调用方预算信号能结算它。
+    registry.register('acme', async ({ signal }) => new Promise<UsageSnapshot>((_, reject) => {
+      signal?.addEventListener('abort', () => reject(signal.reason ?? new Error('aborted')), { once: true })
+    }))
+    const controller = new AbortController()
+    const pending = registry.snapshot('acme', { signal: controller.signal })
+    controller.abort(new Error('usage request exceeded its 20ms budget'))
+    const snapshot = await pending
+    expect(snapshot?.error).toContain('budget')
+    expect(snapshot?.windows).toEqual([])
+  })
+
+  it('信号已取消时不再启动查询（不发无意义的账单请求）', async () => {
+    const { registry } = makeRegistry()
+    const querier = vi.fn(async (): Promise<UsageSnapshot> => ({ provider: 'acme', windows: [], fetchedAt: 0 }))
+    registry.register('acme', querier)
+    const controller = new AbortController()
+    controller.abort(new Error('already cancelled'))
+    const snapshot = await registry.snapshot('acme', { signal: controller.signal })
+    expect(querier).not.toHaveBeenCalled()
+    expect(snapshot?.error).toContain('already cancelled')
+  })
+
+  it('在途查询被别人的预算取消时，新调用方仍能按时拿到失败快照', async () => {
+    const { registry } = makeRegistry({ timeoutMs: 60_000 })
+    let release: (() => void) | undefined
+    registry.register('acme', async () => {
+      await new Promise<void>(resolve => { release = resolve })
+      return { provider: 'acme', windows: [], fetchedAt: 0 }
+    })
+    // 第一个调用方没有预算信号，查询会一直挂到 release。
+    const owner = registry.snapshot('acme')
+    await vi.waitFor(() => { expect(release).toBeDefined() }, { timeout: 5000 })
+    // 第二个调用方有预算：不得被别人的在途查询拖过预算。
+    const controller = new AbortController()
+    const bounded = registry.snapshot('acme', { signal: controller.signal })
+    controller.abort(new Error('bounded caller budget exhausted'))
+    const snapshot = await bounded
+    expect(snapshot?.error).toContain('budget')
+    release?.()
+    await owner
+  })
+
   it('官方 DeepSeek 两条路由都给出已查询快照，provider 是请求键', async () => {
     const registry = makeBuiltinRegistry()
     for (const key of ['deepseek-account', 'deepseek-official']) {
@@ -726,6 +771,38 @@ describe('querier 返回形状校验（第三方扩展点不得让 client 渲染
       const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimit }).snapshot('acme')
       expect(snapshot?.windows).toEqual([])
       expect(snapshot?.error, `${key}=${String(value)}`).toContain(`rateLimit.${key} is not a finite number`)
+    }
+  })
+
+  it('本地化 label（{en, zh}）合法：原样透传给 client 按语言解析', async () => {
+    const label = { en: 'Total', zh: '总计' }
+    const snapshot = await registryAnswering({
+      provider: 'acme',
+      windows: [{ id: 'w', label, remain: 1, unit: 'credits' }],
+      fetchedAt: 0,
+    }).snapshot('acme')
+    expect(snapshot?.error).toBeUndefined()
+    expect(snapshot?.windows[0]?.label).toEqual(label)
+  })
+
+  it('本地化 label 形状非法：折叠成失败快照（不让脏 label 进渲染层）', async () => {
+    const invalidLabels: unknown[] = [
+      { zh: '总计' }, // 缺 en 回退基线
+      { en: '', zh: '总计' }, // en 空串
+      { en: 'Total', zh: 42 }, // 非字符串值
+      { en: 'Total', zh: null },
+      null,
+      42,
+      ['Total'],
+    ]
+    for (const label of invalidLabels) {
+      const snapshot = await registryAnswering({
+        provider: 'acme',
+        windows: [{ id: 'w', label, unit: 'credits' }],
+        fetchedAt: 0,
+      }).snapshot('acme')
+      expect(snapshot?.windows).toEqual([])
+      expect(snapshot?.error, `label=${JSON.stringify(label)}`).toContain('windows[0].label is neither a string nor a localized label')
     }
   })
 })

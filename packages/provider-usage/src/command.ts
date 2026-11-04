@@ -13,7 +13,33 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDefinition, CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { normalizeProviderKey } from './resolve.js'
 import type { ProviderUsageRegistry } from './registry.js'
-import type { UsageSnapshot, UsageWindow } from './types.js'
+import { resolveUsageLabel, type UsageSnapshot, type UsageWindow } from './types.js'
+
+/**
+ * `/usage` 默认读取的总预算（毫秒）。
+ *
+ * 命令是聊天里的一次同步交互：默认路径只读缓存/负缓存，未命中时才发起上游
+ * 查询；预算把这批顺序查询的**总**耗时封顶，避免 11 条账单端点各挂 15s 把
+ * 一次命令拖成分钟级。
+ */
+export const DEFAULT_COMMAND_BUDGET_MS = 20_000
+
+/**
+ * `/usage refresh` 的总预算（毫秒）。
+ *
+ * 显式刷新会绕过缓存、逐条真打上游（11 条账单请求），因此给比默认更长的
+ * 预算，但仍有上界：命令必须一次性回答，不能让用户等满「条数 × 单查询
+ * deadline」。
+ */
+export const DEFAULT_REFRESH_COMMAND_BUDGET_MS = 60_000
+
+/** {@link usageCommand} 的可选预算覆盖（测试注入短预算用）。 */
+export interface UsageCommandOptions {
+  /** 默认（缓存读）路径的总预算。 */
+  budgetMs?: number
+  /** refresh 路径的总预算。 */
+  refreshBudgetMs?: number
+}
 
 /**
  * 一行窗口文本:"label 余量 单位"。
@@ -24,7 +50,10 @@ import type { UsageSnapshot, UsageWindow } from './types.js'
  */
 function formatWindow(window: UsageWindow): string {
   const remaining = window.remain === undefined ? '—' : `${window.remain}`
-  return window.unit === '' ? `${window.label} ${remaining}` : `${window.label} ${remaining} ${window.unit}`
+  // 命令是单一语言文本（英语基线）：本地化 label 一律取 en，与 client 按
+  // DSH 当前语言解析互不冲突。
+  const label = resolveUsageLabel(window.label, 'en')
+  return window.unit === '' ? `${label} ${remaining}` : `${label} ${remaining} ${window.unit}`
 }
 
 /** 一行额度文本:displayName(registry 把注册期 displayName 回填进答案，缺省回 provider 键)+ 逐窗口 "label remain unit"。 */
@@ -46,11 +75,21 @@ export function formatUsageReport(lines: readonly string[]): string {
  *
  * 参数(rawInput,trim + 小写后):
  * - 空 → 全部已注册 provider(缓存读,60s TTL);
- * - `refresh` → 全部已注册 provider,绕过缓存(显式刷新);
+ * - `refresh` → 全部已注册 provider,绕过缓存(显式刷新,预算更长);
  * - 其它 → 视作 provider 键(经 normalizeProviderKey 规范化),未注册键
  *   交给 snapshot() 的推断路径回答,推断无果即为不可查行。
+ *
+ * 两个路径都受**总预算**约束（{@link DEFAULT_COMMAND_BUDGET_MS} /
+ * {@link DEFAULT_REFRESH_COMMAND_BUDGET_MS}）：预算到点时在途读取折叠成失败
+ * 快照，命令仍然在有限时间内给出逐 provider 的完整报告。
+ *
+ * @param registry - provider-usage 注册表（只用到 providers/snapshot）。
+ * @param options - 预算覆盖（测试注入短预算）。
+ * @returns 命令定义。
  */
-export function usageCommand(registry: ProviderUsageRegistry): CommandDefinition {
+export function usageCommand(registry: ProviderUsageRegistry, options: UsageCommandOptions = {}): CommandDefinition {
+  const budgetMs = options.budgetMs ?? DEFAULT_COMMAND_BUDGET_MS
+  const refreshBudgetMs = options.refreshBudgetMs ?? DEFAULT_REFRESH_COMMAND_BUDGET_MS
   return {
     name: 'usage',
     description: 'Show remaining quota for the queryable LLM providers ("/usage refresh" to bypass the cache)',
@@ -59,12 +98,22 @@ export function usageCommand(registry: ProviderUsageRegistry): CommandDefinition
       const force = input === 'refresh'
       const providers = input === '' || force ? registry.providers() : [normalizeProviderKey(input)]
       if (providers.length === 0) return { kind: 'success', text: 'no queryable provider is registered' }
-      const lines: string[] = []
-      for (const provider of providers) {
-        const snapshot = await registry.snapshot(provider, { force })
-        lines.push(snapshot === undefined ? `${provider}: (no querier resolved)` : formatUsageLine(snapshot))
+      // 总预算：一次命令内所有顺序查询共享同一个 deadline 信号。
+      const controller = new AbortController()
+      const timer = setTimeout(() => {
+        controller.abort(new Error(`usage command exceeded its ${force ? refreshBudgetMs : budgetMs}ms budget`))
+      }, force ? refreshBudgetMs : budgetMs)
+      timer.unref?.()
+      try {
+        const lines: string[] = []
+        for (const provider of providers) {
+          const snapshot = await registry.snapshot(provider, { force, signal: controller.signal })
+          lines.push(snapshot === undefined ? `${provider}: (no querier resolved)` : formatUsageLine(snapshot))
+        }
+        return { kind: 'success', text: formatUsageReport(lines) }
+      } finally {
+        clearTimeout(timer)
       }
-      return { kind: 'success', text: formatUsageReport(lines) }
     },
   }
 }

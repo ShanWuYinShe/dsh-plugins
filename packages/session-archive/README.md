@@ -88,6 +88,9 @@ dsh plugin --profile web remove @chaoset/session-archive
 > 二次删除仍压不掉）、`not-restorable`（仅 unarchive：confirm 复核时文件已不在）；
 > 其余为底层删除错误消息。
 
+> 五个方法都支持取消：`signal` 由 Gateway 注入（不进 wire 参数），Host 侧透传给
+> 持久化 `open/read/stat`、标题索引与批量循环；调用方取消后不再继续读文件。
+>
 > `delete` 的 `removedFromArchive` 恒为 0（删除保留归档占位 id，见上）；
 > `unarchive` 的为实际从归档集合移除的 id 数。`restored` 之外的每个请求 id
 > 都会在 `failed` 里给出原因。
@@ -118,8 +121,10 @@ config 字段（`cordis.patch.yml`；配置只走官方 config-editor，旧版�
 
 ## 限制
 
-- 正在生成落盘的会话拒绝删除——归档会话不在会话列表、无流可停，请稍后重试
-  （沉降观察窗内体积不再增长即可删）。
+- **仍在宿主内存中的会话拒绝删除**（`busy`）：判定读宿主 `ctx.sessions` 的显式状态，
+  不再依赖 mtime/体积增长等墙钟启发式。宿主重启或该会话被卸载后即可删除；这正是
+  `needsRestart` 字段在实践中不再产生的原因（保留仅为删除竞态兜底）。删除后立即做一次
+  无等待的文件复验：文件被重建会再删一次，仍存在则记 `reappeared` 失败。
 - 首行损坏的孤儿日志被宿主枚举静默跳过：面板既看不到也无法经面板删除（删除
   会因 `unenumerable` 被拒绝），只能手动清理文件。
 - 恢复归档走 DSH 官方的 `WorkspaceRegistry.unarchiveSession()`（宿主必填

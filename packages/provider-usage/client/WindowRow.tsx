@@ -4,7 +4,7 @@
  * @module provider-usage/WindowRow
  */
 
-import type { UsageWindow } from '../src/types.js'
+import { resolveUsageLabel, type UsageWindow } from '../src/types.js'
 import { labelStyle, windowRowStyle, windowHeadStyle, windowMetaStyle, trackStyle } from './pill-styles.js'
 import { fillStyle, formatAmount, formatReset } from './pill-format.js'
 import type { ProviderUsagePillInjected } from './pill-types.js'
@@ -18,10 +18,13 @@ export function WindowRow({ window, t, localeId }: { window: UsageWindow; t: Pro
   // 语义，与 headline(不显示数字)和圆点(remain 缺失不判色)互相矛盾。
   const showBar = remain !== undefined && limit !== undefined && limit > 0
   const percent = showBar ? (remain / limit) * 100 : 0
+  // label 可能是本地化结构 `{ en, [locale] }`：按 DSH 当前语言解析，纯字符串
+  // 原样渲染。
+  const label = resolveUsageLabel(window.label, localeId)
   return (
     <div style={windowRowStyle}>
       <div style={windowHeadStyle}>
-        <span id={`pu-window-${window.id}`} style={labelStyle}>{window.label}</span>
+        <span id={`pu-window-${window.id}`} style={labelStyle}>{label}</span>
         <span style={{ fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
           {/* blocked 是上游真的拒绝过（不是余额读数为 0）：说「已用尽」比「0」更准确，因为这一行此刻确实用不了。 */}
           {remain === undefined

@@ -46,6 +46,7 @@
   "devDependencies": {
     "@deepseek-ai/schemastery": "~3.19.0",
     "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/cordis-plugin-loader": "~1.1.0",
     "@deepseek-ai/dsh-client-locale": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-client-resources": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-client-ui-conversation": "^0.2.2-rc.1",

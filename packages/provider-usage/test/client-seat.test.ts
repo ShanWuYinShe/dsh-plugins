@@ -76,20 +76,31 @@ function makeSlots(faults: { throwOnRegister?: boolean } = {}): {
       },
       register: (options: unknown, component: unknown) => {
         if (faults.throwOnRegister === true) throw new Error('keyed slot requires options.key')
-        registrations.push({ options, component })
-        return () => {}
+        const registration = { options, component }
+        registrations.push(registration)
+        // 与真实 SlotRegistry 一致：disposer 移除 entry（宿主 fiber 卸载/HMR 时调用）。
+        return () => {
+          const index = registrations.indexOf(registration)
+          if (index >= 0) registrations.splice(index, 1)
+        }
       },
     },
   }
 }
 
 /** locale 服务桩：入口用到 register / bind，以及注入面 hooks.locale 的快照源。 */
-function makeLocale(): { service: unknown; snapshot: { active: string; locales: unknown[]; revision: number } } {
+function makeLocale(): {
+  service: unknown
+  snapshot: { active: string; locales: unknown[]; revision: number }
+  registerDisposals: () => number
+} {
   const snapshot = { active: 'zh', locales: [], revision: 0 }
+  let disposals = 0
   return {
     snapshot,
+    registerDisposals: () => disposals,
     service: {
-      register: () => () => {},
+      register: () => () => { disposals += 1 },
       bind: () => (key: string) => key,
       getSnapshot: () => snapshot,
       subscribe: () => () => {},
@@ -97,7 +108,7 @@ function makeLocale(): { service: unknown; snapshot: { active: string; locales: 
   }
 }
 
-/** resources 服务桩：记录协议 provider 注册，返回幂等 disposer。 */
+/** resources 服务桩：记录协议 provider 注册，返回真正移除协议的幂等 disposer。 */
 function makeResources(): { service: unknown; protocols: string[] } {
   const protocols: string[] = []
   return {
@@ -105,7 +116,10 @@ function makeResources(): { service: unknown; protocols: string[] } {
     service: {
       register: (provider: { protocol: string }) => {
         protocols.push(provider.protocol)
-        return () => {}
+        return () => {
+          const index = protocols.indexOf(provider.protocol)
+          if (index >= 0) protocols.splice(index, 1)
+        }
       },
     },
   }
@@ -185,6 +199,9 @@ describe('provider-usage dock entry 注册形状（对齐宿主自带 pill）', 
     expect(typeof second.resolveSeat).toBe('function')
     expect(first.resolveSeat?.('same-session')).toBeUndefined()
     expect(second.resolveSeat?.('same-session')).toBeUndefined()
+    // keyedHooks 每次 inject 是新 resolver 但行为等价（同样的目录解析）。
+    expect(first.keyedHooks.modelDirectory('same-session')).toBeUndefined()
+    expect(second.keyedHooks.modelDirectory('same-session')).toBeUndefined()
   })
 
   it('目录服务缺席时 resolveSeat 返回 undefined 而非抛错', async () => {
@@ -209,6 +226,21 @@ describe('provider-usage dock entry 注册形状（对齐宿主自带 pill）', 
     expect(typeof seat?.load).toBe('function')
     seat!.load()
     expect(directories.loadCount()).toBe(1)
+  })
+
+  it('注入面携带 keyedHooks.modelDirectory（官方 reactive 事实通道）', async () => {
+    const { ctx, registrations, directories } = await mountEntry()
+    const [dock] = registrations
+    const props = dock!.options.inject()
+    // 组件不再自己 useSyncExternalStore 订阅裸 store：目录快照经 keyedHooks
+    // 交给 renderer 绑定成 useModelDirectory（官方 ui-plan `plans: (turn) => …`
+    // 同形）。目录服务未就绪时 resolver 返回 undefined（这一帧不渲染）。
+    expect(typeof props.keyedHooks.modelDirectory).toBe('function')
+    expect(props.keyedHooks.modelDirectory('session-1')).toBeUndefined()
+
+    ctx.provide('modelDirectories', { directoryFor: directories.directoryFor } as never)
+    await settle()
+    expect(props.keyedHooks.modelDirectory('session-1')).toBe(directories.store)
   })
 
   it('注入面携带 locale 快照源（renderer 据此绑定组件侧 useLocale）', async () => {
@@ -280,6 +312,21 @@ describe('provider-usage dock entry 注册形状（对齐宿主自带 pill）', 
     const { resources } = await mountEntry()
     // 轮询兜底已删除；额度只能来自 resource 流，协议注册少一次就整块失效。
     expect(resources.protocols).toEqual(['provider-usage'])
+  })
+
+  it('fiber dispose 回收 effect 注册：resource 协议与 locale 字典都被反注册（HMR 安全）', async () => {
+    // 「注册即 effect」：插件 HMR 重载/卸载时，宿主 fiber 会执行 apply 期间
+    // 收集的 disposer。这里用真实 cordis Context 装载真实入口，dispose 后断言
+    // 反注册真的发生——残留的协议注册会让重载后的插件「协议已被占用」。
+    const { resources, locale, load } = await mountEntry()
+    expect(resources.protocols).toEqual(['provider-usage'])
+    expect(locale.registerDisposals()).toBe(0)
+
+    const fiber = await load as unknown as { dispose: () => Promise<void> }
+    await fiber.dispose()
+
+    expect(resources.protocols).toEqual([])
+    expect(locale.registerDisposals()).toBe(1)
   })
 
   it('注册体抛错：同句 console.error 兜底且不冒泡', async () => {

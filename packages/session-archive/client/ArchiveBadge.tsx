@@ -15,15 +15,17 @@ export function ArchiveBadge(props: {
   badgeRef: any
   iconOnly: any
   open: any
-  setOpen: any
   closing: any
   closePanel: any
-  reopenPanel: any
+  /** 打开面板（清空上一条提示并置 open）。 */
+  openPanel: () => void
+  /** 关闭动画中取消关闭并重开（同样清空提示）。 */
+  reopen: () => void
   items: any
   badgeCount: any
   badgeTitle: any
 }): React.ReactNode {
-  const { t, badgeRef, iconOnly, open, setOpen, closing, closePanel, reopenPanel, items, badgeCount, badgeTitle } = props
+  const { t, badgeRef, iconOnly, open, closing, closePanel, items, badgeCount, badgeTitle, openPanel, reopen } = props
 
   return (
       React.createElement(
@@ -34,7 +36,7 @@ export function ArchiveBadge(props: {
       type: "button",
       // closing 动画期间的点击 = 取消关闭并重开(open 仍为 true,不处理
       // 会被当成「再次关闭」吞掉,用户要点两次才能重开)。
-      onClick: () => { if (closing) reopenPanel(); else if (open) closePanel(); else setOpen(true); },
+      onClick: () => { if (closing) reopen(); else if (open) closePanel(); else openPanel(); },
       "aria-expanded": open,
       "aria-label": badgeTitle,
       title: badgeTitle

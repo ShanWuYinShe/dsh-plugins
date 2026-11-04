@@ -63,6 +63,7 @@ async function renderPill(answer: SnapshotAnswer): Promise<string> {
     t,
     sessionId: 'session-1',
     resolveSeat: () => ({ directory, load: () => {} }),
+    useModelDirectory: () => readyState,
     useResource: () => ({ status: 'live', value: answer, failure: undefined }),
   } as unknown as ProviderUsagePillProps
   await act(async () => {

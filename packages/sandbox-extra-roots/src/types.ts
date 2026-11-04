@@ -15,10 +15,18 @@ export interface SandboxExtraRootsConfig {
   extraWritableRoots: string[];
 }
 
-/** get() 的返回：当前生效配置的快照。 */
+/** enforcement 初始化失败的可见报告：额外根当前未并入官方沙盒策略。 */
+export interface SandboxExtraRootsDegraded {
+  /** 初始化失败原因（展示给用户；不含凭据）。 */
+  reason: string;
+}
+
+/** get() 的返回：当前生效配置的快照 + 可选的降级原因。 */
 export interface SandboxExtraRootsGetResult {
-  /** 当前生效配置。 */
+  /** 当前生效配置（用户填写值；缺省表示未配置）。 */
   config: SandboxExtraRootsConfig;
+  /** 存在时表示配置已保存但 enforcement 未生效（卡片展示"额外根当前未生效"）。 */
+  degraded?: SandboxExtraRootsDegraded;
 }
 
 /** set() 的入参：允许覆盖的配置字段（缺省字段保持当前值）。 */

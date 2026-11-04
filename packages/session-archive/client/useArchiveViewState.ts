@@ -11,12 +11,19 @@ import * as React from "react";
 import { ARCHIVE_PAGE_SIZE, ARCHIVE_SORT_KEYS, filterArchived, sortArchived } from "./archive-entries.js";
 import type { ArchiveSortKey } from "./archive-entries.js";
 
+/** 分页窗口：记录「上一次展开更多时的筛选条件 + 列表身份 + 行数」。
+ * 筛选变化或列表整体替换时 render 期直接回到第一页（不写 state），
+ * 避免 effect 回写 render 可推导状态（RULE-074）。 */
+interface PaginationWindow {
+  filter: string
+  items: readonly unknown[]
+  visibleCount: number
+}
+
 export function useArchiveViewState(deps: {
   items: any[]
-  visibleCount: number
-  setVisibleCount: (next: number) => void
 }) {
-  const { items, visibleCount, setVisibleCount } = deps
+  const { items } = deps
 
   // 筛选与排序持久化到 sessionStorage(标签页内跨页面重载保留):用户筛出
   // 一组会话后打开详情/误刷新,回来不必重新输入。禁用 sessionStorage 的
@@ -43,9 +50,19 @@ export function useArchiveViewState(deps: {
   const filteredItems = React.useMemo(() => filterArchived(items, filter), [items, filter]);
   // 先筛后排:排序在筛选结果上进行,「加载更多」分页按最终顺序切片。
   const sortedItems = React.useMemo(() => sortArchived(filteredItems, sortKey), [filteredItems, sortKey]);
-  // 筛选变化回到第一页:否则 narrowed 结果落在已翻过的页码之外,看似空列表。
-  React.useEffect(() => { setVisibleCount(ARCHIVE_PAGE_SIZE); }, [filter]);
+  // 分页窗口是 { filter, items, visibleCount } 的派生对：筛选条件变化或列表
+  // 整体替换（手动刷新落地新行）时 render 期直接返回第一页，无需 effect 回写；
+  // setVisibleCount 只由「加载更多」手势调用（打开面板不再重置分页）。
+  const [pagination, setPagination] = React.useState<PaginationWindow>({ filter: "", items: [], visibleCount: ARCHIVE_PAGE_SIZE });
+  const paginationCurrent = pagination.filter === filter && pagination.items === items;
+  const visibleCount = paginationCurrent ? pagination.visibleCount : ARCHIVE_PAGE_SIZE;
+  const setVisibleCount = React.useCallback((next: number | ((current: number) => number)) => {
+    setPagination((current) => {
+      const base = current.filter === filter && current.items === items ? current.visibleCount : ARCHIVE_PAGE_SIZE;
+      return { filter, items, visibleCount: typeof next === "function" ? next(base) : next };
+    });
+  }, [filter, items]);
   const visibleItems = sortedItems.slice(0, visibleCount);
 
-  return { filter, setFilter, sortKey, setSortKey, filteredItems, sortedItems, visibleItems }
+  return { filter, setFilter, sortKey, setSortKey, filteredItems, sortedItems, visibleItems, visibleCount, setVisibleCount }
 }

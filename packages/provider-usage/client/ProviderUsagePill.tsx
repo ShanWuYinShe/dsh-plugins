@@ -97,8 +97,8 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
               disabled={busy}
               title={busy ? t('refreshing') : t('refresh')}
               aria-label={busy ? t('refreshing') : t('refresh')}
-              // 手动刷新要真刷新:force 让宿主绕过缓存读——否则轮询间隔与
-              // 宿主 TTL 同为 60s,缓存恒新鲜,按钮永远拿回上一轮轮询的数。
+              // 手动刷新要真刷新:force 让宿主绕过缓存读。自动轮询要等下一个
+              // 节拍（60s + 相位余量）才会重读，按钮必须立刻打一次上游。
               onClick={() => { void refresh() }}
             >
               <svg

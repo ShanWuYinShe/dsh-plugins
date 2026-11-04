@@ -1,11 +1,14 @@
 /**
- * apply.ts — 插件主体：包装 sandbox/fs 并接配置热更新。
+ * apply.ts — 插件主体：把配置的额外可写根并入官方 sandbox 策略，并注册设置页服务。
  *
- * 包装安装与共享挂载生命周期在 wrap.ts；argv 改写与危险根复查在
- * confine-runners.ts；本模块只做配置解析、状态装配与 Remote 服务注册。
+ * enforcement 收敛到官方：`policy-merge.ts` 包装 `ctx.sandboxPolicy.resolve()`，
+ * 官方 Seatbelt / bwrap / Landlock / fs fence 从同一 `additionalWritableRoots`
+ * 消费（本插件不再包装 `ctx.fs.checkedTarget`、不再改写 confine argv）。
+ * 本模块只做配置解析、包装装配与 Remote 服务注册；目录存在性过滤复用
+ * roots-filter 的实例缓存，危险根/规范化在 config-validate。
  *
- * 官方依赖（@deepseek-ai/dsh-sandbox 等）一律静态导入：宿主的外部插件运行时
- * 解析保证单实例，没有 createRequire 多级 fallback 与模块求值期 await。
+ * 官方依赖（@deepseek-ai/dsh-sandbox-policy 等）一律静态导入：宿主的外部插件
+ * 运行时解析保证单实例，没有 createRequire 多级 fallback 与模块求值期 await。
  *
  * @module @chaoset/sandbox-extra-roots/apply
  */
@@ -14,103 +17,48 @@ import type { Context } from '@deepseek-ai/cordis'
 import { createRootsFilter } from './roots-filter.js'
 import { normalizeRoots } from './config-validate.js'
 import { DEFAULT_CONFIG } from './plugin-config.js'
-import { createLandlockRuntimeLoader } from './landlock-exec.js'
-import { ORIGINAL } from './roots.js'
+import { policyMerge, rawPolicyService } from './policy-merge.js'
 import { PluginConfigGateway } from './remote.js'
 import type { Config } from './config.js'
-import type { SandboxExtraRootsConfig } from './types.js'
-import {
-  installConfineWrapper,
-  installFsWrapper,
-  mountState,
-  rawService,
-  releaseMount,
-  type ConfineMountState,
-  type MountState,
-} from './wrap.js'
+import type { SandboxExtraRootsConfig, SandboxExtraRootsDegraded } from './types.js'
 
 export async function apply(ctx: Context, config?: Config): Promise<void> {
-  // fail-safe：初始化失败只记录，绝不让本插件拖垮 harness（host 层挂载时
-  // entry 异常会导致进程启动失败）。
+  const warn = (message: string) => ctx.logger?.warn?.(message)
+  // 生效配置：defaults 与 cordis 注入的 patch config（设置页保存经官方
+  // configEditor 写入，由 Loader 对账后 reload 本行使新配置在这里生效）。
+  const cfg: SandboxExtraRootsConfig = { ...DEFAULT_CONFIG, ...(config ?? {}) }
+  // 降级可见性（RULE-061）：初始化失败时额外根不生效，但设置卡必须能显示
+  // 原因——gateway 仍注册，get() 返回 degraded。
+  let degraded: SandboxExtraRootsDegraded | undefined
   try {
-    const rawSandbox = rawService(ctx.sandbox, ORIGINAL)
-    // ctx.fs 的官方 Context 增强来自本包未依赖的 @deepseek-ai/dsh-fs：按实例访问。
-    const rawFs = rawService((ctx as unknown as { fs: unknown }).fs, ORIGINAL)
-    // landlock 启动器解析是实例级懒加载（owner: 本次 apply）：此前是模块级
-    // singleton，同进程多实例/测试会串扰。成功缓存、失败下次重新探测的语义
-    // 由 loader 实例自身保持（见 landlock-exec.ts）。
-    const landlockRuntime = await createLandlockRuntimeLoader().get()
-
-    // 目录存在性 TTL 缓存是实例级状态（owner: 包装状态 MountState）。行
-    // reload 时旧包装可能仍挂着（新 entry 先 apply、旧 entry 后 dispose），
-    // 因此每次 apply 都换新实例并写回状态，保证按真实文件系统判定。
+    // 目录存在性 TTL 缓存是实例级状态（owner: 本次 apply 的包装句柄）。
     const rootsFilter = createRootsFilter()
-
-    // 共享状态（跨挂载点）：引用计数 + 包装句柄 + 当前生效的额外目录。
-    const sandboxState = mountState<ConfineMountState>(rawSandbox, () => ({
-      mounts: 0,
-      extraRoots: [],
-      warned: new Set<string>(),
-      rootsFilter,
-      wrapped: false,
-      hadOwn: false,
-      original: null,
-      installed: null,
-      checkedProfile: false,
-      profileDrifted: false,
-    }))
-    const fsState = mountState<MountState>(rawFs, () => ({
-      mounts: 0,
-      extraRoots: [],
-      warned: new Set<string>(),
-      rootsFilter,
-      wrapped: false,
-      hadOwn: false,
-      original: null,
-      installed: null,
-    }))
-    // 已存在包装状态（行 reload 的短暂重叠窗口）时沿用包装，但目录缓存
-    // 属于"当前这一代配置"：整体换成新实例。
-    sandboxState.rootsFilter = rootsFilter
-    fsState.rootsFilter = rootsFilter
-    // 卸载计数在 effect 体内递增，且 effect 先于后续初始化登记：
-    //   - ctx.effect 的 execute 在注册时立即执行（cordis 契约），递增与注册
-    //     同一步完成；注册本身抛错时不会留下"已递增、但永不 dispose"的计数
-    //     （旧实现先 +1 后注册——注册失败 = 计数永久泄漏，包装再也无法还原）。
-    //   - 后续 setup 失败由本 fiber 负责递减；最后一次退出才还原包装。
-    ctx.effect(() => {
-      sandboxState.mounts += 1
-      fsState.mounts += 1
-      return () => {
-        releaseMount(rawSandbox, sandboxState, 'confine')
-        releaseMount(rawFs, fsState, 'checkedTarget')
-      }
-    })
-
-    const warn = (message: string) => ctx.logger?.warn?.(message)
-    // 生效配置：defaults 与 cordis 注入的 patch config（含 profile patch 里的
-    // 用户 override——设置页保存经官方 configEditor 写入，由 Loader 对账后
-    // reload 本行使新配置在这里生效）。配置热更新即行 reload：目录存在性缓存
-    // 在每次 apply 重建时整体失效，保证按真实文件系统判定。
-    const cfg: SandboxExtraRootsConfig = { ...DEFAULT_CONFIG, ...(config ?? {}) }
+    const policy = rawPolicyService(ctx.sandboxPolicy)
+    const merge = policyMerge(policy, { rootsFilter, warn })
+    // 挂载计数在 effect 体内递增，且 effect 先于包装安装登记：
+    //   - ctx.effect 的 execute 在注册时立即执行（cordis 契约）；注册本身抛错
+    //     时不会留下已递增、但永不 dispose 的计数；
+    //   - 安装失败时由本 fiber 的 dispose 回收计数，不会残留无 owner 的包装。
+    // Loader 行 reload 时新旧 entry 短暂并存：共享状态挂在 policy service 上，
+    // 引用计数保证最后一个挂载点退出才还原官方 resolve。
+    ctx.effect(() => merge.mount())
     // Config schema 只保证形状/默认值；这里仍是最终防线：canonical 化、危险根
-    // 分级过滤、去重，非法 patch 值经 warn 可见（不静默忽略）。
-    sandboxState.extraRoots = normalizeRoots(cfg, warn)
-    fsState.extraRoots = sandboxState.extraRoots
-
-    // 任一包装已在本实例上安装过（apply 重跑/多挂载点）时沿用，不重复包装。
-    if (!sandboxState.wrapped) installConfineWrapper(rawSandbox, { ctx, state: sandboxState, landlockRuntime, warn })
-    if (!fsState.wrapped) installFsWrapper(rawFs, { ctx, state: fsState, warn })
-
-    // 可选服务（设置页 UI）：排在核心包装之后，且独立 fail-safe——gateway
-    // 失败不影响包装。远程配置服务：typert 工件由官方生成器产出并随
-    // package.json 的 ./typert 导出给宿主 typert-loader；此处只注册服务实例。
-    try {
-      ctx.plugin(PluginConfigGateway, { config: cfg })
-    } catch (error) {
-      ctx.logger?.warn?.(`sandbox-extra-roots: settings gateway failed (core sandbox extension unaffected): ${(error as Error)?.message ?? String(error)}`)
-    }
+    // 分级过滤、去重，非法 patch 值经 warn 可见（不静默忽略）。每次 apply 换新
+    // 目录缓存与生效根，下一次 resolve 即用「当前这一代配置」。
+    merge.update(normalizeRoots(cfg, warn), rootsFilter, warn)
+    merge.install()
   } catch (error) {
-    ctx.logger?.warn?.(`sandbox-extra-roots: init failed: ${(error as Error)?.message ?? String(error)}`)
+    const reason = (error as Error)?.message ?? String(error)
+    degraded = { reason }
+    // 安全增强静默失效比初始化失败更危险：明确写出"extra roots are NOT in effect"。
+    warn(`sandbox-extra-roots: init failed; extra writable roots are NOT in effect (the official sandbox policy is unchanged): ${reason}`)
+  }
+
+  // 设置页服务：独立 fail-safe——gateway 失败不影响 enforcement 包装；反之
+  // enforcement 失败时 gateway 仍需注册（degraded 在卡片上可见）。
+  try {
+    ctx.plugin(PluginConfigGateway, { config: cfg, degraded })
+  } catch (error) {
+    ctx.logger?.warn?.(`sandbox-extra-roots: settings gateway failed (extra-root merging unaffected): ${(error as Error)?.message ?? String(error)}`)
   }
 }

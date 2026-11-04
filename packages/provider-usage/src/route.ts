@@ -25,10 +25,22 @@ interface ProviderUsageRouteOptions {
   path?: string
   /** Upper bound on the provider list one request may ask for. */
   maxProviders?: number
+  /** 一次请求顺序查全部 provider 的**总预算**（毫秒）；默认 {@link DEFAULT_REQUEST_BUDGET_MS}。 */
+  budgetMs?: number
 }
 
 /** Largest provider list one request may name. */
 const DEFAULT_MAX_PROVIDERS = 20
+
+/**
+ * 一次 usage 请求的总预算（毫秒）。
+ *
+ * route 顺序查最多 {@link DEFAULT_MAX_PROVIDERS} 个 provider，每个又受 15s
+ * 单查询 deadline 约束——没有总预算时单请求最坏可挂约 5 分钟（浏览器早已超时，
+ * 服务端还在排队打账单接口）。20s 覆盖正常一轮「首帧查询」并给出上界：超时后
+ * 在途读取折叠成失败快照，响应仍然完整（逐 provider 都能读到错误）。
+ */
+const DEFAULT_REQUEST_BUDGET_MS = 20_000
 
 // 错误文本统一走 registry 导出的 safeMessage：本地曾有一份少一条
 // “token=/api_key= 查询参数”脱敏规则的旧副本，与 registry 版本漂移——
@@ -118,6 +130,7 @@ function requestedProviders(url: URL, max: number): readonly string[] {
  */
 export function providerUsageHandler(options: ProviderUsageRouteOptions): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const max = options.maxProviders ?? DEFAULT_MAX_PROVIDERS
+  const budgetMs = options.budgetMs ?? DEFAULT_REQUEST_BUDGET_MS
   return async (req, res) => {
     if (req.method !== 'GET') {
       json(res, 405, { error: 'method not allowed' })
@@ -133,15 +146,27 @@ export function providerUsageHandler(options: ProviderUsageRouteOptions): (req: 
       const url = new URL(req.url ?? '/', 'http://dsh.invalid')
       const providers = requestedProviders(url, max)
       const force = forceRequested(url)
-      // Sequential rather than parallel: these are billing endpoints, and
-      // firing twenty at once from one page poll is how an account gets
-      // rate-limited for merely displaying a number.
-      const snapshots: ProviderUsageAnswer[] = []
-      for (const provider of providers) {
-        const snapshot = await options.registry.snapshot(provider, { force })
-        snapshots.push(snapshot ?? { provider, queried: false })
+      // 总预算：一次请求内所有顺序查询共享同一个 deadline 信号。到点后
+      // registry 把在途读取折叠成失败快照，循环继续把剩余 provider 以
+      // 「预算耗尽」失败行补齐，响应仍是完整的世界，而不是半截 JSON。
+      const controller = new AbortController()
+      const timer = setTimeout(() => {
+        controller.abort(new Error(`usage request exceeded its ${budgetMs}ms budget`))
+      }, budgetMs)
+      timer.unref?.()
+      try {
+        // Sequential rather than parallel: these are billing endpoints, and
+        // firing twenty at once from one page poll is how an account gets
+        // rate-limited for merely displaying a number.
+        const snapshots: ProviderUsageAnswer[] = []
+        for (const provider of providers) {
+          const snapshot = await options.registry.snapshot(provider, { force, signal: controller.signal })
+          snapshots.push(snapshot ?? { provider, queried: false })
+        }
+        json(res, 200, { snapshots })
+      } finally {
+        clearTimeout(timer)
       }
-      json(res, 200, { snapshots })
     } catch (error: unknown) {
       json(res, 500, { error: safeMessage(error) })
     }

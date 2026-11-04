@@ -10,22 +10,20 @@
 import * as React from "react";
 import { formatBytes, formatTime, shortId } from "./archive-format.js";
 import type { TFunc } from "./locales.js";
-
+import type { ArchiveDetailEntry, ArchiveItem, ArchiveRowCallbacks } from "./panel-types.js";
+import { isDetailError } from "./panel-types.js";
 
 export function ArchiveRow(props: {
   /** 本行对应的归档条目（map 回调参数，故不在 hook 解构名单里）。 */
-  item: any
+  item: ArchiveItem
   t: TFunc
-  selected: any
-  expanded: any
-  details: any
-  detailLoading: any
-  busy: any
-  toggleOne: any
-  toggleDetail: any
-  restoreOne: any
-  exportOne?: any
-}): React.ReactNode {
+  selected: ReadonlySet<string>
+  /** 展开中的会话 id（null = 全部收起）。 */
+  expanded: string | null
+  details: ReadonlyMap<string, ArchiveDetailEntry>
+  detailLoading: ReadonlySet<string>
+  busy: boolean
+} & ArchiveRowCallbacks): React.ReactNode {
   const { item, t, selected, expanded, details, detailLoading, busy, toggleOne, toggleDetail, restoreOne, exportOne } = props
 
   const isExpanded = expanded === item.sessionId;
@@ -65,9 +63,9 @@ export function ArchiveRow(props: {
       { className: "sa_rowFoot" },
       React.createElement("span", { className: "sa_rowMeta" },
         React.createElement("code", null, shortId(item.sessionId)),
-        detail !== void 0 && !detail.error && detail.messageCount !== void 0
+        detail !== void 0 && !isDetailError(detail) && detail.messageCount !== void 0
           ? " · " + (detail.truncated === true
-            ? t("messagesTruncated").replace("{n}", String(detail.totalMessageCount !== void 0 ? detail.totalMessageCount : detail.messageCount))
+            ? t("messagesTruncated").replace("{n}", String(detail.totalMessageCount))
             : t("messages").replace("{n}", String(detail.messageCount)))
           : null
       ),
@@ -109,7 +107,7 @@ export function ArchiveRow(props: {
         React.createElement("span", { className: "sa_spin", "aria-hidden": true }),
         t("loading")) : null,
       detail === void 0 ? null :
-        detail.error !== void 0 ? React.createElement("p", { className: "sa_error" }, detail.error) :
+        isDetailError(detail) ? React.createElement("p", { className: "sa_error" }, detail.error) :
         !Array.isArray(detail.messages) ? React.createElement("p", { className: "sa_error" }, t("detailLoadFailed")) :
         detail.messages.length === 0 ? React.createElement("p", { className: "sa_empty" }, t("noMessages")) :
         detail.messages.map((message: any, index: any) => React.createElement(
