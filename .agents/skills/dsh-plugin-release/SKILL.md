@@ -158,6 +158,8 @@ RELEASING.md「日常发布流程」——工作未完成期间代码可以本�
 ## 版本与推送约定
 
 - 版本号只在本地手工改（各包 `package.json` 的 `version`），CI 绝不改写。
+  升完版本重跑一次 `bun install` 同步 `bun.lock` 里 workspace 包的 `version` 字段
+  （lockfile 记录本地包版本；漏跑会让提交里的 lockfile 与 `package.json` 不一致）。
   升版本必须同时补该包 `CHANGELOG.md` 的 `## <版本> (YYYY-MM-DD)` 小节
   （GitHub Release 说明自动取自这里）：**CHANGELOG 只保留当前适配线的条目**（更早历史以 GitHub Releases 为准），
   适配小节把 `engines.dsh`（兼容声明，**精确宿主版本**，现取 `bun run dsh-status`）与依赖 range（`^版本`）分开表述。

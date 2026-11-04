@@ -215,7 +215,9 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
      Release 说明自动取自这里（`scripts/release-notes.mjs`），不写就没有说明；
      CHANGELOG 只保留当前适配线的条目（更早历史以 GitHub Releases 为准），
      适配小节把 `engines.dsh`（兼容声明，**精确宿主版本**，如 `0.2.2-rc.1`）与依赖 range（`^版本`）分开表述；
-   - 升 `package.json` 的 `version`（bump 是最后一步）。
+   - 升 `package.json` 的 `version`（bump 是最后一步），随后重跑一次 `bun install`：
+     `bun.lock` 会记录 workspace 各包的 `version` 字段，漏跑会让提交里的 lockfile
+     仍停在旧版本号（收敛压缩提交时会被一起带进 main）。
 4. **推送前逐提交复核**（`git log --oneline origin/<分支>..HEAD` +
    `git diff origin/<分支>..HEAD`）：版本号、CHANGELOG 小节、实际 diff 三者
    必须互相印证——提交信息声称的每一项变更都要能在 diff 里找到，diff 里的
