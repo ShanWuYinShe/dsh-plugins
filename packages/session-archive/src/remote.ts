@@ -15,8 +15,11 @@
  *   sessionId，**不解析数组参数**，必须显式声明数组 reader（见下方
  *   sessionIdsAsResources）——否则非 owner 批量调用按 global 判定，绕过会话级
  *   授权；
- * - list/count：方法没有具体会话参数，按 global 是**有意为之**（这两个端点
- *   不做按会话过滤；非 owner 的列表过滤属后续事项）。
+ * - list/count：方法没有具体会话参数（Gateway 在 lookup 解析前读不到资源），
+ *   因此按 global 判定入口调用；**返回的每一行逐项**经
+ *   `this.ctx.remoteAccess.allows({ kind: 'session', id })` 过滤（count 用过滤后
+ *   的数量）——官方 session/list 的同款模型（api-session-controller 的 list
+ *   先取全量再逐行 filter），非 owner 只能看到自己的归档元数据。
  *
  * 所有逻辑委托给 host 模块（index.ts 传入的 archiveHost）。
  *
@@ -24,6 +27,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis';
+import type {} from '@deepseek-ai/dsh-api-remote-access';
 import type { SessionId } from '@deepseek-ai/dsh-session';
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { assertSessionId, assertSessionIdArray } from './session-id.js';
@@ -62,6 +66,11 @@ function sessionIdsAsResources(sessionIds: readonly string[]): readonly SessionI
  * @param config - { host: archiveHost }。
  */
 export class SessionArchiveGateway extends TypertRemoteService {
+  /** remoteAccess 是 list/count 逐项过滤与 resources 判定的必挂宿主服务：
+   * 作为服务级依赖声明（不写进插件入口的 inject——插件入口只声明
+   * workspaceRegistry/sessionPersistence/sessions，Gateway fiber 自己等它）。 */
+  static inject = ['remoteAccess'];
+
   private host: ArchiveHost;
 
   constructor(ctx: Context, config: { host: ArchiveHost }) {
@@ -70,17 +79,26 @@ export class SessionArchiveGateway extends TypertRemoteService {
   }
 
   /** 列出全部归档会话（文件已删的幽灵归档记录不显示）。
-   * 无具体会话参数，按 global 授权（有意为之，见文件头）。 */
+   * 无具体会话参数，入口按 global 判定；返回前逐行过滤，非 owner 只看到
+   * 自己的会话（官方 session/list 同款）。 */
   @Remote('list')
-  list(): Promise<ArchiveListResult> {
-    return this.host.list();
+  async list(): Promise<ArchiveListResult> {
+    const result = await this.host.list();
+    return {
+      items: result.items.filter((item) =>
+        this.ctx.remoteAccess.allows({ kind: 'session', id: item.sessionId as SessionId })),
+    };
   }
 
   /** 归档会话计数（侧边栏徽标的关闭态轮询只调这里）。
-   * 无具体会话参数，按 global 授权（有意为之，见文件头）。 */
+   * 无具体会话参数，入口按 global 判定；计数用逐项过滤后的数量。 */
   @Remote('count')
-  count(): Promise<ArchiveCountResult> {
-    return this.host.count();
+  async count(): Promise<ArchiveCountResult> {
+    const ids = await this.host.existingIds();
+    return {
+      count: ids.filter((sessionId) =>
+        this.ctx.remoteAccess.allows({ kind: 'session', id: sessionId as SessionId })).length,
+    };
   }
 
   /**

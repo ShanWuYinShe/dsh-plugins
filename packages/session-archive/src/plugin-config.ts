@@ -32,19 +32,30 @@ export const DEFAULT_CONFIG: SessionArchiveConfig = {
   titleReadConcurrency: 4,
 };
 
-/** 配置归一化：非法/缺失数值回退默认值，保证运行时不会拿到 NaN/负数。 */
+/** 配置归一化：非法/缺失数值回退默认值，保证运行时不会拿到 NaN/负数。
+ * 这是 Loader schema（config.ts 的 Config）之外的最终防线：schema 校验挡在
+ * 激活前，但直调 apply / 旧 profile 绕过 Loader 时仍可能传入非法值——此时
+ * 通过 onInvalid 上报（宿主 logger.warn），不再静默回退。 */
 export function normalizeConfig(
   source: unknown,
   defaults: SessionArchiveConfig = DEFAULT_CONFIG,
+  onInvalid?: (message: string) => void,
 ): SessionArchiveConfig {
   const raw = source !== null && typeof source === 'object' && !Array.isArray(source)
     ? source as Partial<Record<keyof SessionArchiveConfig, unknown>>
     : {};
-  const positiveInt = (value: unknown, fallback: number): number =>
-    Number.isInteger(value) && (value as number) > 0 ? value as number : fallback;
+  const positiveInt = (key: keyof SessionArchiveConfig): number => {
+    // undefined 视为未配置（用默认值）；null/字符串/0/浮点等显式非法值走告警回退。
+    const value = raw[key] !== undefined ? raw[key] : defaults[key];
+    if (Number.isInteger(value) && (value as number) > 0) return value as number;
+    // 上报原值（含字符串/浮点/0），日志里能看出用户到底写错了什么。
+    const shown = JSON.stringify(value) ?? String(value);
+    onInvalid?.(`session-archive: invalid config "${key}"=${shown}; using default ${defaults[key]}`);
+    return defaults[key];
+  };
   return {
-    detailMaxMessages: positiveInt(raw.detailMaxMessages ?? defaults.detailMaxMessages, defaults.detailMaxMessages),
-    messagePreviewChars: positiveInt(raw.messagePreviewChars ?? defaults.messagePreviewChars, defaults.messagePreviewChars),
-    titleReadConcurrency: positiveInt(raw.titleReadConcurrency ?? defaults.titleReadConcurrency, defaults.titleReadConcurrency),
+    detailMaxMessages: positiveInt('detailMaxMessages'),
+    messagePreviewChars: positiveInt('messagePreviewChars'),
+    titleReadConcurrency: positiveInt('titleReadConcurrency'),
   };
 }

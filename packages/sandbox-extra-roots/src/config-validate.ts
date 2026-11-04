@@ -8,7 +8,8 @@
  */
 
 import { isAbsolute } from 'node:path'
-import { canon, expandTilde, classifyRoot } from './roots.js'
+import { expandHomePath } from '@deepseek-ai/dsh-home-paths'
+import { canon, classifyRoot } from './roots.js'
 import type { SandboxExtraRootsConfig } from './types.js'
 
 /** 把未知输入收窄成"可能是配置对象"的最小视图（字段逐项运行时校验）。 */
@@ -29,7 +30,7 @@ export function validateSandboxConfig(partial: unknown): void {
     throw new TypeError('sandbox-extra-roots config field "extraWritableRoots" must be an array');
   }
   for (const rawRoot of roots) {
-    const root = typeof rawRoot === "string" ? expandTilde(rawRoot) : rawRoot;
+    const root = typeof rawRoot === "string" ? expandHomePath(rawRoot) : rawRoot;
     if (typeof root !== "string" || root.length === 0 || !isAbsolute(root)) {
       throw new TypeError(`sandbox-extra-roots: extra writable root must be a non-empty absolute path: ${JSON.stringify(root)}`);
     }
@@ -51,7 +52,7 @@ export function normalizeRoots(source: unknown, warn: (message: string) => void)
   if (!Array.isArray(config.extraWritableRoots)) {
     warn("sandbox-extra-roots: extraWritableRoots must be an array of absolute paths; ignoring current config");
   }
-  const expanded = roots.map((root) => (typeof root === "string" ? expandTilde(root) : root));
+  const expanded = roots.map((root) => (typeof root === "string" ? expandHomePath(root) : root));
   const normalized = expanded
     .filter((root): root is string => {
       if (typeof root === "string" && root.length > 0 && isAbsolute(root)) return true;

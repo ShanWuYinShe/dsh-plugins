@@ -1,7 +1,8 @@
 /**
  * pill-types.ts — pill 的注入面与组件 props。
  *
- * 注入面只剩「文案 t」与「渲染期解析模型目录的 resolveSeat」；会话 id 与
+ * 注入面只剩「文案 t」「渲染期解析模型目录的 resolveSeat」与 locale 快照源
+ * （`hooks.locale`，宿主 renderer 绑定成组件侧 `useLocale`）；会话 id 与
  * resources 的 useResource 由宿主 standard kit 提供(renderer 无条件注入)，
  * 不在这里重复声明。目录类型直接取宿主 ui-model-selection 的官方
  * ModelDirectory.store，不再手写 { subscribe, getSnapshot } 影子形状。
@@ -9,6 +10,7 @@
  * @module provider-usage/pill-types
  */
 
+import type { LocaleSnapshot } from '@deepseek-ai/dsh-client-locale/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelDirectory } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 // 仅加载 resources 对 GlobalStandardProps 的 useResource 合并声明。
@@ -23,6 +25,23 @@ export interface ProviderUsageSeat {
   load: () => void
 }
 
+/**
+ * 注入面 `hooks` 隔间里的 locale 快照源。
+ *
+ * 形状与宿主安装的 `LocaleFace` 一致（getSnapshot/subscribe 对）：renderer
+ * 把它绑定成组件侧的 `useLocale` selector hook，语言切换时用 uSES 通知组件
+ * 重渲染——数字/时间格式化因此跟随 DSH 当前语言，而不是浏览器语言。
+ */
+export interface ProviderUsageLocaleSource {
+  /** 当前 locale 快照（宿主在变更之间保持同一引用，uSES-safe）。 */
+  getSnapshot: () => LocaleSnapshot
+  /** 订阅 locale 快照变更。 */
+  subscribe: (listener: () => void) => () => void
+}
+
+/** 组件侧 locale selector hook（宿主 renderer 由 inject.hooks 绑定生成）。 */
+export type ProviderUsageLocaleHook = <Selected>(selector: (snapshot: LocaleSnapshot) => Selected) => Selected
+
 /** 由浏览器侧入口注入的本地化与目录解析面。 */
 export interface ProviderUsagePillInjected {
   /** 本包 locale 命名空间的文案函数。 */
@@ -36,6 +55,14 @@ export interface ProviderUsagePillInjected {
    * 下一次 render 自动重试；本函数**绝不抛错**。
    */
   resolveSeat: (sessionId: unknown) => ProviderUsageSeat | undefined
+  /**
+   * 可观察伴侣隔间：renderer 把这里的每个源绑定成组件侧 selector hook，
+   * 不参与 render-occurrence 上下文（`hooks` 键本身不会出现在组件 props 上）。
+   */
+  hooks: {
+    /** DSH 当前语言快照源 → 组件侧 `useLocale`。 */
+    locale: ProviderUsageLocaleSource
+  }
 }
 
 /**
@@ -57,4 +84,13 @@ interface ProviderUsagePillSessionProps {
 export type ProviderUsagePillProps =
   PropsRuntime<'conversation.composer.dock'>
   & ProviderUsagePillSessionProps
-  & Partial<ProviderUsagePillInjected>
+  & Partial<Omit<ProviderUsagePillInjected, 'hooks'>>
+  & {
+    /**
+     * 宿主 renderer 从 inject.hooks.locale 绑定的 selector hook。
+     *
+     * 旧宿主/契约漂移时缺席：组件仍用同一套英文/浏览器默认格式化照常渲染，
+     * 绝不因 locale 面缺失而抛错。
+     */
+    useLocale?: ProviderUsageLocaleHook
+  }

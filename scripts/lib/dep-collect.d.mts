@@ -10,7 +10,8 @@
 export declare function depKey(name: string, version: string): string;
 
 /**
- * 解析 bun 隔离布局的 store 条目名。只做形态拆分，空版本与否由收集器判定。
+ * 解析 bun 隔离布局的 store 条目名（剥离平台/peer 变体的 `+<hex>` 后缀）。
+ * 只做形态拆分，空版本与否由收集器判定。
  */
 export declare function parseBunStoreEntry(entryName: string): { name: string; version: string } | null;
 

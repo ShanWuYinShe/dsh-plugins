@@ -9,7 +9,7 @@
 
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { isWsl, windowsPathForWsl } from './wsl.js'
 import type { WorkBuddyVariant } from './variants.js'
 
@@ -33,9 +33,13 @@ export const WORKBUDDY_AUTH_FILE_ENV = 'WORKBUDDY_AUTH_FILE'
  */
 export const WORKBUDDY_STATE_DIRNAME = '.dsh-any-connect'
 
-/** Plugin-owned copy path inside the Harness home state directory. */
+/** Plugin-owned copy path inside the Harness home state directory.
+ *
+ * 用宿主的 `dshHomePath` 而不是手拼 `join(resolveDshHome(), …)`：路径归一化与
+ * 「DSH_HOME 相对/绝对」语义只该有宿主一个实现（同仓其它包也用它）。
+ */
 export function workbuddyOwnAuthPath(filename: string = WORKBUDDY_AUTH_FILENAME): string {
-  return join(resolveDshHome(), WORKBUDDY_STATE_DIRNAME, filename)
+  return dshHomePath(WORKBUDDY_STATE_DIRNAME, filename)
 }
 
 /** Directory portion of the desktop auth path, shared by both products. */

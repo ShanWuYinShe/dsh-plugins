@@ -1,3 +1,32 @@
+## 0.4.31 (2026-11-04)
+
+### 修复
+
+* **设置页保存的合并基**：写回改为官方 `configEditor.edit(current, inherited)` 契约——
+  以当前值为合并基并只并入白名单字段 `extraWritableRoots`，不再用 apply 时刻快照整体
+  覆盖本行 config（不丢 profile patch 里的其它 key、不把 bundle 继承层固化成 override）；
+  保存成功后实例快照立即更新，同一 fiber 后续 get()/set() 看到新值。
+* **Remote 失败归一化**：`set` 的失败统一抛官方 `RemoteError`——`sandbox-extra-roots/invalid-config`
+  （details `{field,value}`）与 `sandbox-extra-roots/config-unavailable`；设置页按 code
+  展示本地化提示，不再退化成网关折叠后的内部错误。
+* locale 字典注册交回 `ctx.effect` 的 disposer（HMR/卸载后字典会回收），删除 "already" 吞错分支。
+* 模块级状态收进 apply 实例：目录存在性 TTL 缓存改为 `createRootsFilter()` 实例、
+  landlock 启动器改为实例级懒加载；`Symbol.for("cordis.original")` 改用官方 `symbols.original`。
+
+### 新增
+
+* 导出官方 `Config` schema（`extraWritableRoots` 默认 `[]`），patch 非法值在 apply 时告警回退。
+* `~` 展开改用宿主 `@deepseek-ai/dsh-home-paths` 的 `expandHomePath`（与本地实现逐字等价）。
+* 发布展示元数据（`icon.svg` + `locale/en|zh.json`）与 `THIRD_PARTY_NOTICES.md`
+  （浏览器产物内联 `@deepseek-ai/dsh-typert-protocol` remote-info 的 MIT 告知）。
+
+### 优化
+
+* 设置卡片 `:hover` 规则加 `@media (hover: hover)`、补齐 `prefers-reduced-motion` 关闭
+  transition/animation；问题行预览 key 改稳定身份；`WrappedService` 收敛为最小方法面 interface。
+* 发布产物只含运行时文件（`lib/*.js`、`lib/*.d.ts`、`client/client.cjs`），不再发布
+  client 源码与 sourcemap。
+
 ## 0.4.30 (2026-11-04)
 
 ### 新增

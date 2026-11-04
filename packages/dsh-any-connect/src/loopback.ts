@@ -44,6 +44,29 @@ export function hostIsLoopback(host: string | undefined): boolean {
 }
 
 /**
+ * 浏览器同源判据（写路由专用）：`Origin` 必须**逐字等于** `http(s)://<请求的 Host>`。
+ *
+ * 任意环回 Origin 都放行是不够的：本地任何其它 Web 应用/被投毒的开发服务器
+ * 都跑在 `http://127.0.0.1:<别的端口>`，它们发出的跨源 POST 同样满足「Origin
+ * 是环回」。同源判据把调用方限定为**与宿主页面同源**的浏览器上下文——浏览器
+ * 会自己写 Origin（页面 JS 改不了），跨源页面无法伪装。
+ *
+ * 缺 Origin 一律拒绝：浏览器对 POST 一定带 Origin（Fetch 规范），不带
+ * Origin 的请求只可能来自非浏览器客户端；同用户的本机进程可以直接改状态
+ * 文件，不需要经过这条路由，不在威胁模型内。
+ *
+ * @param origin - 请求的 Origin 头（可缺）。
+ * @param host - 请求的 Host 头。
+ */
+export function requestIsSameOrigin(origin: string | undefined, host: string | undefined): boolean {
+  if (origin === undefined || host === undefined) return false
+  const normalizedHost = host.trim().toLowerCase()
+  if (normalizedHost === '') return false
+  const normalizedOrigin = origin.trim().toLowerCase()
+  return normalizedOrigin === `http://${normalizedHost}` || normalizedOrigin === `https://${normalizedHost}`
+}
+
+/**
  * A browser-sent Origin (present header) must be loopback. Non-browser
  * clients (the plugin's own fetch calls) send no Origin at all and pass.
  *

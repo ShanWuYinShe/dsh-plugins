@@ -1,3 +1,29 @@
+## 0.3.34 (2026-11-04)
+
+### 修复
+
+* **归档列表的访问控制**：`list()` / `count()` 对非 owner Peer 逐会话
+  `ctx.remoteAccess.allows({kind:'session'})` 过滤（与官方 `session/list` 同一模型），
+  不再返回未过滤的归档会话元数据聚合。
+* locale 字典注册交回 `ctx.effect` 的 disposer；删除确认计时器加卸载清理。
+* 客户端 Remote 失败按 code 本地化（`session-archive/not-archived`、`remote-access/denied`、
+  `gateway/cancelled`），未知 code 回退「技术文本 + code」。
+* **符号链接防护**：会话目录与代际文件清理先 `lstat`——目录被换成符号链接、或目录内
+  条目是符号链接时不跟随、不递归删除目标，只删除持久化定位到的真实文件并告警。
+* 消息列表 key 改稳定身份（时间 + 序号）；`:hover` 规则加 `@media (hover: hover)`。
+
+### 新增
+
+* 导出官方 `Config` schema（`detailMaxMessages` 200 / `messagePreviewChars` 2000 /
+  `titleReadConcurrency` 4，正整数校验）；patch 非法值经 logger 告警并回退默认。
+
+### 优化
+
+* 删除旧宿主兼容分支：`count()` 失败回退 `list()`、history `live` 失败原因映射、
+  `exportFilename` 死助手；内容块识别只认 0.2.2-rc.1 的 `tool-call` 形状并让仅含工具调用的
+  助手消息计入总数与占位摘要。
+* 清理死代码/无效 props，`t: any` 统一为 `TFunc`；发布产物只含运行时文件。
+
 ## 0.3.33 (2026-11-04)
 
 ### 新增

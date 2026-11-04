@@ -10,8 +10,9 @@
  * - apply.ts — 插件主体：配置解析、包装装配与 Remote 服务注册
  * - wrap.ts — sandbox/fs 包装安装与共享挂载生命周期（引用计数/还原）
  * - confine-runners.ts — confine 按 runner 改写 + 运行期根身份校验/危险根复查（纯函数）
- * - roots-filter.ts config-validate.ts — 真实存在目录过滤（带 TTL 缓存）与配置校验/规范化
+ * - roots-filter.ts config-validate.ts — 实例级目录存在性过滤（工厂）与配置校验/规范化
  * - roots.ts — 额外根目录规范化、分类与授予集合
+ * - config.ts — 插件配置 schema（Loader 读取的 Config 导出）
  * - plugin-config.ts — 插件身份（name/inject）与配置默认值
  * - common.ts — 沙盒能力探测与宿主路径工具（官方 dsh-sandbox 静态导入）
  * - landlock-exec.ts — 官方 landlock-run 启动器解析缓存（仅 Linux）
@@ -25,8 +26,10 @@
  * @module @chaoset/sandbox-extra-roots/index
  */
 
-// Cordis Loader 的 function plugin 面：只导出 name / inject / apply（值导出）。
+// Cordis Loader 的 function plugin 面：只导出 name / inject / Config / apply（值导出）。
 // 小写 config 导出不是 Cordis 元数据、从不被读取，2026-10-29 已删除；
 // 入口面锁 test/entry-surface.test.ts 拦住它长回来。
 export { name, inject } from './plugin-config.js'
 export { apply } from './apply.js'
+// 配置 schema：Loader 激活 entry 时用它校验/补默认值（RULE-060）。
+export { Config } from './config.js'

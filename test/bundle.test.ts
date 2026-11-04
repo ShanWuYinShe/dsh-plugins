@@ -76,28 +76,59 @@ describe("npm bundle metadata", () => {
       // 官方生成器 workspace.ts 的 validateExport 用 Array.includes 逐字校验
       // （不认目录通配，"lib" 不等于包含 lib/typert.host.js），官方发布包同样
       // 逐个列出。少列一条 = 生成失败/发布产物缺入口。
-      const canonical = ["lib", "client", "cordis.patch.yml", "README.md", "CHANGELOG.md", "LICENSE"];
+      // 配送面（2026-11-04 审计后）：只发布运行时真正加载的产物——
+      // - lib 用 `lib/*.js` + `lib/*.d.ts` 通配（不再整目录发布 sourcemap /
+      //   declaration map；官方 cookbook「Do not publish src, declaration maps,
+      //   JS maps」）；
+      // - client 只发构建产物 `client/client.cjs`（源码 .tsx 不随包发布）。
+      // 有 Remote 服务面的包仍**逐条**列出 Typert 工件与 ./types：官方生成器
+      // workspace.ts 的 validateExport 用 Array.includes 逐字校验（不认目录通配），
+      // 少列一条 = 生成失败/发布产物缺入口。
+      const canonical = [
+        "lib/*.js",
+        "lib/*.d.ts",
+        "client/client.cjs",
+        "cordis.patch.yml",
+        "icon.svg",
+        "locale/*.json",
+        "README.md",
+        "CHANGELOG.md",
+        "LICENSE",
+      ];
       // dsh-any-connect 的独立 CLI（lib/bin.js）是构建期自包含 bundle，内联的
       // MIT 依赖清单随包发布（THIRD_PARTY_NOTICES.md 在包根、files 显式列出）。
       if (name === "dsh-any-connect") canonical.push("THIRD_PARTY_NOTICES.md");
       const expected = REMOTE_PACKAGES.has(name)
         ? [
-            "lib",
+            "lib/*.js",
+            "lib/*.d.ts",
             "lib/typert.host.js",
             "lib/typert.host.d.ts",
             "lib/typert.remote-client.js",
             "lib/typert.remote-client.d.ts",
             "lib/types.js",
             "lib/types.d.ts",
-            "client",
+            "client/client.cjs",
             "cordis.patch.yml",
+            "icon.svg",
+            "locale/*.json",
             "README.md",
             "CHANGELOG.md",
             "LICENSE",
+            "THIRD_PARTY_NOTICES.md",
           ]
         : canonical;
       expect(pkg.files).toEqual(expected);
       for (const entry of pkg.files as string[]) {
+        if (entry.includes("*")) {
+          // 通配条目（如 `locale/*.json`、`lib/*.js`）：至少命中一个真实文件。
+          const directory = join(ROOT, "packages", name, entry.slice(0, entry.lastIndexOf("/")));
+          const suffix = entry.slice(entry.lastIndexOf("/") + 1);
+          const pattern = new RegExp("^" + suffix.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+          const matches = existsSync(directory) ? readdirSync(directory).filter((file) => pattern.test(file)) : [];
+          expect(matches.length, `${name}: files 里的通配 ${entry} 至少命中一个文件`).toBeGreaterThan(0);
+          continue;
+        }
         expect(existsSync(join(ROOT, "packages", name, entry)), `${name}: files 里的 ${entry} 在磁盘上存在`).toBe(true);
       }
     });

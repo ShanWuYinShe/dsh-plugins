@@ -23,7 +23,10 @@ export function parseBunStoreEntry(entryName) {
   const at = entryName.lastIndexOf("@");
   if (at <= 0) return null; // 形如 name@version；@ 只出现在名内（scoped 存为 +）
   const rawName = entryName.slice(0, at);
-  const version = entryName.slice(at + 1);
+  // bun 隔离布局对「有平台/peer 变体」的包会加 `+<hex>` 后缀（如
+  // `@vitest+mocker@4.1.0+fff7ddf946fac095`）。它不是 semver 的一部分：同版本的
+  // 多个变体应合并为一条 OSV 查询，否则既重复计数、又向 OSV 传了脏版本号。
+  const version = entryName.slice(at + 1).replace(/\+[0-9a-f]{8,}$/u, "");
   const name = rawName.startsWith("@") ? rawName.replace("+", "/") : rawName;
   return { name, version };
 }

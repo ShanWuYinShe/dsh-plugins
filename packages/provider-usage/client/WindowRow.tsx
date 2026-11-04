@@ -10,7 +10,7 @@ import { fillStyle, formatAmount, formatReset } from './pill-format.js'
 import type { ProviderUsagePillInjected } from './pill-types.js'
 
 /** One window's progress bar and figures. */
-export function WindowRow({ window, t }: { window: UsageWindow; t: ProviderUsagePillInjected['t'] }): React.ReactNode {
+export function WindowRow({ window, t, localeId }: { window: UsageWindow; t: ProviderUsagePillInjected['t']; localeId?: string }): React.ReactNode {
   const remain = window.remain
   const limit = window.limit
   // remain/limit 都是契约上的可选字段：有 limit 无 remain 是合法答案(余额未知的
@@ -28,13 +28,13 @@ export function WindowRow({ window, t }: { window: UsageWindow; t: ProviderUsage
             ? window.unit
             : window.blocked === true
               ? t('blocked')
-              : `${formatAmount(remain)} ${window.unit}`}
+              : `${formatAmount(remain, localeId)} ${window.unit}`}
         </span>
       </div>
       {showBar ? <div style={trackStyle} role="progressbar" aria-labelledby={`pu-window-${window.id}`} aria-valuenow={Math.round(percent)} aria-valuemin={0} aria-valuemax={100}><div className={percent <= 20 ? 'pu-stripe' : undefined} style={fillStyle(percent)} /></div> : null}
       <span style={windowMetaStyle}>
-        {showBar ? t('windowRemaining', { remain: formatAmount(remain), limit: formatAmount(limit) }) : null}
-        {window.resetsAt === undefined ? null : <>{showBar ? ' · ' : ''}{t('resetsAt', { time: formatReset(window.resetsAt) })}</>}
+        {showBar ? t('windowRemaining', { remain: formatAmount(remain, localeId), limit: formatAmount(limit, localeId) }) : null}
+        {window.resetsAt === undefined ? null : <>{showBar ? ' · ' : ''}{t('resetsAt', { time: formatReset(window.resetsAt, localeId) })}</>}
       </span>
     </div>
   )

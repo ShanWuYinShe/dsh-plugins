@@ -1,4 +1,9 @@
 // 全仓构建，四段顺序固定：
+//   0) 清理上一轮构建产物：整目录删除每包 lib/ 与 client/client.cjs
+//      （tsc 不会删除已删源码的旧产物，而 files 含整个 lib/ 目录；
+//       2026-11-04 审计实测陈旧 zcode-*/gateway/legacy-migrate/typert.host
+//       等死模块会被本地 npm pack / 手动兜底发布带进 tarball。typert 工件
+//       在阶段 2 重新生成，因此先删后建不影响阶段顺序）
 //   1) 每包 tsc 编译 src/ → lib/（含 dsh.d.ts 增强合并）
 //   2) typert 工件生成（scripts/typert.mjs → lib/typert.*）
 //   3) esbuild 打包 client/index.tsx → client/client.cjs
@@ -94,7 +99,7 @@ ${body}
   writeFileSync(join(pkgDir, "client", "client.cjs"), wrapped);
 }
 
-// ── 阶段 1：Host 源码编译（tsc 只碰 src/ → lib/*.js|d.ts，不清理 lib/） ──
+// ── 阶段 1：Host 源码编译（先清空 lib/，再 tsc 全量 emit） ──
 const compiled = [];
 for (const pkg of PACKAGES) {
   const pkgDir = join(ROOT, "packages", pkg);
@@ -102,6 +107,10 @@ for (const pkg of PACKAGES) {
     console.log(`skipped ${pkg}: no src/`);
     continue;
   }
+  // 陈旧产物比「多删一个目录」更贵：清单删除方案会漏掉 typert 工件与改名模块，
+  // 整目录删除与真实产物面一一对应（typert 阶段 2 重写，client 阶段 3 重写）。
+  rmSync(join(pkgDir, "lib"), { recursive: true, force: true });
+  rmSync(join(pkgDir, "client", "client.cjs"), { force: true });
   const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
   tsc(pkgDir);
   appendDshAugmentations(pkgDir);
@@ -123,9 +132,13 @@ try {
 
 // ── 阶段 3：Client 打包（externals 见 buildClient） ──
 for (const { pkg, pkgDir, pkgName } of compiled) {
-  if (existsSync(join(pkgDir, "client", "index.tsx"))) {
-    await buildClient(pkgDir, pkg, pkgName);
+  if (!existsSync(join(pkgDir, "client", "index.tsx"))) {
+    // 包移除 client 入口后阶段 1 已删 client.cjs；这里不再重写，
+    // 避免 exports["./client"] 指向一个不存在的产物。
+    console.log(`built ${pkg} (no client entry)`);
+    continue;
   }
+  await buildClient(pkgDir, pkg, pkgName);
   console.log(`built ${pkg}`);
 }
 

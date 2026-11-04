@@ -13,7 +13,7 @@ import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { WorkBuddyCredentialStore, workbuddyOwnAuthPath, WORKBUDDY_AUTH_FILE_ENV } from './auth.js'
 import { openStandaloneStateStore } from './state-store.js'
-import { errorMessage } from './values.js'
+import { safeMessage } from './values.js'
 import type { WorkBuddyCreditAccount } from './upstream.js'
 import { FALLBACK_OPENCODE_MODELS, FALLBACK_WORKBUDDY_AI_MODELS, FALLBACK_WORKBUDDY_MODELS, FALLBACK_ZCODE_MODELS } from './catalog.js'
 import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
@@ -31,14 +31,6 @@ import { variantIsStartPlan } from './variant-runtime.js'
 type Action = 'doctor' | 'logout' | 'status'
 
 const JSON_SCHEMA_VERSION = 1
-
-/** Remove token-like strings from an unexpected diagnostic message. */
-function safeMessage(error: unknown): string {
-  const message = errorMessage(error)
-  return message
-    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu, '[redacted token]')
-    .replace(/(\b(?:code|token|refresh_token|access_token)=)[^&\s]+/giu, '$1[redacted]')
-}
 
 function printHelp(): void {
   process.stdout.write([
@@ -58,17 +50,25 @@ function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`)
 }
 
-/** 进程内共享的 standalone 状态域句柄；run() 结束时统一释放（见 closeSharedState）。 */
-let sharedStateClose: (() => Promise<void>) | undefined
-
 /**
- * CLI 侧的台账只读（standalone 单元里的 ledger 表）：status 命令展示「今日已用」。
- * 只读不写——宿主进程是唯一的记账者，短命 CLI 写域有跨进程窗口。
+ * 一次 run() 的进程内句柄：standalone 状态域与台账只读口。
+ *
+ * 刻意是 run() 的局部变量而不是模块级变量（RULE-051：共享状态必须有 owner）：
+ * 模块级句柄在「同一进程内多次调用 run()」（测试、嵌入式调用）时会互相覆盖，
+ * 前一次的状态域永远不会被释放。
  */
-let sharedLedgerReader: ((variantId: string) => Promise<CreditLedgerState | undefined>) | undefined
+interface CliState {
+  /** standalone 状态域关闭句柄；run() 收尾统一释放。 */
+  stateClose?: () => Promise<void>
+  /**
+   * CLI 侧的台账只读（standalone 单元里的 ledger 表）：status 命令展示「今日已用」。
+   * 只读不写——宿主进程是唯一的记账者，短命 CLI 写域有跨进程窗口。
+   */
+  ledgerReader?: (variantId: string) => Promise<CreditLedgerState | undefined>
+}
 
 /** Credential store wired for CLI diagnostics. */
-async function makeWorkBuddyStore(variant: WorkBuddyVariant): Promise<WorkBuddyCredentialStore> {
+async function makeWorkBuddyStore(variant: WorkBuddyVariant, cli: CliState): Promise<WorkBuddyCredentialStore> {
   // 与插件运行时同一份装配（见 variant-wiring.ts）：计划语义 / 刷新通道都由它
   // 决定，CLI 不再自己拼一遍——历史上正是这里漏掉 transformCredential，把
   // zcode-start-plan 的额度查询指到了 coding 池子。
@@ -79,8 +79,8 @@ async function makeWorkBuddyStore(variant: WorkBuddyVariant): Promise<WorkBuddyC
   try {
     const standalone = await openStandaloneStateStore()
     state = standalone
-    sharedStateClose = () => standalone.close()
-    sharedLedgerReader = variantId => standalone.readLedger(variantId)
+    cli.stateClose = () => standalone.close()
+    cli.ledgerReader = variantId => standalone.readLedger(variantId)
   } catch (error: unknown) {
     console.warn(`dsh-any-connect: state domain unavailable (${String(error)}); owned-copy operations use the file fallback`)
   }
@@ -88,10 +88,10 @@ async function makeWorkBuddyStore(variant: WorkBuddyVariant): Promise<WorkBuddyC
 }
 
 /** run() 收尾：释放状态域句柄（幂等；未打开过则空操作）。 */
-async function closeSharedState(): Promise<void> {
-  const close = sharedStateClose
-  sharedStateClose = undefined
-  sharedLedgerReader = undefined
+async function closeState(cli: CliState): Promise<void> {
+  const close = cli.stateClose
+  cli.stateClose = undefined
+  cli.ledgerReader = undefined
   await close?.().catch(() => {})
 }
 
@@ -108,8 +108,8 @@ function fallbackFor(variant: WorkBuddyVariant): number {
   return FALLBACK_COUNT_BY_ID.get(variant.id) ?? 0
 }
 
-async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
-  const store = await makeWorkBuddyStore(variant)
+async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant, cli: CliState): Promise<number> {
+  const store = await makeWorkBuddyStore(variant, cli)
   const status = await store.status()
   const desktopPresent = await store.desktopFilePresent()
   const desktopPath = await store.resolvedDesktopAuthPath()
@@ -179,7 +179,7 @@ async function doctor(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
  * Plan. Start Plan 上游按模型分池且池子互不通用（2026-10-24 实测），每池一行；
  * Coding Plan 维持订阅有效性单行。
  */
-function humanCredits(
+export function humanCredits(
   variant: WorkBuddyVariant,
   credits: { total: number; error?: string } | undefined,
   accounts: readonly WorkBuddyCreditAccount[] | undefined,
@@ -187,21 +187,33 @@ function humanCredits(
   if (credits?.error !== undefined) return `Remaining credit: unavailable (${credits.error})`
   if (credits === undefined || accounts === undefined) return 'Remaining credit: unknown'
   if (variant.kind !== 'zcode') return `Remaining credit: ${credits.total}`
-  const windows = variantIsStartPlan(variant) ? startPlanWindows(accounts) : currentPlanWindow(accounts)
+  const isStartPlan = variantIsStartPlan(variant)
+  const windows = isStartPlan ? startPlanWindows(accounts) : currentPlanWindow(accounts)
+  const startPlanEmptyCopy = 'Start Plan quota: no active balance today (claim it in the ZCode client)'
   if (windows.length === 0) {
-    return 'Start Plan quota: no active balance today (claim it in the ZCode client)'
+    // 空窗口的结论必须对应当前产品：Start Plan 今天还没领取（去客户端领一次）；
+    // Coding Plan 没有「领取」这回事，只能说订阅窗口没返回，并指引 --json 排查。
+    return isStartPlan
+      ? startPlanEmptyCopy
+      : 'Coding Plan quota: no subscription window returned (run with --json for details)'
   }
+  const prefix = isStartPlan ? 'Start Plan quota' : 'Coding Plan quota'
   return windows.map(window => {
-    if (window.remain === undefined || window.limit === undefined) return `${window.label}: active`
+    if (window.remain === undefined || window.limit === undefined) {
+      // Start Plan 的「今日待领取」是一个**没有数字的窗口**（startPlanWindows 的
+      // 兜底形态）：文案必须说领取，不能落到通用的 "active"。
+      if (isStartPlan && window.unit === '今日待领取') return startPlanEmptyCopy
+      return `${window.label}: active`
+    }
     const reset = window.resetsAt !== undefined
       ? `, expires ${new Date(window.resetsAt).toLocaleString()}`
       : ''
-    return `Start Plan quota: ${window.remain.toLocaleString()} / ${window.limit.toLocaleString()} tokens (${window.label})${reset}`
+    return `${prefix}: ${window.remain.toLocaleString()} / ${window.limit.toLocaleString()} tokens (${window.label})${reset}`
   }).join('\n')
 }
 
-async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<number> {
-  const store = await makeWorkBuddyStore(variant)
+async function status(jsonOutput: boolean, variant: WorkBuddyVariant, cli: CliState): Promise<number> {
+  const store = await makeWorkBuddyStore(variant, cli)
   const authStatus = await store.status()
   const heartbeat = await readHostHeartbeat()
   const hostAlive = heartbeat !== undefined && isHeartbeatProcessAlive(heartbeat)
@@ -239,9 +251,9 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
   // 今日消耗统计（credit-ledger）：宿主进程记账、CLI 只读展示；台账缺席
   // （域打不开/今天还没有样本）时省略字段，不编数字。
   let creditsToday: ReturnType<typeof summarize> | undefined
-  if (variant.kind === 'workbuddy' && sharedLedgerReader !== undefined) {
+  if (variant.kind === 'workbuddy' && cli.ledgerReader !== undefined) {
     try {
-      const ledgerState = await sharedLedgerReader(variant.id)
+      const ledgerState = await cli.ledgerReader(variant.id)
       creditsToday = ledgerState === undefined ? undefined : summarize(ledgerState.days)
     } catch {
       creditsToday = undefined
@@ -258,7 +270,9 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
       ...authStatus.nickname === undefined ? {} : { nickname: authStatus.nickname },
       ...authStatus.domain === undefined || authStatus.domain === '' ? {} : { domain: authStatus.domain },
       source: authStatus.source,
-      credits: credits?.total,
+      // credits.total 只对积分制的 WorkBuddy 是一个事实；ZCode 的额度语义是
+      // 窗口（quotaWindows），给一个订阅有效性折算的裸 total 只会误导脚本。
+      ...variant.kind === 'workbuddy' ? { credits: credits?.total } : {},
       ...credits?.error === undefined ? {} : { creditsError: credits.error },
       ...creditsToday === undefined ? {} : {
         creditsToday: {
@@ -268,9 +282,9 @@ async function status(jsonOutput: boolean, variant: WorkBuddyVariant): Promise<n
           samples: creditsToday.today.samples,
         },
       },
-      // ZCode 的额度语义与 WorkBuddy 点数不同:窗口按 pill 同一口径给出
-      // (Start Plan 是按模型分池的 token 计数池、每池一条,Coding Plan 是
-      // 订阅有效性),total 只是兼容字段。
+      // ZCode 的额度语义与 WorkBuddy 点数不同：窗口按 pill 同一口径给出
+      // (Start Plan 是按模型分池的 token 计数池、每池一条，Coding Plan 是
+      // 订阅有效性)；这里只给窗口，不给折算后的裸 total。
       ...variant.kind === 'zcode' && creditAccounts !== undefined
         ? { quotaWindows: variantIsStartPlan(variant) ? startPlanWindows(creditAccounts) : currentPlanWindow(creditAccounts) }
         : {},
@@ -309,6 +323,9 @@ export async function run(argv: readonly string[]): Promise<number> {
   }
   const action = rawAction as Action
   const jsonOutput = flags.includes('--json')
+  // 本次 run 的进程内句柄（见 CliState）：不放到模块级，避免同一进程内多次
+  // run() 互相覆盖/泄漏状态域。
+  const cli: CliState = {}
 
   // `--provider <id>` (or `--provider=<id>`); absent means the CN provider, so
   // every existing invocation keeps its behaviour.
@@ -350,11 +367,11 @@ export async function run(argv: readonly string[]): Promise<number> {
   try {
     switch (action) {
       case 'doctor':
-        return await doctor(jsonOutput, variant)
+        return await doctor(jsonOutput, variant, cli)
       case 'status':
-        return await status(jsonOutput, variant)
+        return await status(jsonOutput, variant, cli)
       case 'logout': {
-        const store = await makeWorkBuddyStore(variant)
+        const store = await makeWorkBuddyStore(variant, cli)
         await store.logout()
         process.stdout.write(`${variant.displayName} Connect: removed the plugin-owned credential copy (state domain, file fallback ${workbuddyOwnAuthPath(variant.ownFilename)}); the desktop app's sign-in is untouched\n`)
         return 0
@@ -365,7 +382,7 @@ export async function run(argv: readonly string[]): Promise<number> {
     return 1
   } finally {
     // 所有出口（含各分支的 return 与异常路径）之后统一释放状态域句柄。
-    await closeSharedState()
+    await closeState(cli)
   }
 }
 

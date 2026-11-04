@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Any Connect 模型接入",
+    "description": "把桌面端 Agent 提供的模型接入 DeepSeek Harness：零配置复用登录态、逐模型思考强度、模型选择器直接显示计费倍率。"
+  }
+}

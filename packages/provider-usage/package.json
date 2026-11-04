@@ -1,7 +1,8 @@
 {
   "name": "@chaoset/provider-usage",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "DSH plugin: show the current LLM provider's remaining quota in the composer dock — a generic querier registry any provider plugin can extend",
+  "icon": "./icon.svg",
   "engines": {
     "node": ">=24.9.0",
     "dsh": "0.2.2-rc.1"
@@ -9,9 +10,12 @@
   "type": "module",
   "license": "MIT",
   "files": [
-    "lib",
-    "client",
+    "lib/*.js",
+    "lib/*.d.ts",
+    "client/client.cjs",
     "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -19,6 +23,7 @@
   "exports": {
     ".": "./lib/index.js",
     "./client": "./client/client.cjs",
+    "./locale/*.json": "./locale/*.json",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -39,6 +44,7 @@
     }
   },
   "devDependencies": {
+    "@deepseek-ai/schemastery": "~3.19.0",
     "@deepseek-ai/cordis": "~4.1.0",
     "@deepseek-ai/dsh-client-locale": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-client-resources": "^0.2.2-rc.1",

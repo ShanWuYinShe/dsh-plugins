@@ -17,13 +17,23 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ConfinedArgv, SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { isPathUnder, seatbeltProfileArgs } from './common.js'
 import { bindMountArgv, bindMountGrant, stableRuntimeRoots, seatbeltArgv, type ConfineRunnerDeps } from './confine-runners.js'
-import { existingDirectoryRoots } from './roots-filter.js'
+import type { RootsFilter } from './roots-filter.js'
 import { STATE } from './roots.js'
 import type { HostSandboxPolicy } from './dsh.js'
 import type { LandlockRuntime } from './landlock-exec.js'
 
-/** 被包装的宿主服务实例（方法面按实例字符串/符号键访问：confine / checkedTarget / resolve / STATE）。 */
-export type WrappedService = Record<string | symbol, any>
+/**
+ * 被包装的宿主服务实例的**最小方法面**：包装/还原按字符串方法键读写，
+ * 实例级包装状态挂在 STATE symbol 上。具体方法签名（confine / checkedTarget
+ * / resolve）由调用点按官方契约收窄——不再用 `Record<string | symbol, any>`
+ * 让整个包装实现失去类型（RULE-051/类型纪律：any 不扩散到方法面）。
+ */
+export interface WrappedService {
+  /** 被包装的方法实现（confine / checkedTarget 等；签名由调用点收窄）。 */
+  [method: string]: unknown
+  /** 实例级包装状态（见 roots.ts 的 STATE）。 */
+  [STATE]?: MountState
+}
 
 /** 一次挂载共享的包装状态；挂在底层实例的 STATE symbol 上。 */
 export interface MountState {
@@ -33,6 +43,8 @@ export interface MountState {
   extraRoots: string[]
   /** 同一 key 只告警一次。 */
   warned: Set<string>
+  /** 实例级目录存在性 TTL 缓存（apply 创建的 owner；行 reload 时整体换新）。 */
+  rootsFilter: RootsFilter
   /** 包装是否已安装。 */
   wrapped: boolean
   /** 底层实例原本是否自有该方法（自有属性 vs 原型方法）。 */
@@ -59,7 +71,11 @@ export function rawService(service: unknown, original: symbol): WrappedService {
 
 /** 取回或建立底层实例上的包装状态。 */
 export function mountState<S extends MountState>(target: WrappedService, create: () => S): S {
-  return target[STATE] ?? (target[STATE] = create())
+  const existing = target[STATE] as S | undefined
+  if (existing !== undefined) return existing
+  const created = create()
+  target[STATE] = created
+  return created
 }
 
 /** 卸载一次挂载：最后一个挂载点退出时还原原方法并清空状态。 */
@@ -152,7 +168,7 @@ export function installConfineWrapper(target: WrappedService, deps: ConfineWrapD
     // 插入集合与 Seatbelt 对齐：官方根 ∪ 额外根去重后减去官方已授予的
     // 部分；且只授予当前真实存在的目录，缺失 root 会让 bwrap 启动失败。
     if (a[0] === 'bwrap') {
-      const rebuilt = bindMountArgv(a, roots, policy, state.warned, warn, warnOnce, bindMountGrant, 'bwrap')
+      const rebuilt = bindMountArgv(a, roots, policy, state.warned, warn, state.rootsFilter, warnOnce, bindMountGrant, 'bwrap')
       if (rebuilt !== null) wrapped.argv = rebuilt
       return wrapped
     }
@@ -160,7 +176,7 @@ export function installConfineWrapper(target: WrappedService, deps: ConfineWrapD
     // 与 bwrap 同一插入集合；同样只授予存在的目录（launcher 把 unopenable
     // grant root 视为失败）。
     if (landlockRuntime !== null && a[0] === landlockRuntime.exec) {
-      const rebuilt = bindMountArgv(a, roots, policy, state.warned, warn, warnOnce, (root) => landlockRuntime.grantArgs({ readWrite: [root] }), 'landlock')
+      const rebuilt = bindMountArgv(a, roots, policy, state.warned, warn, state.rootsFilter, warnOnce, (root) => landlockRuntime.grantArgs({ readWrite: [root] }), 'landlock')
       if (rebuilt !== null) wrapped.argv = rebuilt
       return wrapped
     }
@@ -242,7 +258,10 @@ export function installFsWrapper(service: WrappedService, deps: FsWrapDeps): voi
       // canonical 化/祖先链 stat 遇 EACCES 等）同样不能外泄盖过官方拒绝——
       // 整体兜底 rethrow 原始 FS_SANDBOX_DENIED，失败姿态保持 fail-closed。
       try {
-        const fresh: ResolvedFsTarget = await service.resolve.call(service, target.displayPath)
+        // 显式绑定到服务实例（宿主若以解绑形式调用 checkedTarget，this 可能
+        // 不是服务实例）；resolve 的签名按本文件消费的最小面收窄。
+        const resolveTarget = service.resolve as (this: unknown, displayPath: string) => Promise<ResolvedFsTarget>;
+        const fresh: ResolvedFsTarget = await resolveTarget.call(service, target.displayPath)
         // 官方 FsTarget.targetKey 是不透明身份（@deepseek-ai/dsh-fs 契约原话：
         // "Opaque key for stale guards and target lookup"，消费者不得解析它、
         // 不得假设是本地绝对路径；当前 LocalFileSystem 恰好传 realpath，但那是
@@ -259,7 +278,7 @@ export function installFsWrapper(service: WrappedService, deps: FsWrapDeps): voi
         // 消除"文件工具放行、bash 拒绝"或反向的分叉；运行期根身份校验与
         // 危险根复查同 bash 侧（stableRuntimeRoots），沙盒内符号链接交换
         // 不能让 fs 侧单侧放行。
-        const roots = existingDirectoryRoots(
+        const roots = state.rootsFilter.existingDirectoryRoots(
           stableRuntimeRoots([...new Set(state.extraRoots)], state.warned, 'the fs fence', warn),
           state.warned,
           'the fs fence',

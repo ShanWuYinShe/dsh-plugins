@@ -133,10 +133,13 @@ export class WorkBuddyUpstreamClient {
     return { status: response.status, streamed }
   }
 
-  /** POST the token-refresh endpoint; the caller merges the outcome. */
-  async refreshToken(credential: WorkBuddyCredential): Promise<WorkBuddyRefreshOutcome> {
+  /** POST the token-refresh endpoint; the caller merges the outcome.
+   *
+   * `callerSignal` 与内部 deadline 融合：dispose/取消方不再等满 30s 超时。
+   */
+  async refreshToken(credential: WorkBuddyCredential, callerSignal?: AbortSignal): Promise<WorkBuddyRefreshOutcome> {
     // JSON 短读统一走宿主 deadline（超时原因可分类；此前裸 AbortSignal.timeout）。
-    return withTimeout(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON', async (signal) => {
+    return withTimeout(callerSignal, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON', async (signal) => {
       const response = await fetch(`${chatBase(credential)}/v2/plugin/auth/token/refresh`, {
         method: 'POST',
         headers: refreshHeaders(credential),
@@ -165,7 +168,7 @@ export class WorkBuddyUpstreamClient {
    * rejected with 400, the CLI form gets a smaller document without
    * `modelPromotions`). All three shapes measured live on 2026-09-15.
    */
-  async fetchModels(credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
+  async fetchModels(credential: WorkBuddyCredential, callerSignal?: AbortSignal): Promise<readonly WorkBuddyUpstreamModel[]> {
     const international = regionOf(credential.domain) === 'global'
     let userAgent = CLIENT_UA
     if (international) {
@@ -177,7 +180,7 @@ export class WorkBuddyUpstreamClient {
         userAgent = CLIENT_UA
       }
     }
-    return withTimeout(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON', async (signal) => {
+    return withTimeout(callerSignal, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON', async (signal) => {
       const response = await fetch(
         `${chatBase(credential)}${international ? '/v3/config' : '/console/enterprises/personal/models'}`,
         {
@@ -228,7 +231,7 @@ export class WorkBuddyUpstreamClient {
   }
 
   /** POST the billing endpoint for the aggregated remaining credit. */
-  async fetchCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
+  async fetchCredits(credential: WorkBuddyCredential, callerSignal?: AbortSignal): Promise<WorkBuddyCredits> {
     const now = new Date()
     const format = (date: Date): string => [
       date.getFullYear().toString().padStart(4, '0'),
@@ -239,7 +242,7 @@ export class WorkBuddyUpstreamClient {
       date.getMinutes().toString().padStart(2, '0'),
       date.getSeconds().toString().padStart(2, '0'),
     ].join(':')
-    return withTimeout(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON', async (signal) => {
+    return withTimeout(callerSignal, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON', async (signal) => {
       const response = await fetch(`${billingBase(credential)}/v2/billing/meter/get-user-resource`, {
         method: 'POST',
         headers: billingHeaders(credential),

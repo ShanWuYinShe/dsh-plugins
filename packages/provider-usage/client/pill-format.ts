@@ -44,15 +44,26 @@ export function isStaleDisplay(stale: boolean, snapshot?: UsageSnapshot): boolea
   return snapshot !== undefined && snapshot.degraded === true
 }
 
-/** Group digits; a fractional balance keeps up to two decimals. */
-export function formatAmount(value: number): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)
+/**
+ * 数字分组：小数位最多两位。
+ *
+ * @param value - 要格式化的数字。
+ * @param localeId - DSH 当前语言 id（来自注入面的 locale 钩子）；缺席时退回
+ * 浏览器默认 locale，保证宿主契约漂移时仍可渲染。
+ */
+export function formatAmount(value: number, localeId?: string): string {
+  return new Intl.NumberFormat(localeId, { maximumFractionDigits: 2 }).format(value)
 }
 
-/** Compact reset time. */
-export function formatReset(iso: string): string {
+/**
+ * 紧凑的重置时刻。
+ *
+ * @param iso - ISO-8601 时刻；非法原样返回。
+ * @param localeId - DSH 当前语言 id；缺席时退回浏览器默认 locale。
+ */
+export function formatReset(iso: string, localeId?: string): string {
   const at = new Date(iso)
   if (Number.isNaN(at.getTime())) return iso
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(at)
+  return new Intl.DateTimeFormat(localeId, { dateStyle: 'medium', timeStyle: 'short' }).format(at)
 }
 

@@ -5,28 +5,25 @@
  */
 
 import { homedir } from 'node:os'
-import { join, sep } from 'node:path'
+import { sep } from 'node:path'
+import { symbols } from '@deepseek-ai/cordis'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { canonicalPath, writableRoots } from './common.js'
 
 /** 包装状态标记:挂在被包装的底层实例上,保证幂等与跨挂载点共享。 */
 export const STATE = Symbol("sandbox-extra-roots.state");
 
-/** 取底层实例(sandbox/fs 通常就是 raw,防御性写法)。 */
-export const ORIGINAL = Symbol.for("cordis.original");
+/**
+ * 取底层实例(sandbox/fs 通常就是 raw,防御性写法)。
+ * 用 cordis 官方 registry symbol,不再手写 Symbol.for("cordis.original"):
+ * 同一个全局 symbol 由官方维护,宿主调整 registry 拼写时插件自动跟随
+ * (rc.1 `@deepseek-ai/cordis` 的 symbols.original === Symbol.for("cordis.original"))。
+ */
+export const ORIGINAL = symbols.original;
 
 /** 官方 @deepseek-ai/dsh-sandbox 的 canonical 化（符号链接按真实目标解析；解析失败返回原拼写）。 */
 export function canon(path: string): string {
   return canonicalPath(path);
-}
-
-/** 展开 ~ 前缀为用户主目录（"~"、"~/"、"~\"），其余原样返回。
- * 设置页允许 ~ 拼写（用户最常见的缓存目录写法），host 在校验与
- * 规范化之前统一展开，保证 validate/normalize 两个入口看到同一路径。 */
-export function expandTilde(path: string): string {
-  if (path === "~") return homedir();
-  if (path.startsWith("~/") || path.startsWith("~\\")) return join(homedir(), path.slice(2));
-  return path;
 }
 
 /** Windows 盘根:"C:"、"C:\"、"C:/"。 */

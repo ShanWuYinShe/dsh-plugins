@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detailToMarkdown, exportFilename, mergeArchivedMarkdown } from "../client/archive-entries.js";
+import { detailToMarkdown, mergeArchivedMarkdown } from "../client/archive-entries.js";
 
 const item = { sessionId: "AAA-BBB", title: "修复登录页", cwd: "/proj/web" };
 const detail = {
@@ -29,19 +29,6 @@ describe("detailToMarkdown", () => {
   it("空消息列表输出空正文", () => {
     const md = detailToMarkdown(item, { sessionId: "AAA-BBB", messages: [] });
     expect(md).toContain("- messages: 0");
-  });
-});
-
-describe("exportFilename", () => {
-  it("有标题用标题并安全化非法字符与空格", () => {
-    expect(exportFilename({ title: "a/b:c*d? hello world", sessionId: "ID" })).toBe("archive-a-b-c-d-hello-world.md");
-  });
-  it("无标题回退会话 ID", () => {
-    expect(exportFilename({ title: null, sessionId: "XYZ-123" })).toBe("archive-XYZ-123.md");
-  });
-  it("长标题截断到 40 字符", () => {
-    const name = exportFilename({ title: "x".repeat(100), sessionId: "ID" });
-    expect(name.length).toBeLessThanOrEqual("archive-".length + 40 + ".md".length);
   });
 });
 

@@ -8,8 +8,7 @@
  */
 
 import * as React from 'react'
-import { formatBytes, formatTime, shortId } from './archive-format.js'
-import { ARCHIVE_SORT_KEYS, ARCHIVE_PAGE_SIZE, needsDeleteAck } from './archive-entries.js'
+import { ARCHIVE_PAGE_SIZE } from './archive-entries.js'
 import { useArchivePanel } from './useArchivePanel.js'
 import { ArchiveRow } from './ArchiveRow.js'
 import { ArchiveBadge } from './ArchiveBadge.js'
@@ -114,7 +113,7 @@ export function ArchivePanel(props: any) {
         items.length > 0 ? React.createElement(
           "ul",
           { className: "sa_rows" },
-          visibleItems.map((item) => React.createElement(ArchiveRow, { key: item.sessionId, item, t, loading, error, selected, expanded, details, detailLoading, busy, toggleOne, toggleDetail, restoreOne, exportOne })),
+          visibleItems.map((item) => React.createElement(ArchiveRow, { key: item.sessionId, item, t, selected, expanded, details, detailLoading, busy, toggleOne, toggleDetail, restoreOne, exportOne })),
           // 分页：还有未渲的行就给“加载更多”，点一次追加一页。
           visibleCount < sortedItems.length ? React.createElement("button", {
             className: "sa_action",

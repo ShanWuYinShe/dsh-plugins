@@ -8,8 +8,9 @@
  */
 
 import * as React from "react";
-import { downloadMarkdown, detailToMarkdown, mergeArchivedMarkdown, needsDeleteAck, summarizeBatchResult } from "./archive-entries.js";
+import { downloadMarkdown, detailToMarkdown, mergeArchivedMarkdown, needsDeleteAck, remoteErrorMessage, summarizeBatchResult } from "./archive-entries.js";
 import { shortId } from "./archive-format.js";
+import type { TFunc } from "./locales.js";
 
 export function useArchiveActions(deps: {
   /** 宿主会话列表的刷新口（可选；删除/恢复后同步原生页）。 */
@@ -20,9 +21,7 @@ export function useArchiveActions(deps: {
   deleteAcked: any
   detailLoading: any
   details: any
-  error: any
   expanded: any
-  filter: any
   items: any
   load: any
   selectable: any
@@ -35,11 +34,16 @@ export function useArchiveActions(deps: {
   setItems: any
   setNotice: any
   setSelected: any
-  t: any
+  t: TFunc
 }) {
-  const { refreshSessions, busy, call, confirmingDelete, deleteAcked, detailLoading, details, error, expanded, filter, items, load, selectable, selected, setBusy, setConfirmingDelete, setDetailLoading, setDetails, setExpanded, setItems, setNotice, setSelected, t } = deps
+  const { refreshSessions, busy, call, confirmingDelete, deleteAcked, detailLoading, details, expanded, items, load, selectable, selected, setBusy, setConfirmingDelete, setDetailLoading, setDetails, setExpanded, setItems, setNotice, setSelected, t } = deps
 
   const confirmTimer = React.useRef<any>(0);
+  // 卸载（插件 fiber 卸载/HMR）时清掉挂着的确认计时器：armed 态的 4s 窗口
+  // 不属于任何仍可见的面板，timer 不得继续存活。
+  React.useEffect(() => () => {
+    if (confirmTimer.current !== 0) globalThis.clearTimeout(confirmTimer.current);
+  }, []);
   const disarmDelete = () => {
     if (confirmTimer.current !== 0) {
       globalThis.clearTimeout(confirmTimer.current);
@@ -85,7 +89,7 @@ export function useArchiveActions(deps: {
         setDetails((current: any) => new Map(current).set(item.sessionId, detail));
       }).catch((detailError: any) => {
         setDetails((current: any) => new Map(current).set(item.sessionId, {
-          error: t("detailLoadFailed") + ": " + (detailError && detailError.message || detailError)
+          error: remoteErrorMessage(t, detailError)
         }));
       }).finally(() => {
         setDetailLoading((current: any) => {
@@ -120,7 +124,7 @@ export function useArchiveActions(deps: {
           const detail = await call("detail", id);
           sections.push(detailToMarkdown(item ?? { sessionId: id, title: null, cwd: null }, detail));
         } catch (detailError: any) {
-          failed.push(String(detailError && detailError.message || detailError));
+          failed.push(remoteErrorMessage(t, detailError));
         }
       }
       if (sections.length > 0) {
@@ -134,7 +138,7 @@ export function useArchiveActions(deps: {
     }
   }, [selected, items, call, t]);
 
-  const runBatch = async (action: any, doneKey: any, failKey: any, targetIds?: string[]) => {
+  const runBatch = async (action: any, doneKey: "restoreDone" | "deleteDone", failKey: "restoreFailed" | "deleteFailed", targetIds?: string[]) => {
     const ids = targetIds ?? [...selected];
     if (ids.length === 0) {
       setNotice({ kind: "warn", text: t("noSelection") });
@@ -157,12 +161,11 @@ export function useArchiveActions(deps: {
         ? t("restartNeeded").replace("{n}", String(outcome.restartCount))
         : null;
       if (outcome.failures.length > 0 || outcome.hiddenFailures > 0) {
-        // host 对每个失败项都给了 reason( live/busy/unenumerable/not-archived
-        // /not-restorable/具体错误),只报数量会让用户不知道为什么失败、该等
-        // 多久重试。全部本地化,未知 reason 原样透出兜底。
+        // host 对每个失败项都给了 reason( busy/unenumerable/unlocatable/
+        // reappeared/not-archived/not-restorable/具体错误),只报数量会让用户
+        // 不知道为什么失败、该等多久重试。全部本地化,未知 reason 原样透出兜底。
         const reasonText = (reason: any) => {
-          const map: Record<string, any> = {
-            live: t("live"),
+          const map: Record<string, string> = {
             busy: t("runningHint"),
             unenumerable: t("reasonUnenumerable"),
             unlocatable: t("reasonUnlocatable"),
@@ -218,7 +221,8 @@ export function useArchiveActions(deps: {
       await load();
     } catch (actionError: any) {
       // 异常分支(整单失败,不是部分失败):带请求发出时的数量,与部分失败分支措辞区分。
-      setNotice({ kind: "error", text: t("batchError").replace("{n}", String(ids.length)) + ": " + (actionError && actionError.message || actionError) });
+      // 按 Remote 失败码本地化（not-archived/denied/cancelled）,未知 code 带技术文本。
+      setNotice({ kind: "error", text: t("batchError").replace("{n}", String(ids.length)) + ": " + remoteErrorMessage(t, actionError) });
     } finally {
       setBusy(false);
     }
@@ -252,7 +256,7 @@ export function useArchiveActions(deps: {
       downloadMarkdown(`archived-session-${shortId(sessionId)}-${new Date().toISOString().slice(0, 10)}.md`, md);
       setNotice({ kind: "ok", text: t("exportDone").replace("{n}", "1") });
     } catch (detailError: any) {
-      setNotice({ kind: "error", text: `${t("detailLoadFailed")}: ${detailError?.message || detailError}` });
+      setNotice({ kind: "error", text: `${t("detailLoadFailed")}: ${remoteErrorMessage(t, detailError)}` });
     } finally {
       setBusy(false);
     }

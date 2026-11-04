@@ -19,18 +19,45 @@ import { OpenCodeUpstreamClient, WorkBuddyUpstreamClient, ZCodeUpstreamClient } 
 import type { WorkBuddyUpstreamModel } from './upstream.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { applyZCodePlanOverride } from './zcode-plan-store.js'
+import { readZcodeCodingPlanWhitelist } from './zcode-builtin-catalog.js'
 import type { WorkBuddyStateStore } from './state-store.js'
+import type { ChildProcessTracker } from './child-processes.js'
+import type { Options } from './config.js'
 
-/** 该变体对应的上游客户端：opencode 走 OpenCode，zcode 走专属通道，其余走 WorkBuddy。 */
+/**
+ * 该变体对应的上游客户端：opencode 走 OpenCode，zcode 走专属通道，其余走 WorkBuddy。
+ *
+ * `options.config` 是插件的实时配置快照读取口（见 index.ts 的 `current`）：两条
+ * 「部署相关路径」——`zcodeBuiltinConfig`（Coding Plan 白名单文件）与
+ * `openCodeModelsCache`（OpenCode 元数据缓存）——从这里注入，客户端按需读取，
+ * 因此 Loader 热更新后无需重建客户端即生效。CLI（bin.ts）不传 config，路径
+ * 自然回落到环境变量/平台默认（同一份装配，语义不变）。
+ */
 export function upstreamClientFor(
   variant: WorkBuddyVariant,
-  options: { models?: readonly WorkBuddyUpstreamModel[] } = {},
+  options: {
+    models?: readonly WorkBuddyUpstreamModel[]
+    /** 读取当前插件配置；缺省时两条路径只走环境变量/平台默认（CLI 场景）。 */
+    config?: () => Options
+  } = {},
 ): WorkBuddyUpstreamClient | ZCodeUpstreamClient | OpenCodeUpstreamClient {
+  const models = options.models === undefined ? {} : { models: options.models }
+  const readConfig = options.config
   if (variant.kind === 'opencode') {
-    return new OpenCodeUpstreamClient(options.models === undefined ? {} : { models: options.models })
+    return new OpenCodeUpstreamClient({
+      ...models,
+      ...readConfig === undefined
+        ? {}
+        : { cachePath: () => readConfig().openCodeModelsCache },
+    })
   }
   if (variant.kind !== 'zcode') return new WorkBuddyUpstreamClient()
-  return new ZCodeUpstreamClient(options.models === undefined ? {} : { models: options.models })
+  return new ZCodeUpstreamClient({
+    ...models,
+    ...readConfig === undefined
+      ? {}
+      : { resolveCodingPlanWhitelist: () => readZcodeCodingPlanWhitelist(readConfig().zcodeBuiltinConfig) },
+  })
 }
 
 
@@ -64,8 +91,10 @@ export function createVariantCredentialStore(options: {
 
   onWarning?: ((message: string) => void) | undefined
   state?: WorkBuddyStateStore | undefined
+  /** 在途 helper 子进程 owner（插件运行时传、CLI 不传；见 child-processes.ts）。 */
+  childProcesses?: ChildProcessTracker | undefined
 }): WorkBuddyCredentialStore {
-  const { variant, client, desktopPath, onWarning, state } = options
+  const { variant, client, desktopPath, onWarning, state, childProcesses } = options
   const transform = zcodePlanTransformFor(variant)
   return new WorkBuddyCredentialStore({
     variant,
@@ -74,5 +103,6 @@ export function createVariantCredentialStore(options: {
     ...onWarning === undefined ? {} : { onWarning },
     ...transform === undefined ? {} : { transformCredential: transform },
     ...state === undefined ? {} : { state },
+    ...childProcesses === undefined ? {} : { childProcesses },
   })
 }

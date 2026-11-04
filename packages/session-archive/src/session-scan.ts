@@ -7,7 +7,7 @@
  * @module @chaoset/session-archive/session-scan
  */
 
-import { readdir, rm } from 'node:fs/promises'
+import { lstat, readdir, rm, unlink } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
@@ -43,7 +43,11 @@ async function readdirOrNull(dir: string): Promise<string[] | null> {
  * 只清理本会话代际命名族文件（不动他者日志、不递归），复扫确认没有残留。
  * 返回仍残留的条目：rm 失败、或删除窗口内被写入方重建的，都算残留——
  * 调用方据此把该会话记 failed，不得谎报「已彻底删除」。
- * @param dir - 会话日志所在目录。
+ *
+ * 每个条目先 lstat 再决定：只 unlink **真实文件**。符号链接/子目录一概
+ * 不删（unlink 链接本身也不是删除本会话数据；穿透链接删目标更不可接受），
+ * 保留并计入残留，由调用方 fail-closed。
+ * @param dir - 会话日志所在目录（调用方已用 lstat 确认是真实目录）。
  * @param ownFile - 调用方已单独删除的文件名（本助手不代删，保持原契约）。
  * @param warn - 宿主 logger 告警通道。
  * @returns 仍残留的代际文件条目（空数组即清理干净）。
@@ -54,15 +58,31 @@ async function clearGenerationResidue(dir: string, ownFile: string, warn: (messa
   const residue = new Set<string>();
   for (const entry of entries) {
     if (entry === ownFile || !isGenerationFile(entry)) continue;
+    const path = join(dir, entry);
+    let info;
     try {
-      await rm(join(dir, entry), { force: true });
+      info = await lstat(path);
     } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') continue; // 竞态消失
+      residue.add(entry);
+      warn(`session-archive: failed to inspect stale session generation "${entry}" in "${dir}": ${String(error)}`);
+      continue;
+    }
+    if (!info.isFile()) {
+      residue.add(entry);
+      warn(`session-archive: refusing to remove non-regular session generation entry "${entry}" in "${dir}" (not following links or directories)`);
+      continue;
+    }
+    try {
+      await unlink(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') continue; // 竞态消失
       residue.add(entry);
       warn(`session-archive: failed to remove stale session generation "${entry}" in "${dir}": ${String(error)}`);
     }
   }
   // 复扫确认：rm 成功后仍可能被迁移/重建（rename 型格式迁移的临时文件族），
-  // 或以目录形态占位导致 rm 实际未删（EISDIR 等）。
+  // 或以目录/链接形态占位导致未被清理。
   const remaining = await readdirOrNull(dir);
   if (remaining !== null) {
     for (const entry of remaining) {
@@ -88,11 +108,30 @@ async function clearGenerationResidue(dir: string, ownFile: string, warn: (messa
  * 记成 deleted。清理后仍有残留（删除失败/被重建，或目录名归属失败且目录里
  * 还有他者日志、无法确认代际文件归属）就抛错，由调用方把该 id 记 failed
  * ——宁可报失败，不谎报「已彻底删除」。
+ *
+ * 链接防护：先 lstat 目录本身。若已被换成符号链接或根本不是目录，绝不
+ * readdir/递归（readdir 会穿透链接列出目标目录内容，随后 join(dir, entry)
+ * 的删除会删到目标目录里的文件），只删 location.path 单文件并告警。
  */
 export async function removeSessionDirIfOwned(sessionId: string, filePath: string, warn: (message: string) => void): Promise<void> {
   const dir = dirname(filePath);
   if (dir === '' || dir === '.' || dir === '/') return;
   const base = basename(dir);
+  let dirInfo;
+  try {
+    dirInfo = await lstat(dir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return; // 目录已不存在:无残留
+    throw new Error(`session-archive: cannot inspect session directory "${base}" for ${sessionId}: ${String(error)}`);
+  }
+  if (!dirInfo.isDirectory()) {
+    // 目录被换成符号链接/文件：不进入它（不跟随后代目录），只删定位到的
+    // 一个文件；链接本身与目录内其他条目一律不动。
+    const kind = dirInfo.isSymbolicLink() ? 'a symbolic link' : 'not a directory';
+    warn(`session-archive: session directory "${base}" for ${sessionId} is ${kind}; removing only the located file (not following it)`);
+    await rm(filePath, { force: true });
+    return;
+  }
   const ownedByName = base.includes(sessionId);
   if (!ownedByName) {
     warn(`session-archive: session directory "${base}" does not reference session ${sessionId}; keeping it (layout contract changed?)`);
@@ -199,7 +238,8 @@ export function limitedConcurrency<T>(limit: number, tasks: ReadonlyArray<() => 
 }
 
 /** 从一条消息提取纯文本（text 块拼接；若仅含工具调用则提供占位摘要，忽略图片块）。
- * 官方 Message.content 是 ContentBlock[]，这里优先取 type:'text' 的块。 */
+ * 官方 rc.1 的 ContentBlockMap 只有 `type: 'tool-call'`（名字在 `name`）：
+ * 旧词形 tool_use/tool_call/function.name 属已下线格式，不再识别。 */
 export function messageText(content: unknown, maxChars: number): string {
   if (!Array.isArray(content)) return '';
   let text = '';
@@ -210,12 +250,9 @@ export function messageText(content: unknown, maxChars: number): string {
       if (b.type === 'text' && typeof b.text === 'string') {
         text += b.text;
         if (text.length > maxChars) break;
-      } else if (b.type === 'tool_use' || b.type === 'tool_call') {
-        // OpenAI 兼容形态把名字放在 function.name；官方 native 形态在 b.name。
-        const fn = b.function !== null && typeof b.function === 'object'
-          ? b.function as Record<string, unknown>
-          : undefined;
-        toolNames.push(typeof b.name === 'string' ? b.name : typeof fn?.name === 'string' ? fn.name : 'tool');
+      } else if (b.type === 'tool-call') {
+        // 官方 ToolCallBlock：{ type: 'tool-call', id, name, arguments }。
+        toolNames.push(typeof b.name === 'string' ? b.name : 'tool');
       }
     }
   }

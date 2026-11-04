@@ -8,9 +8,10 @@
  */
 
 import * as React from "react";
+import type { TFunc } from "./locales.js";
 
 export function ArchiveBadge(props: {
-  t: any
+  t: TFunc
   badgeRef: any
   iconOnly: any
   open: any

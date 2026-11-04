@@ -30,6 +30,8 @@ export const zh = {
   rootInvalid: "第 {n} 行“{v}”不是绝对路径，已被禁止保存（支持 ~ 开头或绝对路径）",
   rootDuplicate: "第 {n} 行“{v}”与前面的目录重复，保存时将自动合并去重",
   rootSystem: "第 {n} 行“{v}”为系统受限目录，宿主将自动过滤忽略此目录",
+  saveConfigUnavailable: "此部署未启用配置持久化（没有 configEditor 服务），无法保存",
+  saveInvalidConfig: "配置校验失败：{message}",
 };
 /** 英文文案必须覆盖中文全部键（缺键在 typecheck 阶段报错）。 */
 export const en: Record<keyof typeof zh, string> = {
@@ -53,4 +55,6 @@ export const en: Record<keyof typeof zh, string> = {
   rootInvalid: "Line {n} “{v}” is not an absolute path and cannot be saved (must be absolute or start with ~)",
   rootDuplicate: "Line {n} “{v}” duplicates a previous root and will be deduplicated on save",
   rootSystem: "Line {n} “{v}” is a protected system directory and will be filtered out by host",
+  saveConfigUnavailable: "Configuration persistence is unavailable in this deployment (no configEditor service)",
+  saveInvalidConfig: "Config validation failed: {message}",
 };

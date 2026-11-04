@@ -51,4 +51,15 @@ describe('WindowRow', () => {
     expect(container.querySelector('[role="progressbar"]')).not.toBeNull()
     expect(container.textContent).toContain('30 t')
   })
+
+  it('localeId 透传给数值格式化（跟随 DSH 语言）', () => {
+    act(() => {
+      root!.render(createElement(WindowRow, {
+        window: { id: 'w', label: 'Credits', unit: 'credits', limit: 2000, remain: 1234.5 },
+        t,
+        localeId: 'de-DE',
+      }))
+    })
+    expect(container.textContent).toContain('1.234,5')
+  })
 })

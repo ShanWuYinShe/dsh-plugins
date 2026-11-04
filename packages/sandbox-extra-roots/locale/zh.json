@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "沙盒额外允许写入目录",
+    "description": "为 workspace-write 沙盒增加额外可写目录：同时覆盖 Seatbelt / bwrap / Landlock 与文件系统围栏，并带设置页。"
+  }
+}

@@ -8,9 +8,10 @@
  */
 
 import * as React from "react";
+import type { TFunc } from "./locales.js";
 
 export function ArchiveHeader(props: {
-  t: any
+  t: TFunc
   closePanel: any
   items: any
   loading: any

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Provider Usage 额度显示",
+    "description": "在对话输入区底栏显示当前提供商的剩余额度，并带一个任何 provider 插件都能扩展的通用查询器注册表。"
+  }
+}

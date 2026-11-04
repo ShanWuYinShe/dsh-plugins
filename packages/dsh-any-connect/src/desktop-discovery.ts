@@ -15,6 +15,7 @@ import { basename, join } from 'node:path'
 import { homedir } from 'node:os'
 import type { WorkBuddyElectronProduct } from './variants.js'
 import type { WorkBuddySignedOutReasonCode } from './desktop-auth-envelope.js'
+import type { ChildProcessTracker } from './child-processes.js'
 import { windowsPathForWsl } from './wsl.js'
 
 /**
@@ -149,7 +150,7 @@ export interface WorkBuddyDiscoveryTools {
  * caller's identity comparison both use it, so the two can never disagree
  * about which app they are looking for.
  */
-export function workBuddyDiscoveryTools(bundleId: string): WorkBuddyDiscoveryTools {
+export function workBuddyDiscoveryTools(bundleId: string, childProcesses?: ChildProcessTracker): WorkBuddyDiscoveryTools {
   const runTool = (bin: string, args: readonly string[], maxBytes: number, signal: AbortSignal): Promise<string> =>
     new Promise<string>((resolve, reject) => {
       if (signal.aborted) {
@@ -166,6 +167,8 @@ export function workBuddyDiscoveryTools(bundleId: string): WorkBuddyDiscoveryToo
         }
         resolve(stdout)
       })
+      // 登记给组合根：插件卸载时 kill 并等 close（RULE-047）。
+      childProcesses?.track(child)
       const abort = (): void => {
         if (settled) return
         settled = true

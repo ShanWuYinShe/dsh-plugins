@@ -39,7 +39,8 @@ type RemoteMethod = (typeof REMOTE_METHODS)[number];
 interface ClientContext {
   locale: {
     bind(ns: string): (key: string) => string;
-    register(ns: string, dict: Record<string, Record<string, string>>): void;
+    /** 注册字典并返回 disposer（官方 ctx.effect 约定；卸载/HMR 时回收）。 */
+    register(ns: string, dict: Record<string, Record<string, string>>): void | (() => void);
   };
   effect(fn: () => void | (() => void), label?: string): void;
   remote: { $mount(contribution: unknown): Promise<void> };
@@ -64,8 +65,14 @@ interface ArchivedStore {
   getSnapshot(): { archivedSessionIds?: readonly string[] } | undefined;
 }
 
-/** 面板注入的远程调用函数：成功返回 value，失败抛结构化错误。 */
+/** 面板注入的远程调用函数：成功返回 value，失败抛带 code 的结构化错误。 */
 type ArchiveCall = <T>(method: RemoteMethod, ...args: unknown[]) => Promise<T>;
+
+/** Remote 调用失败的结构化错误：code 是稳定的 `<domain>/<reason>` 串，
+ * 调用侧据此本地化；message 保留技术文本（日志/未知 code 兜底用）。 */
+interface ArchiveCallError extends Error {
+  code: string;
+}
 
 const inject = ["slots", "locale", "remote"];
 
@@ -74,23 +81,22 @@ const inject = ["slots", "locale", "remote"];
 // 炸出整页红条——纯 additive 的面板没有资格打断宿主。
 async function apply(ctx: ClientContext) {
   try {
-  ctx.effect(() => {
-    try {
-      ctx.locale.register(NS, { zh, en });
-    } catch (error) {
-      // 重复注册(HMR/热切换下宿主已持有同 ns 字典)静默忽略,其余失败只
-      // 告警——面板文案回退到宿主默认,异常不得穿透 effect 阻断插件激活。
-      const message = String((error as Error)?.message ?? error);
-      if (!message.includes("already")) console.warn("session-archive: locale dictionary registration failed: " + message);
-    }
-  }, "session-archive: dictionaries");
+  // 字典注册的返回值就是 effect 的 disposer（官方 client-locale README 的
+  // 注册写法）：HMR/卸载时先 dispose 再重新注册，旧字典不会残留。
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), "session-archive: dictionaries");
   // 贡献体来自生成工件（描述符与 codec 由官方生成器产出），本文件不再手写。
   await ctx.remote.$mount(archiveRemote);
   const archiveService = ctx.get("remote.sessionArchive") as ArchiveRemoteService | undefined;
   if (archiveService === void 0) throw new Error("session-archive: remote.sessionArchive did not materialize after mount");
   const call: ArchiveCall = async <T,>(method: RemoteMethod, ...args: unknown[]): Promise<T> => {
     const result = await archiveService[method](...args);
-    if (!result.ok) throw new Error(method + " failed: " + result.error.code + ": " + result.error.message);
+    if (!result.ok) {
+      // 结构化错误：code 供调用侧按稳定词表本地化（RULE-039 调用侧），
+      // message 保留「code: 技术文本」供日志与未知 code 兜底展示。
+      const error = new Error(result.error.code + ": " + result.error.message) as ArchiveCallError;
+      error.code = result.error.code;
+      throw error;
+    }
     return result.value as T;
   };
   // 宿主 workspaces 服务的归档集合 store（实时信号的来源）：归档/恢复/

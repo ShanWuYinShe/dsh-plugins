@@ -48,7 +48,13 @@ export function providerOfAddress(address: string): string | undefined {
   return name === '' ? undefined : name
 }
 
-/** 流节奏:宿主 registry 缓存也是 60s 量级,双重节流意义不大,单一来源即可。 */
+/**
+ * 流节奏:宿主 registry 缓存也是 60s 量级,双重节流意义不大,单一来源即可。
+ *
+ * 这是**客户端协议节拍**（resource 流的轮询周期），不是部署可变量:它由
+ * 浏览器侧固定装配，宿主 Config 不跨端传递；改宿主 registry 的 cacheTtlMs
+ * 只影响服务端缓存寿命，不影响这里推帧的频率。
+ */
 export const RESOURCE_POLL_INTERVAL_MS = 60_000
 
 /** abort 可打断的 sleep;abort 后 resolve,由调用方检查后退出。 */
@@ -95,7 +101,10 @@ export async function* usageStream(address: string, signal: AbortSignal, interva
         fetchedAt: Date.now(),
         error: error instanceof Error ? error.message : String(error),
       }
-      const serialized = JSON.stringify(failed)
+      // fetchedAt 是本地墙钟、每次轮询必变；把它算进「内容变化」会让同一条
+      // 失败每 60s 推一帧恒定变化的帧（视觉不变，却白白唤醒所有订阅者）。
+      // 失败帧的比较键因此只含会改变渲染的业务内容。
+      const serialized = JSON.stringify({ provider: failed.provider, windows: failed.windows, error: failed.error })
       if (serialized !== last) {
         last = serialized
         yield { ok: true, value: failed }

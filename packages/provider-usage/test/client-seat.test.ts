@@ -23,7 +23,12 @@ import { Context } from '@deepseek-ai/cordis'
  * 这里用**真实 cordis Context** 装载真实入口模块，锁住这两个形状。
  */
 
-/** 目录服务桩：store 是 props 交付给 pill 的目录快照源，load 记调用次数。 */
+/**
+ * 目录服务桩：store 是 props 交付给 pill 的目录快照源，load 记调用次数。
+ *
+ * `directoryFor` 按会话返回**同一个目录实例**（宿主 ModelDirectory 的真实语义）：
+ * 本包按目录对象 identity 缓存 load 闭包，每次新建对象会让缓存永不命中。
+ */
 function makeDirectories(): {
   store: { subscribe: () => () => void; getSnapshot: () => unknown }
   directoryFor: (sessionId: unknown) => unknown
@@ -31,15 +36,23 @@ function makeDirectories(): {
 } {
   const store = { subscribe: () => () => {}, getSnapshot: () => ({}) }
   let loads = 0
+  const directories = new Map<unknown, { store: typeof store; load: () => Promise<void> }>()
   return {
     store,
-    directoryFor: () => ({
-      store,
-      load: () => {
-        loads += 1
-        return Promise.resolve()
-      },
-    }),
+    directoryFor: (sessionId: unknown) => {
+      let directory = directories.get(sessionId)
+      if (directory === undefined) {
+        directory = {
+          store,
+          load: () => {
+            loads += 1
+            return Promise.resolve()
+          },
+        }
+        directories.set(sessionId, directory)
+      }
+      return directory
+    },
     loadCount: () => loads,
   }
 }
@@ -70,11 +83,17 @@ function makeSlots(faults: { throwOnRegister?: boolean } = {}): {
   }
 }
 
-/** locale 服务桩：入口只用到 register / bind 两面。 */
-function makeLocale(): unknown {
+/** locale 服务桩：入口用到 register / bind，以及注入面 hooks.locale 的快照源。 */
+function makeLocale(): { service: unknown; snapshot: { active: string; locales: unknown[]; revision: number } } {
+  const snapshot = { active: 'zh', locales: [], revision: 0 }
   return {
-    register: () => () => {},
-    bind: () => (key: string) => key,
+    snapshot,
+    service: {
+      register: () => () => {},
+      bind: () => (key: string) => key,
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+    },
   }
 }
 
@@ -92,7 +111,15 @@ function makeResources(): { service: unknown; protocols: string[] } {
   }
 }
 
-/** 让出若干微任务 + 一拍宏任务，等 cordis 的 fiber 结算（_reload 先 await 一拍）。 */
+/**
+ * 让出若干微任务 + 一拍宏任务，等 cordis 的 fiber 结算。
+ *
+ * 具体等的是两件事：① 服务 provide 与插件 apply 里同步注册的 effect 在
+ * `ctx.plugin(...)` 返回后经微任务结算；② cordis `_reload` 的 fiber 状态机
+ * 会先 `await` 一拍宏任务（`setTimeout(0)`）再让 `load` promise 落地。这里
+ * 不是「睡固定时长等某状态先发生」的负向断言——每次等待后都直接断言真实
+ * 注册结果，注册没完成就是红。
+ */
 async function settle(): Promise<void> {
   for (let i = 0; i < 5; i += 1) await Promise.resolve()
   await new Promise(resolve => setTimeout(resolve, 0))
@@ -108,21 +135,23 @@ async function mountEntry(faults: { throwOnRegister?: boolean } = {}): Promise<{
   ctx: Context
   registrations: Array<{ options: any; component: unknown }>
   directories: ReturnType<typeof makeDirectories>
+  locale: ReturnType<typeof makeLocale>
   resources: ReturnType<typeof makeResources>
   load: Promise<unknown>
 }> {
   const mod = (await import('../client/index.tsx')) as unknown as { apply: (ctx: Context) => void }
   const slots = makeSlots(faults)
   const directories = makeDirectories()
+  const locale = makeLocale()
   const resources = makeResources()
   const ctx = new Context()
   ctx.provide('slots', slots.service as never)
-  ctx.provide('locale', makeLocale() as never)
+  ctx.provide('locale', locale.service as never)
   ctx.provide('resources', resources.service as never)
   const load = ctx.plugin(mod).await()
   await load
   await settle()
-  return { ctx, registrations: slots.registrations, directories, resources, load }
+  return { ctx, registrations: slots.registrations, directories, locale, resources, load }
 }
 
 describe('provider-usage dock entry 注册形状（对齐宿主自带 pill）', () => {
@@ -180,6 +209,39 @@ describe('provider-usage dock entry 注册形状（对齐宿主自带 pill）', 
     expect(typeof seat?.load).toBe('function')
     seat!.load()
     expect(directories.loadCount()).toBe(1)
+  })
+
+  it('注入面携带 locale 快照源（renderer 据此绑定组件侧 useLocale）', async () => {
+    const { registrations, locale } = await mountEntry()
+    const [dock] = registrations
+    const props = dock!.options.inject()
+    // 数字/时间格式化要跟随 DSH 当前语言，而不是浏览器语言：注入面的 hooks
+    // 隔间提供 LocaleFace 同形的快照源，renderer 把它绑定成组件 props 上的
+    // useLocale selector hook（见 pill-types.ts）。
+    expect(props.hooks.locale.getSnapshot()).toBe(locale.snapshot)
+    const unsubscribe = props.hooks.locale.subscribe(() => {})
+    expect(typeof unsubscribe).toBe('function')
+  })
+
+  it('load 闭包缓存归属本次 inject 面，不再是模块级状态（F-PU-11）', async () => {
+    const { ctx, registrations, directories } = await mountEntry()
+    const [dock] = registrations
+    ctx.provide('modelDirectories', { directoryFor: directories.directoryFor } as never)
+    await settle()
+
+    const firstFace = dock!.options.inject()
+    const a = firstFace.resolveSeat('session-1')
+    const b = firstFace.resolveSeat('session-1')
+    // 同一 inject 面内同一目录复用同一个 load 闭包：组件的加载 effect 依赖
+    // 它的 identity，每帧新建会反复重拉目录。
+    expect(a?.load).toBe(b?.load)
+
+    const secondFace = dock!.options.inject()
+    const c = secondFace.resolveSeat('session-1')
+    // 缓存随 inject 面（宿主按 entry × 会话绑定缓存它）而不是模块：两个面
+    // 各自持有自己的 WeakMap，模块级 loadCache 已不存在。
+    expect(c?.directory).toBe(a?.directory)
+    expect(c?.load).not.toBe(a?.load)
   })
 
   it('无 sessionId / 空 sessionId 时返回 undefined（没有会话就没有可报的账号）', async () => {

@@ -99,9 +99,20 @@ const FALLBACK_BY_ID = new Map<string, readonly WorkBuddyModelInfo[]>([
   [OPENCODE_VARIANT.id, FALLBACK_OPENCODE_MODELS],
 ])
 
-/** 变体的编译期兜底目录（首次成功拉取前 / saved 与 fallback 都不可用时）。 */
+/**
+ * 变体的编译期兜底目录（首次成功拉取前 / saved 与 fallback 都不可用时）。
+ *
+ * `PROVIDER_VARIANTS` 是包内封闭清单，`FALLBACK_BY_ID` 与它同源构造——查不到
+ * 只可能是「有人造了第 6 个变体却没登记」这一编程错误。此前这里回落到
+ * `FALLBACK_WORKBUDDY_MODELS`，效果是用**错名单**静默服务（CN 的模型出现在
+ * 别的变体下），比直接报错更难查；按 RULE-053/061 改为 fail loud。
+ */
 export function fallbackFor(variant: WorkBuddyVariant): readonly WorkBuddyModelInfo[] {
-  return FALLBACK_BY_ID.get(variant.id) ?? FALLBACK_WORKBUDDY_MODELS
+  const fallback = FALLBACK_BY_ID.get(variant.id)
+  if (fallback === undefined) {
+    throw new Error(`dsh-any-connect: variant ${variant.id} has no registered fallback catalog; add it to PROVIDER_VARIANTS and FALLBACK_BY_ID`)
+  }
+  return fallback
 }
 
 /**

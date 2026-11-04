@@ -16,7 +16,7 @@ import { safeMessage } from './values.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import type { CreditLedgerSummary } from './credit-ledger.js'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
-import { WORKBUDDY_STATUS_PATH } from './status-paths.js'
+import { writeJson } from './shim-http.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebCreditDay, WorkBuddyWebCreditToday, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebRateLimit, WorkBuddyWebStartPlanClaim, WorkBuddyWebStatus } from './status-paths.js'
 import type { StartPlanPreviewResult } from './zcode-plan-claim.js'
 
@@ -36,8 +36,13 @@ export interface WorkBuddyStatusRouteOptions {
     status(): Promise<WorkBuddyAuthStatus>
     current(): Promise<unknown>
   }
-  /** Live billing answer for the card's credit section. */
-  fetchCredits?: (credential: WorkBuddyCredential) => Promise<WorkBuddyCredits>
+  /**
+   * Live billing answer for the card's credit section.
+   *
+   * `signal` 是装配方（runtime）的卸载信号（AC-33）：dispose 时在途额度查询
+   * 立即中断，而不是等内部 30s 超时。
+   */
+  fetchCredits?: (credential: WorkBuddyCredential, signal?: AbortSignal) => Promise<WorkBuddyCredits>
   /**
    * 今日消耗台账（credit-ledger.ts，仅积分制变体提供）：fetchCredits 成功后记
    * 一次观测。契约上从不 reject（内部吞错），调用侧仍兜一层——统计故障绝不
@@ -67,6 +72,11 @@ export interface WorkBuddyStatusRouteOptions {
    * 挂死的上游不能拖住整份 status 文档。
    */
   fetchStartPlanClaim?: (credential: WorkBuddyCredential) => Promise<StartPlanPreviewResult>
+  /**
+   * 装配方的插件卸载信号（AC-33）：额度查询等「消费侧可取消」的在途请求与它
+   * 融合，dispose 时立即中断。缺席（纯文档组装/单测）时只受各自内部超时约束。
+   */
+  signal?: AbortSignal
   /** In-process key authorizing probe control writes; handed to the card. */
   probeKey: string
   /**
@@ -77,12 +87,6 @@ export interface WorkBuddyStatusRouteOptions {
   rateLimits?: () => readonly WorkBuddyWebRateLimit[] | undefined
   /** Route path; one per variant. */
   path: string
-}
-
-function json(res: ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body)
-  res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) })
-  res.end(payload)
 }
 
 /**
@@ -147,7 +151,7 @@ export async function workBuddyWebStatus(
     if (deps.fetchCredits !== undefined) {
       const credential = await deps.store.current()
       if (credential !== undefined) {
-        const credits = await deps.fetchCredits(credential as WorkBuddyCredential)
+        const credits = await deps.fetchCredits(credential as WorkBuddyCredential, deps.signal)
         // 今日统计（credit-ledger）：先记本次观测再回读，读到的一定含刚记的样本。
         // record/summary 按契约从不 reject，这里仍兜一层——统计故障只降级为
         // 「没有今日统计」，绝不把 status 文档变成 500。
@@ -232,29 +236,51 @@ async function startPlanClaimSection(
   }
 }
 
+/**
+ * The status route's handler, extracted so tests can mount it on a bare server.
+ *
+ * 威胁模型（AC-11）：`probeKey` 是写路由（probe-route）的准入门槛，此前它随
+ * **无鉴权**的 GET 状态文档发给任何「环回 Origin」的页面——本地另一个端口上的
+ * 页面/被投毒的开发服务器同样满足环回，等于把门槛送给它。现在：
+ * - 宿主 webServer 不设 CORS 头，跨源页面本来就**读不到响应体**；
+ * - 再由这里要求 `Sec-Fetch-Site: same-origin`（浏览器填、页面 JS 无法伪造）
+ *   才下发 key——两层任一失效都 fail closed。
+ * 同用户的本机进程不在威胁模型内：它不经过这条路由也能直接改状态文件。
+ */
+export function workBuddyStatusHandler(
+  deps: WorkBuddyStatusRouteOptions,
+): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
+  return async (req, res) => {
+    if (req.method !== 'GET') {
+      writeJson(res, 405, { error: 'method not allowed' })
+      return
+    }
+    // 与探针路由同口径：Host 必环回（挡 DNS 重绑定导航/表单）+
+    // Origin 必环回（挡跨站读），缺一即 403。
+    if (!hostIsLoopback(req.headers.host) || !originIsLoopback(req.headers.origin)) {
+      writeJson(res, 403, { error: 'request-not-trusted' })
+      return
+    }
+    try {
+      const document = await workBuddyWebStatus(deps)
+      // 只在同源页面请求下下发 probeKey（见上方威胁模型）。
+      if (req.headers['sec-fetch-site'] !== 'same-origin' && 'probeKey' in document) {
+        delete (document as { probeKey?: string }).probeKey
+      }
+      writeJson(res, 200, document)
+    } catch (error: unknown) {
+      writeJson(res, 500, { error: safeMessage(error) })
+    }
+  }
+}
+
 /** Mount the GET status route on an optional webServer context. */
 export function registerWorkBuddyStatusRoute(ctx: Context, deps: WorkBuddyStatusRouteOptions): void {
   ctx.effect(() => {
     const dispose = ctx.webServer.register({
       kind: 'exact',
       path: deps.path,
-      handler: async (req: IncomingMessage, res: ServerResponse) => {
-        if (req.method !== 'GET') {
-          json(res, 405, { error: 'method not allowed' })
-          return
-        }
-        // 与探针路由同口径：Host 必环回（挡 DNS 重绑定导航/表单）+
-        // Origin 必环回（挡跨站读），缺一即 403。
-        if (!hostIsLoopback(req.headers.host) || !originIsLoopback(req.headers.origin)) {
-          json(res, 403, { error: 'request-not-trusted' })
-          return
-        }
-        try {
-          json(res, 200, await workBuddyWebStatus(deps))
-        } catch (error: unknown) {
-          json(res, 500, { error: safeMessage(error) })
-        }
-      },
+      handler: workBuddyStatusHandler(deps),
     })
     return () => {
       dispose()

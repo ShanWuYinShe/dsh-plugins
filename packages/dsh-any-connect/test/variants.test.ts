@@ -36,7 +36,7 @@ describe('AnyConnect variants', () => {
     for (let a = 0; a < PROVIDER_VARIANTS.length; a += 1) {
       for (let b = a + 1; b < PROVIDER_VARIANTS.length; b += 1) {
         const [left, right] = [PROVIDER_VARIANTS[a]!, PROVIDER_VARIANTS[b]!]
-        for (const field of ['ownFilename', 'probeFilename', 'catalogFilename', 'statusPath', 'probePath', 'settingsNs'] as const) {
+        for (const field of ['ownFilename', 'probeFilename', 'catalogFilename', 'statusPath', 'probePath'] as const) {
           expect(left[field]).not.toBe(right[field])
         }
       }

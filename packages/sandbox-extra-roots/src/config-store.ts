@@ -11,9 +11,17 @@
  * 锁住这一点）。实现只依赖官方 configEditor，不读写任何自建配置文件。
  */
 
-/** 官方持久化通道：edit(change) 编辑本行 config，由 Loader 对账后生效。 */
+/**
+ * 官方持久化通道：edit(change) 编辑本行 config，由 Loader 对账后生效。
+ *
+ * `change` 的签名逐字取自官方 ConfigEditor（rc.1
+ * `@deepseek-ai/dsh-config-editor` 的 `lib/types/index.d.ts`）：
+ * `change(current, inherited)` —— current 是本行当前 raw config，inherited 是
+ * 继承层（bundle/patch 默认值），返回下一次的完整 raw config。调用方必须把
+ * 两者当合并基，不得用 apply 时刻的配置快照整体覆盖（RULE-063）。
+ */
 export interface ConfigPersist {
-  edit(change: (current: Record<string, any>) => Record<string, any>): Promise<void>;
+  edit(change: (current: Record<string, unknown>, inherited: Record<string, unknown>) => Record<string, unknown>): Promise<void>;
 }
 
 /**

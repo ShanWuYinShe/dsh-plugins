@@ -257,6 +257,8 @@ describe('WorkBuddyCredentialStore', () => {
     await writeFile(desktop, nestedDoc(Date.now() - 1000))
     let releaseRefresh: (() => void) | undefined
     let refreshStarted = false
+    // 用「清凭据的调用」当 logout 走到哪一步的确定性观测点（见下面的断言）。
+    let clearCalled = false
     const store = new WorkBuddyCredentialStore({
       variant: CN_VARIANT,
       desktopPath: desktop,
@@ -266,18 +268,25 @@ describe('WorkBuddyCredentialStore', () => {
         await new Promise<void>(resolve => { releaseRefresh = resolve })
         return { accessToken: 'fresh', refreshToken: 'rt2', expiresInSec: 3600 }
       },
+      state: {
+        read: async () => undefined,
+        write: async () => {},
+        clear: async () => { clearCalled = true },
+      },
     })
     const resolvePromise = store.resolve()
     await vi.waitFor(() => { expect(refreshStarted).toBe(true) }, { timeout: 5000 })
     const logoutPromise = store.logout()
-    // logout 必须挂在在途刷新上:刷新未完成前它不该返回。
-    let logoutSettled = false
-    void logoutPromise.then(() => { logoutSettled = true })
-    await new Promise(resolve => setTimeout(resolve, 20))
-    expect(logoutSettled).toBe(false)
+    // logout 必须挂在在途刷新上：刷新未完成前它不该开始清凭据。判据是
+    // **同步可见的副作用**而不是「睡 20ms 后断言没发生」（RULE-084 禁止
+    // 墙钟负向断言）：logout 在进入 stateStore.clear 之前没有任何 await 点
+    // （唯一的等待就是 await inflight），所以不等在途刷新的实现会在调用当拍
+    // 就置位 clearCalled；等待 inflight 的实现则一直停在那个 await 上。
+    expect(clearCalled, '刷新未落定前 logout 不得开始清凭据').toBe(false)
     releaseRefresh?.()
     await logoutPromise
     await resolvePromise
+    expect(clearCalled).toBe(true)
     // 刷新成果曾写回 ownPath(saveOwn),但 logout 等它结束后删除——
     // 终态必须是文件不存在,而不是被刷新成果复活。
     const ownExists = await readFile(join(dir, 'own.json'), 'utf8').then(() => true, () => false)

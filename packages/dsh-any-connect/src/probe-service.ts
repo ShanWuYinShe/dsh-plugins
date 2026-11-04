@@ -70,6 +70,12 @@ export class WorkBuddyProbeService {
   private queue: Promise<unknown> = Promise.resolve()
   private readonly pending = new Map<string, Promise<WorkBuddyProbeStatus>>()
   private running = false
+  /**
+   * 插件卸载时 abort 的在途探测信号：融入每次上游请求的内部 deadline，
+   * dispose 不必等某次 30s 超时自然结束。
+   */
+  private readonly shutdown = new AbortController()
+  private disposed = false
 
   constructor(options: WorkBuddyProbeServiceOptions) {
     this.options = options
@@ -111,6 +117,7 @@ export class WorkBuddyProbeService {
    * Explicit requests bypass historical results, but share an ongoing run.
    */
   async probe(modelId: string): Promise<WorkBuddyProbeStatus> {
+    if (this.disposed) return this.unavailable('plugin is stopping')
     const info = this.options.catalog.current().find(model => model.id === modelId)
     if (info === undefined) return this.unavailable(`unknown model: ${modelId}`)
     const account = this.options.account()
@@ -120,6 +127,7 @@ export class WorkBuddyProbeService {
     if (pending !== undefined) return pending
 
     const run = this.queue.then(async (): Promise<WorkBuddyProbeStatus> => {
+      if (this.disposed) return this.unavailable('plugin is stopping')
       // Re-read inside the queue: an earlier sweep may have changed the catalog
       // or already answered this model.
       const current = this.options.catalog.current().find(model => model.id === modelId)
@@ -150,8 +158,11 @@ export class WorkBuddyProbeService {
       try {
         const outcome = await probeModel({
           send,
+          signal: this.shutdown.signal,
           ...this.options.sentinel === undefined ? {} : { sentinel: this.options.sentinel },
         })
+        // 卸载已被请求：不再写探测记录（结果也不再有 owner），直接如实收尾。
+        if (this.disposed) return this.unavailable('plugin is stopping')
         // The account may have changed while the requests were in flight. Drop
         // the observation rather than attribute it to whoever is signed in now.
         if (this.options.account() !== account) {
@@ -196,6 +207,7 @@ export class WorkBuddyProbeService {
    * invalidates its old observation and the model becomes a candidate again.
    */
   probeMissingCandidates(): void {
+    if (this.disposed) return
     const candidates = this.options.catalog.current().filter(info =>
       info.reasoning?.supports === true
       && (info.reasoning.supportedEfforts?.length ?? 0) === 0)
@@ -208,5 +220,20 @@ export class WorkBuddyProbeService {
         })
       }
     }
+  }
+
+  /**
+   * 卸载收尾（RULE-045）：abort 在途探测（融入每次上游请求的 deadline），
+   * 并等串行队列落定。返回后不会再发起探测请求，也不会有探测记录写盘。
+   * 幂等。
+   */
+  async dispose(): Promise<void> {
+    if (this.disposed) {
+      await Promise.allSettled([this.queue])
+      return
+    }
+    this.disposed = true
+    this.shutdown.abort()
+    await Promise.allSettled([this.queue])
   }
 }

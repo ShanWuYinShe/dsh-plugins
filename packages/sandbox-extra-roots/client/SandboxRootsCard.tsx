@@ -170,14 +170,16 @@ function SandboxRootsForm(props: SandboxRootsCardProps) {
       rootProblems.length > 0 ? React.createElement(
         "div",
         { className: "ser_problems", role: "note" },
-        rootProblems.map((problem, index) => {
+        rootProblems.map((problem) => {
           const kind = problem.kind;
           const isDanger = kind === "danger" || kind === "homeAncestor" || kind === "invalid";
           const isWarn = kind === "system";
           const cls = isDanger ? "ser_problem ser_problem--danger" : isWarn ? "ser_problem ser_problem--warn" : "ser_problem ser_problem--info";
           const keyName = "root" + kind.charAt(0).toUpperCase() + kind.slice(1);
           const tmpl = String(t(keyName) || `Line {n}: {v}`);
-          return React.createElement("div", { key: index, className: cls },
+          // key 表达身份：行号 + 问题类型 + 行文本（每行至多一个问题，行号
+          // 已唯一；拼上类型/文本后编辑行内容也不会误复用节点状态）。
+          return React.createElement("div", { key: `${problem.kind}:${problem.line}:${problem.value}`, className: cls },
             tmpl
               // 函数替换:{v} 是用户输入的原始行,字符串替换串里的 $&/$`/$'
               // 等特殊序列会把模板前后文拼进预览,显示的路径与实际输入不符。

@@ -2,8 +2,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { run } from '../src/bin.js'
+import { humanCredits, run } from '../src/bin.js'
 import { deriveProtectorKey, sealAuthFieldForTest } from '../src/desktop-credential-protection.js'
+import { ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from '../src/variants.js'
 
 let root: string | undefined
 
@@ -12,6 +13,28 @@ afterEach(async () => {
   root = undefined
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
+})
+
+describe('humanCredits 空窗口文案按产品区分', () => {
+  it('Coding Plan 的空窗口不得输出 Start Plan 领取文案', () => {
+    // AC-17：Coding Plan 没有「每日领取」这回事，把 Start Plan 的
+    // "claim it in the ZCode client" 打给它是错误动作指引。
+    const text = humanCredits(ZCODE_VARIANT, { total: 0 }, [])
+    expect(text).toContain('Coding Plan quota')
+    expect(text).not.toContain('Start Plan')
+    expect(text).not.toContain('claim')
+  })
+
+  it('Start Plan 的空窗口保留领取文案（那是它真实存在的动作）', () => {
+    const text = humanCredits(ZCODE_START_PLAN_VARIANT, { total: 0 }, [])
+    expect(text).toContain('Start Plan quota')
+    expect(text).toContain('claim it in the ZCode client')
+  })
+
+  it('WorkBuddy 仍按积分总数报，不套 ZCode 窗口文案', () => {
+    const text = humanCredits({ id: 'workbuddy', kind: 'workbuddy' } as never, { total: 42 }, [])
+    expect(text).toBe('Remaining credit: 42')
+  })
 })
 
 describe('dsh-any-connect CLI --provider', () => {
@@ -130,6 +153,8 @@ printf '%s' '${JSON.stringify({ version: 1, atRestSecretKey: secret })}'
       const report = JSON.parse(out.join('')) as { credits?: number; quotaWindows?: Array<{ unit?: string; remain?: number; limit?: number }> }
       // --json:窗口带真实 token 数字(与 pill 同口径),不再是裸 total。
       expect(report.quotaWindows?.[0]).toMatchObject({ unit: 'tokens', remain: 57798755, limit: 100000000 })
+      // C-8：ZCode 的 JSON 不再给兼容字段 credits.total（额度语义是窗口）。
+      expect((report as { credits?: number }).credits).toBeUndefined()
       // 人读模式:带单位与上限,而不是「Remaining credit: 57798755」。
       out.length = 0
       expect(await run(['status', '--provider', 'zcode-start-plan'])).toBe(0)

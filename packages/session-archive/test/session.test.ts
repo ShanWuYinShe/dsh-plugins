@@ -7,6 +7,7 @@ import { remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 // 入口只导出 Loader 四件套（name/inject/config/apply），测试便利值走相对路径导入
 // （官方 package-surface 规则：入口不得为测试冻结额外 API）。
 import { createArchiveHost } from "../src/archive-host.js";
+import { createHostContext } from "../src/archive-host-context.js";
 
 const prevHome = process.env.HOME;
 const prevDshHome = process.env.DSH_HOME;
@@ -708,6 +709,46 @@ describe("session-archive host", () => {
       && !fs.existsSync(path.dirname(legacyPath))).toBe(true);
     // 兜底断言:夹具的 session.jsonl 存根也随目录清理消失。
     expect(fs.existsSync(legacyPath)).toBe(false);
+  });
+
+  it("代际文件扫描不穿透符号链接目录（SA-11 链接防护）", async () => {
+    // resolveGenerationFile 旧实现直接 readdir：目录被换成符号链接时会列出
+    // 目标目录内容并把它当代际文件返回，后续删除即穿透链接删目标数据。
+    // 新实现先 lstat：链接/非目录一律返回 null。
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-link-"));
+    const target = path.join(saRoot, "link-target");
+    fs.mkdirSync(target);
+    fs.writeFileSync(path.join(target, "session.v1.jsonl"), "{}");
+    const linkDir = path.join(saRoot, "link-dir");
+    fs.symlinkSync(target, linkDir);
+    // 最小 ctx：createHostContext 只消费 workspaceRegistry/sessionPersistence/sessions/get。
+    const ctx = {
+      workspaceRegistry: { archivedSessionIds: [] },
+      sessionPersistence: {},
+      sessions: { get: () => undefined },
+      get: () => undefined,
+    } as unknown as Context;
+    const deps = createHostContext(ctx, baseCfg);
+    expect(await deps.resolveGenerationFile(linkDir)).toBe(null);
+    // 判据有效性：真实目录仍能扫到代际文件。
+    expect((await deps.resolveGenerationFile(target))?.endsWith("session.v1.jsonl")).toBe(true);
+  });
+
+  it("detail:仅含工具调用的助手消息计入总数并生成 [toolNames] 占位摘要（rc.1 tool-call）", async () => {
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-toolcall-"));
+    const f = makeFixture({
+      archived: ["tc1"],
+      headers: [{ id: "tc1", cwd: "/proj/a", createdAt: 1000 }],
+    });
+    writeSession("tc1", [
+      messageEvent(1, 1, "hi"),
+      { type: "assistant/message", seq: 2, time: 2, data: { turn: 1, step: 1, message: { id: "m2", role: "assistant", content: [{ type: "tool-call", id: "c1", name: "read", arguments: "{}" }] }, stream: [] } },
+    ]);
+    const detail = await createArchiveHost(f.ctx, baseCfg).detail("tc1");
+    // 纯工具调用消息在旧实现里 text 为空 → 被跳过（不计 totalMessageCount）；
+    // rc.1 形状识别后必须有占位文本并计入总数。
+    expect(detail.messages.map((message) => message.text)).toEqual(["hi", "[read]"]);
+    expect(detail.totalMessageCount).toBe(2);
   });
 
   it("stat 抛错:删除按 unenumerable 拒绝,不得谎报成功(0.3.9 同源回归)", async () => {

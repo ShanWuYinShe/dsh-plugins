@@ -11,12 +11,13 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { clearDirExistCache } from './roots-filter.js'
+import { createRootsFilter } from './roots-filter.js'
 import { normalizeRoots } from './config-validate.js'
 import { DEFAULT_CONFIG } from './plugin-config.js'
-import { getLandlockRuntime } from './landlock-exec.js'
+import { createLandlockRuntimeLoader } from './landlock-exec.js'
 import { ORIGINAL } from './roots.js'
 import { PluginConfigGateway } from './remote.js'
+import type { Config } from './config.js'
 import type { SandboxExtraRootsConfig } from './types.js'
 import {
   installConfineWrapper,
@@ -28,20 +29,29 @@ import {
   type MountState,
 } from './wrap.js'
 
-export async function apply(ctx: Context, config?: Partial<SandboxExtraRootsConfig>): Promise<void> {
+export async function apply(ctx: Context, config?: Config): Promise<void> {
   // fail-safe：初始化失败只记录，绝不让本插件拖垮 harness（host 层挂载时
   // entry 异常会导致进程启动失败）。
   try {
     const rawSandbox = rawService(ctx.sandbox, ORIGINAL)
     // ctx.fs 的官方 Context 增强来自本包未依赖的 @deepseek-ai/dsh-fs：按实例访问。
     const rawFs = rawService((ctx as unknown as { fs: unknown }).fs, ORIGINAL)
-    const landlockRuntime = await getLandlockRuntime()
+    // landlock 启动器解析是实例级懒加载（owner: 本次 apply）：此前是模块级
+    // singleton，同进程多实例/测试会串扰。成功缓存、失败下次重新探测的语义
+    // 由 loader 实例自身保持（见 landlock-exec.ts）。
+    const landlockRuntime = await createLandlockRuntimeLoader().get()
+
+    // 目录存在性 TTL 缓存是实例级状态（owner: 包装状态 MountState）。行
+    // reload 时旧包装可能仍挂着（新 entry 先 apply、旧 entry 后 dispose），
+    // 因此每次 apply 都换新实例并写回状态，保证按真实文件系统判定。
+    const rootsFilter = createRootsFilter()
 
     // 共享状态（跨挂载点）：引用计数 + 包装句柄 + 当前生效的额外目录。
     const sandboxState = mountState<ConfineMountState>(rawSandbox, () => ({
       mounts: 0,
       extraRoots: [],
       warned: new Set<string>(),
+      rootsFilter,
       wrapped: false,
       hadOwn: false,
       original: null,
@@ -53,11 +63,16 @@ export async function apply(ctx: Context, config?: Partial<SandboxExtraRootsConf
       mounts: 0,
       extraRoots: [],
       warned: new Set<string>(),
+      rootsFilter,
       wrapped: false,
       hadOwn: false,
       original: null,
       installed: null,
     }))
+    // 已存在包装状态（行 reload 的短暂重叠窗口）时沿用包装，但目录缓存
+    // 属于"当前这一代配置"：整体换成新实例。
+    sandboxState.rootsFilter = rootsFilter
+    fsState.rootsFilter = rootsFilter
     // 卸载计数在 effect 体内递增，且 effect 先于后续初始化登记：
     //   - ctx.effect 的 execute 在注册时立即执行（cordis 契约），递增与注册
     //     同一步完成；注册本身抛错时不会留下"已递增、但永不 dispose"的计数
@@ -78,7 +93,8 @@ export async function apply(ctx: Context, config?: Partial<SandboxExtraRootsConf
     // reload 本行使新配置在这里生效）。配置热更新即行 reload：目录存在性缓存
     // 在每次 apply 重建时整体失效，保证按真实文件系统判定。
     const cfg: SandboxExtraRootsConfig = { ...DEFAULT_CONFIG, ...(config ?? {}) }
-    clearDirExistCache()
+    // Config schema 只保证形状/默认值；这里仍是最终防线：canonical 化、危险根
+    // 分级过滤、去重，非法 patch 值经 warn 可见（不静默忽略）。
     sandboxState.extraRoots = normalizeRoots(cfg, warn)
     fsState.extraRoots = sandboxState.extraRoots
 

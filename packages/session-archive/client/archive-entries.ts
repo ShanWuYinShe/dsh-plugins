@@ -7,7 +7,7 @@
  * @module @chaoset/session-archive/client/archive-entries
  */
 
-
+import type { TFunc } from './locales.js'
 
 /** 归档筛选：子串不区分大小写匹配标题/工作区路径/会话 ID；空查询返回
  * 副本。纯函数导出供单测（client-filter.test.ts）与面板 useMemo 共用——
@@ -52,12 +52,6 @@ export function sortArchived<T extends { updatedAt: unknown; size: unknown; titl
     return 0;
   });
   return out;
-}
-
-/** 会话导出文件名：标题安全化（非法字符换 -，截 40 字符），无标题用 ID。 */
-export function exportFilename(item: { title: unknown; sessionId: unknown }): string {
-  const base = String(item.title ?? "").replace(/[-\\/:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
-  return "archive-" + (base || String(item.sessionId).slice(0, 12)) + ".md";
 }
 
 /** 把 detail（标题 + user/assistant 文本消息）格式化为 Markdown 文本。 */
@@ -125,7 +119,7 @@ export interface BatchActionResult {
   /** 成功处理的 id（delete 用 deleted，unarchive 用 restored——两者取其一）。 */
   deleted?: unknown;
   restored?: unknown;
-  /** 逐项失败原因（live / busy / unenumerable / not-archived / not-restorable / 具体错误）。 */
+  /** 逐项失败原因（busy / unenumerable / not-archived / not-restorable / 具体错误）。 */
   failed?: unknown;
   /** 删除成功但内存会话仍在的 id：原生页需宿主重启才丢条目。 */
   needsRestart?: unknown;
@@ -168,4 +162,24 @@ export function summarizeBatchResult(result: BatchActionResult | null | undefine
   };
 }
 
-// ── 归档面板 ─────────────────────────────────────────────────────────
+/** 本插件 Remote 失败码 → 本地化文案键（官方客户端的稳定词表；未知 code 走兜底）。 */
+const REMOTE_ERROR_KEYS: Readonly<Record<string, "errorNotArchived" | "errorDenied" | "errorCancelled">> = {
+  "session-archive/not-archived": "errorNotArchived",
+  "remote-access/denied": "errorDenied",
+  "gateway/cancelled": "errorCancelled",
+};
+
+/**
+ * Remote 调用失败的用户可见文案：按稳定 `code` 本地化；没有 code（本地异常）
+ * 或未知 code 回退「技术文本（+ code）」，保证用户至少能看到可报告的信息。
+ * 官方 RULE-039 的调用侧判据：按 code 分支、不用 instanceof、不吞错。
+ */
+export function remoteErrorMessage(t: TFunc, error: unknown): string {
+  const record = error !== null && typeof error === "object" ? error as { code?: unknown; message?: unknown } : undefined;
+  const technical = String(record?.message ?? error ?? "error");
+  const code = typeof record?.code === "string" ? record.code : undefined;
+  if (code === undefined) return technical;
+  const key = REMOTE_ERROR_KEYS[code];
+  if (key !== undefined) return t(key);
+  return t("errorUnknown") + ": " + technical + " [" + code + "]";
+}

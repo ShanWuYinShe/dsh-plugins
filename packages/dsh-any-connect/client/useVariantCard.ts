@@ -63,6 +63,8 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
   // 可见模型列表。有隐藏项时标题行始终显示数量，用户知道它存在。
   const [excludedOpen, setExcludedOpen] = useState(false)
   // 「已复制」是短暂反馈：复制成功给一次确认，2s 后自行复原，不留陈旧状态。
+  // 定时器挂在 effect 上（而不是在事件处理器里裸 setTimeout）：卸载时由
+  // cleanup 清掉，不留 2s 的悬空计时器（RULE-046）。
   const [copiedPlanId, setCopiedPlanId] = useState(false)
   const mounted = useRef(true)
 
@@ -70,6 +72,12 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
     mounted.current = true
     return () => { mounted.current = false }
   }, [])
+
+  useEffect(() => {
+    if (!copiedPlanId) return
+    const timer = window.setTimeout(() => { if (mounted.current) setCopiedPlanId(false) }, 2000)
+    return () => window.clearTimeout(timer)
+  }, [copiedPlanId])
 
   const probe: WorkBuddyWebProbeSection | undefined = status.probe
   const probeKey = status.probeKey
@@ -97,7 +105,6 @@ export function useVariantCard({ t, variant, status, open, onToggle, fetchStatus
       await navigator.clipboard.writeText(planId)
       if (!mounted.current) return
       setCopiedPlanId(true)
-      window.setTimeout(() => { if (mounted.current) setCopiedPlanId(false) }, 2000)
     } catch {
       // 复制失败不改状态：plan_id 本身已经显示在卡片上，用户仍可手动选中复制。
     }

@@ -262,6 +262,42 @@ describe('ProviderUsageRegistry', () => {
     expect(snapshot?.degraded).toBe(true)
   })
 
+  it('失败快照继承上一次观测到的 rateLimit（限流块不因一次失败消失）', async () => {
+    const { registry, advance } = makeRegistry({ ttlMs: 100 })
+    const observed = { blockedAt: 1_000, lastSeenAt: 2_000, resetAt: 9_000, status: 429, hits: 3, model: 'glm-5.3' }
+    let fail = false
+    registry.register('acme', async (): Promise<UsageSnapshot> => {
+      if (fail) throw new Error('transient')
+      return {
+        provider: 'acme',
+        windows: [{ id: 'a', label: 'A', remain: 9, unit: 'credits' }],
+        fetchedAt: 0,
+        rateLimit: observed,
+      }
+    })
+
+    const first = await registry.snapshot('acme')
+    expect(first?.rateLimit).toEqual(observed)
+
+    fail = true
+    advance(101)
+    const failed = await registry.snapshot('acme')
+    // 窗口还有额度但通道正在拒收时，「何时恢复」是用户唯一能行动的信息：
+    // 失败一次就抹掉限流块等于把这条答案弄丢。degraded 已标明是旧观测。
+    expect(failed?.rateLimit).toEqual(observed)
+    expect(failed?.degraded).toBe(true)
+    expect(failed?.error).toContain('transient')
+  })
+
+  it('失败快照没有可继承的 rateLimit 时不凭空造一个', async () => {
+    const { registry } = makeRegistry()
+    registry.register('acme', async () => { throw new Error('down') })
+
+    const snapshot = await registry.snapshot('acme')
+    expect(snapshot?.rateLimit).toBeUndefined()
+    expect(snapshot?.degraded).toBeUndefined()
+  })
+
   it('redacts the credential a failing endpoint quotes back', async () => {
     const { registry } = makeRegistry({ timeoutMs: 5000 })
     const secret = 'sk-abcdefghijklmnopqrstuvwxyz012345'
@@ -372,6 +408,31 @@ describe('ProviderUsageRegistry', () => {
     // 的旧 Promise 永久挂起。
     const second = await registry.snapshot('acme')
     expect(second?.error).toContain('timed out')
+  })
+
+  it('resolver 同步抛错后不残留 deadline 定时器（run 在 try 内）', async () => {
+    // 回归:underDeadline 此前把 `run(...)` 放在 try/finally 之外,resolver
+    // 同步抛错时 finally 里的 clearTimeout 被跳过,timer 只靠 unref 留在
+    // 事件循环里(测试 fake timers 会直接看到未决定时器)。setResolver 是公开
+    // 注入点,同步抛错是合法失败路径,必须与异步失败同样清理。
+    vi.useFakeTimers()
+    try {
+      const { registry } = makeRegistry({ timeoutMs: 15_000 })
+      registry.setResolver(() => { throw new Error('sync resolver boom') })
+
+      // 推断路径把 resolve 的失败折叠成「无推断结果」,snapshot 返回 undefined。
+      expect(await registry.snapshot('my-cloud')).toBeUndefined()
+      // 没有任何未结算的 deadline 定时器残留。
+      expect(vi.getTimerCount()).toBe(0)
+
+      // 正常路径同样不残留:超时未发生的查询结算后 timer 必须被清理。
+      registry.setResolver(async () => ({ baseURL: 'https://api.siliconflow.cn/v1' }))
+      registry.register('siliconflow', async (): Promise<UsageSnapshot> => ({ provider: 'siliconflow', windows: [], fetchedAt: 0 }))
+      expect(await registry.snapshot('my-cloud')).toBeDefined()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('carries a querier-reported error through the success path', async () => {
@@ -614,6 +675,58 @@ describe('querier 返回形状校验（第三方扩展点不得让 client 渲染
     expect(snapshot?.windows).toEqual([{ id: 'a', label: 'A', remain: 9, unit: 'credits' }])
     expect(snapshot?.degraded).toBe(true)
     expect(snapshot?.error).toContain('invalid snapshot')
+  })
+
+  it('rateLimit 合法答案原样透传（校验不误伤真实形状）', async () => {
+    const rateLimit = { blockedAt: 1_000, lastSeenAt: 2_000, resetAt: 9_000, status: 429, hits: 4, model: 'glm-5.3' }
+    const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimit }).snapshot('acme')
+    expect(snapshot?.rateLimit).toEqual(rateLimit)
+    expect(snapshot?.error).toBeUndefined()
+  })
+
+  it('rateLimit.hits 缺失/负数/非有限数：折叠成失败快照', async () => {
+    // client 的限流块无条件渲染 hits（"被拒 N 次"），缺失会渲染出
+    // "undefined refusals"；非负有限数是渲染的硬前提。
+    const base = { blockedAt: 1, lastSeenAt: 2, status: 429 }
+    const invalidHits: unknown[] = [
+      { ...base }, // 缺失
+      { ...base, hits: -1 },
+      { ...base, hits: Number.NaN },
+      { ...base, hits: Number.POSITIVE_INFINITY },
+      { ...base, hits: '4' },
+    ]
+    for (const rateLimit of invalidHits) {
+      const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimit }).snapshot('acme')
+      expect(snapshot?.windows).toEqual([])
+      expect(snapshot?.error, `rateLimit=${JSON.stringify(rateLimit)}`).toContain('rateLimit.hits is not a finite number >= 0')
+    }
+  })
+
+  it('rateLimit.model 非空串缺失以外的非法值：折叠成失败快照', async () => {
+    const base = { blockedAt: 1, lastSeenAt: 2, status: 429, hits: 1 }
+    for (const model of ['', 42, null]) {
+      const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimit: { ...base, model } }).snapshot('acme')
+      expect(snapshot?.windows).toEqual([])
+      expect(snapshot?.error, `model=${JSON.stringify(model)}`).toContain('rateLimit.model is not a non-empty string')
+    }
+  })
+
+  it('rateLimit.blockedAt/lastSeenAt/status 非有限数：折叠成失败快照', async () => {
+    const valid = { blockedAt: 1, lastSeenAt: 2, status: 429, hits: 1 }
+    const invalidFields: Array<[string, unknown]> = [
+      ['blockedAt', '1'],
+      ['blockedAt', Number.NaN],
+      ['lastSeenAt', null],
+      ['lastSeenAt', Number.POSITIVE_INFINITY],
+      ['status', '429'],
+      ['status', Number.NaN],
+    ]
+    for (const [key, value] of invalidFields) {
+      const rateLimit = { ...valid, [key]: value }
+      const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimit }).snapshot('acme')
+      expect(snapshot?.windows).toEqual([])
+      expect(snapshot?.error, `${key}=${String(value)}`).toContain(`rateLimit.${key} is not a finite number`)
+    }
   })
 })
 

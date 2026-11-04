@@ -176,8 +176,53 @@ describe('助手子进程环境的 WSLENV 注入', () => {
     const wsl = helperSpawnEnv(base, true)
     expect(wsl['ELECTRON_RUN_AS_NODE']).toBe('1')
     expect(wsl['WSLENV']).toBe('WT_SESSION:ELECTRON_RUN_AS_NODE/w')
-    // 其余变量原样透传（桌面 App 可能依赖宿主常规环境）。
+    // 白名单内的常规环境照常继承（Electron 以 node 形态启动需要路径/语言时区）。
     expect(wsl['PATH']).toBe('/usr/bin')
+  })
+
+  it('helperSpawnEnv：只继承白名单变量，宿主凭据类变量一律不进子进程环境', () => {
+    // RULE-057：被 spawn 的是第三方桌面 App 的 Electron 二进制，环境在进程
+    // 启动那一刻即对外暴露（/proc/<pid>/environ、崩溃转储）——宿主的
+    // DEEPSEEK_API_KEY / 各类 *_TOKEN 不能跟着传过去。
+    const base = {
+      PATH: '/usr/bin',
+      HOME: '/home/u',
+      TEMP: '/tmp',
+      LANG: 'zh_CN.UTF-8',
+      TZ: 'Asia/Shanghai',
+      WSLENV: 'WT_SESSION',
+      WSL_INTEROP: '/run/WSL/8_interop',
+      DEEPSEEK_API_KEY: 'sk-secret',
+      DSH_TOKEN: 'dsh-secret',
+      GITHUB_TOKEN: 'gh-token',
+      DB_PASSWORD: 'pw',
+      AWS_SECRET_ACCESS_KEY: 'aws-secret',
+      MY_CREDENTIAL_FILE: '/home/u/cred.json',
+      DSH_HOME: '/home/u/.dsh',
+      UNRELATED: 'x',
+    }
+    const env = helperSpawnEnv(base, true)
+    // 必需项保留。
+    expect(env['PATH']).toBe('/usr/bin')
+    expect(env['HOME']).toBe('/home/u')
+    expect(env['TEMP']).toBe('/tmp')
+    expect(env['LANG']).toBe('zh_CN.UTF-8')
+    expect(env['TZ']).toBe('Asia/Shanghai')
+    expect(env['WSL_INTEROP']).toBe('/run/WSL/8_interop')
+    // 敏感/非白名单项全部剔除。
+    for (const name of [
+      'DEEPSEEK_API_KEY',
+      'DSH_TOKEN',
+      'GITHUB_TOKEN',
+      'DB_PASSWORD',
+      'AWS_SECRET_ACCESS_KEY',
+      'MY_CREDENTIAL_FILE',
+      'DSH_HOME',
+      'UNRELATED',
+    ]) {
+      expect(env[name], `${name} 不得继承给第三方桌面二进制`).toBeUndefined()
+    }
+    expect(env['ELECTRON_RUN_AS_NODE']).toBe('1')
   })
 
   it('spawnAt 真实发起的子进程断开了 stdin（防 interop 阻塞）', async () => {

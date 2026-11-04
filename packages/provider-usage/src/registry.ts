@@ -15,6 +15,7 @@
 
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
+import { DEFAULT_CACHE_TTL_MS, DEFAULT_ERROR_CACHE_TTL_MS, DEFAULT_QUERY_TIMEOUT_MS, DEFAULT_UNRESOLVED_TTL_MS } from './config.js'
 import { inferProviderFromBaseUrl, normalizeProviderKey, type ResolvedProvider } from './resolve.js'
 import type { ProviderUsageQuerier, UsageSnapshot } from './types.js'
 
@@ -33,19 +34,13 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** How long one provider's answer is reused before the next read refetches. */
-const DEFAULT_CACHE_TTL_MS = 60_000
-
-/** 失败答案的复用时长:错误没有成功答案的保质期,按更短负缓存处理。 */
-const DEFAULT_ERROR_CACHE_TTL_MS = 10_000
-
-/** 无推断结果(`snapshot` 为 undefined)的负缓存时长,过期后才再次尝试推断。 */
-const DEFAULT_UNRESOLVED_TTL_MS = 60_000
-
-/** How long one query may run before it is abandoned. */
-const DEFAULT_QUERY_TIMEOUT_MS = 15_000
-
-/** Constructor options. */
+/**
+ * Constructor options.
+ *
+ * 缓存/负缓存 TTL 与查询 deadline 的默认值来自 {@link Config}（src/config.ts）：
+ * 默认值与部署配置的唯一来源都在那里，这里的 `?? DEFAULT_*` 只是直接
+ * `new ProviderUsageRegistry(ctx)`（测试、内部 caller）时的兜底。
+ */
 interface ProviderUsageRegistryOptions {
   /** Cache lifetime in milliseconds; tests pin this to drive refetches. */
   cacheTtlMs?: number
@@ -115,9 +110,12 @@ async function underDeadline<T>(timeoutMs: number, timeoutMessage: string, run: 
   // race 先被操作结算时，timedOut 稍后的 reject 会成为 unhandled rejection；
   // 同理操作在超时后迟到 reject 时也一样。两边都挂空 catch 吞掉。
   timedOut.catch(() => {})
-  const work = run(controller.signal)
-  work.catch(() => {})
   try {
+    // run 必须进 try：resolver 是公开注入点（setResolver），同步抛错时
+    // `work.catch` 与 deadline 清理都会被跳过，定时器残留到进程退出。
+    // 放进 try 后同步抛错走 finally 的 clearTimeout，再原样抛给调用方。
+    const work = run(controller.signal)
+    work.catch(() => {})
     return await Promise.race([work, timedOut])
   } finally {
     clearTimeout(timer)
@@ -177,9 +175,29 @@ function assertQuerierSnapshot(provider: string, value: unknown): void {
   const rateLimit = snapshot['rateLimit']
   if (rateLimit !== undefined) {
     if (typeof rateLimit !== 'object' || rateLimit === null || Array.isArray(rateLimit)) throw invalidSnapshot(provider, 'rateLimit is not an object')
-    const resetAt = (rateLimit as Record<string, unknown>)['resetAt']
+    const limit = rateLimit as Record<string, unknown>
+    const resetAt = limit['resetAt']
     if (resetAt !== undefined && (typeof resetAt !== 'number' || !Number.isFinite(resetAt))) {
       throw invalidSnapshot(provider, 'rateLimit.resetAt is not a finite number')
+    }
+    // client 的限流块无条件渲染 `hits`（"被拒 N 次"），缺失会渲染成
+    // "undefined refusals"；因此有 rateLimit 就必须有非负有限计数。
+    const hits = limit['hits']
+    if (typeof hits !== 'number' || !Number.isFinite(hits) || hits < 0) {
+      throw invalidSnapshot(provider, 'rateLimit.hits is not a finite number >= 0')
+    }
+    // model 可选，但给了就必须是非空串：空串会渲染成悬空的分隔符 " · "。
+    const model = limit['model']
+    if (model !== undefined && (typeof model !== 'string' || model === '')) {
+      throw invalidSnapshot(provider, 'rateLimit.model is not a non-empty string')
+    }
+    // 这三个字段当前未直接渲染，但类型契约要求「毫秒时间戳 / 上游状态码」；
+    // 校验它们可让第三方 querier 的脏数据在越过 wire 前就折叠成失败快照。
+    for (const key of ['blockedAt', 'lastSeenAt', 'status'] as const) {
+      const value = limit[key]
+      if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
+        throw invalidSnapshot(provider, `rateLimit.${key} is not a finite number`)
+      }
     }
   }
 }
@@ -396,6 +414,10 @@ export class ProviderUsageRegistry extends Service {
         // 「该 provider 不上报额度」的绿点，失败原因蒸发。错误文本过
         // safeMessage，与 catch 分支同一脱敏口径。
         ...snapshot.error === undefined ? {} : { error: safeMessage(snapshot.error) },
+        // 限流观测必须透传：client 的限流块（何时恢复、按哪个模型限）是
+        // 「此刻还能不能发请求」的唯一答案；不透传等于让 querier 的这条
+        // 观测死在 host 侧，面板只能显示「还剩多少」这种误导性绿数字。
+        ...snapshot.rateLimit === undefined ? {} : { rateLimit: snapshot.rateLimit },
         windows: snapshot.windows,
         fetchedAt,
       }
@@ -409,6 +431,10 @@ export class ProviderUsageRegistry extends Service {
         // stale, not wrong, and blanking it hides the very number the user
         // opened the pill to read.
         ...previous?.plan === undefined ? {} : { plan: previous.plan },
+        // 限流观测同理不能丢：窗口还有额度但通道正在拒收时，用户需要的是
+        // 「什么时候恢复」；失败一次就抹掉限流块，会让「何时能继续用」的
+        // 答案消失。degraded 已标明这是上一次观测，不是本轮结果。
+        ...previous?.rateLimit === undefined ? {} : { rateLimit: previous.rateLimit },
         windows: previous?.windows ?? [],
         fetchedAt,
         error: safeMessage(error),

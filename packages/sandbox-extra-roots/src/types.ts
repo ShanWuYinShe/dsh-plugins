@@ -32,3 +32,22 @@ export interface SandboxExtraRootsSetResult {
   /** 是否持久化成功（失败会抛错，不会静默返回 false）。 */
   saved: boolean;
 }
+
+/**
+ * 本插件的 Remote 业务失败码（typert-protocol 的 RemoteErrorDetailsMap 合并
+ * 扩展，官方 dsh-session / workspace 的 "xxx/not-found" 同款做法）：Host 在
+ * 失败点抛 RemoteError，Client 按 code 判别（不要用 instanceof）。
+ */
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface RemoteErrorDetailsMap {
+    /** 本部署没有可用的官方 configEditor（无 profile entry 或服务缺失），配置无法持久化。 */
+    'sandbox-extra-roots/config-unavailable': {};
+    /** remote.set 的配置校验失败：field 是被拒绝的字段，value 是其原始值文本。 */
+    'sandbox-extra-roots/invalid-config': {
+      /** 校验失败的字段名（通常是 extraWritableRoots；整体形状非法时为 config）。 */
+      readonly field: string;
+      /** 被拒绝的原始值（JSON 文本，已做循环引用兜底）。 */
+      readonly value: string;
+    };
+  }
+}

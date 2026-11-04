@@ -30,15 +30,25 @@ export function createArchiveQueries(deps: HostContext) {
     rowFor,
   } = deps
 
+  /** 存在性过滤后的归档 id（幽灵记录不计；只逐 id stat，不读事件流/标题）。
+   * count 与 Remote 层逐项 remoteAccess 过滤共用这一个轻量口径。 */
+  async function existingIds(): Promise<string[]> {
+    const archived = [...archivedSet()];
+    if (archived.length === 0) return [];
+    const snapshots = await snapshotsByIds(archived);
+    return archived.filter((sessionId) => snapshots.has(sessionId));
+  }
+
   return {
     /** 归档会话计数（存在性过滤后的真实数量）。侧边栏徽标的关闭态轮询
      * 只调这里：逐 id stat 只读元数据头，不枚举全部历史会话。 */
     async count(): Promise<ArchiveCountResult> {
-      const archived = [...archivedSet()];
-      if (archived.length === 0) return { count: 0 };
-      const snapshots = await snapshotsByIds(archived);
-      return { count: snapshots.size };
+      return { count: (await existingIds()).length };
     },
+
+    /** 存在性过滤后的归档 id 列表：Remote 层对每项做 remoteAccess 过滤用。
+     * 与 count 同口径（只 stat 元数据），不读事件流/标题。 */
+    existingIds,
 
     /** 列出全部归档会话（存在性过滤：文件已删的幽灵归档记录不显示）。 */
     async list(): Promise<ArchiveListResult> {

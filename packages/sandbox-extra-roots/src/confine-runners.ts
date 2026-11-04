@@ -11,7 +11,7 @@
 import type { SandboxExecutionPolicy } from "@deepseek-ai/dsh-sandbox";
 import { seatbeltProfileArgs } from "./common.js";
 import { canon, classifyRoot, extraGrantRoots } from "./roots.js";
-import { existingDirectoryRoots } from "./roots-filter.js";
+import type { RootsFilter } from "./roots-filter.js";
 
 /** 改写分支需要的装配回调（apply 侧闭包提供）。 */
 export interface ConfineRunnerDeps {
@@ -158,6 +158,7 @@ export const bindMountGrant: GrantFragmentBuilder = (root) => ["--bind", root, r
 /**
  * bwrap / Landlock 通用插入：在 -- 前插入 buildGrant 产出的授权片段。
  * 只授予当前真实存在的目录，缺失 root 会让 bwrap 启动失败。
+ * rootsFilter 是包装状态持有的实例级目录过滤器（apply 创建）。
  * 返回插入后的完整 argv；null = 保持官方原样。
  */
 export function bindMountArgv(
@@ -166,6 +167,7 @@ export function bindMountArgv(
   policy: SandboxExecutionPolicy,
   warned: Set<string>,
   warn: (message: string) => void,
+  rootsFilter: RootsFilter,
   warnOnce: (key: string, message: string) => void,
   buildGrant: GrantFragmentBuilder,
   runnerName: string,
@@ -176,7 +178,7 @@ export function bindMountArgv(
     return null;
   }
   const extra: string[] = [];
-  for (const root of existingDirectoryRoots(extraGrantRoots(policy, roots), warned, "bwrap/Landlock", warn)) {
+  for (const root of rootsFilter.existingDirectoryRoots(extraGrantRoots(policy, roots), warned, "bwrap/Landlock", warn)) {
     extra.push(...buildGrant(root));
   }
   return [...a.slice(0, dashDash), ...extra, ...a.slice(dashDash)];

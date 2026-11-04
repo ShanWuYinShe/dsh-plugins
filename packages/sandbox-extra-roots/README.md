@@ -19,7 +19,7 @@ https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
 ```
 
 即可在发现页一键安装本插件、查看与安装任意历史版本（索引与静态 registry 由 CI 从
-GitHub Releases 生成，发布在发行分支（当前 `alpha`，收敛后 `main`）根下的 `market/` 目录）。重启 DSH 后更新到指定版本
+GitHub Releases 生成，发布在独立的 `market` 发布产物分支根目录（CI 生成，禁止手工编辑））。重启 DSH 后更新到指定版本
 （DSH 对自建 registry 的自动更新检查只在安装会话内生效）：
 
 ```bash
@@ -56,7 +56,8 @@ dsh plugin --profile web remove @chaoset/sandbox-extra-roots
    保存到当前 profile 的 `cordis.patch.yml` 本行 config，立即热生效；
    配置只走官方通道，旧版自建 `config.json` 迁移已删除）
 
-`extraWritableRoots`：绝对路径数组（设置页里每行一个，支持 `~` 表示用户主目录）。
+`extraWritableRoots`：绝对路径数组（设置页里每行一个，支持 `~` 表示用户主目录；
+`Config` 为官方 Schemastery schema，默认 `[]`，patch 里写非法形状会被拒绝并告警）。
 相对路径/空值会被拒绝并告警；危险根（`/`、盘根、主目录本身及其父目录，如
 macOS 的 `/Users`）保存时直接拒绝，系统目录（`/etc` `/usr` `/bin` `/sbin` 及
 macOS 的 `/private`，仅 POSIX——Windows 暂无对应条目）被过滤，重复行自动去重。
@@ -81,3 +82,9 @@ macOS 的 `/private`，仅 POSIX——Windows 暂无对应条目）被过滤，�
 - 设置页读写走 Remote 服务面：`src/remote.ts` 用官方 `@Remote` 标准装饰器声明，
   参数/返回类型在 `src/types.ts`；客户端消费的 `./remote` 调用面与宿主侧 `./typert`
   工件由官方 `@deepseek-ai/dsh-typert-generator` 在构建期生成（**不要手写工件**）。
+- 保存失败按官方 `RemoteError` 归一化：`sandbox-extra-roots/invalid-config`（配置被
+  校验拒绝，details 带 `field`/`value`）与 `sandbox-extra-roots/config-unavailable`
+  （当前部署没有 configEditor，无法持久化）；客户端按 code 给出本地化提示。
+- 写回以官方 `configEditor.edit(current, inherited)` 的当前值为合并基（只并入
+  `extraWritableRoots` 白名单字段），不会覆盖 profile patch 里的其它 key，也不会
+  把 bundle 继承层固化成 override。

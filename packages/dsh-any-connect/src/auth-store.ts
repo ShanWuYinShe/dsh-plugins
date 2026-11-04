@@ -74,7 +74,9 @@ export class WorkBuddyCredentialStore {
     // the same way, so `doctor` can never describe a different binary than the
     // one the provider would actually spawn.
     this.keyProvider = options.keyProvider
-      ?? (options.variant.kind === 'workbuddy' ? atRestKeyProviderFor(options.variant) : undefined)
+      ?? (options.variant.kind === 'workbuddy'
+        ? atRestKeyProviderFor(options.variant, options.childProcesses)
+        : undefined)
     this.stateStore = options.state
   }
 

@@ -22,6 +22,7 @@ import { parseAtRestPayload, deriveProtectorKey } from './desktop-auth-envelope.
 import { WINDOWS_REGISTRY_ROOTS, workBuddyWindowsDiscoveryTools, parseWindowsRegistryOutput, inspectWindowsElectronCandidate } from './desktop-discovery-windows.js'
 import type { WorkBuddyWindowsDiscoveryTools } from './desktop-discovery-windows.js'
 import { isWsl, helperSpawnEnv } from './wsl.js'
+import type { ChildProcessTracker } from './child-processes.js'
 
 /** The spawned helper. Separated from the provider so tests can stand it in. */
 export type WorkBuddyKeyPayloadSource = () => Promise<string>
@@ -31,9 +32,13 @@ export type WorkBuddyKeyPayloadSource = () => Promise<string>
  * plugin host and the CLI entry so the browser card and `doctor`/`status` can
  * never disagree about which binary a variant resolves.
  */
-export function atRestKeyProviderFor(variant: Pick<WorkBuddyVariant, 'id' | 'electron'>): WorkBuddyAtRestKeyProvider {
+export function atRestKeyProviderFor(
+  variant: Pick<WorkBuddyVariant, 'id' | 'electron'>,
+  childProcesses?: ChildProcessTracker,
+): WorkBuddyAtRestKeyProvider {
   return new WorkBuddyAtRestKeyProvider({
     product: electronProfileFor(variant),
+    ...childProcesses === undefined ? {} : { childProcesses },
     // 组合根唯一嗅探真实环境的位置：WSL2 里 Linux 平台也走 Windows 发现
     // （/mnt 自动挂载 + interop 拉起桌面 App 取 at-rest key）。
     discovery: electronDiscoveryFor(process.platform, isWsl()),
@@ -89,6 +94,11 @@ export interface WorkBuddyAtRestKeyProviderOptions {
   /** Platform override for deterministic discovery tests. */
   platform?: NodeJS.Platform
   /**
+   * 在途 helper 子进程的 owner（发现工具与解密助手共用）。插件运行时在
+   * dispose 时 kill 并等它们退出；CLI 不传（短命进程，等 natural exit）。
+   */
+  childProcesses?: ChildProcessTracker
+  /**
    * WSL2 运行环境。默认运行时判定；测试显式传入以保持确定性。影响：平台
    * 发现门（linux+WSL 走 Windows 搜索）、默认安装路径的 /mnt 推导、注册表
    * 候选的盘符路径转换、x-bit 校验放宽、助手子进程的 WSLENV 注入。
@@ -124,6 +134,7 @@ export class WorkBuddyAtRestKeyProvider {
   private readonly wsl: boolean
   private readonly discoveryBudgetMs: number
   private readonly timeoutMs: number
+  private readonly childProcesses: ChildProcessTracker | undefined
   private readonly source: WorkBuddyKeyPayloadSource
   private readonly spawnHelper: (electronPath: string) => Promise<string>
   /**
@@ -153,7 +164,8 @@ export class WorkBuddyAtRestKeyProvider {
         // （哪怕配错平台）沿用 macOS 默认路径语义，不被 WSL 分支劫持。
         ? defaultWorkBuddyElectronPath(options.product, this.platform, this.discovery === 'windows-workbuddy' && this.wsl)
         : options.defaultElectronPath ?? undefined
-    this.tools = options.tools ?? workBuddyDiscoveryTools(options.product.macOS.bundleId)
+    this.tools = options.tools ?? workBuddyDiscoveryTools(options.product.macOS.bundleId, options.childProcesses)
+    this.childProcesses = options.childProcesses
     this.windowsTools = options.windowsTools ?? workBuddyWindowsDiscoveryTools(this.wsl)
     this.discoveryBudgetMs = options.discoveryBudgetMs ?? WORKBUDDY_DISCOVERY_BUDGET_MS
     this.timeoutMs = options.timeoutMs ?? 10_000
@@ -295,7 +307,7 @@ export class WorkBuddyAtRestKeyProvider {
 
   private async spawnAt(electronPath: string): Promise<string> {
     return await new Promise<string>((resolve, reject) => {
-      execFile(electronPath, [HELPER_SCRIPT_ARGUMENT_FLAG, HELPER_SCRIPT], {
+      const child = execFile(electronPath, [HELPER_SCRIPT_ARGUMENT_FLAG, HELPER_SCRIPT], {
         timeout: this.timeoutMs,
         maxBuffer: 1024 * 1024,
         windowsHide: true,
@@ -333,6 +345,8 @@ export class WorkBuddyAtRestKeyProvider {
         }
         resolve(output)
       })
+      // 登记给组合根：插件卸载时 kill 并等 close（RULE-047）。
+      this.childProcesses?.track(child)
     })
   }
 }

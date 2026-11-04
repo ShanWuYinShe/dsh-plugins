@@ -106,6 +106,13 @@ export function apply(ctx: ClientContext): void {
       }
     }, 'provider-usage: pill copy')
     const t = ctx.locale.bind(LOCALE_NAMESPACE) as ProviderUsagePillInjected['t']
+    // locale 快照源：宿主 renderer 会把 inject 面的 hooks.locale 绑定成组件侧
+    // 的 useLocale selector hook。读的是当前语言（getSnapshot 跟随切换），
+    // 数字/时间格式化因此与文案同一语言，而不是浏览器语言。
+    const localeSource: ProviderUsagePillInjected['hooks']['locale'] = {
+      getSnapshot: () => ctx.locale.getSnapshot(),
+      subscribe: listener => ctx.locale.subscribe(listener),
+    }
     registerProviderUsageResources(ctx)
     // 与宿主自带 activity / usage pill 同形：`inject` 是无参常量函数，注册期不碰
     // 会话/服务状态（原因见文件头「注册期绝不解析」）。会话数据由组件在渲染期
@@ -117,21 +124,25 @@ export function apply(ctx: ClientContext): void {
       // entries (order 0 / 1), so the readout reads as an addition to the
       // built-in stats rather than displacing them.
       order: 10,
-      // 无参、无副作用、永不抛错：与宿主 statPillInject 同形。
-      inject: (): ProviderUsagePillInjected => ({
-        t,
-        resolveSeat: (sessionId: unknown) => resolveSeat(ctx, sessionId),
-      }),
+      // 无参、无副作用、永不抛错：与宿主 statPillInject 同形。locale 快照源只是
+      // 一对只读 observable，注册期不读语言、不解析会话。
+      inject: (): ProviderUsagePillInjected => {
+        // F-PU-11：load 闭包缓存按「这一次 inject 面」持有——宿主按
+        // (entry × 会话绑定) 缓存本对象，缓存随它一起回收，不再是模块级
+        // WeakMap 那种跨 HMR/reload 存活的隐式全局。
+        const loadCache = new WeakMap<ModelDirectory, () => void>()
+        return {
+          t,
+          resolveSeat: (sessionId: unknown) => resolveSeat(ctx, sessionId, loadCache),
+          hooks: { locale: localeSource },
+        }
+      },
     }, ProviderUsagePill))
   } catch (error: unknown) {
     // Degrade silently on the page: the host provider registry is unaffected.
     console.error('[provider-usage] client pill failed to load (host registry unaffected):', error)
   }
 }
-
-/** Inject() 每次 slot render 都会重跑；load 闭包按目录实例缓存，避免把新
- * identity 交给组件的加载 effect（那会反复重拉目录）。 */
-const loadCache = new WeakMap<ModelDirectory, () => void>()
 
 /**
  * Resolve one session's model seat **at render time**, from the component.
@@ -144,11 +155,15 @@ const loadCache = new WeakMap<ModelDirectory, () => void>()
  *
  * @param ctx - the browser plugin context (the apply closure's context).
  * @param sessionId - the session whose directory the dock belongs to.
+ * @param loadCache - 本次 inject 面私有的 `directory → load` 缓存；调用方
+ * （apply 内的 inject 工厂）持有它，宿主缓存 inject 结果时一并存活、随 entry
+ * 回收——模块级可变状态因此消失（F-PU-11）。
  * @returns the seat, or undefined when it cannot be resolved right now.
  */
 function resolveSeat(
   ctx: ClientContext,
   sessionId: unknown,
+  loadCache: WeakMap<ModelDirectory, () => void>,
 ): ProviderUsageSeat | undefined {
   if (sessionId === undefined || sessionId === null || sessionId === '') return undefined
   // 模型目录是可选服务：ctx.get 是宿主对可选服务的官方读取方式（严格模式下

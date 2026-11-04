@@ -1,7 +1,8 @@
 {
   "name": "@chaoset/session-archive",
-  "version": "0.3.33",
+  "version": "0.3.34",
   "description": "DSH plugin: browse archived sessions, inspect their content, batch-restore or permanently delete them with multi-select",
+  "icon": "./icon.svg",
   "engines": {
     "dsh": "0.2.2-rc.1",
     "node": ">=24.9.0"
@@ -9,22 +10,27 @@
   "type": "module",
   "license": "MIT",
   "files": [
-    "lib",
+    "lib/*.js",
+    "lib/*.d.ts",
     "lib/typert.host.js",
     "lib/typert.host.d.ts",
     "lib/typert.remote-client.js",
     "lib/typert.remote-client.d.ts",
     "lib/types.js",
     "lib/types.d.ts",
-    "client",
+    "client/client.cjs",
     "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "exports": {
     ".": "./lib/index.js",
     "./client": "./client/client.cjs",
+    "./locale/*.json": "./locale/*.json",
     "./types": {
       "types": "./lib/types.d.ts",
       "default": "./lib/types.js"
@@ -58,7 +64,9 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/schemastery": "~3.19.0",
     "@deepseek-ai/dsh-api-remotes": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-api-remote-access": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-api-session-controller": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-api-workspace-controller": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-client-locale": "^0.2.2-rc.1",

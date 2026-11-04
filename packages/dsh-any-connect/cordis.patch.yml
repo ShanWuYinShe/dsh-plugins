@@ -16,3 +16,5 @@
         authFileAI: ''
         authFileZCode: ''
         authFileOpenCode: ''
+        zcodeBuiltinConfig: ''
+        openCodeModelsCache: ''

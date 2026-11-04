@@ -8,6 +8,7 @@ import * as AnyConnect from '../src/index.js'
 import { signedInDocument, catalogRow } from './catalog-harness.js'
 import type { WorkBuddyModelInfo } from '../src/catalog.js'
 import { WorkBuddyUpstreamClient } from '../src/upstream.js'
+import { WorkBuddyProbeService } from '../src/probe-service.js'
 
 /**
  * 「注册前预热目录」这条线的回归（2026-10-27 取证，全过程记录在项目 skill dsh-any-connect-channels「5.3 重载窗口」）：
@@ -42,15 +43,27 @@ afterEach(async () => {
  * 返回「workbuddy 路由被注册那一刻」adapter 服务出去的模型 id 快照。 */
 async function installPlugin(options: {
   desktopFile: string
-  models: () => Promise<readonly WorkBuddyModelInfo[]>
-}): Promise<{ idsAtRegistration: Promise<string[]>; ctx: Context }> {
+  models: (signal?: AbortSignal) => Promise<readonly WorkBuddyModelInfo[]>
+}): Promise<{
+  idsAtRegistration: Promise<string[]>
+  ctx: Context
+  /** 注册那一刻累计的档位探测入队次数（预热契约：必须为 0）。 */
+  probeCallsAtRegistration: number
+  /** 注册那一刻累计的 fetchModels 调用次数（预热契约：必须为 0）。 */
+  fetchCallsAtRegistration: number
+}> {
   // 只让被测变体（workbuddy，CN）拿到挂起/指定名单，其余变体一律答空——
   // 既让断言只看 CN，也保证用例零真实网络（同 catalog-refresh.test.ts 的口径）。
   const models = options.models
-  vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
-    .mockImplementation(async function (this: unknown, credential: { domain?: string }) {
-      return credential.domain === 'www.codebuddy.cn' ? await models() : []
+  const modelsSpy = vi.spyOn(WorkBuddyUpstreamClient.prototype, 'fetchModels')
+    .mockImplementation(async function (this: unknown, credential: { domain?: string }, signal?: AbortSignal) {
+      // 挂起的桩必须响应取消信号：dispose 会 abort 在途刷新并 await 落定
+      // （AC-04 的 quiescence），忽略信号的桩会让卸载永久挂住。
+      return credential.domain === 'www.codebuddy.cn' ? await models(signal) : []
     })
+  // 预热契约「只读本地文件，绝不触网」：探测入队是可观测的同步动作，
+  // 在 registerAdapter 那一刻采样，避免用等待时长做负向断言。
+  const probeSpy = vi.spyOn(WorkBuddyProbeService.prototype, 'probeMissingCandidates')
   // 独立 DSH_HOME：本文件的 live 改写用例会把 saved catalog 落盘；共享测试
   // home 会让下一个用例（以及下次运行）的预热读到别人的名单——uid-1 这份
   // 凭据被 catalog 系列测试共用，污染面不小。每个用例各用各的临时 home。
@@ -66,6 +79,8 @@ async function installPlugin(options: {
   // 永不落定的占位：workbuddy 没注册成时由外层 waitFor 先红，不让 reject 逃成
   // unhandled rejection。
   let idsAtRegistration: Promise<string[]> = new Promise(() => {})
+  let probeCallsAtRegistration = -1
+  let fetchCallsAtRegistration = -1
   const proto = Object.getPrototypeOf(ctx.llm) as { registerAdapter: (p: string[], a: unknown) => unknown }
   const descriptor = Object.getOwnPropertyDescriptor(proto, 'registerAdapter')!
   const originalRegister = descriptor.value as (p: string[], a: unknown) => unknown
@@ -73,6 +88,10 @@ async function installPlugin(options: {
     ...descriptor,
     value: function (this: unknown, providers: string[], adapter: unknown) {
       if (providers[0] === 'workbuddy') {
+        // 采样必须发生在注册之前：primeCatalogForRegistration 已 await 完成，
+        // 若它在预热阶段入队了探测/发了网络请求，这里一定会看到。
+        probeCallsAtRegistration = probeSpy.mock.calls.length
+        fetchCallsAtRegistration = modelsSpy.mock.calls.length
         const listed = (adapter as { listModels: (p: string) => Promise<readonly { id: string }[]> })
           .listModels('workbuddy')
         idsAtRegistration = listed.then(rows => rows.map(row => row.id).sort())
@@ -88,7 +107,7 @@ async function installPlugin(options: {
   } finally {
     Object.defineProperty(proto, 'registerAdapter', descriptor)
   }
-  return { idsAtRegistration, ctx }
+  return { idsAtRegistration, ctx, probeCallsAtRegistration, fetchCallsAtRegistration }
 }
 
 /** 当前 provider 服务出去的模型 id，排序后便于断言。 */
@@ -96,9 +115,13 @@ async function servedIds(ctx: Context, provider = 'workbuddy'): Promise<string[]
   return (await ctx.llm.listModels(provider)).map(model => model.id).sort()
 }
 
-/** 永不落定的名单：live 拉取挂起，注册后的 refreshCatalog 停在等待上游。 */
-function hangingModels(): Promise<readonly WorkBuddyModelInfo[]> {
-  return new Promise(() => {})
+/** 挂起的名单：live 拉取停在等待上游，但响应取消信号（dispose 要能落定）。 */
+function hangingModels(signal?: AbortSignal): Promise<readonly WorkBuddyModelInfo[]> {
+  return new Promise((_resolve, reject) => {
+    const abort = (): void => reject(new Error('aborted'))
+    if (signal?.aborted === true) { abort(); return }
+    signal?.addEventListener('abort', abort, { once: true })
+  })
 }
 
 describe('注册前预热：adapter 上路由那一刻目录已非空', () => {
@@ -153,6 +176,45 @@ describe('注册前预热：adapter 上路由那一刻目录已非空', () => {
     // 空目录 = 分组隐藏的既有语义；预热只对「已登录」解锁目录。
     expect(await idsAtRegistration).toEqual([])
     expect(await servedIds(ctx)).toEqual([])
+  })
+
+  it('注册前预热零网络零探测：saved 里即使有未检测模型也不入队探针、不发 fetchModels', async () => {
+    // AC-13 回归：primeCatalogForRegistration 的契约是「只读本地文件，绝不触网」。
+    // 探测（probeMissingCandidates）会在上游真实消耗 chat 请求，必须只留在
+    // refreshCatalog 成功后的正式路径；用 registerAdapter 那一刻采样，
+    // 而不是等待固定时长后断言「没发生」。
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-prime-noprobe-'))
+    const home = join(root, 'dsh-home')
+    const desktop = join(root, 'workbuddy-desktop.info')
+    await writeFile(desktop, signedInDocument())
+    const cacheDir = join(home, 'cache', 'dsh-any-connect')
+    await mkdir(cacheDir, { recursive: true })
+    // 一行需要档位检测（supports: true 且未声明 supportedEfforts）：这正是
+    // 预热阶段会被入队的候选。
+    const needsProbe: WorkBuddyModelInfo = {
+      ...catalogRow('needs-probe'),
+      reasoning: { supports: true, onlyReasoning: false, canDisableThinking: true },
+    }
+    await writeFile(join(cacheDir, 'workbuddy-catalog.json'), `${JSON.stringify({
+      version: 1,
+      entries: {
+        'uid-1:': {
+          account: 'uid-1:',
+          source: 'https://copilot.tencent.com',
+          fetchedAtMs: Date.now(),
+          models: [catalogRow('saved-row'), needsProbe],
+        },
+      },
+    })}\n`)
+
+    const { idsAtRegistration, probeCallsAtRegistration, fetchCallsAtRegistration } = await installPlugin({
+      desktopFile: desktop,
+      models: hangingModels,
+    })
+
+    expect(await idsAtRegistration).toEqual(['needs-probe', 'saved-row'])
+    expect(probeCallsAtRegistration, '预热阶段不得入队档位探测').toBe(0)
+    expect(fetchCallsAtRegistration, '预热阶段不得发 fetchModels').toBe(0)
   })
 
   it('live 到场后照常改写：预热不改变 refreshCatalog 的身份/拉取链', async () => {

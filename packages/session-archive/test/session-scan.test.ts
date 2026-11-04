@@ -6,7 +6,7 @@
  * 校验**（宁可留下空壳目录，也不可递归多删别的会话数据）。
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -70,10 +70,24 @@ describe('messageText', () => {
     const content = [
       { type: 'text', text: 'hello ' },
       { type: 'image', source: {} },
-      { type: 'tool_use', name: 'x' },
+      { type: 'tool-call', name: 'x' },
       { type: 'text', text: 'world' },
     ]
     expect(messageText(content, 100)).toBe('hello world')
+  })
+
+  it('仅含工具调用时生成 [toolNames] 占位摘要（官方 rc.1 的 tool-call + name）', () => {
+    expect(messageText([
+      { type: 'tool-call', id: 'c1', name: 'read', arguments: '{}' },
+      { type: 'tool-call', id: 'c2', name: 'write', arguments: '{}' },
+    ], 100)).toBe('[read, write]')
+    // 缺 name 的畸形块回退 'tool'，不产出空串（否则该消息被 detail 静默丢弃）。
+    expect(messageText([{ type: 'tool-call' }], 100)).toBe('[tool]')
+  })
+
+  it('旧词形 tool_use/tool_call 不再识别（只认官方 tool-call）', () => {
+    expect(messageText([{ type: 'tool_use', name: 'x' }], 100)).toBe('')
+    expect(messageText([{ type: 'tool_call', name: 'x', function: { name: 'y' } }], 100)).toBe('')
   })
 
   it('非数组输入返回空串', () => {
@@ -217,5 +231,51 @@ describe('removeSessionDirIfOwned', () => {
     writeFileSync(join(dir, 'other-session.jsonl'), '{}')
     await expect(removeSessionDirIfOwned(sessionId, join(dir, 'session.jsonl'), vi.fn()))
       .rejects.toThrow(/cannot confirm stale file ownership/)
+  })
+
+  it('会话目录被替换为符号链接：不 readdir/不穿透目标目录，只删定位文件并告警', async () => {
+    // SA-11 负向用例：目录名与归属校验都「看起来正常」，但目录本身是链接。
+    // 旧实现 readdir 会列出目标目录内容，随后 rm(join(dir, entry)) 穿透链接
+    // 删掉目标目录里的同代际文件；新实现 lstat 后直接返回。
+    const root = tempDir()
+    const sessionId = '11111111-2222-3333-4444-555555555555'
+    const target = join(root, 'symlink-target')
+    mkdirSync(target)
+    writeFileSync(join(target, 'session.v1.jsonl'), 'old-generation')
+    writeFileSync(join(target, 'other-session.jsonl'), 'other-data')
+    const linkDir = join(root, 'sessions-' + sessionId)
+    symlinkSync(target, linkDir)
+    const warn = vi.fn()
+
+    await removeSessionDirIfOwned(sessionId, join(linkDir, 'session.jsonl'), warn)
+
+    // 目标目录里的文件一个都不能被删（旧实现会删掉 session.v1.jsonl）。
+    expect(existsSync(join(target, 'session.v1.jsonl'))).toBe(true)
+    expect(existsSync(join(target, 'other-session.jsonl'))).toBe(true)
+    // 链接本身保持原样（不递归删除、不跟随）。
+    expect(lstatSync(linkDir).isSymbolicLink()).toBe(true)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]?.[0])).toContain('symbolic link')
+  })
+
+  it('目录内代际条目是符号链接：不 unlink（不穿透），计入残留并报失败', async () => {
+    // 走代际清理路径（目录名归属校验失败 → 逐文件清理）：链接条目必须留下，
+    // 残留如实上报，由调用方把该会话记 failed，而不是穿透链接删目标数据。
+    const root = tempDir()
+    const sessionId = '11111111-2222-3333-4444-555555555555'
+    const dir = join(root, 'hashed-dir-name')
+    mkdirSync(dir)
+    const outside = join(root, 'outside-generation.jsonl')
+    writeFileSync(outside, 'outside-data')
+    const link = join(dir, 'session.v1.jsonl')
+    symlinkSync(outside, link)
+    const warn = vi.fn()
+
+    await expect(removeSessionDirIfOwned(sessionId, join(dir, 'session.jsonl'), warn))
+      .rejects.toThrow(/stale session files remain/)
+    // 链接与目标都不动：残留如实上报，由调用方把该会话记 failed。
+    expect(lstatSync(link).isSymbolicLink()).toBe(true)
+    expect(existsSync(outside)).toBe(true)
+    expect(warn).toHaveBeenCalled()
   })
 })

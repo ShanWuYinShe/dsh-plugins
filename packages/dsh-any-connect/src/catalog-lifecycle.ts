@@ -38,6 +38,8 @@ export interface CatalogLifecycle {
   claimPreviewFor(runtime: VariantRuntime): (credential: WorkBuddyCredential) => Promise<StartPlanPreviewResult>
   startTimers(): void
   stopTimers(): void
+  /** 卸载收尾：abort 在途刷新并等落定（见 catalog-refresh.ts 的 dispose）。 */
+  dispose(): Promise<void>
 }
 
 /** 建一套目录生命周期（每插件实例一份）。 */
@@ -60,5 +62,6 @@ export function createCatalogLifecycle(deps: CatalogLifecycleDeps): CatalogLifec
     claimPreviewFor: refresh.claimPreviewFor,
     startTimers: timers.startTimers,
     stopTimers: timers.stopTimers,
+    dispose: refresh.dispose,
   }
 }

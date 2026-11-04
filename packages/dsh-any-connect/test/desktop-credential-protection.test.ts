@@ -277,19 +277,14 @@ describe('at-rest key provider', () => {
     expect(new WorkBuddyAtRestKeyProvider({ product: electronProfileFor(CN_VARIANT) }).helperPath()).toBeUndefined()
   })
 
-  it('keeps externally assembled variants source-compatible (public type)', () => {
-    // `WorkBuddyVariant` is exported: callers have been building their own
-    // descriptors since before the electron profile existed. Such a variant
-    // must keep working — resolution falls back by variant id, and a custom
-    // id lands on the CN profile, the store's other legacy default.
+  it('fails loud for a variant without an Electron profile instead of borrowing another product', () => {
+    // 缺 profile 的变体此前按 id 静默回落到 CN/AI 产品，等于执行另一个产品
+    // 的二进制；按 RULE-053/061 改为 fail loud（没有任何产品身份就不 spawn）。
     const legacyAi = { id: AI_VARIANT.id } as unknown as WorkBuddyVariant
-    const legacyCustom = { id: 'workbuddy-custom' } as unknown as WorkBuddyVariant
-    expect(new WorkBuddyAtRestKeyProvider({ product: electronProfileFor(legacyAi) }).helperPath())
-      .toBe(new WorkBuddyAtRestKeyProvider({ product: electronProfileFor(AI_VARIANT) }).helperPath())
-    expect(new WorkBuddyAtRestKeyProvider({ product: electronProfileFor(legacyCustom) }).helperPath())
-      .toBe(new WorkBuddyAtRestKeyProvider({ product: electronProfileFor(CN_VARIANT) }).helperPath())
-    expect(new WorkBuddyAtRestKeyProvider({ product: electronProfileFor(undefined) }).helperPath())
-      .toBe(new WorkBuddyAtRestKeyProvider({ product: electronProfileFor(CN_VARIANT) }).helperPath())
+    const custom = { id: 'workbuddy-custom' } as unknown as WorkBuddyVariant
+    for (const variant of [legacyAi, custom, undefined]) {
+      expect(() => electronProfileFor(variant), '缺 Electron profile 必须报错而不是借用别的产品').toThrow(/no Electron profile/)
+    }
   })
 
   it('separates the env variables per product (issue #60)', () => {

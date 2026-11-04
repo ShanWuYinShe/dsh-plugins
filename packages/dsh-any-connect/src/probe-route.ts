@@ -10,10 +10,14 @@
  * 1. **Loopback Host + Origin**, shared with the status route. This drops
  *    DNS-rebinding pages, whose requests arrive addressed to the attacker's
  *    domain.
- * 2. **An in-process random key**, minted per process and handed only to the
- *    same-origin card. Loopback alone is *not* authentication — any local
- *    process can write `Host: 127.0.0.1` — so a route that spends the user's
- *    credit must prove the caller was told the key.
+ * 2. **Strict same-origin**: `Origin` must equal `http(s)://<Host>` — i.e. the
+ *    caller is the host page itself, not just "some loopback page". 其他本地
+ *    Web 应用同样跑在 127.0.0.1 的其它端口上；「环回」不等于「宿主页面」。
+ * 3. **An in-process random key**, minted per process and handed only to the
+ *    same-origin card (status 文档只在 `Sec-Fetch-Site: same-origin` 下下发，
+ *    见 web-status.ts 的威胁模型注释）. Loopback alone is *not* authentication — any
+ *    local process can write `Host: 127.0.0.1` — so a route that spends the
+ *    user's credit must prove the caller was told the key.
  *
  * The route never accepts a prompt, a model id, or a sentinel from the
  * browser: a probe request is assembled entirely host-side.
@@ -25,8 +29,9 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import { hostIsLoopback, originIsLoopback } from './loopback.js'
+import { hostIsLoopback, originIsLoopback, requestIsSameOrigin } from './loopback.js'
 import { safeMessage } from './values.js'
+import { writeJson } from './shim-http.js'
 import { WORKBUDDY_AI_PROBE_PATH, WORKBUDDY_PROBE_PATH } from './status-paths.js'
 import type { WorkBuddyProbeAction } from './status-paths.js'
 
@@ -58,11 +63,8 @@ export interface WorkBuddyProbeRouteOptions {
   restoreModel?: (modelId: string) => Promise<{ state: string; restored?: boolean; excludedCount?: number }>
   /** Restore all excluded models back to default. */
   restoreModels?: () => Promise<{ state: string; excludedCount?: number }>
-  /**
-   * Route path to mount. Defaults to the CN variant's path so existing callers
-   * and tests keep their behaviour; the international variant passes its own.
-   */
-  path?: string
+  /** Route path to mount; one per variant (五个变体各有一条）。 */
+  path: string
 }
 
 /** Mint the per-process control key. */
@@ -78,12 +80,6 @@ function keyMatches(expected: string, presented: string | undefined): boolean {
   const a = Buffer.from(expected)
   const b = Buffer.from(presented)
   return a.length === b.length && timingSafeEqual(a, b)
-}
-
-function json(res: ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body)
-  res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) })
-  res.end(payload)
 }
 
 /** Read the request body with a hard ceiling. */
@@ -138,64 +134,74 @@ export function workBuddyProbeHandler(
 ): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   return async (req, res) => {
     if (req.method !== 'POST') {
-      json(res, 405, { error: 'method not allowed' })
+      writeJson(res, 405, { error: 'method not allowed' })
       return
     }
+    // 两道守卫各挡一类调用方（威胁模型见模块头）：
+    // 1) Host/Origin 环回：挡 DNS 重绑定页面（请求被指到攻击者域名）；
+    // 2) **严格同源**：Origin 必须逐字等于 http(s)://<Host>。任意环回 Origin
+    //    不够——本地另一个端口上的页面/开发服务器同样是环回，却不是宿主页面。
+    //    写路由会持久化改用户的隐藏模型清单并触发上游请求，必须限定同源
+    //    浏览器上下文（浏览器自己写 Origin，跨源页面无法伪装）。
     if (!hostIsLoopback(req.headers.host) || !originIsLoopback(req.headers.origin)) {
-      json(res, 403, { error: 'request-not-trusted' })
+      writeJson(res, 403, { error: 'request-not-trusted' })
+      return
+    }
+    if (!requestIsSameOrigin(req.headers.origin, req.headers.host)) {
+      writeJson(res, 403, { error: 'cross-origin-rejected' })
       return
     }
     if (!keyMatches(key, req.headers['x-workbuddy-probe-key'] as string | undefined)) {
-      json(res, 403, { error: 'invalid-probe-key' })
+      writeJson(res, 403, { error: 'invalid-probe-key' })
       return
     }
     const body = await readBody(req)
     if (body === undefined) {
-      json(res, 413, { error: 'body too large' })
+      writeJson(res, 413, { error: 'body too large' })
       return
     }
     const action = parseAction(body)
     if (action === undefined) {
-      json(res, 400, { error: 'invalid action' })
+      writeJson(res, 400, { error: 'invalid action' })
       return
     }
     try {
       if (action.action === 'refresh') {
         if (deps.refresh === undefined) {
-          json(res, 404, { error: 'refresh-not-supported' })
+          writeJson(res, 404, { error: 'refresh-not-supported' })
           return
         }
-        json(res, 200, await deps.refresh())
+        writeJson(res, 200, await deps.refresh())
         return
       }
       if (action.action === 'delete-model') {
         if (deps.deleteModel === undefined) {
-          json(res, 404, { error: 'delete-model-not-supported' })
+          writeJson(res, 404, { error: 'delete-model-not-supported' })
           return
         }
-        json(res, 200, await deps.deleteModel(action.modelId))
+        writeJson(res, 200, await deps.deleteModel(action.modelId))
         return
       }
       if (action.action === 'restore-model') {
         if (deps.restoreModel === undefined) {
-          json(res, 404, { error: 'restore-model-not-supported' })
+          writeJson(res, 404, { error: 'restore-model-not-supported' })
           return
         }
-        json(res, 200, await deps.restoreModel(action.modelId))
+        writeJson(res, 200, await deps.restoreModel(action.modelId))
         return
       }
       if (action.action === 'restore-models') {
         if (deps.restoreModels === undefined) {
-          json(res, 404, { error: 'restore-models-not-supported' })
+          writeJson(res, 404, { error: 'restore-models-not-supported' })
           return
         }
-        json(res, 200, await deps.restoreModels())
+        writeJson(res, 200, await deps.restoreModels())
         return
       }
     } catch (error: unknown) {
       // 与 web-status 的 500 兜底同一脱敏口径:refresh 是注入点,自定义实
       // 现抛出的错误可能携带凭据材料,不能裸透传到浏览器。
-      json(res, 500, { error: safeMessage(error) })
+      writeJson(res, 500, { error: safeMessage(error) })
     }
   }
 }
@@ -206,11 +212,10 @@ export function registerWorkBuddyProbeRoute(
   deps: WorkBuddyProbeRouteOptions,
   key: string,
 ): void {
-  const path = deps.path ?? WORKBUDDY_PROBE_PATH
   ctx.effect(() => {
     const dispose = ctx.webServer.register({
       kind: 'exact',
-      path,
+      path: deps.path,
       handler: workBuddyProbeHandler(deps, key),
     })
     return () => {

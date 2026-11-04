@@ -40,6 +40,7 @@ import { createVariantCredentialStore, upstreamClientFor } from './variant-wirin
 import type { WorkBuddyStateStore } from './state-store.js'
 import type { CreditLedger } from './credit-ledger.js'
 import { errorMessage } from './values.js'
+import { createChildProcessTracker } from './child-processes.js'
 
 /** apply() 拿到的运行时集合句柄。 */
 export interface VariantRuntimeSet {
@@ -69,6 +70,16 @@ export function createVariantRuntimeSet(deps: {
   const { ctx, client, current } = deps
   let stopped = false
   /**
+   * 插件卸载信号（AC-33）：状态路由的额度查询等「消费侧可取消」的在途请求
+   * 与它融合，dispose 时立即中断，而不是等各自 30s 内部超时。
+   */
+  const shutdown = new AbortController()
+  /**
+   * 在途 helper 子进程的 owner（桌面 App 发现 / 解密助手）：dispose 时 kill
+   * 并等 close（RULE-047），见 child-processes.ts。
+   */
+  const childProcesses = createChildProcessTracker()
+  /**
    * 注册后写心跳是 fire-and-forget（不能拖慢注册），但卸载必须等这些写**落定**
    * 之后再清文件：在途写会在 clearHostHeartbeat 之后把心跳写回来（宿主退出后
    * 残留一条 CLI 可见的心跳），测试里则表现为删临时 DSH_HOME 时与在途
@@ -96,12 +107,15 @@ export function createVariantRuntimeSet(deps: {
     //    变体取自 fallbackFor——Start Plan 与 Coding Plan 的名单差异就在其中）；
     // 2) 只有 WorkBuddy 变体有探针（档位检测是 WorkBuddy 上游的能力）。
     const kind = variant.kind
-    const variantClient = kind === 'workbuddy' ? client : upstreamClientFor(variant, { models: fallbackFor(variant) })
+    const variantClient = kind === 'workbuddy'
+      ? client
+      : upstreamClientFor(variant, { models: fallbackFor(variant), config: current })
     const credentialStore = createVariantCredentialStore({
       variant,
       client: variantClient,
       desktopPath: configured,
       onWarning: message => ctx.logger?.warn?.(message),
+      childProcesses,
     })
     const catalogStore = new WorkBuddyCatalogStore({ path: workbuddyCatalogPath(variant.catalogFilename) })
     const shim = createWorkBuddyShim({ kind, providerId: variant.id, store: credentialStore, client: variantClient, catalog, logger: ctx.logger, rateLimits })
@@ -177,7 +191,8 @@ export function createVariantRuntimeSet(deps: {
       registerWorkBuddyStatusRoute(webCtx, {
         path: runtime.variant.statusPath,
         store: runtime.store,
-        fetchCredits: credential => runtime.client.fetchCredits(credential),
+        // 卸载信号传入额度查询：dispose 后不再等 30s 内部超时。
+        fetchCredits: (credential, signal) => runtime.client.fetchCredits(credential, signal ?? shutdown.signal),
         // 今日消耗台账只属于积分制变体（credit-ledger 的口径说明见该模块头）。
         // ledger 是域就绪后的后补注入，闭包取值即可拿到。
         ...runtime.variant.kind === 'workbuddy'
@@ -205,6 +220,8 @@ export function createVariantRuntimeSet(deps: {
           return actives.length === 0 ? undefined : actives.map(toWebRateLimit)
         },
         probeKey,
+        // 卸载信号：status 文档里的额度查询与 probe 控制写入都受它约束（AC-33）。
+        signal: shutdown.signal,
       })
       registerWorkBuddyProbeRoute(webCtx, {
         path: runtime.variant.probePath,
@@ -271,7 +288,17 @@ export function createVariantRuntimeSet(deps: {
   /** 卸载收尾（见接口注释）。 */
   async function dispose(): Promise<void> {
     stopped = true
+    // 1) 发取消信号 + 停周期定时器（不再产生新的刷新/探测/子进程）。
+    shutdown.abort()
     lifecycle.stopTimers()
+    // 2) 等所有已启动的工作落定（RULE-045）：在途目录刷新链、探测队列、
+    //    helper 子进程。三者都在这里 abort/kill 后 await 到真实静止，返回后
+    //    不会再有落盘、请求或子进程。
+    await Promise.all([
+      lifecycle.dispose(),
+      ...runtimes.map(async runtime => { await runtime.probeService?.dispose() }),
+      childProcesses.dispose(),
+    ])
     // close 期间 server 的 error 事件会 reject 该 promise,不捕获就是
     // unhandled rejection——Node 默认策略下会终止宿主进程,且恰发生在
     // dispose 路径。降级为告警日志。

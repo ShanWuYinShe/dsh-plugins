@@ -12,6 +12,9 @@ async function mount(deps?: {
 }): Promise<{ server: Server; port: number; calls: string[] }> {
   const calls: string[] = []
   const handler = workBuddyProbeHandler({
+    // handler 本身不读 path（挂载由 registerWorkBuddyProbeRoute 负责），
+    // 但装配契约里它是必填项。
+    path: '/workbuddy-probe-test',
     refresh: deps?.refresh === undefined
       ? undefined
       : async () => {
@@ -79,7 +82,13 @@ function post(port: number, body: unknown, headers: Record<string, string> = {})
   })
 }
 
-const AUTH = { 'x-workbuddy-probe-key': KEY, origin: 'http://127.0.0.1:3000' }
+/**
+ * 同源写请求头：AC-11 起写路由要求 `Origin` 逐字等于 `http://<Host>`，
+ * 不再接受「任意环回 Origin」（本地其它端口的页面同样环回）。
+ */
+function auth(port: number): Record<string, string> {
+  return { 'x-workbuddy-probe-key': KEY, origin: `http://127.0.0.1:${port}` }
+}
 
 describe('workBuddyProbeHandler', () => {
   it('rejects GET, untrusted hosts, and wrong keys', async () => {
@@ -89,19 +98,33 @@ describe('workBuddyProbeHandler', () => {
       get(`http://127.0.0.1:${m.port}`, res => resolve(res.statusCode ?? 0))
     })
     expect(getStatus).toBe(405)
-    // No key
-    expect((await post(m.port, { action: 'refresh' }, { origin: 'http://127.0.0.1:9' })).status).toBe(403)
+    // No key（同源但不是本进程 mint 的 key）
+    expect((await post(m.port, { action: 'refresh' }, { origin: `http://127.0.0.1:${m.port}` })).status).toBe(403)
     // Wrong key
-    expect((await post(m.port, { action: 'refresh' }, { ...AUTH, 'x-workbuddy-probe-key': 'wrong' })).status).toBe(403)
+    expect((await post(m.port, { action: 'refresh' }, { ...auth(m.port), 'x-workbuddy-probe-key': 'wrong' })).status).toBe(403)
     // Bad action
-    expect((await post(m.port, { action: 'explode' }, AUTH)).status).toBe(400)
+    expect((await post(m.port, { action: 'explode' }, auth(m.port))).status).toBe(400)
+    expect(m.calls).toEqual([])
+  })
+
+  it('rejects a loopback Origin from another port (same-site but not same-origin)', async () => {
+    const m = await mount({ refresh: async () => ({ state: 'ok' }) })
+    mounted = m
+    // 本地另一个端口的页面（任何本地 dev server / 被投毒的 Web 应用）发出的
+    // 跨源 POST：环回判定会放行，同源判定必须拒绝。
+    const foreign = await post(m.port, { action: 'refresh' }, { 'x-workbuddy-probe-key': KEY, origin: 'http://127.0.0.1:9' })
+    expect(foreign.status).toBe(403)
+    expect(foreign.json).toEqual({ error: 'cross-origin-rejected' })
+    // 缺 Origin（非浏览器客户端）同样拒绝：浏览器对 POST 一定带 Origin。
+    const missing = await post(m.port, { action: 'refresh' }, { 'x-workbuddy-probe-key': KEY })
+    expect(missing.status).toBe(403)
     expect(m.calls).toEqual([])
   })
 
   it('dispatches refresh', async () => {
     const m = await mount({ refresh: async () => ({ state: 'ok' }) })
     mounted = m
-    expect(await post(m.port, { action: 'refresh' }, AUTH)).toEqual({
+    expect(await post(m.port, { action: 'refresh' }, auth(m.port))).toEqual({
       status: 200,
       json: { state: 'ok' },
     })
@@ -113,9 +136,9 @@ describe('workBuddyProbeHandler', () => {
     mounted = m
     // 手动探测、清除与授权开关都已移除（检测全自动）：旧客户端发这些
     // action 必须得到 400，而不是被当成 refresh 或静默成功。
-    expect((await post(m.port, { action: 'probe', model: 'm1' }, AUTH)).status).toBe(400)
-    expect((await post(m.port, { action: 'clear' }, AUTH)).status).toBe(400)
-    expect((await post(m.port, { action: 'set-consent', enabled: true }, AUTH)).status).toBe(400)
+    expect((await post(m.port, { action: 'probe', model: 'm1' }, auth(m.port))).status).toBe(400)
+    expect((await post(m.port, { action: 'clear' }, auth(m.port))).status).toBe(400)
+    expect((await post(m.port, { action: 'set-consent', enabled: true }, auth(m.port))).status).toBe(400)
     expect(m.calls).toEqual([])
   })
 
@@ -126,7 +149,7 @@ describe('workBuddyProbeHandler', () => {
   it('answers 404 for refresh when the handler has no refresh hook', async () => {
     const m = await mount()
     mounted = m
-    expect((await post(m.port, { action: 'refresh' }, AUTH)).status).toBe(404)
+    expect((await post(m.port, { action: 'refresh' }, auth(m.port))).status).toBe(404)
   })
 
   it('dispatches delete-model and validates modelId', async () => {
@@ -136,7 +159,7 @@ describe('workBuddyProbeHandler', () => {
     mounted = m
 
     // Valid delete-model
-    const res = await post(m.port, { action: 'delete-model', modelId: 'deepseek-flash' }, AUTH)
+    const res = await post(m.port, { action: 'delete-model', modelId: 'deepseek-flash' }, auth(m.port))
     expect(res).toEqual({
       status: 200,
       json: { state: 'ok', excludedCount: 1 },
@@ -144,16 +167,16 @@ describe('workBuddyProbeHandler', () => {
     expect(m.calls).toEqual(['delete-model:deepseek-flash'])
 
     // Missing modelId
-    expect((await post(m.port, { action: 'delete-model' }, AUTH)).status).toBe(400)
+    expect((await post(m.port, { action: 'delete-model' }, auth(m.port))).status).toBe(400)
     // Empty modelId
-    expect((await post(m.port, { action: 'delete-model', modelId: '' }, AUTH)).status).toBe(400)
-    expect((await post(m.port, { action: 'delete-model', modelId: '   ' }, AUTH)).status).toBe(400)
+    expect((await post(m.port, { action: 'delete-model', modelId: '' }, auth(m.port))).status).toBe(400)
+    expect((await post(m.port, { action: 'delete-model', modelId: '   ' }, auth(m.port))).status).toBe(400)
   })
 
   it('answers 404 for delete-model when deleteModel hook is absent', async () => {
     const m = await mount()
     mounted = m
-    expect((await post(m.port, { action: 'delete-model', modelId: 'm1' }, AUTH)).status).toBe(404)
+    expect((await post(m.port, { action: 'delete-model', modelId: 'm1' }, auth(m.port))).status).toBe(404)
   })
 
   // 2026-10-29：单条恢复。与全量恢复的关键差别是**不动其它隐藏项**。
@@ -161,21 +184,21 @@ describe('workBuddyProbeHandler', () => {
     const m = await mount({ restoreModel: async () => ({ state: 'ok', restored: true, excludedCount: 1 }) })
     mounted = m
 
-    const res = await post(m.port, { action: 'restore-model', modelId: 'deepseek-flash' }, AUTH)
+    const res = await post(m.port, { action: 'restore-model', modelId: 'deepseek-flash' }, auth(m.port))
     expect(res.status).toBe(200)
     expect((res.json as { restored: boolean }).restored).toBe(true)
     expect(m.calls).toEqual(['restore-model:deepseek-flash'])
 
     // 空/空白 modelId 是无效动作，不能当成"恢复某个空 id"。
-    expect((await post(m.port, { action: 'restore-model' }, AUTH)).status).toBe(400)
-    expect((await post(m.port, { action: 'restore-model', modelId: '' }, AUTH)).status).toBe(400)
-    expect((await post(m.port, { action: 'restore-model', modelId: '   ' }, AUTH)).status).toBe(400)
+    expect((await post(m.port, { action: 'restore-model' }, auth(m.port))).status).toBe(400)
+    expect((await post(m.port, { action: 'restore-model', modelId: '' }, auth(m.port))).status).toBe(400)
+    expect((await post(m.port, { action: 'restore-model', modelId: '   ' }, auth(m.port))).status).toBe(400)
   })
 
   it('restore-model 回报 restored=false 表示本来就没隐藏（不算错误）', async () => {
     const m = await mount({ restoreModel: async () => ({ state: 'ok', restored: false, excludedCount: 0 }) })
     mounted = m
-    const res = await post(m.port, { action: 'restore-model', modelId: 'already-visible' }, AUTH)
+    const res = await post(m.port, { action: 'restore-model', modelId: 'already-visible' }, auth(m.port))
     expect(res.status).toBe(200)
     expect((res.json as { restored: boolean }).restored).toBe(false)
   })
@@ -184,7 +207,7 @@ describe('workBuddyProbeHandler', () => {
     const m = await mount({ restoreModels: async () => ({ state: 'ok' }) })
     mounted = m
     // 只挂了全量恢复、没挂单条恢复：不能悄悄降级成全量（那会误伤其它隐藏项）。
-    expect((await post(m.port, { action: 'restore-model', modelId: 'm1' }, AUTH)).status).toBe(404)
+    expect((await post(m.port, { action: 'restore-model', modelId: 'm1' }, auth(m.port))).status).toBe(404)
   })
 
   it('dispatches restore-models', async () => {
@@ -193,7 +216,7 @@ describe('workBuddyProbeHandler', () => {
     })
     mounted = m
 
-    const res = await post(m.port, { action: 'restore-models' }, AUTH)
+    const res = await post(m.port, { action: 'restore-models' }, auth(m.port))
     expect(res).toEqual({
       status: 200,
       json: { state: 'ok', excludedCount: 0 },
@@ -204,6 +227,6 @@ describe('workBuddyProbeHandler', () => {
   it('answers 404 for restore-models when restoreModels hook is absent', async () => {
     const m = await mount()
     mounted = m
-    expect((await post(m.port, { action: 'restore-models' }, AUTH)).status).toBe(404)
+    expect((await post(m.port, { action: 'restore-models' }, auth(m.port))).status).toBe(404)
   })
 })

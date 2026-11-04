@@ -9,9 +9,10 @@
 
 import * as React from "react";
 import { ARCHIVE_SORT_KEYS, needsDeleteAck } from "./archive-entries.js";
+import type { TFunc } from "./locales.js";
 
 export function ArchiveToolbar(props: {
-  t: any
+  t: TFunc
   selected: any
   detailLoading: any
   busy: any
@@ -56,7 +57,10 @@ export function ArchiveToolbar(props: {
         const at = ARCHIVE_SORT_KEYS.indexOf(sortKey);
         setSortKey(ARCHIVE_SORT_KEYS[(at + 1) % ARCHIVE_SORT_KEYS.length] ?? "time");
       },
-    }, t("sortBy_" + sortKey)),
+    },
+    // 动态键（sortBy_${sortKey}）：键集由 ARCHIVE_SORT_KEYS 保证，字典键
+    // 由根 test/locale-keys 的前缀规则覆盖。
+    t(("sortBy_" + sortKey) as Parameters<TFunc>[0])),
   ),
   React.createElement(
     "div",

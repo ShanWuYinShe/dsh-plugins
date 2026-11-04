@@ -28,9 +28,10 @@ import { useArchiveViewState } from './useArchiveViewState.js'
 import { useArchivePanelChrome } from './useArchivePanelChrome.js'
 import { useArchiveBadgeVisibility } from './useArchiveBadgeVisibility.js'
 import { useArchivePanelOpen } from './useArchivePanelOpen.js'
+import type { TFunc } from './locales.js'
 
 export function useArchivePanel(props: any) {
-  const t = props.t;
+  const t: TFunc = props.t;
   const call = props.call;
   const { collapsed, iconOnly, badgeRef } = useArchiveBadgeVisibility(props.wide)
 
@@ -88,9 +89,7 @@ export function useArchivePanel(props: any) {
     deleteAcked,
     detailLoading,
     details,
-    error,
     expanded,
-    filter,
     items,
     load,
     selectable,

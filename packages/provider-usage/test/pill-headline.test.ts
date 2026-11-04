@@ -47,6 +47,12 @@ describe('headlineText', () => {
     )).toBe('3 credits [remaining]')
   })
 
+  it('数字按 localeId 格式化（与正文文案同一语言）', () => {
+    const snapshot = { provider: 'acme', windows: [{ id: 'w', label: 'W', remain: 1234.5, unit: 'credits' }], fetchedAt: 1 }
+    expect(headlineText(snapshot, 'acme', false, t, 'de-DE')).toBe('1.234,5 credits [remaining]')
+    expect(headlineText(snapshot, 'acme', false, t, 'en-US')).toBe('1,234.5 credits [remaining]')
+  })
+
   it('stale 时追加 staleData 后缀', () => {
     expect(headlineText(undefined, 'acme', true, t)).toBe('[loading] · [staleData]')
   })

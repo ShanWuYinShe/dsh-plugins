@@ -49,6 +49,47 @@ describe('usageStream', () => {
     expect(frames).toEqual([{ ok: true, value: { provider: 'acme', windows: [], fetchedAt: expect.any(Number), error: 'HTTP_502' } }])
   })
 
+  it('同一条失败不因 fetchedAt 变化重复推帧（失败帧比较键不含本地墙钟）', async () => {
+    // 回归:失败帧的 fetchedAt 是本地 Date.now(),每次轮询必然不同;此前它参与
+    // 「序列化结果有变化才推帧」的比较,于是每 60s 都推一帧内容恒定变化的失败帧
+    // (视觉不变却唤醒所有订阅者)。失败帧只按业务内容(provider/windows/error)比较。
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(1_000)
+      fetchMock.mockReset()
+      fetchMock
+        .mockRejectedValueOnce(new Error('HTTP_502'))
+        .mockRejectedValueOnce(new Error('HTTP_502'))
+        .mockResolvedValueOnce(answer({ fetchedAt: 5 }))
+      const controller = new AbortController()
+      const stream = usageStream(usageResourceAddress('acme'), controller.signal, 5)[Symbol.asyncIterator]()
+
+      // 首帧:第一次取数失败 → 失败帧(fetchedAt=1000)。
+      const first = await stream.next()
+      expect(first.done).toBe(false)
+      expect(first.value).toEqual({ ok: true, value: { provider: 'acme', windows: [], fetchedAt: 1_000, error: 'HTTP_502' } })
+
+      // 第二次取数同样失败、但本地墙钟已经推进(fetchedAt=2000):不得再推帧。
+      // 只有第三次取数成功才推第二帧——若主比较键又把 fetchedAt 算进去,
+      // 第二次轮询就会提前被当成「变化」而推帧,这里立刻红。
+      vi.setSystemTime(2_000)
+      const second = stream.next()
+      await vi.advanceTimersByTimeAsync(5)
+      await vi.advanceTimersByTimeAsync(5)
+      const secondFrame = await second
+      expect(secondFrame.done).toBe(false)
+      expect(secondFrame.value).toEqual({ ok: true, value: answer({ fetchedAt: 5 }) })
+
+      // 收够即断流(生产 60s 循环只在测试外发生)。
+      controller.abort()
+      const end = await stream.next()
+      expect(end.done).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+
   it('abort 后流结束(生产 60s 循环只在测试外发生)', async () => {
     fetchMock.mockReset()
     fetchMock.mockResolvedValue(answer())

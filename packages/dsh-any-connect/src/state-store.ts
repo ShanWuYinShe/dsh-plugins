@@ -21,12 +21,11 @@
  * @module dsh-any-connect/state-store
  */
 
-import { join } from 'node:path'
 import { z } from 'zod'
 import { JsonStorageBackend } from '@deepseek-ai/dsh-storage-json'
 import { descriptorOf, defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { WorkBuddyCredential } from './auth-types.js'
 import type { CreditLedgerPersistence, CreditLedgerState } from './credit-ledger.js'
 
@@ -140,7 +139,8 @@ export async function openStandaloneStateStore(): Promise<WorkBuddyStateStore & 
   readLedger(variantId: VariantId): Promise<CreditLedgerState | undefined>
   close(): Promise<void>
 }> {
-  const backend = new JsonStorageBackend(join(resolveDshHome(), 'storages'))
+  // 路径归一化走宿主 dshHomePath（与 auth-paths 同口径，不手拼 resolveDshHome）。
+  const backend = new JsonStorageBackend(dshHomePath('storages'))
   const unit = await backend.kv.open(descriptorOf(anyConnectDomain))
   const readAll = async (): Promise<Record<VariantId, WorkBuddyCredential>> => {
     const snapshot = await unit.loadAll()

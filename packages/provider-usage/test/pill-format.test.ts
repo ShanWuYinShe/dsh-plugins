@@ -49,6 +49,11 @@ describe('formatAmount', () => {
     expect(formatAmount(1234567)).toBe('1,234,567')
     expect(formatAmount(3.14159)).toBe('3.14')
   })
+
+  it('按传入 localeId 分组（跟随 DSH 当前语言，而不是浏览器语言）', () => {
+    expect(formatAmount(1234.5, 'de-DE')).toBe('1.234,5')
+    expect(formatAmount(1234.5, 'en-US')).toBe('1,234.5')
+  })
 })
 
 describe('formatReset', () => {
@@ -60,6 +65,13 @@ describe('formatReset', () => {
     const out = formatReset('2026-10-01T00:00:00.000Z')
     expect(out).not.toBe('2026-10-01T00:00:00.000Z')
     expect(out.length).toBeGreaterThan(0)
+  })
+
+  it('按传入 localeId 选择日期格式（与文案同一语言）', () => {
+    const iso = '2026-10-01T00:00:00.000Z'
+    // 月份名/顺序随 locale 变化：de-DE 与 en-US 的 medium 日期必然不同，
+    // 断言「不是同一串」即可，不锁定依赖 ICU/时区的具体拼写。
+    expect(formatReset(iso, 'de-DE')).not.toBe(formatReset(iso, 'en-US'))
   })
 })
 

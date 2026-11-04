@@ -11,7 +11,7 @@ import crypto from 'node:crypto'
 import os from 'node:os'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { WORKBUDDY_STATE_DIRNAME } from './auth-paths.js'
 import type { WorkBuddyCredential, ZCodeFamily, ZCodePlanKind } from './auth-types.js'
 import { decryptZCodeEncryptedKey } from './auth-zcode-crypto.js'
@@ -163,7 +163,7 @@ function resolveZCodeDeviceMid(desktopPath: string | undefined): string {
     }
   }
   // 2026-10-11 起状态文件位于 `.dsh-any-connect/` 子目录（WORKBUDDY_STATE_DIRNAME）。
-  const stateDir = join(resolveDshHome(), WORKBUDDY_STATE_DIRNAME)
+  const stateDir = dshHomePath(WORKBUDDY_STATE_DIRNAME)
   const fallbackPath = join(stateDir, ZCODE_DEVICE_MID_FILENAME)
   try {
     const persisted = readFileSync(fallbackPath, 'utf8').trim()

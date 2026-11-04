@@ -4,8 +4,7 @@
  * @module @chaoset/session-archive/client/archive-format
  */
 
-/** locale 绑定后的文案函数。 */
-type Translate = (key: string) => string;
+import type { TFunc } from './locales.js'
 
 /** 一个归档会话行里参与展示与浅比较的字段（列表行 / 面板行的公共子集）。 */
 interface ArchiveRowIdentity {
@@ -15,7 +14,7 @@ interface ArchiveRowIdentity {
   live: boolean;
 }
 
-export function formatBytes(bytes: number | null | undefined, t: Translate): string {
+export function formatBytes(bytes: number | null | undefined, t: TFunc): string {
   // 0/缺失（文件已不可 stat）显示占位符，避免误导性的 "0 B"。
   if (bytes === void 0 || bytes === null || Number(bytes) === 0) return "—";
   if (bytes < 1024) return t("sizeBytes").replace("{n}", String(bytes));

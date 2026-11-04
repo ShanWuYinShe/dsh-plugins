@@ -109,11 +109,12 @@ export async function chatStreamStartPlan(
 export async function fetchStartPlanModels(
   ctx: ZCodeStartPlanContext,
   credential: WorkBuddyCredential,
+  callerSignal?: AbortSignal,
 ): Promise<readonly WorkBuddyUpstreamModel[]> {
   if (credential.zcodeJwtToken === undefined || credential.zcodeJwtToken === '') {
     return ctx.models
   }
-  const modelsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+  const modelsTimeout = await deadlineSignal(callerSignal, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
   try {
     const response = await fetch('https://zcode.z.ai/api/v1/zcode-plan/billing/balance', {
       headers: {
@@ -186,11 +187,12 @@ export async function fetchStartPlanClaimPreview(
 export async function fetchStartPlanCredits(
   ctx: ZCodeStartPlanContext,
   credential: WorkBuddyCredential,
+  callerSignal?: AbortSignal,
 ): Promise<WorkBuddyCredits> {
   if (credential.zcodeJwtToken === undefined || credential.zcodeJwtToken === '') {
     throw new Error('Start Plan 额度查询缺少凭据（凭据文档中没有 zcodejwttoken）')
   }
-  const balanceTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+  const balanceTimeout = await deadlineSignal(callerSignal, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
   try {
     const response = await fetch('https://zcode.z.ai/api/v1/zcode-plan/billing/balance', {
       headers: {

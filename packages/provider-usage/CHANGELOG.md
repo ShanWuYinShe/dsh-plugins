@@ -1,3 +1,27 @@
+## 0.2.3 (2026-11-04)
+
+### 修复
+
+* **成功快照丢失 `rateLimit`**：registry 成功路径此前只透传 windows/plan，客户端限流块
+  永远拿不到数据；失败快照也改为继承上一次限流观测（degraded 时仍显示恢复时刻）。
+* `rateLimit` 渲染字段补齐运行时校验（`hits` 有限数且 ≥0、`model` 非空串、
+  `blockedAt/lastSeenAt/status` 有限数），非法快照折叠为失败快照。
+* 缺翻译函数 `t` 时不再 render 期抛错（告警一次 + 英文兜底渲染），避免 pill 被宿主
+  永久移出投影。
+* `underDeadline` 的同步抛错路径也会清理定时器；客户端 wire 解析补最小结构校验
+  （provider 一致、windows 数组、error 字符串）；失败帧不再因 `fetchedAt` 变化每轮推帧。
+
+### 新增
+
+* 导出官方 `Config` schema：`queryTimeoutMs`（15000）、`cacheTtlMs`（60000）、
+  `errorCacheTtlMs`（10000）、`unresolvedTtlMs`（60000）。
+* 数字/时间格式化跟随 DSH 语言设置（inject `hooks.locale` 快照源，Intl 使用当前 locale）。
+
+### 优化
+
+* 模块级 `WeakMap` 缓存移入 inject 面私有缓存；发布展示元数据（icon/locale）；
+  发布产物只含运行时文件。
+
 ## 0.2.2 (2026-11-04)
 
 ### 新增

@@ -11,10 +11,11 @@
 import { sameItems } from './archive-format.js'
 import { ARCHIVE_PAGE_SIZE } from './archive-entries.js'
 import * as React from 'react'
+import type { TFunc } from './locales.js'
 
 export function useArchiveList({ call, t, open, subscribeArchived, archivedCountOf, setSelected }: {
   call: any
-  t: any
+  t: TFunc
   open: boolean
   /** 宿主归档集合 store 的订阅/计数口（不可用时静默退回纯轮询）。 */
   subscribeArchived: any
@@ -35,8 +36,8 @@ export function useArchiveList({ call, t, open, subscribeArchived, archivedCount
   // 列表落地（加载与静默刷新共用）：sameItems 比较避免无变化时整表
   // reconcile；同时剔除已消失 id 的残留勾选——否则"已选 N 项"虚高，
   // 还可能把幽灵 id 发给批量操作（host 有幂等兜底，但不该依赖它）。
-  // 顺手用列表长度同步徽标计数：count() 端点不可用（host 旧进程未重启、
-  // RPC 失败被吞）时，开/关一次面板徽标也能自我纠正，不会卡在 0。
+  // 顺手用列表长度同步徽标计数：count() 端点失败时，开/关一次面板徽标也能
+  // 自我纠正，不会卡在 0。
   const applyItems = React.useCallback((next: any[]) => {
     setItems((current) => (sameItems(current, next) ? current : next));
     setBadgeCount(next.length);
@@ -93,14 +94,11 @@ export function useArchiveList({ call, t, open, subscribeArchived, archivedCount
       const result = await call("count");
       setBadgeCount(typeof result.count === "number" ? result.count : 0);
     } catch {
-      // count() 不可用（host 进程旧于 lib、端点缺失等）：退回一次 list()，
-      // applyItems 会同步徽标计数——宁可贵一点也不让徽标卡在过期值。
-      try {
-        const result = await call("list");
-        applyItems(Array.isArray(result.items) ? result.items : []);
-      } catch {}
+      // count() 失败：保持上一计数，等下一轮轮询/列表落地自我纠正。
+      // 不再回退 list()——那是「宿主内 lib 旧于进程」的兼容路径，本插件与宿主
+      // 同版本发布，端点不会缺失；为一次轻端点失败付整表解析的成本不值得。
     }
-  }, [call, applyItems]);
+  }, [call]);
   React.useEffect(() => {
     if (open) return;
     let id: any = 0;

@@ -6,7 +6,6 @@
  * - index.tsx — 浏览器侧入口：注册卡片文案与配置页
  * - WorkBuddyConfigPage.tsx — 配置页入口（解构 + 渲染），对外 API 门面
  * - VariantsPage.tsx useVariantsPage.ts — 变体列表页（渲染）与页面状态/取数
- * - ModelLabel.tsx — 原生模型名称与费率标签内联渲染组件（conversation.input.model.label）
  * - VariantCard.tsx VariantCardQuota.tsx VariantCardModels.tsx — 单卡组合、额度区块、模型区块（渲染）
  * - useVariantCard.ts variant-card-view.ts — 卡片状态/动作与纯派生视图（渲染之外的全部逻辑）
  * - StartPlanClaimBox.tsx RateLimitBox.tsx ModelRow.tsx SignedOutRow.tsx — 今日待领取提示框、
@@ -23,7 +22,6 @@ import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { ModelLabel } from './ModelLabel.js'
 import { WorkBuddyConfigPage } from './WorkBuddyConfigPage.js'
 import type { WorkBuddyConfigPageInjected } from './WorkBuddyConfigPage.js'
 import { en, zh } from './locales.js'
@@ -45,17 +43,12 @@ export const inject = ['slots', 'locale']
  * Register card copy and the WorkBuddy configuration page under the Plugins
  * page.
  *
- * The entire body is wrapped so that a DSH slot-API breaking change (for
- * example the rc.6→rc.7 `id`→`key` / `order`→`priority` rename) degrades
- * to a `console.error` instead of throwing into the DSH loader and raising
- * the red "Failed to load plugins" banner. The host provider keeps working:
- * the `workbuddy` model channel is unaffected, and `dsh-any-connect
- * status` reports host health via the heartbeat file.
- *
- * The guarded boundary itself is covered by the real-entry regression in
- * `test/bundle.test.ts`（仓根，"client apply() 的兜底边界对真实入口成立（slot 注入抛错不穿透）"）: it
- * imports this module and asserts a throwing slot registration never reaches
- * the loader.
+ * 整个函数体包在 try 里是**本仓的入口兜底约定**（RULE-029：additive 插件的
+ * 贡献失败只影响自己的贡献）：客户端入口在宿主 loader 的加载链上，任何
+ * 未捕获异常都会把整页变成 "Failed to load plugins" 红条，而宿主 provider
+ * （模型通道）根本不受影响。兜底边界本身由仓根 `test/bundle.test.ts`
+ * （"client apply() 的兜底边界对真实入口成立（slot 注入抛错不穿透）"）锁住：
+ * 它导入本模块并断言抛错的 slot 注册不会穿透到 loader。
  */
 export function apply(ctx: ClientContext): void {
   // namespace 提到 try 之外：catch 里的占位逻辑也要用它，留在 try 内会撞 TDZ。
@@ -84,15 +77,6 @@ export function apply(ctx: ClientContext): void {
       key: '@chaoset/dsh-any-connect',
       inject: (): WorkBuddyConfigPageInjected => ({ t }),
     }, WorkBuddyConfigPage))
-
-    // Inline model labels: the slot is part of the matched host contract (0.2.2).
-    // 该 slot 是 *single*：官方 @deepseek-ai/dsh-client-ui-deepseek-model-label-1017
-    // 也以默认 priority 0 注册同一 slot，同优先级二次注册会在控制台抛错。
-    // 显式低一档优先级：本插件保持渲染（lowest renders），官方注册安全 shadow。
-    ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({
-      name: 'conversation.input.model.label',
-      priority: -1,
-    }, ModelLabel))
   } catch (error: unknown) {
     // Degrade silently on the page: the host provider still serves models.
     // Developers see the full cause in the browser console; users see no banner.

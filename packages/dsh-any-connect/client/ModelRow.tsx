@@ -55,8 +55,10 @@ export function ModelRow({ row, efforts, t, even, onRefresh, onDelete, onRestore
       <td style={modelTdStyle}>
         <span style={modelBadgesStyle}>
           {row.free === true ? <span style={chipStyle}>{t('freeModel')}</span> : null}
-          {row.badges?.map((badge, index) => (
-            <span key={`${badge}-${index}`} style={chipStyle}>{modelBadgeLabel(badge, t)}</span>
+          {/* badge 是上游给的字符串数组，可能重复且没有稳定 id：先按内容去重，
+              再用 badge 本身当 key（RULE-076：key 表达身份，不用 index 编码顺序）。 */}
+          {[...new Set(row.badges ?? [])].map(badge => (
+            <span key={badge} style={chipStyle}>{modelBadgeLabel(badge, t)}</span>
           ))}
         </span>
       </td>

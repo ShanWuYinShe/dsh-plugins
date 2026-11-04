@@ -20,7 +20,10 @@ export type { WorkBuddyConfigPageInjected, WorkBuddyConfigPageProps } from './co
  * branch stays a static one-liner instead of polling account state.
  */
 export function WorkBuddyConfigPage({ t, view }: WorkBuddyConfigPageProps): React.ReactNode {
-  if (t === undefined) throw new Error('WorkBuddy config page requires its translation function')
+  // t 缺失只可能发生在注册契约被破坏时（入口 catch 已记录原因）。组件内 throw
+  // 会让宿主 reportEntryError 把这一 entry 永久退场、页面空白；返回 null 让
+  // 边界兜住（RULE-079：additive 插件失败只影响自己的贡献，且不炸整页）。
+  if (t === undefined) return null
   if (view !== 'page') return t('intro')
   return <VariantsPage t={t} />
 }

@@ -8,7 +8,7 @@
  * @module @chaoset/session-archive/archive-host-context
  */
 
-import { readdir, stat } from 'node:fs/promises'
+import { lstat, readdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence, SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
@@ -160,8 +160,19 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig) {
    * 目录"，目录路径不随代际变化，因此在快照给出的目录里扫描
    * session*.jsonl(.zstd) 取实际文件（多个代际并存时取最新 mtime）。
    * 扫描结果为空才认定文件不存在。
+   *
+   * 链接防护：目录/条目都先 lstat——目录是符号链接或非目录时直接返回 null
+   * （不 readdir 目标目录、不跟随后代目录）；条目只接受真实文件（符号链接
+   * 不算代际文件，避免后续删除穿透到链接目标）。
    */
   async function resolveGenerationFile(dir: string): Promise<string | null> {
+    let dirInfo;
+    try {
+      dirInfo = await lstat(dir);
+    } catch {
+      return null; // 目录不存在：无任何代际文件
+    }
+    if (!dirInfo.isDirectory()) return null; // 符号链接/非目录：不跟随后代目录
     let entries: string[];
     try {
       entries = await readdir(dir);
@@ -173,7 +184,8 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig) {
       if (!entry.startsWith('session.') || !(entry.endsWith('.jsonl') || entry.endsWith('.jsonl.zstd'))) continue;
       const candidate = join(dir, entry);
       try {
-        const info = await stat(candidate);
+        const info = await lstat(candidate);
+        if (!info.isFile()) continue; // 链接/子目录不是代际文件
         if (latest === null || info.mtimeMs > latest.mtimeMs) latest = { path: candidate, mtimeMs: info.mtimeMs };
       } catch {} // 竞态消失的条目跳过
     }

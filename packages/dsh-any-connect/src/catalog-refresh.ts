@@ -10,7 +10,6 @@
 
 import { RegionMismatchError, type WorkBuddyCredential } from './auth.js'
 import { credentialIdentity } from './catalog-store.js'
-import { filterByCodingPlanWhitelist } from './zcode-builtin-catalog.js'
 import { errorMessage } from './values.js'
 import type { StartPlanPreviewResult } from './zcode-plan-claim.js'
 import { fallbackFor, variantIsStartPlan, type VariantRuntime } from './variant-runtime.js'
@@ -39,10 +38,15 @@ export interface CatalogRefresh {
   claimPreviewFor(runtime: VariantRuntime): (credential: WorkBuddyCredential) => Promise<StartPlanPreviewResult>
   /** 空名单自愈阈值（sweep 的判据，见 catalog-timers）。 */
   emptyRosterSelfHealMs: number
+  /**
+   * 卸载收尾：abort 在途刷新、清重试定时器，等全部刷新链落定（RULE-045）。
+   */
+  dispose(): Promise<void>
 }
 
 export function createCatalogRefresh(deps: CatalogRefreshDeps): CatalogRefresh {
-  const { ctx, runtimes, adapterHandles, isStopped } = deps
+  // runtimes 由 catalog-timers 消费（本模块只按传入的 runtime 工作）。
+  const { ctx, adapterHandles, isStopped } = deps
 
 /** 目录拉取失败后的延迟重试：最多再试 2 次、间隔 60s（暂态故障自愈，耗尽即停）。 */
 const CATALOG_REFRESH_RETRIES = 2
@@ -217,7 +221,9 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
       // 预热阶段的 publish 没有注册句柄可通知（notifyCatalogChanged 静默跳过），
       // 但它会把指纹记进 publishedCatalog——注册自身会广播 adapters-updated，
       // 客户端重拉时读到的正是这份已采用的目录，语义完整。
-      await adoptIdentity(runtime, identity, publishCatalog)
+      // 预热契约是「只读本地文件，绝不触网」：采用 saved/fallback 后**不**入队
+      // 档位探测（探测是真实 chat 请求，见 catalog-adopt 的 options.probe）。
+      await adoptIdentity(runtime, identity, publishCatalog, { probe: false })
     } catch (error: unknown) {
       if (error instanceof RegionMismatchError) {
         if (!isStopped()) {
@@ -231,6 +237,23 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
     }
   }
 
+  /**
+   * 在途刷新链（RULE-045）：dispose 时 abort 并 `allSettled` 等全部落定——
+   * 只置 stopped 挡不住已经在 `catalogStore.save()` / `fetchModels()` 里等着的
+   * 那一拍，卸载完成后仍可能有一次落盘。
+   */
+  const pendingRefreshes = new Set<Promise<void>>()
+  /** 失败重试定时器：dispose 时清掉，不留插件卸载后的空转（RULE-046）。 */
+  const retryTimers = new Set<ReturnType<typeof setTimeout>>()
+  /** 卸载信号：目录拉取与（经 probe-service 的）探测共用的取消源。 */
+  const shutdown = new AbortController()
+
+  function refreshCatalog(runtime: VariantRuntime, reason: string, retriesLeft = CATALOG_REFRESH_RETRIES): void {
+    const refresh = runRefresh(runtime, reason, retriesLeft)
+    pendingRefreshes.add(refresh)
+    void refresh.finally(() => { pendingRefreshes.delete(refresh) })
+  }
+
   /** 从上游拉一次模型目录并写入 catalog；启动、配置变更、身份核对共用。
    * 函数声明（而非 const 箭头）：`loader/volatile-update` 处理器引用它，
    *
@@ -242,16 +265,19 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
    *   再拉取 live；拉取中的旧身份迟到响应由 lastIdentity 挡掉，不覆盖新身份；
    * - 拉取失败 → 保留已发布的内容（saved/fallback），只记录 error 并按既有
    *   策略重试，重试耗尽即停。 */
-  function refreshCatalog(runtime: VariantRuntime, reason: string, retriesLeft = CATALOG_REFRESH_RETRIES): void {
+  async function runRefresh(runtime: VariantRuntime, reason: string, retriesLeft: number): Promise<void> {
     const { store, catalog, catalogStore, variant } = runtime
     const retry = (left: number): void => {
-      if (left > 0 && !isStopped()) {
-        setTimeout(() => { if (!isStopped()) refreshCatalog(runtime, `${reason}; retry`, left - 1) }, CATALOG_REFRESH_RETRY_MS).unref()
-      }
+      if (left <= 0 || isStopped() || shutdown.signal.aborted) return
+      const timer = setTimeout(() => {
+        retryTimers.delete(timer)
+        if (!isStopped()) refreshCatalog(runtime, `${reason}; retry`, left - 1)
+      }, CATALOG_REFRESH_RETRY_MS)
+      timer.unref()
+      retryTimers.add(timer)
     }
-    void (async () => {
-      try {
-        // current() 只探是否已登录（未登录静默隐藏分组，不告警不重试）；
+    try {
+      // current() 只探是否已登录（未登录静默隐藏分组，不告警不重试）；
         // 真正取凭据用 resolve()：桌面文件里的 access token 过期是常态
         // （离屏很久后启动），current() 的旧 token 会让 fetchModels 必 401、
         // 目录永远停在旧快照——resolve() 会按需刷新并落盘。
@@ -267,7 +293,7 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
         const identity = credentialIdentity(credential)
         if (identity !== runtime.lastIdentity) await adoptIdentity(runtime, identity, publishCatalog)
         const generation = runtime.lastIdentity
-        const models = await runtime.client.fetchModels(credential)
+        const models = await runtime.client.fetchModels(credential, shutdown.signal)
         if (isStopped()) return
         // 拉取中账号又变了（切换/登出）：迟到响应直接丢弃，不覆盖新身份。
         if (generation !== runtime.lastIdentity) return
@@ -321,9 +347,19 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
         // 有限次延迟重试：刚启动时上游/网络暂不可达是暂态，自动恢复实时
         // 目录；重试耗尽则停在已发布的内容（saved/fallback），不再打扰。
         // 重试全程 stopped 已挡，插件卸载后的残留定时器最多空转一次。
-        retry(retriesLeft)
-      }
-    })()
+      retry(retriesLeft)
+    }
+  }
+
+  /**
+   * 卸载收尾（RULE-045/046）：abort 在途刷新（融入 fetchModels 的 deadline）、
+   * 清掉未决定时器，并等所有在途刷新链落定。返回后不会再有目录落盘或通知。
+   */
+  async function dispose(): Promise<void> {
+    shutdown.abort()
+    for (const timer of retryTimers) clearTimeout(timer)
+    retryTimers.clear()
+    await Promise.allSettled([...pendingRefreshes])
   }
 
   return {
@@ -334,5 +370,6 @@ const START_PLAN_CLAIM_PROBE_TIMEOUT_MS = 3_000
     claimFlipChanged,
     claimPreviewFor,
     emptyRosterSelfHealMs: EMPTY_ROSTER_SELF_HEAL_MS,
+    dispose,
   }
 }

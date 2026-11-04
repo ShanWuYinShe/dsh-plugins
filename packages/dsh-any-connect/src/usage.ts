@@ -255,7 +255,9 @@ export function registerUsageQueriers(
         async context => {
           const credential = await runtime.store.resolve()
           if (context.signal?.aborted === true) throw context.signal.reason ?? new Error('aborted')
-          const credits = await runtime.client.fetchCredits(credential)
+          // 额度/目录 JSON 端点接受 caller signal（AC-33）：消费者取消或插件
+          // dispose 时，在途请求立即中断，而不是等满 30s 内部超时。
+          const credits = await runtime.client.fetchCredits(credential, context.signal)
           const isZCode = runtime.variant.kind === 'zcode'
           const isOpenCode = runtime.variant.kind === 'opencode'
           const isStartPlan = variantIsStartPlan(runtime.variant)
@@ -276,7 +278,7 @@ export function registerUsageQueriers(
           // `GET bigmodel.cn/api/monitor/usage/quota/limit`：拿得到就按它展示，
           // 拿不到（网络 / 非 bigmodel 账号 / 形状变化）回退订阅有效性窗口。
           const quota = isZCode && !isStartPlan
-            ? await (runtime.client as ZCodeUpstreamClient).fetchCodingPlanQuota(credential)
+            ? await (runtime.client as ZCodeUpstreamClient).fetchCodingPlanQuota(credential, context.signal)
             : undefined
           const quotaWindows = quota === undefined ? [] : codingPlanQuotaWindows(quota)
           return {

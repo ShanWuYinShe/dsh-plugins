@@ -31,7 +31,7 @@ import type {
 interface ClientContext {
   locale: {
     bind(ns: string): (key: string) => string;
-    register(ns: string, dict: Record<string, Record<string, string>>): void;
+    register(ns: string, dict: Record<string, Record<string, string>>): () => void;
   };
   effect(fn: () => void | (() => void), label?: string): void;
   remote: { $mount(contribution: unknown): Promise<void> };
@@ -53,6 +53,23 @@ interface ConfigRemoteService {
   set(partial: SandboxExtraRootsSetRequest): Promise<RemoteResult<SandboxExtraRootsSetResult>>;
 }
 
+/**
+ * 把 Remote 失败归一化成用户可读文案（RULE-039：调用侧按 code 判别，不用
+ * instanceof）。稳定的本插件失败码映射到 locales 文案；未知 code（宿主网关
+ * 折叠错误或未来新增码）返回 undefined，由调用方回退技术文本，不吞诊断信息。
+ */
+function localizeRemoteFailure(failure: { code: string; message: string }, t: (key: string) => string): string | undefined {
+  switch (failure.code) {
+    case "sandbox-extra-roots/config-unavailable":
+      return t("saveConfigUnavailable");
+    case "sandbox-extra-roots/invalid-config":
+      // 函数替换：{message} 里可能含用户输入的路径（$& 等替换序列不能生效）。
+      return t("saveInvalidConfig").replace("{message}", () => failure.message);
+    default:
+      return undefined;
+  }
+}
+
 // ── 插件 apply ───────────────────────────────────────────────────────
 // DSH 客户端的 remote.<ns> 服务不会自动生成：客户端代码必须用
 // ctx.remote.$mount(contribution) 显式挂载（官方 dsh-api-remotes 即如此）。
@@ -65,16 +82,12 @@ const inject = ["slots", "locale", "remote"];
 // 炸出整页红条——纯 additive 的配置卡没有资格打断宿主。
 async function apply(ctx: ClientContext) {
   try {
-  ctx.effect(() => {
-    try {
-      ctx.locale.register(NS, { zh, en });
-    } catch (error) {
-      // 重复注册(HMR/热切换下宿主已持有同 ns 字典)静默忽略,
-      // 其余失败只告警——卡片文案回退到宿主默认,不阻断插件激活。
-      const message = String((error as Error)?.message ?? error);
-      if (!message.includes("already")) console.warn("sandbox-extra-roots: locale dictionary registration failed: " + message);
-    }
-  }, "sandbox-extra-roots: dictionaries");
+  // register 返回 disposer：必须交回 ctx.effect，卸载/HMR 后字典才会被回收、
+  // 重载后的新字典才能替换旧文案（旧实现丢弃返回值并吞掉 "already" 重复注册
+  // 错误，上版字典会一直生效）。
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), "sandbox-extra-roots: dictionaries");
+  // 文案函数与 slot 注入的 t 同源（按当前语言在调用时解析）。
+  const t = ctx.locale.bind(NS);
   // 先挂载命名空间，再用 ctx.get 取回服务：cordis 的属性访问（ctx.remote.X）
   // 要求 X 出现在 inject 里，而本插件的命名空间由自己挂载，若写进 inject
   // 会和自己等待的服务形成死锁，因此用 ctx.get（对未声明的服务合法）。
@@ -86,7 +99,12 @@ async function apply(ctx: ClientContext) {
     return result.value.config;
   });
   const setConfig = (partial: SandboxExtraRootsSetRequest) => configService.set(partial).then((result) => {
-    if (!result.ok) throw new Error("sandboxExtraRootsConfig.set failed: " + result.error.code + ": " + result.error.message);
+    if (!result.ok) {
+      // 已知 code → 本地化文案（卡片再包一层 t("saveFailed")）；未知 code →
+      // 保留 code + 技术文本，便于诊断宿主网关折叠错误或新版本新增码。
+      const localized = localizeRemoteFailure(result.error, t);
+      throw new Error(localized ?? "sandboxExtraRootsConfig.set failed: " + result.error.code + ": " + result.error.message);
+    }
     return result.value;
   });
   ctx.slots.inject("plugins.bundle.config", () => ctx.slots.register({

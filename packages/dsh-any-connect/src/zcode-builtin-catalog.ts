@@ -29,6 +29,9 @@ const BUILTIN_CONFIG_RELATIVE = ['Contents', 'Resources', 'config', 'provider', 
 /**
  * 环境变量覆盖口：显式指定 zcode-builtin.json 的路径。
  * 供非标准安装位置与非 macOS 平台使用（其余平台的安装路径未经实测，不猜）。
+ *
+ * 优先级：插件 `Config.zcodeBuiltinConfig`（可从 patch 改、随 profile 迁移）>
+ * 本环境变量（部署/调试的临时口）> 平台候选路径。
  */
 const BUILTIN_CONFIG_ENV = 'ZCODE_BUILTIN_CONFIG'
 
@@ -62,8 +65,10 @@ function linuxBuiltinConfigCandidates(): string[] {
   ]
 }
 
-/** 平台相关的候选路径。 */
-function builtinConfigCandidates(): string[] {
+/** 平台相关的候选路径；`configuredPath` 是 Config 里的显式路径（最高优先级）。 */
+function builtinConfigCandidates(configuredPath?: string): string[] {
+  const fromConfig = configuredPath?.trim()
+  if (fromConfig !== undefined && fromConfig !== '') return [fromConfig]
   const override = process.env[BUILTIN_CONFIG_ENV]
   if (override !== undefined && override.trim() !== '') {
     return [override]
@@ -113,12 +118,15 @@ export function codingPlanWhitelistFromConfig(config: unknown): ReadonlySet<stri
 /**
  * 读取本机 ZCode 客户端的 Coding Plan 白名单；不可得时返回 undefined。
  *
+ * `configuredPath` 来自 `Config.zcodeBuiltinConfig`（deployable 路径必须是
+ * Config 字段，RULE-059）；空串/未设置时回落到环境变量与平台候选。
+ *
  * 每次调用都重新读盘（约 180KB，调用方每小时至多一次）：客户端升级后名单
  * 无需重启插件即生效。任何读取/解析失败都静默降级——这里没有比「回退已
  * 注册名单」更正确的答案。
  */
-export function readZcodeCodingPlanWhitelist(): ReadonlySet<string> | undefined {
-  for (const path of builtinConfigCandidates()) {
+export function readZcodeCodingPlanWhitelist(configuredPath?: string): ReadonlySet<string> | undefined {
+  for (const path of builtinConfigCandidates(configuredPath)) {
     try {
       if (!existsSync(path)) continue
       const parsed = codingPlanWhitelistFromConfig(JSON.parse(readFileSync(path, 'utf8')) as unknown)

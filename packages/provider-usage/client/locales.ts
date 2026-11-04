@@ -62,3 +62,23 @@ export const zh: Record<ProviderUsageLocaleKey, string> = {
   rateLimitHits: '被拒 {count} 次',
   blocked: '已用尽',
 }
+
+/**
+ * 注入面漂移时的英文兜底文案。
+ *
+ * `t` 来自宿主 inject 面；宿主契约变更（face 改名/延迟注入）时可能缺席。
+ * 此时**不能抛错**：render 期抛错会被宿主 `reportEntryError({abdicate:true})`
+ * 永久移出投影（见 client/index.tsx 文件头），而本包自带 en 字典，退回英文
+ * 文案即可让 pill 继续存活。占位符语法与宿主 `t` 相同（`{name}`）。
+ *
+ * @param key - 本包字典键。
+ * @param params - 占位符参数。
+ * @returns 英文文案（缺参占位符原样保留）。
+ */
+export function fallbackTranslate(key: ProviderUsageLocaleKey, params?: Record<string, unknown>): string {
+  // `?? key`：静态类型保证 key 一定在字典里，但这一层就是为契约漂移兜底的，
+  // 不认识 key 时显示 key 本身，绝不在这里再抛一次错。
+  const template = en[key] ?? key
+  if (params === undefined) return template
+  return template.replace(/\{(\w+)\}/gu, (placeholder, name: string) => name in params ? String(params[name]) : placeholder)
+}

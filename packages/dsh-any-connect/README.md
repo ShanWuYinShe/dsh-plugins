@@ -6,6 +6,11 @@
 
 ---
 
+> 展示口径（DSH 0.2.2 起）：模型选择器与 `/model` 弹窗里的「免费」等徽标由宿主
+> **原生渲染**本插件适配器提供的 `badge`（`{en, zh}` 本地化、按 tone 着色）；插件不再
+> 向 `conversation.input.model.label` 贡献组件，也不再往模型名里拼中文「免费」。计费倍率
+> 仍拼在 `name` 上（如 `GLM-5.2 · x0.79`），因为宿主 `/model` 弹窗只读 `name`。
+
 ## 支持通道与功能
 
 - **多通道模型聚合接入**：
@@ -54,7 +59,7 @@ https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
 ```
 
 即可在发现页一键安装本插件、查看与安装任意历史版本（索引与静态 registry 由 CI 从
-GitHub Releases 生成，发布在发行分支（当前 `alpha`，收敛后 `main`）根下的 `market/` 目录）。重启 DSH 后更新到指定版本
+GitHub Releases 生成，发布在独立的 `market` 发布产物分支根目录（CI 生成，禁止手工编辑））。重启 DSH 后更新到指定版本
 （DSH 对自建 registry 的自动更新检查只在安装会话内生效）：
 
 ```bash
@@ -123,6 +128,8 @@ dsh-any-connect status --provider opencode-free
 | `authFileAI` | 自动探测 | 同上，作用于 WorkBuddy AI（国际版） |
 | `authFileZCode` | 自动探测 | 同上，作用于 ZCode 桌面端凭据文件（覆盖环境变量与平台默认探测） |
 | `authFileOpenCode` | 免密公开通道 | 同上，作用于 OpenCode Free 通道的凭据 / token 文件路径（默认免密公开通道，一般无需配置） |
+| `zcodeBuiltinConfig` | 自动探测 | ZCode Coding Plan 白名单文件（`zcode-builtin.json`）路径；未设置时回退 `ZCODE_BUILTIN_CONFIG` 环境变量与客户端内置位置 |
+| `openCodeModelsCache` | 自动探测 | OpenCode 官方 models specs 缓存文件路径；未设置时回退 `OPENCODE_MODELS_CACHE` 环境变量与 `~/.cache/opencode/models.json` |
 
 > 本插件的五个渠道**不会**出现在 DSH「设置 → 模型」页：它们没有可填写的 provider profile
 > （凭据来自桌面 App / 官方便捷通道），声明进去只会得到一张空的编辑卡片。配置面统一在
@@ -136,10 +143,10 @@ dsh-any-connect status --provider opencode-free
   - **诊断未登录问题**：`dsh-any-connect doctor --json` 会报告 `desktopAuthFile.present`、`desktopAuthFile.format` 与 `atRestHelper`。若格式为 `encrypted` 但助手不可用，按引导设置上述环境变量即可。
 - **ZCode**：macOS（`~/.zcode/v2/credentials.json` 及 `Library/Application Support`）、Windows（`%USERPROFILE%\.zcode\v2\credentials.json` 及 Local/Roaming AppData）、WSL（优先通过 WSL 挂载探测 Windows 宿主用户目录与 AppData，并自动计算跨系统解密密钥，随后回落 Linux 原生目录）、Linux（`~/.zcode/v2/credentials.json` 及 `~/.config`）；亦可用 `ZCODE_AUTH_FILE` 环境变量显式指定。
   - **Coding Plan 与 Start Plan 是两个独立连接**：`zcode` 与 `zcode-start-plan` 各自拥有独立的模型分组、模型名单、额度池与请求通道；
-  - **Coding Plan 白名单**：以本机 ZCode 客户端内置目录（`zcode-builtin.json` 的 `builtinModelIds`）为白名单，随客户端发版自动更新（当前为 GLM-5.3、GLM-5.3-Flash）；可用 `ZCODE_BUILTIN_CONFIG` 显式指定该文件路径；
+  - **Coding Plan 白名单**：以本机 ZCode 客户端内置目录（`zcode-builtin.json` 的 `builtinModelIds`）为白名单，随客户端发版自动更新（当前为 GLM-5.3、GLM-5.3-Flash）；可用 `zcodeBuiltinConfig` 配置项（`cordis.patch.yml`）或 `ZCODE_BUILTIN_CONFIG` 环境变量显式指定该文件路径（配置优先）；
   - **Start Plan 专属通道与每日领取**：走 `zcode.z.ai/api/v1/zcode-plan/anthropic`，扣减一次性 token 包；每日领取需通过客户端完成，插件每天自动探测可领活动并在卡片醒目提示；
   - **夜间免费限时活动已下线**：智谱此前的 23:00–09:00 夜间免费窗（曾为 Coding Plan 专属权益，Start Plan 不享受）已下线，插件已移除夜免徽标与费率改写，模型按 150% 额度与基准计费如实展示。
-- **OpenCode Free**：免密直连。支持通过 `OPENCODE_MODELS_CACHE` 环境变量显式指定官方 models specs 缓存文件路径（默认为 `~/.cache/opencode/models.json`）。
+- **OpenCode Free**：免密直连。支持通过 `openCodeModelsCache` 配置项（`cordis.patch.yml`）或 `OPENCODE_MODELS_CACHE` 环境变量显式指定官方 models specs 缓存文件路径（配置优先，默认为 `~/.cache/opencode/models.json`）。
 
 ### 上游限流（429）的记录与展示
 
@@ -201,6 +208,7 @@ dsh-any-connect status --provider opencode-free
 | `storages/dsh_any_connect/auth/` | 各变体的自有凭据副本（每变体一个 JSON） | 宿主存储域（storageDomain）：schema 校验、原子写、损坏记录自动备份。桌面端凭据可读时通常为空。 |
 | `.dsh-any-connect/` | `zcode-device-mid` 设备标识；存储域不可用时的凭据副本文件回落 | 正常情况只有设备标识一个文件。 |
 | `cache/dsh-any-connect/` | 模型目录 ×5、档位探测结果、桌面版本记录、host 心跳 | 可再生缓存，删除后自动重建。 |
+| `cache/dsh-any-connect/<variant>-excluded-models.json` | 用户在各变体卡片里「删除 / 隐藏」的模型清单 | **用户意图，不是可再生缓存**：删除该文件会恢复所有已隐藏模型。 |
 
 > **升级说明（0.4.28 起）**：旧版平铺在 home 根目录的散文件（`.workbuddy-auth.json` 等）
 > **不再自动迁移**——从 ≤0.4.13 直接升级的用户需要重新登录一次（桌面端 App 的登录态仍会被

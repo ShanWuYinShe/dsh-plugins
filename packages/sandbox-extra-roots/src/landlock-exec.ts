@@ -6,6 +6,9 @@
  * 即 ~0.1.2）。本插件必须走官方 grantArgs 授权（launcher 的 flag 拼写是
  * 该包私有契约，消费者不得自拼 --ro/--rw），因此这里加载同一入口。
  *
+ * 缓存是**实例级状态**（RULE-051）：由 apply 用 createLandlockRuntimeLoader()
+ * 创建并持有，不再有模块级 singleton——同进程内多个插件实例/测试互不串扰。
+ *
  * @module @chaoset/sandbox-extra-roots/landlock-exec
  */
 
@@ -40,27 +43,40 @@ async function loadLandlockRun(): Promise<LandlockRunModule | null> {
   }
 }
 
-/** landlock runner 运行时，惰性加载。成功永久缓存；失败不缓存——launcher 稍后安装/修复后下一次 apply 重新探测。 */
-let landlockRuntimePromise: Promise<LandlockRuntime | null> | null = null;
+/** landlock runner 的实例级懒加载器（owner：apply）。 */
+export interface LandlockRuntimeLoader {
+  /**
+   * 取 landlock runner：非 Linux 同步返回 null；Linux 上惰性解析。
+   * 成功永久缓存（同一 loader 内共享同一个 Promise）；失败不缓存——launcher
+   * 稍后安装/修复后下一次 get() 重新探测，而不是到进程重启前都静默跳过。
+   */
+  get(): Promise<LandlockRuntime | null> | null;
+}
 
-export function getLandlockRuntime(): Promise<LandlockRuntime | null> | null {
-  if (process.platform !== "linux") return null;
-  if (landlockRuntimePromise === null) {
-    landlockRuntimePromise = loadLandlockRun()
-      .then((mod) => {
-        if (mod === null) return null;
-        try {
-          return { exec: mod.launcherPath(), grantArgs: mod.grantArgs };
-        } catch {
-          // 平台包缺失/路径解析失败：视为本机无 Landlock 启动器。
-          return null;
-        }
-      })
-      .then((resolved) => {
-        // 失败不清、成功才留：null 结果下次调用重新探测。
-        if (resolved === null) landlockRuntimePromise = null;
-        return resolved;
-      });
-  }
-  return landlockRuntimePromise;
+/** 创建一个实例级懒加载器（缓存随返回对象回收，不跨实例共享）。 */
+export function createLandlockRuntimeLoader(): LandlockRuntimeLoader {
+  let landlockRuntimePromise: Promise<LandlockRuntime | null> | null = null;
+  return {
+    get(): Promise<LandlockRuntime | null> | null {
+      if (process.platform !== "linux") return null;
+      if (landlockRuntimePromise === null) {
+        landlockRuntimePromise = loadLandlockRun()
+          .then((mod) => {
+            if (mod === null) return null;
+            try {
+              return { exec: mod.launcherPath(), grantArgs: mod.grantArgs };
+            } catch {
+              // 平台包缺失/路径解析失败：视为本机无 Landlock 启动器。
+              return null;
+            }
+          })
+          .then((resolved) => {
+            // 失败不清、成功才留：null 结果下次调用重新探测。
+            if (resolved === null) landlockRuntimePromise = null;
+            return resolved;
+          });
+      }
+      return landlockRuntimePromise;
+    },
+  };
 }

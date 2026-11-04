@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { RemoteError, remoteErrorOf } from "@deepseek-ai/dsh-typert-protocol";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -80,11 +81,18 @@ function makeCtx(sandbox: any, fs: any): any {
     // mock 环境没有 Loader,不会重跑 apply。
     fiber: { entry: { options: { id: "sandbox-extra-roots" } } },
     configEditorEdits: [] as Array<Record<string, any>>,
+    // 官方 configEditor.edit 的两个合并基(current=本行 raw config、
+    // inherited=继承层)。mock 在每次 edit 后把写回值更新成 current,
+    // 模拟 Loader 对账(fiber.resolveConfig)对 entry.options.config 的更新。
+    configEditorCurrent: {} as Record<string, any>,
+    configEditorInherited: {} as Record<string, any>,
     get(name: string) {
       if (name === "configEditor") {
         return {
-          edit: async (_entry: unknown, change: (current: any) => any) => {
-            this.configEditorEdits.push(change({}));
+          edit: async (_entry: unknown, change: (current: any, inherited: any) => any) => {
+            const next = change(this.configEditorCurrent, this.configEditorInherited);
+            this.configEditorEdits.push(next);
+            this.configEditorCurrent = next;
           },
         };
       }
@@ -603,5 +611,95 @@ describe("sandbox-extra-roots 漂移自检 fail-closed", () => {
     const ctx = makeCtx(sandboxMock, fsMock);
     await apply(ctx, { extraWritableRoots: [EXTRA] });
     await expect(fsMock.checkedTarget({ displayPath: EXTRA + "/foo" })).rejects.toThrow("FS_SANDBOX_DENIED");
+  });
+});
+
+describe("sandbox-extra-roots 配置持久化(SB-03)与 Remote 错误归一化(SB-02)", () => {
+  // 复用文件级 makeCtx：configEditor mock 记录每次写回的候选 config，并把
+  // 写回值更新为下一次 edit 的 current（模拟 Loader 对账更新 entry config）。
+
+  it("写回以官方 current/inherited 为合并基：不清掉已有字段，保存后快照更新", async () => {
+    const ctx = makeCtx(makeSandboxMock(), makeFsMock());
+    ctx.configEditorCurrent = { extraWritableRoots: ["/tmp/existing"], keepMe: 1 };
+    ctx.configEditorInherited = { bundleOnly: true };
+    await apply(ctx, { extraWritableRoots: [] });
+
+    await ctx.gateway.set({ extraWritableRoots: ["/tmp/first"] });
+    // {...inherited, ...current, ...partial}：继承层与用户手写字段都保留，
+    // 只有白名单字段被覆盖（旧实现用 apply 时刻快照整体覆盖 → 两处都丢）。
+    expect(ctx.configEditorEdits.at(-1)).toEqual({
+      extraWritableRoots: ["/tmp/first"],
+      bundleOnly: true,
+      keepMe: 1,
+    });
+    // 同一 fiber 内 get() 立即看到新值（旧实现返回 apply 时刻快照）。
+    expect(ctx.gateway.get()).toEqual({ config: { extraWritableRoots: ["/tmp/first"] } });
+
+    // 再次保存空 partial（"只改其它字段"的场景）：本行已有字段不被清空
+    // ——旧实现以 apply 快照为基，第二次写入会把前一次保存的值覆盖回去。
+    await ctx.gateway.set({});
+    expect(ctx.configEditorEdits.at(-1)).toEqual({
+      extraWritableRoots: ["/tmp/first"],
+      bundleOnly: true,
+      keepMe: 1,
+    });
+
+    // 第二次保存新值：mock 已把上次写回值更新为 current，前一次字段仍不丢。
+    await ctx.gateway.set({ extraWritableRoots: ["/tmp/second"] });
+    expect(ctx.configEditorEdits.at(-1)).toEqual({
+      extraWritableRoots: ["/tmp/second"],
+      bundleOnly: true,
+      keepMe: 1,
+    });
+    expect(ctx.gateway.get()).toEqual({ config: { extraWritableRoots: ["/tmp/second"] } });
+  });
+
+  it("请求里的未知字段不写入 profile patch（只并入白名单字段）", async () => {
+    const ctx = makeCtx(makeSandboxMock(), makeFsMock());
+    await apply(ctx, { extraWritableRoots: [] });
+    await ctx.gateway.set({
+      extraWritableRoots: ["/tmp/a"],
+      futureField: "should-not-leak",
+    } as unknown as { extraWritableRoots: string[] });
+    expect(ctx.configEditorEdits.at(-1)).toEqual({ extraWritableRoots: ["/tmp/a"] });
+    // 实例快照同样只保留本插件字段。
+    expect(ctx.gateway.get()).toEqual({ config: { extraWritableRoots: ["/tmp/a"] } });
+  });
+
+  it("校验失败抛官方 RemoteError(invalid-config)，details 含 field/value", async () => {
+    const ctx = makeCtx(makeSandboxMock(), makeFsMock());
+    await apply(ctx, { extraWritableRoots: [] });
+    const failure = await ctx.gateway
+      .set({ extraWritableRoots: ["relative/path"] })
+      .then(() => null, (error: unknown) => remoteErrorOf(error));
+    expect(failure).toMatchObject({
+      code: "sandbox-extra-roots/invalid-config",
+      details: { field: "extraWritableRoots", value: '["relative/path"]' },
+    });
+    expect(failure).toBeInstanceOf(RemoteError);
+    // 校验失败不落盘（config-validate 仍纯抛 TypeError，remote 边界才归一化）。
+    expect(ctx.configEditorEdits).toHaveLength(0);
+  });
+
+  it("危险根同样归一化为 invalid-config（details.value 保留原始值）", async () => {
+    const ctx = makeCtx(makeSandboxMock(), makeFsMock());
+    await apply(ctx, { extraWritableRoots: [] });
+    const failure = await ctx.gateway
+      .set({ extraWritableRoots: ["/"] })
+      .then(() => null, (error: unknown) => remoteErrorOf(error));
+    expect(failure).toMatchObject({
+      code: "sandbox-extra-roots/invalid-config",
+      details: { field: "extraWritableRoots", value: '["/"]' },
+    });
+  });
+
+  it("部署无 configEditor（无 fiber entry）时 set 抛 RemoteError(config-unavailable)", async () => {
+    const ctx = makeCtx(makeSandboxMock(), makeFsMock());
+    ctx.fiber = undefined; // 无 profile entry = 无法持久化
+    await apply(ctx, { extraWritableRoots: [] });
+    await expect(ctx.gateway.set({ extraWritableRoots: [] })).rejects.toMatchObject({
+      code: "sandbox-extra-roots/config-unavailable",
+      details: {},
+    });
   });
 });

@@ -1,3 +1,41 @@
+## 0.4.31 (2026-11-04)
+
+### 修复
+
+* **解密助手子进程的环境变量**：`helperSpawnEnv` 改为「白名单 + 敏感剔除」（只保留
+  Electron/WSL 必需项，剔除 `*KEY/*SECRET/*TOKEN/*PASSWORD/*CREDENTIAL*` 与具名宿主凭据），
+  不再把宿主完整环境透传给第三方桌面 App 二进制。
+* **dispose 到达 quiescence**：目录刷新链持有 AbortController 与在途集合（dispose 时
+  abort + `Promise.allSettled`）、重试定时器纳入 owner 清理、probe 队列加 `dispose`
+  并落定、`execFile` 子进程登记句柄并在卸载时 kill + await；新增
+  `src/child-processes.ts` 统一子进程所有权。
+* **本地控制面同源限制**：`probeKey` 只在 `Sec-Fetch-Site: same-origin` 时随状态文档下发，
+  写路由（刷新 / 隐藏 / 恢复模型）要求 Origin 与请求 Host 严格同源——本机其它环回页面
+  不再能读写隐藏模型清单。
+* 额度/目录/刷新类 JSON 端点接受 caller `AbortSignal` 并与内部 deadline 融合（取消可传播）。
+* CLI Coding Plan 空窗口不再输出 Start Plan 领取文案；OpenCode ID 生成器/CLI 句柄改为
+  实例/闭包状态（不再模块级共享）。
+* 客户端复制反馈 2s 定时器改 effect + cleanup；缺翻译函数时配置页返回 null 而非抛错；
+  模型徽标列表 key 改稳定身份；测试去掉 20ms 墙钟负向断言。
+
+### 新增
+
+* `Config` 增加 `zcodeBuiltinConfig` / `openCodeModelsCache` 两个部署字段（默认回退
+  对应环境变量），schema 全部字段补 `.default('')`。
+* `primeCatalogForRegistration` 恢复「注册前零网络」契约（adopt 增加 `probe` 选项，
+  启动快速通道不再触发真实探测请求）。
+* 发布展示元数据（`icon.svg` + `locale/en|zh.json`）。
+
+### 优化
+
+* **移除重复的模型 label 贡献**：删除 `conversation.input.model.label` 注册、
+  `ModelLabel.tsx`（178 行）与 `priority: -1` hack——DSH 0.2.2 起宿主原生渲染适配器提供的
+  `badge`（含 `{en,zh}` 本地化）；免费信息不再往模型名拼中文「免费」。
+* 删除旧 settings 命名空间常量与 `settingsNs` 字段、Start Plan claim POST 死链、
+  `exportFilename` 类死代码、`safeMessage`/`json()` 重复实现、CLI 兼容字段 `credits.total`、
+  未知变体 id 静默回落（改 fail loud）、手写 `join(resolveDshHome)`（改 `dshHomePath`）。
+* 发布产物只含运行时文件（`lib/*.js`、`lib/*.d.ts`、`client/client.cjs`）。
+
 ## 0.4.30 (2026-11-04)
 
 ### 新增

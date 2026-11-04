@@ -13,6 +13,7 @@
  * - session-scan.ts — 会话文件扫描与读取助手
  * - session-query-bridge.ts — sessionQuery 可选服务的唯一探测入口（自有最小契约）
  * - plugin-config.ts — 插件身份与配置默认值/归一化
+ * - config.ts — 插件配置的公开形状与 Loader 校验 schema（入口导出的 Config）
  * - types.ts — Remote 服务面的公共边界类型（typert 生成器引用）
  * - remote.ts — 归档管理 Remote 服务（标准 @Remote 装饰器）
  * - session-id.ts — 网关入参的 session id 断言
@@ -26,16 +27,23 @@ import type { SessionArchiveConfig } from './plugin-config.js'
 import { createArchiveHost } from './archive-host.js'
 import { SessionArchiveGateway } from './remote.js'
 
-// Cordis Loader 的 function plugin 面：只导出 name / inject / apply（值导出）。
+// Cordis Loader 的 function plugin 面：只导出 name / inject / Config / apply（值导出）。
 // 小写 config 导出不是 Cordis 元数据、从不被读取，2026-10-29 已删除；
 // 入口面锁 test/entry-surface.test.ts 拦住它长回来。
 export { name, inject } from './plugin-config.js'
+export { Config } from './config.js'
 
 /** 插件 apply：注册远程服务（面板 UI 读写）。 */
 export function apply(ctx: Context, config?: Partial<SessionArchiveConfig>): void {
   // 生效配置：defaults 与 cordis 注入的 patch config（含 profile patch 里的
   // 用户 override——保存经官方 configEditor 写入,由 Loader 对账后 reload 本行
-  // 使新配置在这里生效）。
-  const cfg = normalizeConfig({ ...DEFAULT_CONFIG, ...(config ?? {}) })
+  // 使新配置在这里生效）。Loader 已按 config.ts 的 Config schema 校验过一行
+  // config；normalizeConfig 是绕过 Loader 的直调/旧 profile 的最终防线，
+  // 非法值经宿主 logger 告警后回退默认值（不再静默）。
+  const cfg = normalizeConfig(
+    { ...DEFAULT_CONFIG, ...(config ?? {}) },
+    DEFAULT_CONFIG,
+    (message) => ctx.logger?.warn?.(message),
+  )
   ctx.plugin(SessionArchiveGateway, { host: createArchiveHost(ctx, cfg) })
 }

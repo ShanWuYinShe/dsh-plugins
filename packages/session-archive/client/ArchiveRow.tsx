@@ -9,14 +9,13 @@
 
 import * as React from "react";
 import { formatBytes, formatTime, shortId } from "./archive-format.js";
+import type { TFunc } from "./locales.js";
 
 
 export function ArchiveRow(props: {
   /** 本行对应的归档条目（map 回调参数，故不在 hook 解构名单里）。 */
   item: any
-  t: any
-  loading: any
-  error: any
+  t: TFunc
   selected: any
   expanded: any
   details: any
@@ -27,14 +26,16 @@ export function ArchiveRow(props: {
   restoreOne: any
   exportOne?: any
 }): React.ReactNode {
-  const { item, t, loading, error, selected, expanded, details, detailLoading, busy, toggleOne, toggleDetail, restoreOne, exportOne } = props
+  const { item, t, selected, expanded, details, detailLoading, busy, toggleOne, toggleDetail, restoreOne, exportOne } = props
 
   const isExpanded = expanded === item.sessionId;
   const detail = details.get(item.sessionId);
   const detailPending = detailLoading.has(item.sessionId);
   return React.createElement(
     "li",
-    { className: "sa_row" + (busy ? " sa_busy" : "") + (selected.has(item.sessionId) ? " sa_row--selected" : ""), key: item.sessionId },
+    // 外层 ArchivePanel 的 map 已用 sessionId 作 key；组件内部的 li 不再设 key
+    // （那是个无效属性，React 只认 map 调用的那一层）。
+    { className: "sa_row" + (busy ? " sa_busy" : "") + (selected.has(item.sessionId) ? " sa_row--selected" : "") },
     React.createElement(
       "div",
       { className: "sa_rowHead" },
@@ -113,7 +114,9 @@ export function ArchiveRow(props: {
         detail.messages.length === 0 ? React.createElement("p", { className: "sa_empty" }, t("noMessages")) :
         detail.messages.map((message: any, index: any) => React.createElement(
           "div",
-          { className: "sa_msg", key: index },
+          // 消息列表是日志顺序的快照：没有稳定 id，用 time + 序号表达身份
+          // （index 单独作 key 在插入/重排后会把 DOM 状态嫁错消息）。
+          { className: "sa_msg", key: String(message.time ?? "") + ":" + index },
           React.createElement("span", { className: "sa_msgRoleChip " + (message.role === "user" ? "sa_msgRoleUser" : "sa_msgRoleAssistant") }, message.role === "user" ? t("user") : t("assistant") + " · " + formatTime(message.time)),
           React.createElement("span", { className: "sa_msgBubble " + (message.role === "user" ? "sa_msgUser" : "sa_msgAssistant") }, message.text)
         ))

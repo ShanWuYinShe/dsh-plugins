@@ -36,7 +36,7 @@ https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
 ```
 
 即可在发现页一键安装本插件、查看与安装任意历史版本（索引与静态 registry 由 CI 从
-GitHub Releases 生成，发布在发行分支（当前 `alpha`，收敛后 `main`）根下的 `market/` 目录）。重启 DSH 后更新到指定版本
+GitHub Releases 生成，发布在独立的 `market` 发布产物分支根目录（CI 生成，禁止手工编辑））。重启 DSH 后更新到指定版本
 （DSH 对自建 registry 的自动更新检查只在安装会话内生效）：
 
 ```bash
@@ -50,7 +50,7 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 
 `<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。
 
-前置：DSH 宿主版本见本包 `package.json` 的 `engines.dsh`（当前为**精确版本** `0.2.2-rc.1`，DSH 按精确匹配判定兼容；DSH 升级后请安装为对应新版本重新发布的本插件）；宿主 0.2.2 起要求 Node.js >= 24.9。
+前置：DSH 宿主版本见本包 `package.json` 的 `engines.dsh`（当前为**精确版本** `0.2.2-rc.1`；宿主按 SemVer range 判定兼容，本仓精确声明故等价于精确匹配；DSH 升级后请安装为对应新版本重新发布的本插件）；宿主 0.2.2 起要求 Node.js >= 24.9。
 
 ## 内置查询器
 
@@ -69,6 +69,23 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 [`@chaoset/dsh-any-connect`](../dsh-any-connect/) 知道如何读取该桌面 App 的登录态
 与计费接口，因此由**那个包**注册自己的查询器。这正是设计意图——provider 的拥有者
 才是最清楚它计费接口的人。两者都装即可看到 WorkBuddy 额度。
+
+## 配置
+
+插件可被 `cordis.patch.yml` 配置（官方 `Config` schema，未配置项取默认值）：
+
+```yaml
+- id: provider-usage
+  name: '@chaoset/provider-usage'
+  config:
+    queryTimeoutMs: 15000   # 单次上游账单查询的超时（1..2^31-1 毫秒）
+    cacheTtlMs: 60000       # 成功快照缓存 TTL
+    errorCacheTtlMs: 10000  # 失败快照（degraded）缓存 TTL，避免坏上游被高频重试
+    unresolvedTtlMs: 60000  # 「当前 provider 无法解析端点/凭据」的负缓存 TTL
+```
+
+非法值（0/负数/非整数/超上限/未知字段）在 apply 时 fail loud，不会被静默接受。
+客户端的额度 pill 轮询间隔（60s）是浏览器侧协议节拍、不属于部署可变量，不在此 schema。
 
 ## 为其他 provider 注册查询器
 

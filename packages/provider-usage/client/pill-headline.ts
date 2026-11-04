@@ -32,8 +32,15 @@ function unitSuffix(unit: string): string {
  *
  * 额度用尽时头行仍是「0 credits 剩余」（诚实），恢复时刻由
  * {@link exhaustedResetText} 追加在按钮的 title/aria 上，不挤占折叠态宽度。
+ *
+ * @param answer - 资源流答案（快照或未查询标记）。
+ * @param provider - 当前 provider 键。
+ * @param stale - 是否标记「数据可能过期」。
+ * @param t - 文案函数。
+ * @param localeId - DSH 当前语言 id；数字/时间格式化随它走，缺席用浏览器默认。
+ * @returns 折叠态头行文案。
  */
-export function headlineText(answer: SnapshotAnswer | undefined, provider: string, stale: boolean, t: PillCopy): string {
+export function headlineText(answer: SnapshotAnswer | undefined, provider: string, stale: boolean, t: PillCopy, localeId?: string): string {
   const snapshot = isQueriedAnswer(answer) ? answer : undefined
   const first = snapshot?.windows[0]
   let headline: string
@@ -42,7 +49,7 @@ export function headlineText(answer: SnapshotAnswer | undefined, provider: strin
   } else if (snapshot === undefined) {
     headline = t('noQuerier', { provider })
   } else if (snapshot.rateLimit !== undefined) {
-    headline = rateLimitHeadline(snapshot.rateLimit, t)
+    headline = rateLimitHeadline(snapshot.rateLimit, t, localeId)
   } else if (snapshot.error !== undefined && snapshot.windows.length === 0) {
     headline = t('failed')
   } else if (first === undefined) {
@@ -52,7 +59,7 @@ export function headlineText(answer: SnapshotAnswer | undefined, provider: strin
     const more = snapshot.windows.length > 1 ? ` +${snapshot.windows.length - 1}` : ''
     headline = first.remain === undefined
       ? `${first.label}${first.unit === '' ? '' : `: ${first.unit}`}${more}`
-      : `${formatAmount(first.remain)}${unitSuffix(first.unit)} ${t('remaining')}${more}`
+      : `${formatAmount(first.remain, localeId)}${unitSuffix(first.unit)} ${t('remaining')}${more}`
   }
   return stale ? `${headline} · ${t('staleData')}` : headline
 }
@@ -67,10 +74,10 @@ export function headlineText(answer: SnapshotAnswer | undefined, provider: strin
  * 这是用户问的「到底到什么时候我可以接着用」在额度这一侧的直接答案；
  * 限流那一侧由 {@link rateLimitHeadline} 负责，两条通道互不替代。
  */
-export function exhaustedResetText(snapshot: UsageSnapshot, t: PillCopy): string | undefined {
+export function exhaustedResetText(snapshot: UsageSnapshot, t: PillCopy, localeId?: string): string | undefined {
   const first = snapshot.windows[0]
   if (first === undefined || first.remain !== 0 || first.resetsAt === undefined) return undefined
-  return t('resetsAt', { time: formatReset(first.resetsAt) })
+  return t('resetsAt', { time: formatReset(first.resetsAt, localeId) })
 }
 
 /**
@@ -79,10 +86,10 @@ export function exhaustedResetText(snapshot: UsageSnapshot, t: PillCopy): string
  * 绝不按固定窗口推算——GLM Coding Plan 的限流是按订阅档位并发动态调整的
  * （官方 usage-policy 原文），不存在可推算的窗口；编一个倒计时比不说更糟。
  */
-export function rateLimitHeadline(rateLimit: UsageRateLimit, t: PillCopy): string {
+export function rateLimitHeadline(rateLimit: UsageRateLimit, t: PillCopy, localeId?: string): string {
   const base = rateLimit.resetAt === undefined
     ? t('rateLimitedUnknown')
-    : t('rateLimitedUntil', { time: formatReset(new Date(rateLimit.resetAt).toISOString()) })
+    : t('rateLimitedUntil', { time: formatReset(new Date(rateLimit.resetAt).toISOString(), localeId) })
   // 上游的限流是**按模型**的（WorkBuddy 尤其如此）：头行必须带上模型名，
   // 否则用户会把「A 模型被限」误读成「整个 provider 不能用」。
   return rateLimit.model === undefined ? base : `${base} · ${rateLimit.model}`

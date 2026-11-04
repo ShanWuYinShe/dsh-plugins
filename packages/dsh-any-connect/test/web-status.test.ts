@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { createServer, get, type Server } from 'node:http'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkBuddyCredential } from '../src/auth.js'
 import type { WorkBuddyCredentialStore } from '../src/auth.js'
 import type { WorkBuddyModelInfo } from '../src/catalog.js'
-import { workBuddyWebStatus } from '../src/web-status.js'
+import { workBuddyStatusHandler, workBuddyWebStatus } from '../src/web-status.js'
 import type { WorkBuddyStatusRouteOptions, WorkBuddyWebStatus } from '../src/web-status.js'
 
 /** Signed-in 成员：测试以已登录 store 构造，联合的 signed-out 分支没有模型/账单字段。 */
@@ -364,5 +365,69 @@ describe('workBuddyWebStatus credits ledger', () => {
     }) as WorkBuddySignedInStatus)
     expect(status.credits).toEqual({ total: 693, accounts: [] })
     expect(status.creditsError).toBeUndefined()
+  })
+})
+
+
+describe('status route 的 probeKey 下发（AC-11 威胁模型）', () => {
+  let server: Server | undefined
+
+  afterEach(async () => {
+    await new Promise<void>(resolve => {
+      if (server === undefined) { resolve(); return }
+      server.close(() => resolve())
+    })
+    server = undefined
+  })
+
+  async function fetchStatus(headers: Record<string, string>): Promise<{ status: number; body: Record<string, unknown> }> {
+    const handler = workBuddyStatusHandler({
+      store: storeWith(CREDENTIAL),
+      models: () => [],
+      catalog: () => ({ source: 'fallback' }),
+      probeKey: 'test-key',
+      path: '/workbuddy-status-test',
+    })
+    const mounted = createServer((req, res) => { void handler(req, res) })
+    server = mounted
+    await new Promise<void>(resolve => mounted.listen(0, '127.0.0.1', resolve))
+    const address = mounted.address()
+    if (typeof address !== 'object' || address === null) throw new Error('no port')
+    return await new Promise((resolve, reject) => {
+      const req = get({
+        host: '127.0.0.1',
+        port: address.port,
+        path: '/workbuddy-status-test',
+        headers,
+      }, res => {
+        let text = ''
+        res.on('data', (chunk: Buffer) => { text += chunk.toString() })
+        res.on('end', () => {
+          try {
+            resolve({ status: res.statusCode ?? 0, body: JSON.parse(text) as Record<string, unknown> })
+          } catch (error: unknown) {
+            reject(error)
+          }
+        })
+      })
+      req.on('error', reject)
+    })
+  }
+
+  it('同源页面（Sec-Fetch-Site: same-origin）才下发 probeKey', async () => {
+    const res = await fetchStatus({ 'sec-fetch-site': 'same-origin' })
+    expect(res.status).toBe(200)
+    expect(res.body['probeKey']).toBe('test-key')
+  })
+
+  it('跨源/无 Sec-Fetch-Site 的请求不带 probeKey（写路由门槛不白送）', async () => {
+    const cases: Record<string, string>[] = [{}, { 'sec-fetch-site': 'same-site' }, { 'sec-fetch-site': 'cross-site' }]
+    for (const headers of cases) {
+      const res = await fetchStatus(headers)
+      expect(res.status).toBe(200)
+      expect(res.body['probeKey'], `headers=${JSON.stringify(headers)}`).toBeUndefined()
+      // 文档其余部分照常（只摘门槛，不影响卡片渲染）。
+      expect(res.body['status']).toBe('signed-in')
+    }
   })
 })

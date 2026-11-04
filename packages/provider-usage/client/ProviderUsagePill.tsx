@@ -35,7 +35,7 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
   // 组件原样早退（与原实现同一分支）。
   const usage = useProviderUsage(props)
   if (usage === null) return null
-  const { t, provider, answer, open, setOpen, busy, stale, alignRight, setAlignRight, rootRef, buttonRef, panelRef, refresh, queried, snapshot, headlineText, resetHint } = usage
+  const { t, provider, answer, open, setOpen, busy, stale, alignRight, setAlignRight, rootRef, buttonRef, panelRef, refresh, queried, snapshot, headlineText, resetHint, localeId } = usage
   const rateLimit = snapshot?.rateLimit
 
   return (
@@ -128,7 +128,7 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
                 <p style={rateLimitLineStyle}>
                   {rateLimit.resetAt === undefined
                     ? t('rateLimitedUnknown')
-                    : t('rateLimitedUntil', { time: formatReset(new Date(rateLimit.resetAt).toISOString()) })}
+                    : t('rateLimitedUntil', { time: formatReset(new Date(rateLimit.resetAt).toISOString(), localeId) })}
                 </p>
                 <p style={rateLimitMetaStyle}>
                   {t('rateLimitHits', { count: rateLimit.hits })}
@@ -140,7 +140,7 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
               ? <p style={noteStyle}>{t('noQuerierHint')}</p>
               : snapshot.windows.length === 0
                 ? <p style={noteStyle}>{snapshot.error === undefined ? t('noWindows') : t('failed')}</p>
-                : snapshot.windows.map(usageWindow => <WindowRow key={usageWindow.id} window={usageWindow} t={t} />)}
+                : snapshot.windows.map(usageWindow => <WindowRow key={usageWindow.id} window={usageWindow} t={t} localeId={localeId} />)}
             {snapshot?.error === undefined ? null : <p style={errorStyle}>{snapshot.error}</p>}
           </div>
         </div>

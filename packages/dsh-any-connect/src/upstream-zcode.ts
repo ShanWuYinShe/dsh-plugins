@@ -92,8 +92,8 @@ export class ZCodeUpstreamClient {
    * coding-plan 的 api-key）。拿不到（网络/非 bigmodel 账号/形状变化）返回
    * undefined，调用方回退到订阅有效性窗口——绝不编数字。
    */
-  async fetchCodingPlanQuota(credential: WorkBuddyCredential): Promise<ZCodeCodingPlanQuota | undefined> {
-    const quotaTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+  async fetchCodingPlanQuota(credential: WorkBuddyCredential, callerSignal?: AbortSignal): Promise<ZCodeCodingPlanQuota | undefined> {
+    const quotaTimeout = await deadlineSignal(callerSignal, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
     try {
       const response = await fetch('https://bigmodel.cn/api/monitor/usage/quota/limit', {
         headers: {
@@ -150,13 +150,13 @@ export class ZCodeUpstreamClient {
     }
   }
 
-  async fetchModels(credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
+  async fetchModels(credential: WorkBuddyCredential, callerSignal?: AbortSignal): Promise<readonly WorkBuddyUpstreamModel[]> {
     // Start Plan 的名单以**当前活动的 entitlements** 为准，而不是客户端内置目录：
     // 内置目录只是候选，服务端按活动放行（实测 Trust Build 只授权 GLM-5.3-Flash，
     // 另外两个 400 code 3006 model not allowed）。拿不到授权信息时回退已注册名单
     // ——一次上游抖动不该让整组模型从选择器里消失。
     if (credential.zcodePlan === 'start-plan') {
-      return this.fetchStartPlanModels(credential)
+      return this.fetchStartPlanModels(credential, callerSignal)
     }
     // Coding Plan 的名单真源是客户端内置 provider 目录（产品面），不是开放平台的
     // paas 目录：白名单拿不到（客户端未装/结构演进）就回已注册名单，不把未经验证
@@ -166,7 +166,7 @@ export class ZCodeUpstreamClient {
       return this.models
     }
     // 超时同样走宿主 deadline：外层 try/catch 的降级语义（失败回退已有模型）不变。
-    const modelsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+    const modelsTimeout = await deadlineSignal(callerSignal, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
     try {
       const response = await fetch('https://open.bigmodel.cn/api/paas/v4/models', {
         headers: {
@@ -224,19 +224,19 @@ export class ZCodeUpstreamClient {
     return chatStreamStartPlan(this.startPlanContext(), credential, bodyJson, signal)
   }
 
-  async fetchCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
+  async fetchCredits(credential: WorkBuddyCredential, callerSignal?: AbortSignal): Promise<WorkBuddyCredits> {
     // 额度来源跟生效计划走：Start Plan 查专属余额（billing/balance，一次性、
     // 一次性 token 包），其余计划查 coding-plan 订阅（subscription/list）。两个
     // 口径绝不混报——Start Plan 档显示订阅余额、或 Coding Plan 档显示专属余额，
     // 都会让用户对着错误的池子做决定。
     if (credential.zcodePlan === 'start-plan') {
-      return this.fetchStartPlanCredits(credential)
+      return this.fetchStartPlanCredits(credential, callerSignal)
     }
     // 额度口径以「账户上的 coding-plan 订阅」为准，与客户端选了哪条账号计划
     // 无关：模型请求本身就固定走 coding-plan 通道（Start Plan 的专属模型通道
     // 被上游风控封锁，本包按普通 ZCode 150% 额度使用），额度显示自然也要跟
     // 模型请求同一口径，否则卡片报的是一份用不上的余额。
-    const creditsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+    const creditsTimeout = await deadlineSignal(callerSignal, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
     try {
       const response = await fetch('https://bigmodel.cn/api/biz/subscription/list', {
         headers: {
@@ -277,8 +277,11 @@ export class ZCodeUpstreamClient {
    * 一用就 400 code 3006"的幻影名单——与"未领取却显示模型"是同一个用户可见症状。
    * 空名单 = "今天拿不到"（可恢复），幻影名单 = "以为能用"（更糟）。
    */
-  private async fetchStartPlanModels(credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
-    return fetchStartPlanModels(this.startPlanContext(), credential)
+  private async fetchStartPlanModels(
+    credential: WorkBuddyCredential,
+    callerSignal?: AbortSignal,
+  ): Promise<readonly WorkBuddyUpstreamModel[]> {
+    return fetchStartPlanModels(this.startPlanContext(), credential, callerSignal)
   }
 
   /**
@@ -312,11 +315,14 @@ export class ZCodeUpstreamClient {
    * 查询失败如实抛错（卡片转 creditsError），绝不拿 Coding Plan 的订阅状态
    * 冒充 Start Plan 的额度。
    */
-  private async fetchStartPlanCredits(credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
-    return fetchStartPlanCredits(this.startPlanContext(), credential)
+  private async fetchStartPlanCredits(
+    credential: WorkBuddyCredential,
+    callerSignal?: AbortSignal,
+  ): Promise<WorkBuddyCredits> {
+    return fetchStartPlanCredits(this.startPlanContext(), credential, callerSignal)
   }
 
-  async refreshToken(credential: WorkBuddyCredential): Promise<WorkBuddyRefreshOutcome> {
+  async refreshToken(credential: WorkBuddyCredential, _callerSignal?: AbortSignal): Promise<WorkBuddyRefreshOutcome> {
     return { accessToken: credential.accessToken }
   }
 

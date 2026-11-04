@@ -22,6 +22,7 @@
  * 模块一览（改源码时请同步本表；根 test/ 的 module-map 回归会核对双向一致）：
  *
  * - index.ts — 插件入口：注册内置 querier、同源路由与 /usage 命令
+ * - config.ts — 插件配置：查询 deadline 与缓存/负缓存 TTL（Schemastery 校验）
  * - providers.ts — 内置 querier 聚合点（注册表 + re-export）
  * - provider-shared.ts — querier 共用的取值助手与 JSON 请求
  * - provider-deepseek.ts provider-openrouter.ts provider-moonshot.ts provider-siliconflow.ts
@@ -35,11 +36,19 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { registerUsageCommand } from './command.js'
+import { Config, resolveConfig } from './config.js'
 import { BUILTIN_USAGE_QUERIERS } from './providers.js'
 import { ProviderUsageRegistry } from './registry.js'
 import { createProviderResolver } from './resolve.js'
 import { registerProviderUsageRoute } from './route.js'
 import { PROVIDER_USAGE_PATH } from './types.js'
+
+/**
+ * 插件配置 schema（Loader 在激活时按它校验并补齐默认值）。
+ *
+ * 与 `interface Config` 同名合并：类型面给 apply 用，值面给 Loader 用。
+ */
+export { Config }
 
 export const name = 'provider-usage'
 
@@ -62,10 +71,21 @@ export const inject: string[] = []
  * and the /usage command.
  *
  * @param ctx - the Cordis plugin context.
+ * @param config - deployment tunables (Loader already validated them against
+ * {@link Config}; direct callers get the same defaults through
+ * {@link resolveConfig}).
  * @returns nothing; the service lives with the plugin's fiber.
  */
-export function apply(ctx: Context): void {
-  const registry = new ProviderUsageRegistry(ctx)
+export function apply(ctx: Context, config: Config = {}): void {
+  // Loader 已按 schema 解析过；再解析一次保证直接调用 apply() 的 caller
+  // （测试、手工装载）也不会把负值/NaN 带进 registry。
+  const resolved = resolveConfig(config)
+  const registry = new ProviderUsageRegistry(ctx, {
+    queryTimeoutMs: resolved.queryTimeoutMs,
+    cacheTtlMs: resolved.cacheTtlMs,
+    errorCacheTtlMs: resolved.errorCacheTtlMs,
+    unresolvedTtlMs: resolved.unresolvedTtlMs,
+  })
 
   // The resolver reads the harness directories lazily on every query, so the
   // services it needs may be mounted after this plugin without blinding it.

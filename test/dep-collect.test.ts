@@ -57,6 +57,15 @@ describe("parseBunStoreEntry", () => {
     expect(parseBunStoreEntry("foo@1.0.0@beta")).toEqual({ name: "foo@1.0.0", version: "beta" });
   });
 
+  it("剥离平台/peer 变体的 +<hex> 后缀（同版本多变体合并为一条）", () => {
+    expect(parseBunStoreEntry("@vitest+mocker@4.1.0+fff7ddf946fac095")).toEqual({
+      name: "@vitest/mocker",
+      version: "4.1.0",
+    });
+    // 非 hex 的 + 后缀不剥离：避免把 semver build metadata 误当 bun hash。
+    expect(parseBunStoreEntry("foo@1.2.3+build.7")).toEqual({ name: "foo", version: "1.2.3+build.7" });
+  });
+
   it("无 @ 或 @ 开头视为形态不符", () => {
     expect(parseBunStoreEntry("foobar")).toBeNull();
     expect(parseBunStoreEntry("@foobar")).toBeNull();

@@ -30,6 +30,10 @@ export function StartPlanClaimBox({ t, claim, copied, onCopy }: {
   // 「没得领」会让用户白丢一次领取机会。
   if (claim === undefined || claim.state === 'none') return null
 
+  // JSX 回调闭包里拿不到外层对 `claim.planId !== undefined` 的收窄，
+  // 先落成一个局部常量，回调直接用（不再用 `?? ''` 掩盖可选性）。
+  const availablePlanId = claim.state === 'available' ? claim.planId : undefined
+
   return (
     <div style={claim.state === 'available' ? claimBoxStyle : claimUnknownBoxStyle}>
       {claim.state === 'available' ? (
@@ -38,10 +42,10 @@ export function StartPlanClaimBox({ t, claim, copied, onCopy }: {
           <span style={planMetaStyle}>
             {t('claimAvailableHint', { name: claim.planName ?? t('startPlanLabel') })}
           </span>
-          {claim.planId !== undefined ? (
+          {availablePlanId !== undefined ? (
             <span style={claimIdRowStyle}>
-              <span style={planMetaStyle}>{t('claimPlanIdLabel')}: <code style={claimCodeStyle}>{claim.planId}</code></span>
-              <button type="button" className="wb-btn" style={buttonStyle} onClick={() => { void onCopy(claim.planId ?? '') }}>
+              <span style={planMetaStyle}>{t('claimPlanIdLabel')}: <code style={claimCodeStyle}>{availablePlanId}</code></span>
+              <button type="button" className="wb-btn" style={buttonStyle} onClick={() => { void onCopy(availablePlanId) }}>
                 {copied ? t('claimCopied') : t('claimCopy')}
               </button>
             </span>

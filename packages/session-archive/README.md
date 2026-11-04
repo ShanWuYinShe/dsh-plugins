@@ -27,7 +27,7 @@ https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
 ```
 
 即可在发现页一键安装本插件、查看与安装任意历史版本（索引与静态 registry 由 CI 从
-GitHub Releases 生成，发布在发行分支（当前 `alpha`，收敛后 `main`）根下的 `market/` 目录）。重启 DSH 后更新到指定版本
+GitHub Releases 生成，发布在独立的 `market` 发布产物分支根目录（CI 生成，禁止手工编辑））。重启 DSH 后更新到指定版本
 （DSH 对自建 registry 的自动更新检查只在安装会话内生效）：
 
 ```bash
@@ -75,15 +75,14 @@ dsh plugin --profile web remove @chaoset/session-archive
 
 | 方法 | 参数 | 返回 |
 | --- | --- | --- |
-| `list()` | — | `{ items: ArchiveRow[] }` |
-| `count()` | — | `{ count }`（存在性过滤后的归档数量，徽标轮询轻端点） |
+| `list()` | — | `{ items: ArchiveRow[] }`（非 owner 逐会话 `remoteAccess.allows` 过滤） |
+| `count()` | — | `{ count }`（存在性过滤 + 逐会话授权过滤后的数量，徽标轮询轻端点） |
 | `detail(sessionId)` | 会话 id | `{ sessionId, header, title, messageCount, totalMessageCount, truncated, messages, live }` |
 | `delete(sessionIds[])` | id 数组 | `{ deleted, failed, removedFromArchive, needsRestart }` |
 | `unarchive(sessionIds[])` | id 数组 | `{ restored, failed, removedFromArchive }` |
 
 > `delete` 与 `unarchive` 共用 `failed[].reason` 词表：`not-archived`（非归档
-> 成员）、`live`（历史保留：0.3.20 起宿主侧不再产出，仅客户端保留防御性映射）、
-> `busy`（内存存在且沉降观察窗内体积仍在
+> 成员）、`busy`（内存存在且沉降观察窗内体积仍在
 > 增长——活跃生成流）、`unenumerable`（文件存在但持久化枚举不到，或文件已删）、
 > `unlocatable`（枚举得到但无法定位路径）、`reappeared`（删除后被生成流重建，
 > 二次删除仍压不掉）、`not-restorable`（仅 unarchive：confirm 复核时文件已不在）；
@@ -107,6 +106,16 @@ config 字段（`cordis.patch.yml`；配置只走官方 config-editor，旧版�
 - `messagePreviewChars`（默认 2000）：单条消息预览的最大字符数。
 - `titleReadConcurrency`（默认 4）：列表加载时并发读取标题的并行度。
 
+三者均由官方 `Config` schema（Schemastery，正整数校验）声明；patch 里写
+非正整数会在 apply 时经 logger 告警并回退默认值，未知字段被忽略。
+
+失败与异常：
+
+- 客户端按 Remote 错误 code 展示本地化文案（`session-archive/not-archived`、
+  `remote-access/denied`、`gateway/cancelled`；未知 code 回退技术文本 + code）。
+- 会话目录与代际文件的清理先做 `lstat`：目录被替换成符号链接、或目录内条目是
+  符号链接时**不跟随**，只删除持久化定位到的真实文件并给出告警。
+
 ## 限制
 
 - 正在生成落盘的会话拒绝删除——归档会话不在会话列表、无流可停，请稍后重试
@@ -115,6 +124,8 @@ config 字段（`cordis.patch.yml`；配置只走官方 config-editor，旧版�
   会因 `unenumerable` 被拒绝），只能手动清理文件。
 - 恢复归档走 DSH 官方的 `WorkspaceRegistry.unarchiveSession()`（宿主必填
   契约，缺失即契约漂移，typecheck 直接红灯）。
+- 归档会话的列表/计数对非 owner Peer 逐会话授权过滤；详情/删除/恢复沿用官方
+  `@Remote` 资源声明，非 owner 只能触达被授权的会话。
 - 已删除但仍在内存中的归档会话，其条目会一直留在宿主原生「设置 → 已归档会话」
   页，直到宿主重启（宿主没有让内存会话消亡的官方 API）；插件面板自身不受影响，
   删除时会明确提示。

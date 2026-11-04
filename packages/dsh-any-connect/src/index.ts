@@ -48,6 +48,7 @@
  *   路径常量、回环守卫、心跳与版本
  * 其它
  * - bin.ts — status/diagnostics CLI
+ * - child-processes.ts — 在途 helper 子进程的登记与回收（dispose 时 kill+await）
  * - values.ts — 跨模块共用的 unknown 值守卫与错误文本归一
  *
  * @module dsh-any-connect
@@ -89,12 +90,18 @@ export function apply(ctx: Context, config: Config): void {
   const client = new WorkBuddyUpstreamClient()
   /** Live configuration snapshot: volatile references committed by the Loader
    * without a remount (read fresh on every use — caching the values would pin
-   * the install-time document); install-time values where no Loader runs. */
+   * the install-time document); install-time values where no Loader runs.
+   *
+   * 六个字段一律直接 `.get()`：schema 每个字段都有 `.default('')`，missing →
+   * 空串由消费方当「未设置」处理；不给某个字段单独加 `?.` 来暗示它可能整个
+   * 缺席（那会让「字段是否存在」与「值是否为空」两种事实混淆，RULE-053）。 */
   const current = (): Options => ({
     authFile: config.authFile.get(),
     authFileAI: config.authFileAI.get(),
     authFileZCode: config.authFileZCode.get(),
-    authFileOpenCode: config.authFileOpenCode?.get(),
+    authFileOpenCode: config.authFileOpenCode.get(),
+    zcodeBuiltinConfig: config.zcodeBuiltinConfig.get(),
+    openCodeModelsCache: config.openCodeModelsCache.get(),
   })
 
   // 变体运行时（构造 / 路由 / 目录生命周期 / 定时器 / 适配器注册）见 runtime.ts。

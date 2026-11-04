@@ -37,16 +37,25 @@ const OPENCODE_DEFAULT_PROJECT_ID = '5da9b72c6f3d58f67b560a1dd82e3c067c3fbd18'
  * - descending=true (SessionID): 前 12 字符为 ~BigInt(Date.now()*4096+cA) 的 16 进制按位反转补码
  * - descending=false (MessageID): 前 12 字符为 BigInt(Date.now()*4096+cA) 的 16 进制升序时间戳
  * - 后 14 字符为 62 进制字母数字随机串
+ *
+ * 单调序列状态（同一毫秒内的序号）是**实例状态**而不是模块级变量（RULE-051）：
+ * 模块级计数器会跨插件 reload / 同进程多 profile 共享，ID 序列无法隔离；这里由
+ * 调用方传入 {@link OpenCodeIdState}，`OpenCodeUpstreamClient` 每个实例各持一份。
  */
-let lastTimestamp = 0
-let sequenceCounter = 0
-export function generateOpenCodeId(descending: boolean, now: number = Date.now()): string {
-  if (now !== lastTimestamp) {
-    lastTimestamp = now
-    sequenceCounter = 0
+export interface OpenCodeIdState {
+  /** 上一次生成 ID 的毫秒时间戳。 */
+  lastTimestamp: number
+  /** 同一毫秒内的递增序号。 */
+  sequenceCounter: number
+}
+
+export function generateOpenCodeId(state: OpenCodeIdState, descending: boolean, now: number = Date.now()): string {
+  if (now !== state.lastTimestamp) {
+    state.lastTimestamp = now
+    state.sequenceCounter = 0
   }
-  sequenceCounter++
-  const num = BigInt(now) * 0x1000n + BigInt(sequenceCounter)
+  state.sequenceCounter++
+  const num = BigInt(now) * 0x1000n + BigInt(state.sequenceCounter)
   const U = descending ? ~num : num
   const hexPrefix = Array.from({ length: 6 }, (_, W) =>
     Number((U >> BigInt(40 - 8 * W)) & 0xffn).toString(16).padStart(2, '0')
@@ -683,6 +692,9 @@ export function formatOpenCodeModelName(id: string): string {
 
 /**
  * OpenCode 官方元数据本地缓存路径（由 OpenCode CLI 同步落盘）。
+ *
+ * 优先级由调用方决定：`Config.openCodeModelsCache`（deployable，RULE-059）>
+ * `OPENCODE_MODELS_CACHE` 环境变量 > XDG 缓存默认位置。
  */
 function defaultOpenCodeCachePath(): string {
   if (process.env.OPENCODE_MODELS_CACHE) {
@@ -796,7 +808,12 @@ export function mergeOpenCodeCatalogue(
 export interface OpenCodeUpstreamClientOptions {
   models?: readonly WorkBuddyUpstreamModel[]
   projectId?: string
-  cachePath?: string
+  /**
+   * 本地 OpenCode 元数据缓存路径。可传函数：配置是 volatile 的，插件热更新
+   * 后下一次解析就按新路径读（缓存按「上次读的路径」失效）。
+   * 缺省（或函数返回 undefined）时回落到 env / XDG 默认。
+   */
+  cachePath?: string | (() => string | undefined)
   specs?: Map<string, OpenCodeModelSpec>
 }
 
@@ -807,23 +824,31 @@ export interface OpenCodeUpstreamClientOptions {
 export class OpenCodeUpstreamClient {
   private readonly models: readonly WorkBuddyUpstreamModel[]
   private readonly projectId: string
-  private readonly cachePath?: string
+  /** 本实例的 OpenCode ID 单调序列（见 {@link OpenCodeIdState}）。 */
+  private readonly idState: OpenCodeIdState = { lastTimestamp: 0, sequenceCounter: 0 }
+  private readonly cachePath: () => string | undefined
+  private readonly injectedSpecs?: Map<string, OpenCodeModelSpec>
+  /** 上次成功解析用的缓存路径：配置改了路径就让下一轮重新读盘。 */
+  private specsPath?: string
   private specsCache?: Map<string, OpenCodeModelSpec>
 
   constructor(options: OpenCodeUpstreamClientOptions = {}) {
     this.models = options.models ?? []
     this.projectId = options.projectId ?? OPENCODE_DEFAULT_PROJECT_ID
-    this.cachePath = options.cachePath
-    this.specsCache = options.specs
+    const cachePath = options.cachePath
+    this.cachePath = typeof cachePath === 'function' ? cachePath : () => cachePath
+    this.injectedSpecs = options.specs
   }
 
   private resolveSpecs(): Map<string, OpenCodeModelSpec> | undefined {
-    if (this.specsCache !== undefined) return this.specsCache
-    try {
-      this.specsCache = readLocalOpenCodeSpecs(this.cachePath)
-    } catch {
-      this.specsCache = undefined
-    }
+    if (this.injectedSpecs !== undefined) return this.injectedSpecs
+    // Config 的「未设置」是空串（不是 undefined）：两者都按未配置处理，
+    // 回落到 OPENCODE_MODELS_CACHE / XDG 默认。
+    const configured = this.cachePath()?.trim()
+    const path = configured === undefined || configured === '' ? defaultOpenCodeCachePath() : configured
+    if (this.specsCache !== undefined && path === this.specsPath) return this.specsCache
+    this.specsPath = path
+    this.specsCache = readLocalOpenCodeSpecs(path)
     return this.specsCache
   }
 
@@ -833,8 +858,8 @@ export class OpenCodeUpstreamClient {
     bodyJson: string,
     signal?: AbortSignal,
   ): Promise<WorkBuddyChatResult> {
-    const sessionId = `ses_${generateOpenCodeId(true)}`
-    const requestId = `msg_${generateOpenCodeId(false)}`
+    const sessionId = `ses_${generateOpenCodeId(this.idState, true)}`
+    const requestId = `msg_${generateOpenCodeId(this.idState, false)}`
     const rawToken = credential.accessToken?.trim() ?? ''
     const token = rawToken !== ''
       && rawToken !== 'public'
@@ -923,8 +948,8 @@ export class OpenCodeUpstreamClient {
     }
   }
 
-  async fetchModels(_credential: WorkBuddyCredential): Promise<readonly WorkBuddyUpstreamModel[]> {
-    const modelsTimeout = await deadlineSignal(undefined, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
+  async fetchModels(_credential: WorkBuddyCredential, callerSignal?: AbortSignal): Promise<readonly WorkBuddyUpstreamModel[]> {
+    const modelsTimeout = await deadlineSignal(callerSignal, JSON_TIMEOUT_MS, 'ANY_CONNECT_JSON')
     try {
       const response = await fetch(OPENCODE_MODELS_URL, {
         headers: {
@@ -952,11 +977,11 @@ export class OpenCodeUpstreamClient {
     }
   }
 
-  async fetchCredits(_credential: WorkBuddyCredential): Promise<WorkBuddyCredits> {
+  async fetchCredits(_credential: WorkBuddyCredential, _callerSignal?: AbortSignal): Promise<WorkBuddyCredits> {
     return OPENCODE_FALLBACK_CREDITS
   }
 
-  async refreshToken(credential: WorkBuddyCredential): Promise<WorkBuddyRefreshOutcome> {
+  async refreshToken(credential: WorkBuddyCredential, _callerSignal?: AbortSignal): Promise<WorkBuddyRefreshOutcome> {
     return { accessToken: credential.accessToken }
   }
 

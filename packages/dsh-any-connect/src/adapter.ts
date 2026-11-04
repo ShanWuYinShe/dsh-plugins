@@ -117,18 +117,21 @@ function billingFacts(info: WorkBuddyModelInfo): BillingFacts {
  * builds its rows from `model.name` alone and never reads `description`.
  * Carrying the rate on the name makes it visible in both.
  *
- * The suffix deliberately carries only free/rate — not the promotion label:
- * the name is also what `/model` and the session metadata show, and the promo
- * label is a selector-only decoration (it lives in the native badge instead).
+ * The suffix carries only the **rate** (`x0.79`) — a language-neutral figure.
+ * 「免费」不写进名字：宿主 LLM seam 把 name 原样送浏览器、宿主没有 locale
+ * 服务，中文后缀会在英文 UI 里漏出来；免费信息由 {@link modelBadge} 的
+ * `{en:'Free', zh:'免费'}` 承载（DSH 0.2.2 的选择器原生渲染 badge，trigger/
+ * menu/option 三处都显示，并按 UI 语言解析）。promotion 标签同理只进 badge。
  *
  * @param name - display name the catalog handed in.
  * @param info - that model's catalog entry.
- * @returns the name with its billing suffix, or the bare base name.
+ * @returns the name with its rate suffix, or the bare base name.
  */
 function withRate(name: string, info: WorkBuddyModelInfo): string {
   const baseName = name.split(RATE_SEPARATOR)[0] ?? name
   const { free, rate } = billingFacts(info)
-  if (free) return `${baseName}${RATE_SEPARATOR}免费`
+  // 免费模型不追加任何后缀（badge 已给 Free/免费）；有倍率的追加语言中性的数字。
+  if (free) return baseName
   return rate === undefined ? baseName : `${baseName}${RATE_SEPARATOR}${rate}`
 }
 

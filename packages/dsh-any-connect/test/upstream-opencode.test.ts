@@ -364,9 +364,14 @@ describe('prepareOpenCodeAnthropicBody', () => {
   })
 })
 
+/** 每个用例各持一份序列状态：ID 生成器是实例状态，不再是模块级计数器。 */
+function idState(): { lastTimestamp: number; sequenceCounter: number } {
+  return { lastTimestamp: 0, sequenceCounter: 0 }
+}
+
 describe('generateOpenCodeId', () => {
   it('生成合法长度与格式的 descending (Session) ID', () => {
-    const id = generateOpenCodeId(true, 1792073905435)
+    const id = generateOpenCodeId(idState(), true, 1792073905435)
     expect(id).toHaveLength(26)
     // 逆向取证验证：1792073905435 的 ones complement 前缀为 ec0124ae4ffe
     expect(id.startsWith('ec0124ae4ffe')).toBe(true)
@@ -374,7 +379,7 @@ describe('generateOpenCodeId', () => {
   })
 
   it('生成合法长度与格式的 ascending (Message) ID', () => {
-    const id = generateOpenCodeId(false, 1792073905435)
+    const id = generateOpenCodeId(idState(), false, 1792073905435)
     expect(id).toHaveLength(26)
     // 逆向取证验证：1792073905435 的普通时间戳前缀为 13fedb51b00X (X 为序列计数)
     expect(id.startsWith('13fedb51b00')).toBe(true)

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Sandbox Extra Roots",
+    "description": "Extra writable roots for the workspace-write sandbox across Seatbelt, bwrap and Landlock profiles, plus the filesystem fence."
+  }
+}

@@ -13,7 +13,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { normalizeRoots, validateSandboxConfig } from '../src/config-validate.js'
-import { clearDirExistCache, existingDirectoryRoots, isExistingDirCached } from '../src/roots-filter.js'
+import { createRootsFilter } from '../src/roots-filter.js'
 
 const made: string[] = []
 
@@ -24,7 +24,6 @@ function tempDir(): string {
 }
 
 afterEach(() => {
-  clearDirExistCache()
   for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
@@ -88,7 +87,8 @@ describe('existingDirectoryRoots', () => {
     const warnings: string[] = []
     const dir = tempDir()
     const missing = join(dir, 'not-created')
-    const kept = existingDirectoryRoots([dir, missing], new Set<string>(), 'test', (m) => warnings.push(m))
+    const filter = createRootsFilter()
+    const kept = filter.existingDirectoryRoots([dir, missing], new Set<string>(), 'test', (m) => warnings.push(m))
     expect(kept).toEqual([dir])
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain('does not exist')
@@ -98,12 +98,13 @@ describe('existingDirectoryRoots', () => {
     const warnings: string[] = []
     const warned = new Set<string>()
     const missing = join(tempDir(), 'nope')
-    existingDirectoryRoots([missing], warned, 'test', (m) => warnings.push(m))
-    existingDirectoryRoots([missing], warned, 'test', (m) => warnings.push(m))
+    const filter = createRootsFilter()
+    filter.existingDirectoryRoots([missing], warned, 'test', (m) => warnings.push(m))
+    filter.existingDirectoryRoots([missing], warned, 'test', (m) => warnings.push(m))
     expect(warnings).toHaveLength(1)
   })
 
-  it('clearDirExistCache 后按当前文件系统立即判定（不沿用旧 TTL）', () => {
+  it('filter.clear() 后按当前文件系统立即判定（不沿用旧 TTL）', () => {
     const dir = tempDir()
     const late = join(dir, 'late')
     // 冻结 Date：TTL 缓存按 Date.now() 判定，真实墙钟下两次调用之间一旦
@@ -111,11 +112,29 @@ describe('existingDirectoryRoots', () => {
     // 冻结后「同一时刻必在 TTL 内」由产品常量保证，不再依赖机器速度。
     vi.useFakeTimers({ toFake: ['Date'] })
     try {
-      expect(isExistingDirCached(late)).toBe(false)
+      const filter = createRootsFilter()
+      expect(filter.isExistingDirCached(late)).toBe(false)
       mkdirSync(late)
-      expect(isExistingDirCached(late)).toBe(false) // 同一冻结时刻 → 沿用旧结论
-      clearDirExistCache()
-      expect(isExistingDirCached(late)).toBe(true)
+      expect(filter.isExistingDirCached(late)).toBe(false) // 同一冻结时刻 → 沿用旧结论
+      filter.clear()
+      expect(filter.isExistingDirCached(late)).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('缓存归属实例：两个 filter 互不影响（不再有模块级单例）', () => {
+    const dir = tempDir()
+    const late = join(dir, 'late')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const a = createRootsFilter()
+      const b = createRootsFilter()
+      expect(a.isExistingDirCached(late)).toBe(false)
+      mkdirSync(late)
+      // a 的旧结论还在，b 从未查询过 → 按当前文件系统判定。
+      expect(a.isExistingDirCached(late)).toBe(false)
+      expect(b.isExistingDirCached(late)).toBe(true)
     } finally {
       vi.useRealTimers()
     }

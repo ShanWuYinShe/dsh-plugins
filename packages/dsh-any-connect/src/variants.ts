@@ -12,7 +12,6 @@
  * @module dsh-any-connect/variants
  */
 
-import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import {
   WORKBUDDY_AI_PROBE_PATH,
   WORKBUDDY_AI_STATUS_PATH,
@@ -103,14 +102,6 @@ export interface WorkBuddyVariant {
    * windows, and which models exist for a shared id.
    */
   catalogFilename: string
-  /**
-   * Legacy settings-namespace identity string (see config.ts).
-   *
-   * Not registered as a configurable-provider directory entry: the variant's
-   * configuration surface is the bundle config card, and 「设置 → 模型」只有
-   * llm-pi-ai / llm-deepseek 两种可编辑布局，声明目录项只会得到死卡片。
-   */
-  settingsNs: SettingsNamespace
   /** Same-origin status route consumed by this variant's card. */
   statusPath: string
   /** Same-origin probe-control route consumed by this variant's card. */
@@ -154,7 +145,6 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
     ownFilename: '.workbuddy-auth.json',
     probeFilename: '.workbuddy-probe.json',
     catalogFilename: WORKBUDDY_CATALOG_FILENAME,
-    settingsNs: 'anyconnect' as SettingsNamespace,
     statusPath: WORKBUDDY_STATUS_PATH,
     probePath: WORKBUDDY_PROBE_PATH,
   },
@@ -184,7 +174,6 @@ export const WORKBUDDY_VARIANTS: readonly WorkBuddyVariant[] = [
     ownFilename: '.workbuddy-ai-auth.json',
     probeFilename: '.workbuddy-ai-probe.json',
     catalogFilename: WORKBUDDY_AI_CATALOG_FILENAME,
-    settingsNs: 'anyconnect-ai' as SettingsNamespace,
     statusPath: WORKBUDDY_AI_STATUS_PATH,
     probePath: WORKBUDDY_AI_PROBE_PATH,
   },
@@ -201,7 +190,6 @@ export const ZCODE_VARIANT: WorkBuddyVariant = {
   ownFilename: '.zcode-auth.json',
   probeFilename: '.zcode-probe.json',
   catalogFilename: '.zcode-catalog.json',
-  settingsNs: 'anyconnect-zcode' as SettingsNamespace,
   statusPath: ZCODE_STATUS_PATH,
   probePath: ZCODE_PROBE_PATH,
   zcodePlanMode: 'coding',
@@ -224,7 +212,6 @@ export const ZCODE_START_PLAN_VARIANT: WorkBuddyVariant = {
   ownFilename: '.zcode-sp-auth.json',
   probeFilename: '.zcode-sp-probe.json',
   catalogFilename: '.zcode-sp-catalog.json',
-  settingsNs: 'anyconnect-zcode-sp' as SettingsNamespace,
   statusPath: ZCODE_SP_STATUS_PATH,
   probePath: ZCODE_SP_PROBE_PATH,
   zcodePlanMode: 'start',
@@ -241,7 +228,6 @@ export const OPENCODE_VARIANT: WorkBuddyVariant = {
   ownFilename: '.opencode-auth.json',
   probeFilename: '.opencode-probe.json',
   catalogFilename: '.opencode-catalog.json',
-  settingsNs: 'anyconnect-opencode' as SettingsNamespace,
   statusPath: OPENCODE_STATUS_PATH,
   probePath: OPENCODE_PROBE_PATH,
 }
@@ -267,14 +253,19 @@ export function variantFor(id: string): WorkBuddyVariant | undefined {
 }
 
 /**
- * The Electron profile a WorkBuddy variant resolves its at-rest key helper
- * with.
+ * The Electron profile a WorkBuddy variant resolves its at-rest key helper with.
  *
- * A descriptor assembled outside this module may omit `electron`; resolution
- * then falls back by variant id, so an unknown custom variant stays on the CN
- * product. The ZCode variants never reach this: they read a plaintext
- * credential document and have no Electron helper.
+ * `electron` 只属于两条 WorkBuddy 桌面产品线（ZCode/OpenCode 读明文凭据文档，
+ * 没有 Electron 助手）。缺 profile 的变体此前按 id 静默回落到 CN/AI 产品
+ * （「未知 custom 变体留在 CN」），效果是**执行另一个产品的二进制**——按
+ * RULE-053/061 改为 fail loud：没有任何产品身份就不许 spawn 助手。
  */
 export function electronProfileFor(variant: Pick<WorkBuddyVariant, 'id' | 'electron'> | undefined): WorkBuddyElectronProduct {
-  return variant?.electron ?? (variant?.id === AI_VARIANT.id ? AI_VARIANT : CN_VARIANT).electron!
+  if (variant?.electron === undefined) {
+    throw new Error(
+      `dsh-any-connect: variant ${variant?.id ?? '(undefined)'} has no Electron profile;`
+      + ' the at-rest key helper only exists for the WorkBuddy desktop app variants',
+    )
+  }
+  return variant.electron
 }

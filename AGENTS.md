@@ -21,7 +21,9 @@ bun run dsh-status      # 两分支 dsh 依赖基线 vs dsh 最新 rc（正式�
 bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览），详见 RELEASING.md
 ```
 
-构建顺序不可交换：client 源码用包自引用子路径 `import "@chaoset/<pkg>/remote"`，
+构建顺序不可交换：阶段 0 先整目录清空每包 `lib/` 与 `client/client.cjs`（陈旧产物清理，
+`test/build-hygiene.test.ts` 锁住），阶段 1 tsc，阶段 2 Typert 生成，阶段 3 client 打包，
+阶段 4 bin 自包含。client 源码用包自引用子路径 `import "@chaoset/<pkg>/remote"`，
 esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typert 生成必须
 在 client 打包之前。`lib/` 与 `client/client.cjs` 都是 gitignore 的构建产物。
 
@@ -59,6 +61,12 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   `market` 分支（workflow_dispatch 可回填/修复）；它与 `alpha`/`main` 的双分支发布体系正交。
   新增发布包必须在 `scripts/lib/plugin-market-core.mjs` 的 `PACKAGE_DISPLAY` 补展示元数据，
   否则 `bun run market:build` 直接报错。
+- **展示元数据**：每个发布包必须提供顶层 `icon: "./icon.svg"` 与 `locale/en.json` /
+  `locale/zh.json`（`meta.title` / `meta.description`，纯字符串），`exports` 暴露
+  `./locale/*.json`，`files` 含 `icon.svg` 与 `locale/*.json`——宿主 Plugin Manager
+  通过 `readPluginMeta` 读这两处（官方 skill「Display metadata and icon」），缺失时
+  卡片标题回退裸包名、图标回退通用图形。文案/图标须与 `PACKAGE_DISPLAY` 同源，
+  由 `test/plugin-display-meta.test.ts` 锁住。
 - **兼容声明**：插件对 DSH 的兼容性用官方 `engines.dsh`，且必须写**精确宿主版本**
   （如 `0.2.2-rc.1`，不写 `^` / `~` / `>=`）；依赖 range 仍是 `^X`，由
   `bun run adapt` 同步维护，`dsh-baseline` 严格核对「range 的 `^X` ↔ `engines.dsh`
@@ -92,6 +100,12 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   - 禁止靠 `retry`/`skip`/放大 timeout 掩盖不稳定；偶发假红必须查明根因。
   - 改测试相关代码后跑 `bun run test:stability`（多轮 + 多并发档位）证明稳定；
     alpha 分支推送（`test.yml`）与发布流水（`publish.yml`）会自动跑同一脚本。
+- **依赖解析基线**：`engines.dsh` 与全部 `@deepseek-ai/dsh-*` range 必须统一到宿主最新正式版；
+  宿主升级后**必须从零重解 lock**（`rm -rf node_modules packages/*/node_modules bun.lock && bun install`），
+  增量 `bun install` 不会重解 peer 图、会永久保留旧实例。`test/dep-resolution-baseline.test.ts`
+  对「声明 range ↔ 实际解析版本 ↔ bun.lock」三方锁定。
+- **废弃 API**：0.2.2-rc.1 起 `Session.eventAt/snapshotEvents/ownEvents` 与
+  `SessionController.page()` 已标 `@deprecated`（禁止新调用）；`test/deprecated-api.test.ts` 拦截。
 - 测试涉及平台差异时必须显式判定平台（如
   `it.skipIf(process.platform !== "darwin")`），或改用运行时取值
   （`canonicalPath`、`dirname(fakeHome)` 等）保持用例平台无关；路径拼写取自运行时，在其他平台也跑得过。新增平台相关用例时

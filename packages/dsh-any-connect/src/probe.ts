@@ -116,6 +116,12 @@ export async function probeModel(options: {
   sentinel?: SentinelFactory
   candidates?: readonly WorkBuddyEffort[]
   timeoutMs?: number
+  /**
+   * 调用方的取消信号（插件卸载时由 probe-service 的 shutdown controller
+   * abort）：与每次请求的内部 deadline 融合，abort 后整轮探测立即结束，
+   * 不等满 30s 单次超时。
+   */
+  signal?: AbortSignal
 }): Promise<ProbeOutcome> {
   const sentinel = options.sentinel ?? randomSentinel
   const candidates = options.candidates ?? PROBE_EFFORT_CANDIDATES
@@ -127,7 +133,7 @@ export async function probeModel(options: {
     // 单次探测超时走宿主 deadline（超时原因可分类；此前手写 controller +
     // setTimeout 三件套）。
     try {
-      return await withTimeout(undefined, timeoutMs, 'ANY_CONNECT_PROBE', (signal) => options.send(effort, signal))
+      return await withTimeout(options.signal, timeoutMs, 'ANY_CONNECT_PROBE', (signal) => options.send(effort, signal))
     } catch (error: unknown) {
       return { status: 0, streamed: false, detail: `transport error: ${String(error)}` }
     }

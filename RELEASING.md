@@ -63,9 +63,9 @@ warning（刻意非阻塞——提醒，不是门禁）。
 「Verify dsh baseline」）执行：所有 dsh-* 依赖必须是 `^<版本>` 形态；
 `engines.dsh` **必须写精确宿主版本**（如 `0.2.2-rc.1`，不能写
 `^X` / `~X` / `>=X`），且必须与依赖基线精确一致；任一不满足即
-exit 1 阻断发布。`engines.dsh` 是 DSH 官方 manifest 字段，宿主安装与
-profile 启动按**精确匹配**判定插件兼容性——写范围会过度声明兼容性、误导用户，
-因此本仓一律精确声明。旧字段 `dsh.host` 已废弃，残留同样会被该脚本拦下。
+exit 1 阻断发布。`engines.dsh` 是 DSH 官方 manifest 字段，宿主安装与 profile 启动按 **SemVer
+range**（`semver.satisfies(..., {includePrerelease:true})`）判定插件兼容性；本仓
+一律写**精确版本**，因此效果上等价于精确匹配——写范围会过度声明兼容性、误导用户。旧字段 `dsh.host` 已废弃，残留同样会被该脚本拦下。
 本地干跑直接执行该脚本即可（无网络、无 git 依赖，纯 manifest 校验）。
 
 依赖漏洞审计由 `bun run audit`（发布门禁步骤「Audit dependencies」）
@@ -329,7 +329,11 @@ alpha 分支：
 
 ```bash
 node scripts/adapt-dsh.mjs 0.1.3-alpha.0   # 改全部 @deepseek-ai/dsh-* range 与 engines.dsh
-bun install                                 # 重新生成 lockfile
+# 必须从零重生成 lock：增量 bun install 只会同步 workspace 版本字段，不会重解 peer 图，
+# 历史实例会永久留在 lock 里（2026-11-04 审计实测：lock 混着 alpha 线 peer 实例，
+# CI --frozen-lockfile 静默安装混版图）。这是 test/dep-resolution-baseline.test.ts 的锁面。
+rm -rf node_modules packages/*/node_modules bun.lock && bun install
+bun pm why @deepseek-ai/dsh-agent            # 验收：应为唯一基线实例（无 pre-rc 混入）
 bun run build                               # 重新生成 lib/ 与 Typert 工件（见下节）
 # 对照新宿主的 diff 复核用到的契约（参照历史 CHANGELOG 的记录方式），
 # 升版本号、写 CHANGELOG，然后：
@@ -343,9 +347,10 @@ bun run test:ci && git push
 
 `adapt-dsh.mjs` 同时把每个发布包 `package.json` 的 `engines.dsh` 兼容声明
 改写为**精确宿主版本**（如 adapt 到 `0.1.3-alpha.0` 就写 `0.1.3-alpha.0`，不写
-`^` / `~` / `>=`）——`engines.dsh` 是 DSH 官方 manifest
-字段（`@deepseek-ai/dsh-package-manifest` 的 `DshEnginesManifest`），宿主安装
-与 profile 启动按精确匹配判定兼容性；存在时它单独生效、peer 依赖不再参与判定。
+`^` / `~` / `>=`）——`engines.dsh` 是 DSH 官方 manifest 字段
+（`@deepseek-ai/dsh-package-manifest` 的 `DshEnginesManifest`），宿主按 SemVer
+range 判定兼容性；本仓声明精确版本，故效果上等价于精确匹配。存在时它单独生效、
+peer 依赖不再参与判定。
 **为什么精确**（用户裁定 2026-10-30）：每个插件版本都有匹配的 DSH 版本，DSH 升级
 很可能不兼容旧版本；写范围会过度声明兼容性、容易误导用户。代价是每次宿主升级
 （含同线 alpha→rc→下一 alpha）都要重新发布对应插件版本。
@@ -483,9 +488,10 @@ Web client 通过 `ctx.remote` 调用的 Host 能力（本仓 `sandbox-extra-roo
   Linux arm64（Docker `node:24`）上生成的 10 个 typert 工件 sha256 完全相同，
   `bun.lock` 也未被 Linux 冻结安装改写。CI 若想防生成器升级静默改字节，可记录
   一份 sha 清单做对比。
-- **发布前干净构建**：先 `rm -rf packages/*/lib` 再 `bun run build`。tsc 不清理解释
-  已删源码留下的旧产物（`scripts/typert.mjs` 只清 `typert.host.*.map` 一类已知残留），
-  沿用旧 `lib/` 会把过期文件打进 tarball（`files` 含 `lib/` 整目录）。
+- **发布前干净构建**：直接 `bun run build` 即可——`scripts/build.mjs` 阶段 0 会整目录
+  清空每包 `lib/` 与 `client/client.cjs` 再编译（2026-11-04 起）。tsc 不清理已删源码
+  留下的旧产物，历史上沿用旧 `lib/` 曾把 `zcode-*`/`gateway`/`legacy-migrate`/
+  `typert.host` 等死模块打进本地 tarball；`test/build-hygiene.test.ts` 锁住这一不变量。
 
 ## 独立 CLI（`dsh-any-connect`）的构建约定
 
@@ -680,9 +686,9 @@ node scripts/plugin-market.mjs build --out /tmp/market-site --registry-url http:
 
 CI tag 流水失败、或需要完全手工发版时，按顺序兜底：
 
-1. **先在仓库根执行干净构建**：`rm -rf packages/*/lib` 后 `bun run build`——
-   `lib/` 与 `client/client.cjs` 都是 gitignore 的构建产物，跳过构建直接 pack 会打出
-   缺文件的 tarball（装上即坏）；不先删 `lib/` 则可能把已删源码的旧产物带进 tarball。
+1. **先在仓库根执行干净构建**：`bun run build`（阶段 0 会自动清空
+   `packages/*/lib` 与 `client/client.cjs`）——两者都是 gitignore 的构建产物，跳过构建
+   直接 pack 会打出缺文件的 tarball（装上即坏）。
 2. 自己打 tag 并推出，让 CI 走完发布：`git tag -a <目录>-v<版本> -m "<包名> v<版本>"`
    然后**逐个** `git push origin <目录>-v<版本>`（一次一个 tag，推完确认触发与
    成败再推下一个，见「tag 推送纪律」；tag 流水会自动测试 → 门禁 → 建 Release）。

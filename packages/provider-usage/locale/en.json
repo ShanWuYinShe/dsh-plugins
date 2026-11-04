@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Provider Usage",
+    "description": "Show the current LLM provider remaining quota in the composer dock, with a generic querier registry any provider plugin can extend."
+  }
+}

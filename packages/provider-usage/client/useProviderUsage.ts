@@ -7,12 +7,17 @@
  * 不再有轮询定时器、唤醒监听或第二条取数路径；provider 切换即换地址、
  * 流自动重开。
  *
+ * 防御姿态（RULE-079）：缺 `t`（宿主 inject 契约漂移）不抛错，退回包内英文
+ * 字典继续渲染；缺 locale 钩子退回浏览器默认格式化。两者都只降低语言保真度，
+ * 不让 render 抛错把 entry 永久移出投影。
+ *
  * @module provider-usage/useProviderUsage
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ModelDirectoryState } from '@deepseek-ai/dsh-client-ui-model-selection/client'
 import { fetchSnapshot, isQueriedAnswer, type SnapshotAnswer } from './fetch-snapshot.js'
+import { fallbackTranslate } from './locales.js'
 import { RESOURCE_POLL_INTERVAL_MS, usageResourceAddress } from './resource-provider.js'
 import { isStaleDisplay } from './pill-format.js'
 import { exhaustedResetText, headlineText } from './pill-headline.js'
@@ -43,8 +48,23 @@ function noopSubscribe(): () => void {
   return () => {}
 }
 
-export function useProviderUsage({ t, sessionId, useResource, resolveSeat }: ProviderUsagePillProps) {
-  if (t === undefined) throw new Error('provider-usage: the pill requires its translation function')
+export function useProviderUsage({ t, sessionId, useResource, resolveSeat, useLocale }: ProviderUsagePillProps) {
+  // 注入面漂移（宿主契约变更、延迟注入）时 t 可能缺席。此前这里直接 throw：
+  // render 期抛错会被宿主 `SlotErrorBoundary` → `reportEntryError({abdicate:true})`
+  // 永久移出投影，pill 再也不显示——恰好是「绝不让 pill 弄坏页面」要防的失效路径。
+  // 现在只记一次 console.error，退回包内 en 字典继续渲染：例外只影响语言，
+  // 不影响 entry 存活，也不把错误推给全局。
+  const warnedMissingTranslation = useRef(false)
+  if (t === undefined && !warnedMissingTranslation.current) {
+    warnedMissingTranslation.current = true
+    console.error('provider-usage: pill missing translation seat; falling back to English copy')
+  }
+  const copy = t ?? fallbackTranslate
+  // locale 快照 hook（宿主 renderer 由 inject.hooks.locale 绑定）：跟随 DSH
+  // 当前语言做数字/时间格式化，而不是浏览器语言。缺席（旧宿主/契约漂移）时
+  // 退回浏览器默认 locale，格式化仍可用；该 hook 的在场性由宿主缓存的 inject
+  // 面决定，同一组件实例内恒定，不破坏 hook 调用顺序。
+  const localeId = typeof useLocale === 'function' ? useLocale(snapshot => snapshot.active) : undefined
   // 目录在**渲染期**解析，不在注册期（宿主自带 pill 同样如此：它们的 inject 是
   // 无参常量，会话数据走 standard kit）。resolveSeat 从不抛错，拿不到就返回
   // undefined，这一次渲染不显示，下一帧自动重试——不存在「坏 props 被永久缓存」
@@ -233,13 +253,14 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat }: Pro
   // 资源流失败、手动请求失败（保旧值）、目录重连中（current 为 null）、宿主折叠
   // 旧答案（degraded）均视为「数据可能过期」。
   const displayStale = isStaleDisplay(stale || isDisconnected || streamFailed, snapshot)
-  const headline = headlineText(effectiveAnswer, provider, displayStale, t)
+  const headline = headlineText(effectiveAnswer, provider, displayStale, copy, localeId)
   // 额度用尽时补「几点恢复」：这是用户「到什么时候能接着用」的直接答案。
   // 只在真用尽（remain === 0 且有 resetsAt）时出现，有余额时不打扰。
-  const resetHint = snapshot === undefined ? undefined : exhaustedResetText(snapshot, t)
+  const resetHint = snapshot === undefined ? undefined : exhaustedResetText(snapshot, copy, localeId)
 
   return {
-    t,
+    t: copy,
+    localeId,
     provider,
     answer: effectiveAnswer,
     open,
