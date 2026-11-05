@@ -33,14 +33,19 @@ function unitSuffix(unit: string): string {
  * 额度用尽时头行仍是「0 credits 剩余」（诚实），恢复时刻由
  * {@link exhaustedResetText} 追加在按钮的 title/aria 上，不挤占折叠态宽度。
  *
+ * 限流观测只显示当前选中模型那一条（没有就不显示）：选择哪个模型就看哪个模型，
+ * 不罗列其它模型的限流。
+ *
  * @param answer - 资源流答案（快照或未查询标记）。
  * @param provider - 当前 provider 键。
  * @param stale - 是否标记「数据可能过期」。
  * @param t - 文案函数。
  * @param localeId - DSH 当前语言 id；数字/时间格式化随它走，缺席用浏览器默认。
+ * @param rateLimit - 当前选中模型的限流观测（由渲染层从 `rateLimits` 数组挑出）；
+ *   缺席表示当前模型没被限，头行照常显示额度。
  * @returns 折叠态头行文案。
  */
-export function headlineText(answer: SnapshotAnswer | undefined, provider: string, stale: boolean, t: PillCopy, localeId?: string): string {
+export function headlineText(answer: SnapshotAnswer | undefined, provider: string, stale: boolean, t: PillCopy, localeId?: string, rateLimit?: UsageRateLimit): string {
   const snapshot = isQueriedAnswer(answer) ? answer : undefined
   const first = snapshot?.windows[0]
   let headline: string
@@ -48,8 +53,8 @@ export function headlineText(answer: SnapshotAnswer | undefined, provider: strin
     headline = t('loading')
   } else if (snapshot === undefined) {
     headline = t('noQuerier', { provider })
-  } else if (snapshot.rateLimit !== undefined) {
-    headline = rateLimitHeadline(snapshot.rateLimit, t, localeId)
+  } else if (rateLimit !== undefined) {
+    headline = rateLimitHeadline(rateLimit, t, localeId)
   } else if (snapshot.error !== undefined && snapshot.windows.length === 0) {
     headline = t('failed')
   } else if (first === undefined) {

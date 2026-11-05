@@ -85,7 +85,7 @@ describe('pill 端到端：限流与额度用尽', () => {
       provider: 'zcode',
       windows: [{ id: 'w', label: '5 小时', remain: 80, unit: '%', limit: 100 }],
       fetchedAt: Date.now(),
-      rateLimit: { blockedAt: Date.now(), lastSeenAt: Date.now(), resetAt: Date.now() + 3_600_000, status: 429, hits: 2 },
+      rateLimits: [{ blockedAt: Date.now(), lastSeenAt: Date.now(), resetAt: Date.now() + 3_600_000, status: 429, hits: 2 }],
     })
     // 通道被拒时，即使还剩 80% 额度，头行也必须先说限流。
     expect(text).toContain('until:')
@@ -97,7 +97,7 @@ describe('pill 端到端：限流与额度用尽', () => {
       provider: 'workbuddy',
       windows: [{ id: 'w', label: '积分', remain: 80, unit: '', limit: 100 }],
       fetchedAt: Date.now(),
-      rateLimit: { blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 1, model: 'glm-5.3' },
+      rateLimits: [{ blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 1, model: 'glm-5.3' }],
     })
     expect(text).toContain('glm-5.3')
   })
@@ -107,7 +107,7 @@ describe('pill 端到端：限流与额度用尽', () => {
       provider: 'zcode',
       windows: [{ id: 'w', label: '5 小时', remain: 80, unit: '%', limit: 100 }],
       fetchedAt: Date.now(),
-      rateLimit: { blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 1 },
+      rateLimits: [{ blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 1 }],
     })
     expect(text).toContain('rateLimitedUnknown')
   })
@@ -137,12 +137,12 @@ describe('pill 端到端：限流与额度用尽', () => {
 
   it('限流属于别的模型：换到当前模型后不再显示限流（只提示当前模型）', async () => {
     // 场景：A 模型（glm-5.3）被限，用户切到 B 模型（glm-4.6）。
-    // 旧行为把 provider 级最近观测挂到 pill 上，B 明明可用却显示「限流中」。
+    // pill 只显示当前选中模型的限流，B 可用就不该显示「限流中」。
     const text = await renderPill({
       provider: 'zcode',
       windows: [{ id: 'w', label: '5 小时', remain: 80, unit: '%', limit: 100 }],
       fetchedAt: Date.now(),
-      rateLimit: { blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 2, model: 'glm-5.3' },
+      rateLimits: [{ blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 2, model: 'glm-5.3' }],
     }, 'glm-4.6')
     // 头行回到额度数字，不是限流文案。
     expect(text).toContain('remaining')
@@ -155,7 +155,7 @@ describe('pill 端到端：限流与额度用尽', () => {
       provider: 'zcode',
       windows: [{ id: 'w', label: '5 小时', remain: 80, unit: '%', limit: 100 }],
       fetchedAt: Date.now(),
-      rateLimit: { blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 2, model: 'glm-4.6' },
+      rateLimits: [{ blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 2, model: 'glm-4.6' }],
     }, 'glm-4.6')
     expect(text).toContain('rateLimitedUnknown')
     expect(text).toContain('glm-4.6')
@@ -166,20 +166,70 @@ describe('pill 端到端：限流与额度用尽', () => {
       provider: 'zcode',
       windows: [{ id: 'w', label: '5 小时', remain: 80, unit: '%', limit: 100 }],
       fetchedAt: Date.now(),
-      rateLimit: { blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 1 },
+      rateLimits: [{ blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 1 }],
     }, 'glm-4.6')
     expect(text).toContain('rateLimitedUnknown')
   })
 
-  it('展开面板的限流块同样只反映当前模型（面板与头行口径一致）', async () => {
+  it('多个模型同时被限：只显示当前选中模型那条（不罗列其它模型）', async () => {
+    // wire 带全部观测，但界面严格只显示当前选中模型 glm-4.6 的限流。
+    const text = await renderPill({
+      provider: 'workbuddy',
+      windows: [{ id: 'w', label: '积分', remain: 80, unit: '', limit: 100 }],
+      fetchedAt: Date.now(),
+      rateLimits: [
+        { blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 2, model: 'glm-5.3' },
+        { blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 1, model: 'glm-4.6' },
+      ],
+    }, 'glm-4.6')
+    expect(text).toContain('rateLimitedUnknown')
+    expect(text).toContain('glm-4.6')
+    // 其它模型既不进头行也不进面板。
+    expect(text).not.toContain('glm-5.3')
+  })
+
+  it('切回先前被限的模型：它的限流信息还在（wire 带全部观测的真正用途）', async () => {
+    const answer = {
+      provider: 'workbuddy',
+      windows: [{ id: 'w', label: '积分', remain: 80, unit: '', limit: 100 }],
+      fetchedAt: Date.now(),
+      rateLimits: [
+        { blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 2, model: 'glm-5.3' },
+        { blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 1, model: 'glm-4.6' },
+      ],
+    }
+    // 先看 glm-4.6：显示 glm-4.6 的限流。
+    expect(await renderPill(answer, 'glm-4.6')).toContain('glm-4.6')
+    // 切回 glm-5.3：glm-5.3 的限流仍在（wire 只带一条时这里就丢了）。
+    const back = await renderPill(answer, 'glm-5.3')
+    expect(back).toContain('glm-5.3')
+    expect(back).toContain('rateLimitedUnknown')
+    expect(back).not.toContain('glm-4.6')
+  })
+
+  it('当前模型没被限：不显示任何限流信息（哪怕其它模型被限）', async () => {
+    const text = await renderPill({
+      provider: 'workbuddy',
+      windows: [{ id: 'w', label: '积分', remain: 80, unit: '', limit: 100 }],
+      fetchedAt: Date.now(),
+      rateLimits: [
+        { blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 2, model: 'glm-5.3' },
+      ],
+    }, 'glm-4.6')
+    expect(text).toContain('remaining')
+    expect(text).not.toContain('rateLimited')
+    expect(text).not.toContain('glm-5.3')
+  })
+
+  it('观测不属于当前模型：不显示该限流（头行与面板一致）', async () => {
     const text = await renderPill({
       provider: 'zcode',
       windows: [{ id: 'w', label: '5 小时', remain: 80, unit: '%', limit: 100 }],
       fetchedAt: Date.now(),
-      rateLimit: { blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 3, model: 'glm-5.3' },
+      rateLimits: [{ blockedAt: Date.now(), lastSeenAt: Date.now(), status: 429, hits: 3, model: 'glm-5.3' }],
     }, 'glm-4.6')
-    // 面板内的「被拒 N 次」与限流标题都不应出现。
     expect(text).not.toContain('hits:3')
+    expect(text).not.toContain('glm-5.3')
     expect(text).not.toContain('rateLimited')
   })
 })

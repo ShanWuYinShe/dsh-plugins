@@ -177,10 +177,46 @@ function isValidUsageLabel(value: unknown): boolean {
 }
 
 /**
+ * Validate one entry of the `rateLimits` array (the fields the pill renders).
+ *
+ * @param provider - provider route key (for the message).
+ * @param index - entry position, used in error messages.
+ * @param value - the raw block.
+ */
+function assertRateLimitBlock(provider: string, index: number, value: unknown): void {
+  const label = `rateLimits[${index}]`
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw invalidSnapshot(provider, `${label} is not an object`)
+  const limit = value as Record<string, unknown>
+  const resetAt = limit['resetAt']
+  if (resetAt !== undefined && (typeof resetAt !== 'number' || !Number.isFinite(resetAt))) {
+    throw invalidSnapshot(provider, `${label}.resetAt is not a finite number`)
+  }
+  // client 的限流块无条件渲染 `hits`（"被拒 N 次"），缺失会渲染成
+  // "undefined refusals"；因此有限流块就必须有非负有限计数。
+  const hits = limit['hits']
+  if (typeof hits !== 'number' || !Number.isFinite(hits) || hits < 0) {
+    throw invalidSnapshot(provider, `${label}.hits is not a finite number >= 0`)
+  }
+  // model 可选，但给了就必须是非空串：空串会渲染成悬空的分隔符 " · "。
+  const model = limit['model']
+  if (model !== undefined && (typeof model !== 'string' || model === '')) {
+    throw invalidSnapshot(provider, `${label}.model is not a non-empty string`)
+  }
+  // 这三个字段当前未直接渲染，但类型契约要求「毫秒时间戳 / 上游状态码」；
+  // 校验它们可让第三方 querier 的脏数据在越过 wire 前就折叠成失败快照。
+  for (const key of ['blockedAt', 'lastSeenAt', 'status'] as const) {
+    const field = limit[key]
+    if (field !== undefined && (typeof field !== 'number' || !Number.isFinite(field))) {
+      throw invalidSnapshot(provider, `${label}.${key} is not a finite number`)
+    }
+  }
+}
+
+/**
  * Validate one querier answer before it reaches the browser.
  *
  * A querier is a public extension point, so a third-party implementation can
- * return anything at runtime. The client renders `windows` and `rateLimit`
+ * return anything at runtime. The client renders `windows` and `rateLimits`
  * directly, so a malformed answer would throw inside the pill's render — and
  * the host turns a render throw into a permanent entry abdication (the pill
  * disappears until a page reload). Folding the defect into the ordinary failure
@@ -227,32 +263,12 @@ function assertQuerierSnapshot(provider: string, value: unknown): void {
   for (const key of ['plan', 'error'] as const) {
     if (snapshot[key] !== undefined && typeof snapshot[key] !== 'string') throw invalidSnapshot(provider, `${key} is not a string`)
   }
-  const rateLimit = snapshot['rateLimit']
-  if (rateLimit !== undefined) {
-    if (typeof rateLimit !== 'object' || rateLimit === null || Array.isArray(rateLimit)) throw invalidSnapshot(provider, 'rateLimit is not an object')
-    const limit = rateLimit as Record<string, unknown>
-    const resetAt = limit['resetAt']
-    if (resetAt !== undefined && (typeof resetAt !== 'number' || !Number.isFinite(resetAt))) {
-      throw invalidSnapshot(provider, 'rateLimit.resetAt is not a finite number')
-    }
-    // client 的限流块无条件渲染 `hits`（"被拒 N 次"），缺失会渲染成
-    // "undefined refusals"；因此有 rateLimit 就必须有非负有限计数。
-    const hits = limit['hits']
-    if (typeof hits !== 'number' || !Number.isFinite(hits) || hits < 0) {
-      throw invalidSnapshot(provider, 'rateLimit.hits is not a finite number >= 0')
-    }
-    // model 可选，但给了就必须是非空串：空串会渲染成悬空的分隔符 " · "。
-    const model = limit['model']
-    if (model !== undefined && (typeof model !== 'string' || model === '')) {
-      throw invalidSnapshot(provider, 'rateLimit.model is not a non-empty string')
-    }
-    // 这三个字段当前未直接渲染，但类型契约要求「毫秒时间戳 / 上游状态码」；
-    // 校验它们可让第三方 querier 的脏数据在越过 wire 前就折叠成失败快照。
-    for (const key of ['blockedAt', 'lastSeenAt', 'status'] as const) {
-      const value = limit[key]
-      if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
-        throw invalidSnapshot(provider, `rateLimit.${key} is not a finite number`)
-      }
+  // 逐模型数组：每条都按限流块口径校验，下标写进错误信息方便定位。
+  const rateLimits = snapshot['rateLimits']
+  if (rateLimits !== undefined) {
+    if (!Array.isArray(rateLimits)) throw invalidSnapshot(provider, 'rateLimits is not an array')
+    for (const [index, block] of rateLimits.entries()) {
+      assertRateLimitBlock(provider, index, block)
     }
   }
 }
@@ -492,8 +508,8 @@ export class ProviderUsageRegistry extends Service {
       ...previous?.plan === undefined ? {} : { plan: previous.plan },
       // 限流观测同理不能丢：窗口还有额度但通道正在拒收时，用户需要的是
       // 「什么时候恢复」；失败一次就抹掉限流块，会让「何时能继续用」的
-      // 答案消失。degraded 已标明这是上一次观测，不是本轮结果。
-      ...previous?.rateLimit === undefined ? {} : { rateLimit: previous.rateLimit },
+      // 答案消失。逐模型数组原样继承，degraded 标明是旧观测。
+      ...previous?.rateLimits === undefined ? {} : { rateLimits: previous.rateLimits },
       windows: previous?.windows ?? [],
       fetchedAt: this.now(),
       error: safeMessage(error),
@@ -524,7 +540,7 @@ export class ProviderUsageRegistry extends Service {
         // 限流观测必须透传：client 的限流块（何时恢复、按哪个模型限）是
         // 「此刻还能不能发请求」的唯一答案；不透传等于让 querier 的这条
         // 观测死在 host 侧，面板只能显示「还剩多少」这种误导性绿数字。
-        ...snapshot.rateLimit === undefined ? {} : { rateLimit: snapshot.rateLimit },
+        ...snapshot.rateLimits === undefined ? {} : { rateLimits: snapshot.rateLimits },
         windows: snapshot.windows,
         fetchedAt,
       }

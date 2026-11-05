@@ -61,8 +61,13 @@ grep -a -m2 "isConversationRateLimitCapError" /Applications/WorkBuddy.app/Conten
 ## 插件侧的实现边界（`rate-limit.ts`）
 
 - 台账键 = `provider + model`；模型未知时才是 provider 级一行（`ledgerKey`）。
-  卡片用 `activesFor(provider)` 逐模型展示；pill 这类 provider 级表面用 `activeFor(provider)`
-  取最近一次活跃观测。
+  卡片用 `activesFor(provider)` 逐模型展示；**额度 pill 的 wire 也用
+  `activesFor(provider)` 带上全部活跃观测**（`rateLimits` 数组，一条一个模型）。
+  旧版只用 `activeFor(provider)` 报「最近一条」+`UsageSnapshot` 单条 `rateLimit` 槽，
+  多模型同时被限时切回先前模型就会丢那条——已修：单条字段直接删掉，wire 只留
+  `rateLimits` 数组。客户端 `selectRateLimitForCurrentModel` 只挑**当前选中模型**
+  那一条（没有就不显示）——选择哪个模型就显示哪个模型的限流，不罗列其它模型。
+  provider 卡片页仍逐模型列出全部观测。
 - **成功只清对应模型**：`clear(provider, model)`。上游按模型限流，B 模型成功不能拿来
   清 A 的观测（否则卡片会把仍在限流的 A 误报成已恢复）；顺带清掉「模型未知」的
   provider 级观测。
@@ -71,8 +76,9 @@ grep -a -m2 "isConversationRateLimitCapError" /Applications/WorkBuddy.app/Conten
 - 恢复时刻来源优先级：响应头（`Retry-After` / `X-RateLimit-Reset`）优先，其次正文
   （`parseResetMessage`）。正文路径只在 429/soft_rate 上下文调用，因此「正文里的时刻
   就是恢复时刻」这个前提才成立——不要把它挪到通用错误文案解析里。
-- 展示：配置页卡片一个模型一个框（`rateLimitMeta` 里带模型名）；额度 pill 折叠态
-  头行带模型名（`限流中 · 20:00 恢复 · glm-5.3`），避免把单模型限流误读成整条通道不可用。
+- 展示：配置页卡片一个模型一个框（`rateLimitMeta` 里带模型名，列出全部被限模型）；
+  额度 pill 只显示当前选中模型那一条（头行 + 面板共用），头行带模型名
+  （`限流中 · 20:00 恢复 · glm-5.3`），不罗列其它模型。
 
 ## 回归命令
 
@@ -83,5 +89,8 @@ bunx vitest run \
   packages/dsh-any-connect/test/shim-rate-limit.test.ts \
   packages/dsh-any-connect/test/rate-limit-box.test.ts \
   packages/provider-usage/test/pill-rate-limit.test.ts \
-  packages/provider-usage/test/pill-rate-limit-render.test.ts
+  packages/provider-usage/test/pill-rate-limit-render.test.ts \
+  packages/provider-usage/test/pill-rate-limit-scope.test.ts \
+  packages/provider-usage/test/pill-rate-limits-array.test.ts \
+  packages/dsh-any-connect/test/usage-rate-limits.test.ts
 ```

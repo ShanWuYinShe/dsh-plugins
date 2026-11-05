@@ -262,9 +262,9 @@ describe('ProviderUsageRegistry', () => {
     expect(snapshot?.degraded).toBe(true)
   })
 
-  it('失败快照继承上一次观测到的 rateLimit（限流块不因一次失败消失）', async () => {
+  it('失败快照继承上一次观测到的 rateLimits（限流块不因一次失败消失）', async () => {
     const { registry, advance } = makeRegistry({ ttlMs: 100 })
-    const observed = { blockedAt: 1_000, lastSeenAt: 2_000, resetAt: 9_000, status: 429, hits: 3, model: 'glm-5.3' }
+    const limits = [{ blockedAt: 1_000, lastSeenAt: 2_000, resetAt: 9_000, status: 429, hits: 3, model: 'glm-5.3' }]
     let fail = false
     registry.register('acme', async (): Promise<UsageSnapshot> => {
       if (fail) throw new Error('transient')
@@ -272,29 +272,48 @@ describe('ProviderUsageRegistry', () => {
         provider: 'acme',
         windows: [{ id: 'a', label: 'A', remain: 9, unit: 'credits' }],
         fetchedAt: 0,
-        rateLimit: observed,
+        rateLimits: limits,
       }
     })
 
     const first = await registry.snapshot('acme')
-    expect(first?.rateLimit).toEqual(observed)
+    expect(first?.rateLimits).toEqual(limits)
 
     fail = true
     advance(101)
     const failed = await registry.snapshot('acme')
     // 窗口还有额度但通道正在拒收时，「何时恢复」是用户唯一能行动的信息：
     // 失败一次就抹掉限流块等于把这条答案弄丢。degraded 已标明是旧观测。
-    expect(failed?.rateLimit).toEqual(observed)
+    expect(failed?.rateLimits).toEqual(limits)
     expect(failed?.degraded).toBe(true)
     expect(failed?.error).toContain('transient')
   })
 
-  it('失败快照没有可继承的 rateLimit 时不凭空造一个', async () => {
+  it('失败快照继承逐模型 rateLimits 数组（多模型观测不因一次失败丢失）', async () => {
+    const { registry, advance } = makeRegistry({ ttlMs: 100 })
+    const limits = [
+      { blockedAt: 1_000, lastSeenAt: 2_000, status: 429, hits: 3, model: 'glm-5.3' },
+      { blockedAt: 1_000, lastSeenAt: 2_000, status: 429, hits: 1, model: 'glm-4.6' },
+    ]
+    let fail = false
+    registry.register('acme', async (): Promise<UsageSnapshot> => {
+      if (fail) throw new Error('transient')
+      return { provider: 'acme', windows: [], fetchedAt: 0, rateLimits: limits }
+    })
+    await registry.snapshot('acme')
+    fail = true
+    advance(101)
+    const failed = await registry.snapshot('acme')
+    expect(failed?.rateLimits).toEqual(limits)
+    expect(failed?.degraded).toBe(true)
+  })
+
+  it('失败快照没有可继承的 rateLimits 时不凭空造一个', async () => {
     const { registry } = makeRegistry()
     registry.register('acme', async () => { throw new Error('down') })
 
     const snapshot = await registry.snapshot('acme')
-    expect(snapshot?.rateLimit).toBeUndefined()
+    expect(snapshot?.rateLimits).toBeUndefined()
     expect(snapshot?.degraded).toBeUndefined()
   })
 
@@ -722,14 +741,7 @@ describe('querier 返回形状校验（第三方扩展点不得让 client 渲染
     expect(snapshot?.error).toContain('invalid snapshot')
   })
 
-  it('rateLimit 合法答案原样透传（校验不误伤真实形状）', async () => {
-    const rateLimit = { blockedAt: 1_000, lastSeenAt: 2_000, resetAt: 9_000, status: 429, hits: 4, model: 'glm-5.3' }
-    const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimit }).snapshot('acme')
-    expect(snapshot?.rateLimit).toEqual(rateLimit)
-    expect(snapshot?.error).toBeUndefined()
-  })
-
-  it('rateLimit.hits 缺失/负数/非有限数：折叠成失败快照', async () => {
+  it('rateLimits 里某条 hits 缺失/负数/非有限数：折叠成失败快照', async () => {
     // client 的限流块无条件渲染 hits（"被拒 N 次"），缺失会渲染出
     // "undefined refusals"；非负有限数是渲染的硬前提。
     const base = { blockedAt: 1, lastSeenAt: 2, status: 429 }
@@ -740,23 +752,23 @@ describe('querier 返回形状校验（第三方扩展点不得让 client 渲染
       { ...base, hits: Number.POSITIVE_INFINITY },
       { ...base, hits: '4' },
     ]
-    for (const rateLimit of invalidHits) {
-      const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimit }).snapshot('acme')
+    for (const bad of invalidHits) {
+      const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimits: [bad] }).snapshot('acme')
       expect(snapshot?.windows).toEqual([])
-      expect(snapshot?.error, `rateLimit=${JSON.stringify(rateLimit)}`).toContain('rateLimit.hits is not a finite number >= 0')
+      expect(snapshot?.error, `entry=${JSON.stringify(bad)}`).toContain('rateLimits[0].hits is not a finite number >= 0')
     }
   })
 
-  it('rateLimit.model 非空串缺失以外的非法值：折叠成失败快照', async () => {
+  it('rateLimits 里某条 model 非法值：折叠成失败快照', async () => {
     const base = { blockedAt: 1, lastSeenAt: 2, status: 429, hits: 1 }
     for (const model of ['', 42, null]) {
-      const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimit: { ...base, model } }).snapshot('acme')
+      const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimits: [{ ...base, model }] }).snapshot('acme')
       expect(snapshot?.windows).toEqual([])
-      expect(snapshot?.error, `model=${JSON.stringify(model)}`).toContain('rateLimit.model is not a non-empty string')
+      expect(snapshot?.error, `model=${JSON.stringify(model)}`).toContain('rateLimits[0].model is not a non-empty string')
     }
   })
 
-  it('rateLimit.blockedAt/lastSeenAt/status 非有限数：折叠成失败快照', async () => {
+  it('rateLimits 里某条 blockedAt/lastSeenAt/status 非有限数：折叠成失败快照', async () => {
     const valid = { blockedAt: 1, lastSeenAt: 2, status: 429, hits: 1 }
     const invalidFields: Array<[string, unknown]> = [
       ['blockedAt', '1'],
@@ -767,11 +779,35 @@ describe('querier 返回形状校验（第三方扩展点不得让 client 渲染
       ['status', Number.NaN],
     ]
     for (const [key, value] of invalidFields) {
-      const rateLimit = { ...valid, [key]: value }
-      const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimit }).snapshot('acme')
+      const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimits: [{ ...valid, [key]: value }] }).snapshot('acme')
       expect(snapshot?.windows).toEqual([])
-      expect(snapshot?.error, `${key}=${String(value)}`).toContain(`rateLimit.${key} is not a finite number`)
+      expect(snapshot?.error, `${key}=${String(value)}`).toContain(`rateLimits[0].${key} is not a finite number`)
     }
+  })
+
+  it('rateLimits 逐模型数组合法：原样透传，多个模型都在', async () => {
+    const rateLimits = [
+      { blockedAt: 1_000, lastSeenAt: 2_000, resetAt: 9_000, status: 429, hits: 4, model: 'glm-5.3' },
+      { blockedAt: 1_100, lastSeenAt: 2_100, status: 429, hits: 1, model: 'glm-4.6' },
+    ]
+    const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimits }).snapshot('acme')
+    expect(snapshot?.rateLimits).toEqual(rateLimits)
+    expect(snapshot?.error).toBeUndefined()
+  })
+
+  it('rateLimits 非数组：折叠成失败快照', async () => {
+    const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimits: 'nope' }).snapshot('acme')
+    expect(snapshot?.windows).toEqual([])
+    expect(snapshot?.error).toContain('rateLimits is not an array')
+  })
+
+  it('rateLimits 里某条字段非法：报出下标并折叠成失败快照', async () => {
+    const rateLimits = [
+      { blockedAt: 1, lastSeenAt: 2, status: 429, hits: 1, model: 'glm-5.3' },
+      { blockedAt: 1, lastSeenAt: 2, status: 429, hits: -1, model: 'glm-4.6' },
+    ]
+    const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimits }).snapshot('acme')
+    expect(snapshot?.error).toContain('rateLimits[1].hits is not a finite number >= 0')
   })
 
   it('本地化 label（{en, zh}）合法：原样透传给 client 按语言解析', async () => {

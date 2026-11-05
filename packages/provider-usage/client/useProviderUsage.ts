@@ -25,7 +25,7 @@ import { fallbackTranslate } from './locales.js'
 import { usageResourceAddress } from './resource-provider.js'
 import { isStaleDisplay } from './pill-format.js'
 import { exhaustedResetText, headlineText } from './pill-headline.js'
-import { rateLimitForCurrentModel } from './pill-rate-limit-scope.js'
+import { selectRateLimitForCurrentModel } from './pill-rate-limit-scope.js'
 import type { ProviderUsagePillProps } from './pill-types.js'
 
 /**
@@ -251,16 +251,11 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat, useLo
   // 资源流失败、手动请求失败（保旧值）、目录重连中（current 为 null）、宿主折叠
   // 旧答案（degraded）均视为「数据可能过期」。
   const displayStale = isStaleDisplay(stale || isDisconnected || streamFailed, snapshot)
-  // 限流归属只看当前选中模型：与选中项无关的观测在这里就被摘掉，头行、圆点、
-  // 展开面板因此共用同一份判定，不会出现「头行说限流、面板说别的模型」。
-  const rateLimit = rateLimitForCurrentModel(snapshot?.rateLimit, currentModel)
-  const headline = headlineText(
-    snapshot === undefined ? effectiveAnswer : { ...snapshot, ...rateLimit === undefined ? { rateLimit: undefined } : { rateLimit } },
-    provider,
-    displayStale,
-    copy,
-    localeId,
-  )
+  // wire 携带该 provider 的**全部**逐模型限流观测（切回别的模型时信息不丢），
+  // 但界面只显示**当前选中模型**那一条（没有就不显示）：选择哪个模型就看哪个
+  // 模型的限流，不罗列其它模型。头行、圆点、展开面板共用这一条判定。
+  const rateLimit = selectRateLimitForCurrentModel(snapshot, currentModel)
+  const headline = headlineText(effectiveAnswer, provider, displayStale, copy, localeId, rateLimit)
   // 额度用尽时补「几点恢复」：这是用户「到什么时候能接着用」的直接答案。
   // 只在真用尽（remain === 0 且有 resetsAt）时出现，有余额时不打扰。
   const resetHint = snapshot === undefined ? undefined : exhaustedResetText(snapshot, copy, localeId)

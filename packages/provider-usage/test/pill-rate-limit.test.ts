@@ -55,10 +55,8 @@ describe('rateLimitHeadline', () => {
 describe('headlineText：限流优先于额度数字', () => {
   it('被限流时，即使还有额度，头行也先说限流', () => {
     const text = headlineText(
-      snapshotOf({ rateLimit: { blockedAt: 0, lastSeenAt: 0, status: 429, hits: 1 } }),
-      'zcode',
-      false,
-      t,
+      snapshotOf(), 'zcode', false, t, undefined,
+      { blockedAt: 0, lastSeenAt: 0, status: 429, hits: 1 },
     )
     expect(text).toBe('rateLimitedUnknown')
   })
@@ -70,10 +68,8 @@ describe('headlineText：限流优先于额度数字', () => {
 
   it('限流 + stale 后缀仍保留', () => {
     const text = headlineText(
-      snapshotOf({ rateLimit: { blockedAt: 0, lastSeenAt: 0, status: 429, hits: 1 } }),
-      'zcode',
-      true,
-      t,
+      snapshotOf(), 'zcode', true, t, undefined,
+      { blockedAt: 0, lastSeenAt: 0, status: 429, hits: 1 },
     )
     expect(text).toContain('staleData')
   })

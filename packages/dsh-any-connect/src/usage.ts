@@ -14,7 +14,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { codingPlanQuotaWindows, type UsageWindowLabel } from './zcode-quota.js'
-import type { RateLimitLedger } from './rate-limit.js'
+import type { RateLimitLedger, RateLimitObservation } from './rate-limit.js'
 import { variantIsStartPlan } from './variant-runtime.js'
 import type { VariantRuntime } from './variant-runtime.js'
 import type { CreditLedgerSummary } from './credit-ledger.js'
@@ -23,6 +23,32 @@ import type { WorkBuddyCreditAccount, ZCodeUpstreamClient } from './upstream.js'
 
 // 窗口 label/unit 的本地化结构定义在 zcode-quota.ts（usage 依赖它的窗口构造，
 // 反向 import 会成环）；这里直接复用同一类型。
+
+/** 一条限流观测在 usage wire 上的形状（与 provider-usage 的 UsageRateLimit 对齐）。 */
+interface UsageRateLimitWire {
+  blockedAt: number
+  lastSeenAt: number
+  resetAt?: number
+  status: number
+  model?: string
+  hits: number
+}
+
+/**
+ * 台账观测 → usage wire 的限流块（逐字段搬运，不把台账内部诊断字段漏出去）。
+ */
+function toUsageRateLimits(
+  observations: readonly RateLimitObservation[],
+): readonly UsageRateLimitWire[] {
+  return observations.map(observation => ({
+    blockedAt: observation.blockedAtMs,
+    lastSeenAt: observation.lastSeenAtMs,
+    ...observation.resetAtMs === undefined ? {} : { resetAt: observation.resetAtMs },
+    status: observation.status,
+    ...observation.model === undefined ? {} : { model: observation.model },
+    hits: observation.hits,
+  }))
+}
 
 /**
  * The slice of @chaoset/provider-usage's registry this plugin calls.
@@ -53,18 +79,11 @@ export interface ProviderUsageRegistryLike {
     fetchedAt: number
     error?: string
     /**
-     * 当前观测到的上游限流（rate-limit.ts 的台账读数）。只在「查询器真的看到过
-     * 429」时存在——额度窗口说「还剩多少」，这个说「通道现在收不收请求」，
-     * 两件事互不替代：订阅制 coding plan 常常是额度还有、但被并发限流。
+     * 当前全部生效的上游限流，**一条一个模型**（rate-limit.ts 的台账读数）。
+     * 上游按模型限流时可能多条并存；只在「查询器真的看到过 429」时存在——
+     * 额度窗口说「还剩多少」，这个说「通道现在收不收请求」，两件事互不替代。
      */
-    rateLimit?: {
-      blockedAt: number
-      lastSeenAt: number
-      resetAt?: number
-      status: number
-      model?: string
-      hits: number
-    }
+    rateLimits?: readonly UsageRateLimitWire[]
   }>, displayName?: string): () => void
 }
 
@@ -284,6 +303,9 @@ export function registerUsageQueriers(
             ? await (runtime.client as ZCodeUpstreamClient).fetchCodingPlanQuota(credential, context.signal)
             : undefined
           const quotaWindows = quota === undefined ? [] : codingPlanQuotaWindows(quota)
+          // 台账按 provider+model 分行，可能多个模型同时被限——整份数组都要过
+          // wire；只取「最近一条」会让切回先前模型时它的限流信息凭空消失。
+          const activeRateLimits = toUsageRateLimits(rateLimits?.activesFor(runtime.variant.id) ?? [])
           return {
             provider: runtime.variant.id,
             displayName: runtime.variant.displayName,
@@ -313,22 +335,8 @@ export function registerUsageQueriers(
                     : totalCreditsWindows(credits.accounts, todaySummary),
             fetchedAt: Date.now(),
             // 限流读数与额度窗口并列上报：额度是「还剩多少」，限流是「现在能不能发」。
-            // 台账里没有活跃观测就整段缺席（= 当前没被限），不报一个空对象让
-            // 界面去猜。
-            ...(() => {
-              const active = rateLimits?.activeFor(runtime.variant.id)
-              if (active === undefined) return {}
-              return {
-                rateLimit: {
-                  blockedAt: active.blockedAtMs,
-                  lastSeenAt: active.lastSeenAtMs,
-                  ...active.resetAtMs === undefined ? {} : { resetAt: active.resetAtMs },
-                  status: active.status,
-                  ...active.model === undefined ? {} : { model: active.model },
-                  hits: active.hits,
-                },
-              }
-            })(),
+            // 没有活跃观测（= 当前没被限）时整段缺席，不报空数组让界面去猜。
+            ...activeRateLimits.length === 0 ? {} : { rateLimits: activeRateLimits },
           }
         },
         runtime.variant.displayName,

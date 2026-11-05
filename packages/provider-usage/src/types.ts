@@ -123,17 +123,21 @@ export interface UsageSnapshot {
    */
   degraded?: boolean
   /**
-   * The provider is refusing requests right now for rate reasons, and when it
-   * expects to accept them again.
+   * All rate-limit blocks currently in effect, **one per model**.
+   *
+   * Upstreams such as WorkBuddy cap each model independently, so several models
+   * can be limited at once. Carrying the whole set (instead of one "latest"
+   * block) is what lets the pill keep model A's limit visible after the user
+   * switches to model B. A querier reports only blocks it actually observed
+   * (a 429/refusal with the upstream's headers), never guesses a window.
    *
    * Separate from `windows` because the two answer different questions: a
    * window says how much is left, this says whether the channel admits a
    * request at all. A provider can be rate limited with plenty of quota left
    * (concurrency/window caps) — that is the common case for subscription
-   * coding plans. A querier sets it only from an observation it actually made
-   * (a 429/refusal with the upstream's headers), never by guessing a window.
+   * coding plans.
    */
-  rateLimit?: UsageRateLimit
+  rateLimits?: readonly UsageRateLimit[]
 }
 
 /**

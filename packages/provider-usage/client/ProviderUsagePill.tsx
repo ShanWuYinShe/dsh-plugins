@@ -120,7 +120,8 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
             </button>
           </div>
           <div style={{ opacity: busy ? 0.65 : 1, transition: 'opacity 0.2s ease', pointerEvents: busy ? 'none' : 'auto' }}>
-            {/* 限流块排在额度之前：通道被拒时它是用户此刻唯一能行动的信息。 */}
+            {/* 限流块排在额度之前：通道被拒时它是用户此刻唯一能行动的信息。
+                只显示当前选中模型那一条（没有就不显示），不罗列其它模型。 */}
             {rateLimit !== undefined ? (
               <div style={rateLimitBoxStyle} role="status">
                 <p style={rateLimitTitleStyle}>{t('rateLimited')}</p>

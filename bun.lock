@@ -18,7 +18,7 @@
     },
     "packages/dsh-any-connect": {
       "name": "@chaoset/dsh-any-connect",
-      "version": "0.4.32",
+      "version": "0.4.33",
       "bin": {
         "dsh-any-connect": "./lib/bin.js",
       },
@@ -53,7 +53,7 @@
     },
     "packages/provider-usage": {
       "name": "@chaoset/provider-usage",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.1.0",
         "@deepseek-ai/cordis-plugin-loader": "~1.1.0",
