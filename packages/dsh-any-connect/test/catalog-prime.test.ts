@@ -160,10 +160,10 @@ describe('注册前预热：adapter 上路由那一刻目录已非空', () => {
 
     const { idsAtRegistration } = await installPlugin({ desktopFile: desktop, models: hangingModels })
 
-    // 不等 live：注册那一刻即非空，内容是编译期兜底名单（含 hy4-preview）。
+    // 不等 live：注册那一刻即非空，内容是编译期兜底名单（含 hy4free）。
     const ids = await idsAtRegistration
     expect(ids.length).toBeGreaterThan(0)
-    expect(ids).toContain('hy4-preview')
+    expect(ids).toContain('hy4free')
   })
 
   it('未登录：注册那一刻目录仍为空（隐藏语义不被预热破坏）', async () => {

@@ -590,6 +590,12 @@
       "functions": 100,
       "lines": 100
     },
+    "packages/provider-usage/client/pill-rate-limit-scope.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
     "packages/provider-usage/client/pill-styles.ts": {
       "statements": 100,
       "branches": 100,

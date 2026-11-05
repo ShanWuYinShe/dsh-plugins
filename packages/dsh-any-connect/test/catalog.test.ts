@@ -77,14 +77,19 @@ describe('Provider model parameter & billing isolation', () => {
     expect(zcodeFlash?.maxTokens).toBe(128000)
     expect(zcodeFlash?.billing?.badges).toContain('150% 额度')
 
-    // Hy4 preview context window differs between CN (1M) and Global (200k)
-    const wbHy4 = wbCatalog.current().find(m => m.id === 'hy4-preview')
-    const aiHy4 = aiCatalog.current().find(m => m.id === 'hy4-preview')
+    // Hy4 正式版按档位拆成两行：hy4free（x0.00/免费）与 hy4std（x0.29）。
+    // 上下文窗口 CN 960k / Global 1M（取自 live 目录，见 fallback 注释）。
+    const wbHy4Free = wbCatalog.current().find(m => m.id === 'hy4free')
+    const wbHy4Std = wbCatalog.current().find(m => m.id === 'hy4std')
+    const aiHy4Free = aiCatalog.current().find(m => m.id === 'hy4free')
 
-    expect(wbHy4?.contextWindow).toBe(1000000)
-    expect(wbHy4?.billing?.credits).toBe('x0.29')
-    expect(aiHy4?.contextWindow).toBe(200000)
-    expect(aiHy4?.billing?.credits).toBe('x0.29')
+    expect(wbHy4Free?.contextWindow).toBe(960000)
+    expect(wbHy4Free?.billing?.credits).toBe('x0.00')
+    expect(wbHy4Free?.billing?.free).toBe(true)
+    expect(wbHy4Std?.contextWindow).toBe(960000)
+    expect(wbHy4Std?.billing?.credits).toBe('x0.29')
+    expect(aiHy4Free?.contextWindow).toBe(1000000)
+    expect(aiHy4Free?.billing?.credits).toBe('x0.00')
   })
 
   it('does not apply ZCode off-peak logic to WorkBuddy models with night-free badges', () => {
@@ -93,7 +98,7 @@ describe('Provider model parameter & billing isolation', () => {
     const dayTime = Date.parse('2026-09-24T06:00:00Z') // 06:00 UTC = 14:00 Beijing time
 
     const wbCatalog = new WorkBuddyCatalog(FALLBACK_WORKBUDDY_MODELS, 'workbuddy')
-    const hy4Night = wbCatalog.current().find(m => m.id === 'hy4-preview')
+    const hy4Night = wbCatalog.current().find(m => m.id === 'hy4std')
     expect(hy4Night?.billing?.credits).toBe('x0.29')
     expect(hy4Night?.billing?.free).toBe(false)
 
@@ -120,7 +125,7 @@ describe('Provider model parameter & billing isolation', () => {
     expect(resolvedNight.billing?.badges).not.toContain('夜间免费')
 
     // WorkBuddy Hy4 during night is NOT altered by ZCode offpeak
-    const hy4Model = FALLBACK_WORKBUDDY_MODELS.find(m => m.id === 'hy4-preview')!
+    const hy4Model = FALLBACK_WORKBUDDY_MODELS.find(m => m.id === 'hy4std')!
     const resolvedWbHy4 = modelWithCurrentPromotion(hy4Model, nightTime, 'workbuddy')
     expect(resolvedWbHy4.billing?.credits).toBe('x0.29')
     expect(resolvedWbHy4.billing?.free).toBe(false)
@@ -159,19 +164,19 @@ describe('Provider model parameter & billing isolation', () => {
     expect(catalog.getExcludedModelIds()).toEqual([])
 
     // Exclude two models
-    catalog.setExcludedModelIds(['hy4-preview', 'kimi-k3-1'])
-    expect(catalog.getExcludedModelIds()).toEqual(['hy4-preview', 'kimi-k3-1'])
+    catalog.setExcludedModelIds(['hy4std', 'kimi-k3-1'])
+    expect(catalog.getExcludedModelIds()).toEqual(['hy4std', 'kimi-k3-1'])
     expect(catalog.excludedCount()).toBe(2)
 
     const currentIds = catalog.current().map(m => m.id)
-    expect(currentIds).not.toContain('hy4-preview')
+    expect(currentIds).not.toContain('hy4std')
     expect(currentIds).not.toContain('kimi-k3-1')
     expect(currentIds).toContain('hy3')
     expect(catalog.current().length).toBe(FALLBACK_WORKBUDDY_MODELS.length - 2)
 
     // rawModels() remains un-filtered
     expect(catalog.rawModels().length).toBe(FALLBACK_WORKBUDDY_MODELS.length)
-    expect(catalog.rawModels().map(m => m.id)).toContain('hy4-preview')
+    expect(catalog.rawModels().map(m => m.id)).toContain('hy4std')
 
     // Restore
     catalog.setExcludedModelIds([])
@@ -182,17 +187,17 @@ describe('Provider model parameter & billing isolation', () => {
   // 2026-10-29：隐藏区需要**完整行**而不只是数量，否则用户只能一键全恢复。
   it('excludedModels() 给出被隐藏模型的完整行（卡片逐条恢复用）', () => {
     const catalog = new WorkBuddyCatalog(FALLBACK_WORKBUDDY_MODELS, 'workbuddy')
-    catalog.setExcludedModelIds(['hy4-preview', 'kimi-k3-1'])
+    catalog.setExcludedModelIds(['hy4std', 'kimi-k3-1'])
 
     const hidden = catalog.excludedModels()
-    expect(hidden.map(m => m.id)).toEqual(['hy4-preview', 'kimi-k3-1'])
+    expect(hidden.map(m => m.id)).toEqual(['hy4std', 'kimi-k3-1'])
     // 完整行：名称、窗口、计费这些卡片要显示的字段都在，不是只有 id。
     const first = hidden[0]!
     expect(first.name).not.toBe('')
     expect(typeof first.contextWindow).toBe('number')
     // 与可见区同源：同一模型两处必须一致（否则隐藏后像"变了"）。
     const visibleRows = catalog.current()
-    expect(visibleRows.map(m => m.id)).not.toContain('hy4-preview')
+    expect(visibleRows.map(m => m.id)).not.toContain('hy4std')
   })
 
   it('没有隐藏项时 excludedModels() 为空数组', () => {
@@ -202,11 +207,32 @@ describe('Provider model parameter & billing isolation', () => {
 
   it('visible=false（无凭据）时仍能看到自己隐藏过什么', () => {
     const catalog = new WorkBuddyCatalog(FALLBACK_WORKBUDDY_MODELS, 'workbuddy')
-    catalog.setExcludedModelIds(['hy4-preview'])
+    catalog.setExcludedModelIds(['hy4std'])
     catalog.setVisible(false)
     // current() 是「这个变体现在能用什么」，未登录时为空；
     // excludedModels() 是「用户自己的配置」，两者语义不同。
     expect(catalog.current()).toEqual([])
-    expect(catalog.excludedModels().map(m => m.id)).toEqual(['hy4-preview'])
+    expect(catalog.excludedModels().map(m => m.id)).toEqual(['hy4std'])
+  })
+
+  // Hy4 正式版按档位拆成 hy4free / hy4std 两行：兜底名单必须跟着 live 目录走，
+  // 每个已发布档位都要能选（少一行 = 未登录/离线时该档位直接消失）。
+  it('兜底名单含 hy4 两个已发布档位', () => {
+    for (const models of [FALLBACK_WORKBUDDY_MODELS, FALLBACK_WORKBUDDY_AI_MODELS]) {
+      const ids = models.map(m => m.id)
+      expect(ids).toContain('hy4free')
+      expect(ids).toContain('hy4std')
+    }
+  })
+
+  it('hy4free 与 hy4std 是同名但不同档位的两行（id 与计费都不同）', () => {
+    const free = FALLBACK_WORKBUDDY_MODELS.find(m => m.id === 'hy4free')!
+    const std = FALLBACK_WORKBUDDY_MODELS.find(m => m.id === 'hy4std')!
+    // 两行的 display name 相同，用户靠模型的「免费」徽章区分档位；
+    // 而程序侧（限流归属、隐藏清单）只能靠 id 判定，绝不能拿 name 匹配。
+    expect(free.name).toBe(std.name)
+    expect(free.billing?.credits).not.toBe(std.billing?.credits)
+    expect(free.billing?.free).toBe(true)
+    expect(std.billing?.free).toBe(false)
   })
 })

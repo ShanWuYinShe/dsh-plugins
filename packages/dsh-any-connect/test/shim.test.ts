@@ -111,7 +111,7 @@ describe('WorkBuddy shim', () => {
     expect(ids).toContain('deepseek-v4.1-flash')
     expect(ids).toContain('kimi-k2.8-preview')
     expect(ids).not.toContain('deepseek-v4-flash')
-    expect(ids).toContain('hy4-preview')
+    expect(ids).toContain('hy4free')
     expect(ids).toContain('glm-5.3')
   })
 

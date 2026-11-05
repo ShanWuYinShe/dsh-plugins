@@ -92,7 +92,7 @@ describe('WorkBuddy Host settings integration', () => {
     expect(models.map(model => model.id)).toContain('deepseek-v4-pro')
     // The fallback catalog tracks the live `cli` roster, including the newer
     // models the desktop app offers that older builds lacked.
-    expect(models.map(model => model.id)).toContain('hy4-preview')
+    expect(models.map(model => model.id)).toContain('hy4free')
     expect(models.map(model => model.id)).toContain('glm-5.3')
 
     // The billing rate rides the display name only: surfaces that render
