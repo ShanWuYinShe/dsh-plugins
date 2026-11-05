@@ -219,10 +219,12 @@ dsh plugin --profile web remove @chaoset/session-archive --registry=$REGISTRY
 
 - **索引安装后，同 profile 再装/更新插件报 `ERR_PNPM_FETCH_404`（宿主依赖，如 `zod`）**：索引安装走静态 registry，pnpm 会按已装 tarball 的 `dependencies` 声明去该 registry 解析依赖；装过「历史版本仍带运行期依赖」的插件后，后续包操作就可能命中 404（详见上文「运行期依赖的历史代价」）。变通：
   1. 把该历史版本**放到最后装**（先装/更新其它插件），或直接改用「方式二」的 tarball URL 安装它；
-  2. 若失败发生在 `dsh plugin add` 的 bundle 对账之后，删除该 profile 的 `node_modules` 后按同一顺序重装（见下一条「pnpm store 漂移」的删掉重装做法）；
+  2. 若失败发生在 `dsh plugin add` 的 bundle 对账之后，**先停掉 `dsh web`**，删除该 profile 的 `node_modules` 后按同一顺序重装（见下一条「pnpm store 漂移」的删掉重装做法）；
   3. 策略生效时刻（2026-10-30T00:00:00Z）之后发布的版本运行期零依赖，不会再触发；发布侧由 `check`/build 自校验强制（该时刻之后发布的版本带运行期依赖即失败，见 `RELEASING.md`「收录规则」）。
 
-- **pnpm store 漂移（宿主升级后安装报错，全部 profile 通用）**：宿主升级若更换了内置 pnpm 的大版本，**每一个**旧 profile 的 `node_modules` 都是上一版 pnpm 安装的——只要该 profile 执行过 `dsh plugin add` 就会报 `ERR_PNPM_UNEXPECTED_STORE`（use the new store location …）：node_modules 里的 `.modules.yaml` 记录着旧 store 位置，与新 pnpm 解析出的不一致。**逐 profile 修复**，对每个受影响的 profile 各做一遍：
+- **pnpm store 漂移（宿主升级后安装报错，全部 profile 通用）**：宿主升级若更换了内置 pnpm 的大版本，**每一个**旧 profile 的 `node_modules` 都是上一版 pnpm 安装的——只要该 profile 执行过 `dsh plugin add` 就会报 `ERR_PNPM_UNEXPECTED_STORE`（use the new store location …）：node_modules 里的 `.modules.yaml` 记录着旧 store 位置，与新 pnpm 解析出的不一致。**逐 profile 修复**，对每个受影响的 profile 各做一遍。
+
+  > ⚠️ **必须先停掉运行中的 DSH（`dsh web`）再做下面的删装**。运行中的实例里手动删 `node_modules` / 改 profile 依赖，会让宿主的运行时安装映射与磁盘不一致，之后在 GUI 里卸载/更新就可能命中 `restart-required` 并把「自己没停掉的行」误报成 `bundle-in-use`（见上一条排障）。
 
   修复就是**删掉重装**（node_modules 是纯安装产物，删掉连旧 store 记录一起归零；插件配置在 `cordis.patch.yml`，不受影响）：
 
@@ -242,6 +244,7 @@ dsh plugin --profile web remove @chaoset/session-archive --registry=$REGISTRY
 4. 验证安装：`dsh plugin --profile web list` 或 `dsh --profile web --dump-config | grep chaoset`；
 5. 索引页安装默认不启用：引导用户在弹出的安装结果里点**立即启用**（或「已安装」列表打开开关）；CLI 安装会同时写入 `dsh.profile.bundles`、默认启用。
 6. 一般无需重启：启用 HMR 的 web profile 会在线重组合；只有结果报 `restart-required`（或 profile 未启用 HMR）时才重启。卸载/更新用 CLI 时务必带 `--registry`（见「常见安装排障」第一条）。
+7. **禁止在管理器之外动 profile**：不要手工改 profile 的 `package.json` / `dsh.profile.bundles` / `cordis.patch.yml` / `pnpm-workspace.yaml`，不要在运行中的实例上删 profile 的 `node_modules` 或依赖。需要重建安装产物时先停掉 `dsh web`，装完再启动。否则宿主会进入 `restart-required`，GUI 里的安装/卸载/更新会报 `bundle-in-use`（「其他配置仍在使用…」）——插件实现本身无法绕过这个宿主状态。
 
 ---
 
