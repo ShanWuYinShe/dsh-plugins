@@ -221,6 +221,28 @@ describe('pill 端到端：限流与额度用尽', () => {
     expect(text).not.toContain('glm-5.3')
   })
 
+  it('展开面板：上游披露策略字段时补一行 policy/余量/窗口详情', async () => {
+    const now = Date.now()
+    await renderPill({
+      provider: 'workbuddy',
+      windows: [{ id: 'w', label: '积分', remain: 80, unit: '', limit: 100 }],
+      fetchedAt: now,
+      rateLimits: [{
+        blockedAt: now, lastSeenAt: now, resetAt: now + 3_600_000, status: 429, hits: 2,
+        model: 'glm-5.3', policy: 'rpm', metric: 'requests', limit: 60, remaining: 0, windowSeconds: 60,
+      }],
+    })
+    const button = container.querySelector('button')
+    expect(button).not.toBeNull()
+    await act(async () => {
+      button!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    const opened = container.textContent ?? ''
+    expect(opened).toContain('rpm')
+    expect(opened).toContain('windowRemaining')
+    expect(opened).toContain('rateLimitWindow')
+  })
+
   it('观测不属于当前模型：不显示该限流（头行与面板一致）', async () => {
     const text = await renderPill({
       provider: 'zcode',

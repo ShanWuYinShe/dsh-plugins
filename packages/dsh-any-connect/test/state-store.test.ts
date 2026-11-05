@@ -17,7 +17,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { openStandaloneStateStore } from '../src/state-store.js'
+import type { Domain } from '@deepseek-ai/dsh-storage-domain'
+import { anyConnectDomain, domainRateLimitPersistence, openStandaloneStateStore } from '../src/state-store.js'
 
 let root: string | undefined
 
@@ -75,5 +76,71 @@ describe('state-store', () => {
     } finally {
       await state.close()
     }
+  })
+})
+
+describe('domainRateLimitPersistence（rate_limits 表）', () => {
+  /** 最小 Domain 替身：只要 table().get/put/delete 与 close（真实语义在 storage-domain 包内回归）。 */
+  function fakeDomain(): { domain: Domain<typeof anyConnectDomain>, table: (name: string) => Map<string, unknown> } {
+    const tables = new Map<string, Map<string, unknown>>()
+    const table = (name: string): Map<string, unknown> => {
+      const found = tables.get(name) ?? new Map<string, unknown>()
+      tables.set(name, found)
+      return found
+    }
+    const domain = {
+      table(name: string) {
+        const records = table(name)
+        return {
+          get: async (key: string) => records.get(key),
+          put: async (key: string, value: unknown) => { records.set(key, value) },
+          delete: async (key: string) => { records.delete(key) },
+        }
+      },
+      close: async () => {},
+    }
+    return { domain: domain as unknown as Domain<typeof anyConnectDomain>, table }
+  }
+
+  function observation(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      provider: 'workbuddy',
+      blockedAtMs: 1_000,
+      lastSeenAtMs: 2_000,
+      resetAtMs: 9_000,
+      status: 429,
+      kind: 'soft_rate',
+      model: 'glm-5.3',
+      policy: 'rpm',
+      hits: 1,
+      ...overrides,
+    }
+  }
+
+  it('save 只持久化带 resetAt 的观测（一条记录放该 provider 的全部策略）', async () => {
+    const { domain, table } = fakeDomain()
+    const persistence = domainRateLimitPersistence(domain)
+    await persistence.save('workbuddy', [
+      observation(),
+      observation({ policy: 'tpd', resetAtMs: undefined }),
+    ] as never)
+    expect(table('rate_limits').get('workbuddy')).toEqual({ observations: [observation()] })
+  })
+
+  it('save 空数组 → 删除记录（不留空壳）', async () => {
+    const { domain, table } = fakeDomain()
+    const persistence = domainRateLimitPersistence(domain)
+    await persistence.save('workbuddy', [observation()] as never)
+    expect(table('rate_limits').has('workbuddy')).toBe(true)
+    await persistence.save('workbuddy', [])
+    expect(table('rate_limits').has('workbuddy')).toBe(false)
+  })
+
+  it('load 返回记录里的观测；不存在时 undefined', async () => {
+    const { domain, table } = fakeDomain()
+    const persistence = domainRateLimitPersistence(domain)
+    expect(await persistence.load('workbuddy')).toBeUndefined()
+    table('rate_limits').set('workbuddy', { observations: [observation()] })
+    expect(await persistence.load('workbuddy')).toEqual([observation()])
   })
 })

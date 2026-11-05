@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkBuddyCredential } from '../src/auth.js'
 import type { WorkBuddyCredentialStore } from '../src/auth.js'
 import type { WorkBuddyModelInfo } from '../src/catalog.js'
-import { workBuddyStatusHandler, workBuddyWebStatus } from '../src/web-status.js'
+import { toWorkBuddyWebRateLimit, workBuddyStatusHandler, workBuddyWebStatus } from '../src/web-status.js'
 import type { WorkBuddyStatusRouteOptions, WorkBuddyWebStatus } from '../src/web-status.js'
 
 /** Signed-in 成员：测试以已登录 store 构造，联合的 signed-out 分支没有模型/账单字段。 */
@@ -429,5 +429,50 @@ describe('status route 的 probeKey 下发（AC-11 威胁模型）', () => {
       // 文档其余部分照常（只摘门槛，不影响卡片渲染）。
       expect(res.body['status']).toBe('signed-in')
     }
+  })
+})
+
+describe('toWorkBuddyWebRateLimit（台账观测 → 卡片文档）', () => {
+  it('策略字段齐全时逐字段搬运', () => {
+    expect(toWorkBuddyWebRateLimit({
+      provider: 'workbuddy',
+      blockedAtMs: 1,
+      lastSeenAtMs: 2,
+      resetAtMs: 3,
+      status: 429,
+      kind: 'soft_rate',
+      model: 'glm-5.3',
+      policy: 'rpm',
+      scope: 'model',
+      metric: 'requests',
+      limit: 60,
+      remaining: 0,
+      windowSeconds: 60,
+      hits: 2,
+    })).toEqual({
+      blockedAt: 1,
+      lastSeenAt: 2,
+      resetAt: 3,
+      status: 429,
+      model: 'glm-5.3',
+      policy: 'rpm',
+      scope: 'model',
+      metric: 'requests',
+      limit: 60,
+      remaining: 0,
+      windowSeconds: 60,
+      hits: 2,
+    })
+  })
+
+  it('可选字段缺席时只保留必填（不塞 undefined）', () => {
+    expect(toWorkBuddyWebRateLimit({
+      provider: 'workbuddy',
+      blockedAtMs: 1,
+      lastSeenAtMs: 2,
+      status: 429,
+      kind: 'soft_rate',
+      hits: 1,
+    })).toEqual({ blockedAt: 1, lastSeenAt: 2, status: 429, hits: 1 })
   })
 })

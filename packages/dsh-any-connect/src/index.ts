@@ -62,7 +62,8 @@ import { Config } from './config.js'
 import type { Options } from './config.js'
 import { CreditLedger } from './credit-ledger.js'
 import { createVariantRuntimeSet } from './runtime.js'
-import { anyConnectDomain, domainCreditLedgerPersistence, domainStateStore } from './state-store.js'
+import { anyConnectDomain, domainCreditLedgerPersistence, domainRateLimitPersistence, domainStateStore } from './state-store.js'
+import { attachRateLimitPersistence } from './rate-limit.js'
 import { WorkBuddyUpstreamClient } from './upstream.js'
 import { errorMessage } from './values.js'
 import { registerUsageQueriers } from './usage.js'
@@ -132,6 +133,14 @@ export function apply(ctx: Context, config: Config): void {
       // 今日消耗台账（credit-ledger.ts）与凭据副本同域（ledger 表）：域就绪即
       // 注入；open 失败时整个域走下面的统一 error 路径，台账随域一起缺席。
       variants.setLedger(new CreditLedger(domainCreditLedgerPersistence(domain)))
+      // 上游限流观测（rate-limit.ts）：带明确 resetAt 的观测与凭据副本同域
+      // （rate_limits 表），重启后继续提示；读写失败只告警，不影响主链路。
+      attachRateLimitPersistence(
+        variants.rateLimits,
+        domainRateLimitPersistence(domain),
+        variants.runtimes.map(runtime => runtime.variant.id),
+        ctx.logger,
+      )
       ctx.effect(() => async () => {
         await domain.close()
       })

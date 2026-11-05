@@ -10,7 +10,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { UpstreamErrorKind } from './upstream.js'
 import { httpStatusLabel } from './upstream-shared.js'
-import { parseResetHeader, parseResetMessage } from './rate-limit.js'
+import { parseResetMessage, resolveHeaderResetAt } from './rate-limit.js'
 
 const REQUEST_BODY_LIMIT = 64 * 1024 * 1024
 
@@ -114,17 +114,15 @@ function resolveResetAtMs(
   message: string,
   nowMs: number,
 ): number | undefined {
-  return parseResetHeader(headers?.get('retry-after'), nowMs)
-    ?? parseResetHeader(headers?.get('x-ratelimit-reset'), nowMs)
-    ?? parseResetMessage(message, nowMs)
+  return resolveHeaderResetAt(headers, nowMs) ?? parseResetMessage(message, nowMs)
 }
 
 /** 把恢复时刻写成人话；没有就明说「没给」，不推算。 */
 function formatResetHint(
-  headers?: { get(name: string): string | null },
-  message?: string,
+  headers: { get(name: string): string | null } | undefined,
+  message: string,
 ): string {
-  const resetAtMs = resolveResetAtMs(headers, message ?? '', Date.now())
+  const resetAtMs = resolveResetAtMs(headers, message, Date.now())
   if (resetAtMs === undefined) return '本次响应未给出恢复时间，请稍后再试。'
   return `上游给出的恢复时间为 ${formatResetAt(resetAtMs)}（本地时间）。`
 }

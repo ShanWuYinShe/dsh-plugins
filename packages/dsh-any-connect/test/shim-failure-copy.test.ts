@@ -310,6 +310,23 @@ describe('auth_forbidden 分类', () => {
     expect(classifyUpstreamError(403, 'Offline user session not found')).toBe('session_dead')
   })
 
+  it('OpenCode 429（非 FreeUsageLimitError）走通用免费通道限流文案', () => {
+    const message = upstreamFailureMessage('opencode-free', 'soft_rate', 429, 'too many requests', new Headers({ 'retry-after': '60' }))
+    expect(message).toContain('上游限流')
+    expect(message).toContain('恢复时间')
+  })
+
+  it('429 只给响应头 epoch 也给出恢复时间', () => {
+    const message = upstreamFailureMessage('opencode-free', 'soft_rate', 429, '{"error":{"type":"FreeUsageLimitError"}}', new Headers({ 'x-ratelimit-reset': '1800000000' }))
+    expect(message).toContain('恢复时间')
+    expect(message).not.toContain('未给出恢复时间')
+  })
+
+  it('429 既无响应头也无正文时刻 → 明说「未给出恢复时间」', () => {
+    const message = upstreamFailureMessage('opencode-free', 'soft_rate', 429, '{"error":{"type":"FreeUsageLimitError"}}', new Headers())
+    expect(message).toContain('未给出恢复时间')
+  })
+
   it('KIND_STATUS：auth_forbidden 刻意映射 400（而非 403，避免宿主误判 AUTH）', () => {
     expect(KIND_STATUS['auth_forbidden']).toBe(400)
   })

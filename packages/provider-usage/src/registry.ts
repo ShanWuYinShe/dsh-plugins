@@ -202,6 +202,28 @@ function assertRateLimitBlock(provider: string, index: number, value: unknown): 
   if (model !== undefined && (typeof model !== 'string' || model === '')) {
     throw invalidSnapshot(provider, `${label}.model is not a non-empty string`)
   }
+  // 策略名 / 计量维度可选，给了就必须非空（空串同样会渲染成悬空分隔符）。
+  for (const key of ['policy', 'metric'] as const) {
+    const field = limit[key]
+    if (field !== undefined && (typeof field !== 'string' || field === '')) {
+      throw invalidSnapshot(provider, `${label}.${key} is not a non-empty string`)
+    }
+  }
+  const scope = limit['scope']
+  if (scope !== undefined && scope !== 'model' && scope !== 'account') {
+    throw invalidSnapshot(provider, `${label}.scope is neither "model" nor "account"`)
+  }
+  // 配额数值：有限非负数；窗口秒数必须为正（0 秒窗口没有意义）。
+  for (const key of ['limit', 'remaining'] as const) {
+    const field = limit[key]
+    if (field !== undefined && (typeof field !== 'number' || !Number.isFinite(field) || field < 0)) {
+      throw invalidSnapshot(provider, `${label}.${key} is not a finite number >= 0`)
+    }
+  }
+  const windowSeconds = limit['windowSeconds']
+  if (windowSeconds !== undefined && (typeof windowSeconds !== 'number' || !Number.isFinite(windowSeconds) || windowSeconds <= 0)) {
+    throw invalidSnapshot(provider, `${label}.windowSeconds is not a finite number > 0`)
+  }
   // 这三个字段当前未直接渲染，但类型契约要求「毫秒时间戳 / 上游状态码」；
   // 校验它们可让第三方 querier 的脏数据在越过 wire 前就折叠成失败快照。
   for (const key of ['blockedAt', 'lastSeenAt', 'status'] as const) {

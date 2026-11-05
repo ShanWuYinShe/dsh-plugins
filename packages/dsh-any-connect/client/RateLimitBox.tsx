@@ -33,6 +33,27 @@ function formatElapsed(fromMs: number, nowMs: number): string {
   return `${hours}h`
 }
 
+/**
+ * 策略详情（上游披露时才有）：policy/metric、剩余/配额、窗口秒数。
+ *
+ * 上限/余量/窗口都是**上游说过的事实**；三者都没有时返回 undefined，
+ * 卡片不凭空补一行「策略」。
+ */
+function policyDetail(observation: WorkBuddyWebRateLimit, t: WorkBuddyConfigPageInjected['t']): string | undefined {
+  const parts: string[] = []
+  const policy = observation.policy ?? observation.metric
+  if (policy !== undefined) parts.push(policy)
+  if (observation.remaining !== undefined && observation.limit !== undefined) {
+    parts.push(observation.remaining + ' / ' + observation.limit)
+  } else if (observation.limit !== undefined) {
+    parts.push(String(observation.limit))
+  }
+  if (observation.windowSeconds !== undefined) {
+    parts.push(t('rateLimitWindow', { seconds: String(observation.windowSeconds) }))
+  }
+  return parts.length === 0 ? undefined : parts.join(' · ')
+}
+
 /** 恢复时刻：今天的给时分，跨天给日期。 */
 function formatResetTime(atMs: number, nowMs: number): string {
   const at = new Date(atMs)
@@ -71,6 +92,10 @@ export function RateLimitBox({ t, rateLimits, nowMs }: {
               model: observation.model ?? t('rateLimitAnyModel'),
             })}
           </span>
+          {(() => {
+            const detail = policyDetail(observation, t)
+            return detail === undefined ? null : <span style={planMetaStyle}>{detail}</span>
+          })()}
         </div>
       ))}
       <span style={planMetaStyle}>{t('rateLimitNote')}</span>

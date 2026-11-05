@@ -768,6 +768,42 @@ describe('querier 返回形状校验（第三方扩展点不得让 client 渲染
     }
   })
 
+  it('rateLimits 里某条 policy/metric 非法值：折叠成失败快照', async () => {
+    const base = { blockedAt: 1, lastSeenAt: 2, status: 429, hits: 1 }
+    for (const key of ['policy', 'metric'] as const) {
+      for (const value of ['', 42, null]) {
+        const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimits: [{ ...base, [key]: value }] }).snapshot('acme')
+        expect(snapshot?.windows).toEqual([])
+        expect(snapshot?.error, `${key}=${JSON.stringify(value)}`).toContain(`rateLimits[0].${key} is not a non-empty string`)
+      }
+    }
+  })
+
+  it('rateLimits 里某条 scope 非法值：折叠成失败快照', async () => {
+    const base = { blockedAt: 1, lastSeenAt: 2, status: 429, hits: 1 }
+    for (const scope of ['provider', '', 42, null]) {
+      const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimits: [{ ...base, scope }] }).snapshot('acme')
+      expect(snapshot?.windows).toEqual([])
+      expect(snapshot?.error, `scope=${JSON.stringify(scope)}`).toContain('rateLimits[0].scope is neither "model" nor "account"')
+    }
+  })
+
+  it('rateLimits 里某条 limit/remaining 非法或为负、windowSeconds 非正：折叠成失败快照', async () => {
+    const base = { blockedAt: 1, lastSeenAt: 2, status: 429, hits: 1 }
+    for (const key of ['limit', 'remaining'] as const) {
+      for (const value of ['1', Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+        const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimits: [{ ...base, [key]: value }] }).snapshot('acme')
+        expect(snapshot?.windows).toEqual([])
+        expect(snapshot?.error, `${key}=${String(value)}`).toContain(`rateLimits[0].${key} is not a finite number >= 0`)
+      }
+    }
+    for (const value of [0, -1, '60', Number.NaN]) {
+      const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimits: [{ ...base, windowSeconds: value }] }).snapshot('acme')
+      expect(snapshot?.windows).toEqual([])
+      expect(snapshot?.error, `windowSeconds=${String(value)}`).toContain('rateLimits[0].windowSeconds is not a finite number > 0')
+    }
+  })
+
   it('rateLimits 里某条 blockedAt/lastSeenAt/status 非有限数：折叠成失败快照', async () => {
     const valid = { blockedAt: 1, lastSeenAt: 2, status: 429, hits: 1 }
     const invalidFields: Array<[string, unknown]> = [
@@ -789,6 +825,11 @@ describe('querier 返回形状校验（第三方扩展点不得让 client 渲染
     const rateLimits = [
       { blockedAt: 1_000, lastSeenAt: 2_000, resetAt: 9_000, status: 429, hits: 4, model: 'glm-5.3' },
       { blockedAt: 1_100, lastSeenAt: 2_100, status: 429, hits: 1, model: 'glm-4.6' },
+      // 策略字段全部合法时原样透传（client 的详细行会渲染它们）。
+      {
+        blockedAt: 1_200, lastSeenAt: 2_200, resetAt: 9_500, status: 429, hits: 1,
+        model: 'glm-5.3', policy: 'rpm', scope: 'model', metric: 'requests', limit: 60, remaining: 0, windowSeconds: 60,
+      },
     ]
     const snapshot = await registryAnswering({ provider: 'acme', windows: [], fetchedAt: 0, rateLimits }).snapshot('acme')
     expect(snapshot?.rateLimits).toEqual(rateLimits)

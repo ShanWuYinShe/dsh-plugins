@@ -17,7 +17,7 @@
  */
 
 import { rootStyle, pillStyle, labelStyle, dotStyle, panelStyle, panelTitleStyle, refreshButtonStyle, noteStyle, errorStyle, rateLimitBoxStyle, rateLimitTitleStyle, rateLimitLineStyle, rateLimitMetaStyle } from './pill-styles.js'
-import { formatReset, getDotColor } from './pill-format.js'
+import { formatReset, getDotColor, rateLimitPolicyDetail } from './pill-format.js'
 import { WindowRow } from './WindowRow.js'
 import { useProviderUsage } from './useProviderUsage.js'
 import type { ProviderUsagePillProps } from './pill-types.js'
@@ -134,6 +134,11 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
                   {t('rateLimitHits', { count: rateLimit.hits })}
                   {rateLimit.model === undefined ? null : ` · ${rateLimit.model}`}
                 </p>
+                {(() => {
+                  // 策略详情：上游披露 policy/metric、配额与窗口时补一行。
+                  const detail = rateLimitPolicyDetail(rateLimit, t)
+                  return detail === undefined ? null : <p style={rateLimitMetaStyle}>{detail}</p>
+                })()}
               </div>
             ) : null}
             {snapshot === undefined

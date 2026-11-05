@@ -15,15 +15,42 @@ import { normalizeCredits } from './upstream.js'
 import { safeMessage } from './values.js'
 import type { WorkBuddyModelInfo } from './catalog.js'
 import type { CreditLedgerSummary } from './credit-ledger.js'
+import type { RateLimitObservation } from './rate-limit.js'
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { writeJson } from './shim-http.js'
 import type { WorkBuddyWebCatalog, WorkBuddyWebCreditDay, WorkBuddyWebCreditToday, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebRateLimit, WorkBuddyWebStartPlanClaim, WorkBuddyWebStatus } from './status-paths.js'
 import type { StartPlanPreviewResult } from './zcode-plan-claim.js'
 
-// `WorkBuddyWebStartPlanClaim` 的形状定义在 status-paths.ts（客户端与宿主共用同一
+// WorkBuddyWebStartPlanClaim 的形状定义在 status-paths.ts（客户端与宿主共用同一
 // 份契约，避免两处各写一遍后漂移）。这里只转出，不再重复声明。
 
 export type { WorkBuddyWebCatalog, WorkBuddyWebModelRow, WorkBuddyWebProbeSection, WorkBuddyWebRateLimit, WorkBuddyWebStartPlanClaim, WorkBuddyWebStatus } from './status-paths.js'
+
+/**
+ * 台账观测 → 卡片文档里的限流块。
+ *
+ * 刻意逐字段搬运而不是展开对象：文档契约在 status-paths.ts 里是对外的稳定面，
+ * 台账内部形状（kind/provider 等诊断字段）不该顺带漏出去。
+ *
+ * @param observation - rate-limit.ts 的一条观测。
+ * @returns 卡片可渲染的限流块（策略字段可选，上游没披露就缺席）。
+ */
+export function toWorkBuddyWebRateLimit(observation: RateLimitObservation): WorkBuddyWebRateLimit {
+  return {
+    blockedAt: observation.blockedAtMs,
+    lastSeenAt: observation.lastSeenAtMs,
+    ...observation.resetAtMs === undefined ? {} : { resetAt: observation.resetAtMs },
+    status: observation.status,
+    ...observation.model === undefined ? {} : { model: observation.model },
+    ...observation.policy === undefined ? {} : { policy: observation.policy },
+    ...observation.scope === undefined ? {} : { scope: observation.scope },
+    ...observation.metric === undefined ? {} : { metric: observation.metric },
+    ...observation.limit === undefined ? {} : { limit: observation.limit },
+    ...observation.remaining === undefined ? {} : { remaining: observation.remaining },
+    ...observation.windowSeconds === undefined ? {} : { windowSeconds: observation.windowSeconds },
+    hits: observation.hits,
+  }
+}
 
 /** Constructor dependencies. */
 export interface WorkBuddyStatusRouteOptions {

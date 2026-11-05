@@ -141,12 +141,20 @@ export interface UsageSnapshot {
 }
 
 /**
- * An observed rate-limit block.
+ * An observed rate-limit block (an observational ledger entry, not a full
+ * standard RateLimit state).
  *
- * `resetAt` is present only when the upstream said so (`Retry-After` /
- * `X-RateLimit-Reset`). Providers that rate-limit by plan concurrency and
- * adjust it dynamically publish no window at all, so the absence of `resetAt`
- * is a fact to display, not a gap to fill with a computed guess.
+ * `resetAt` is present only when the upstream said so (`Retry-After`,
+ * `RateLimit` / `RateLimit-Reset` delta-seconds, `X-RateLimit-Reset` epoch,
+ * vendor headers, or a stated instant in the error body). Providers that
+ * rate-limit by plan concurrency and adjust it dynamically publish no window at
+ * all, so the absence of `resetAt` is a fact to display, not a gap to fill with
+ * a computed guess.
+ *
+ * Optional policy fields mirror what standard/vendor headers disclose: one
+ * observation per exhausted policy (requests / tokens / a named policy), so a
+ * model limited by both RPM and TPM carries two blocks instead of one
+ * ambiguous one.
  */
 export interface UsageRateLimit {
   /** Epoch milliseconds the block was first observed. */
@@ -159,6 +167,18 @@ export interface UsageRateLimit {
   status: number
   /** Model the refusal was attributed to, when known. */
   model?: string
+  /** Policy/limit name (IETF RateLimit policy or vendor metric); absent when unnamed. */
+  policy?: string
+  /** Attribution scope: model-scoped, or account/channel-wide when no model is disclosed. */
+  scope?: 'model' | 'account'
+  /** Metered dimension (e.g. requests, tokens), when disclosed. */
+  metric?: string
+  /** Announced quota for this policy, when disclosed. */
+  limit?: number
+  /** Remaining quota observed at refusal time, when disclosed. */
+  remaining?: number
+  /** Policy window length in seconds, when disclosed. */
+  windowSeconds?: number
   /** Refusals observed within this continuous block. */
   hits: number
 }

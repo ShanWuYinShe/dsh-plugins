@@ -19,6 +19,7 @@ export type ProviderUsageLocaleKey =
   | 'rateLimitedUntil'
   | 'rateLimitedUnknown'
   | 'rateLimitHits'
+  | 'rateLimitWindow'
   | 'blocked'
 
 export const en: Record<ProviderUsageLocaleKey, string> = {
@@ -39,6 +40,7 @@ export const en: Record<ProviderUsageLocaleKey, string> = {
   rateLimitedUntil: 'Rate limited · back {time}',
   rateLimitedUnknown: 'Rate limited · reset time not reported',
   rateLimitHits: '{count} refusals',
+  rateLimitWindow: '{seconds}s window',
   blocked: 'blocked',
 }
 
@@ -60,6 +62,7 @@ export const zh: Record<ProviderUsageLocaleKey, string> = {
   rateLimitedUntil: '限流中 · {time} 恢复',
   rateLimitedUnknown: '限流中 · 上游未给恢复时间',
   rateLimitHits: '被拒 {count} 次',
+  rateLimitWindow: '{seconds} 秒窗口',
   blocked: '已用尽',
 }
 

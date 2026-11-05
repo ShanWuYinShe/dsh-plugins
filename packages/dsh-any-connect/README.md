@@ -163,8 +163,10 @@ dsh-any-connect status --provider opencode-free
 
 ### 上游限流（429）的记录与展示
 
-模型通道被上游限流时，插件把观测**落到进程内台账**（`rate-limit.ts`），并在
-两处如实展示：配置页卡片（「上游限流中」提示框）与 composer 的额度 pill。
+模型通道被上游限流时，插件把观测**落到台账**（`rate-limit.ts`）；带明确恢复时刻的
+观测还会经宿主 storageDomain（`storages/dsh_any_connect/` 的 `rate_limits` 表）持久化，
+**DSH 重启后仍会继续提示**（没有恢复时刻的观测只活在本进程的 TTL 里）。台账在两处
+如实展示：配置页卡片（「上游限流中」提示框）与 composer 的额度 pill。
 
 **台账只观测、不拦截**：它不参与任何请求门禁，也不会因为「上次被限」而拒绝
 后续请求。请求是否放行完全由上游决定——插件的职责只是把上游说过的话显示出来，
@@ -182,10 +184,20 @@ dsh-any-connect status --provider opencode-free
   不显示）——切回先前被限的模型时它的信息不会丢，也不会把别的模型的限流挂到当前
   模型上。
 
-口径只有一条：**恢复时刻只来自上游明说的事实**。
+**限流策略也分账**：同一个模型可能同时被多条策略约束（RPM / TPM / 日额度…），
+台账行键是 `provider + model + policy`，一条策略一条观测、互不覆盖。上游披露
+`policy` / `metric` / `limit` / `remaining` / `windowSeconds` 时，卡片与 pill 会补一行
+策略详情（如 `rpm · 0 / 60 · 60 秒窗口`）；pill 头行只挑当前模型**最紧迫**的一条
+（余量已耗尽 > 恢复更早 > 最近被拒），同模型的其它策略仍在 wire 与卡片里可查。
 
-- `Retry-After`（相对秒 / HTTP-date）与 `X-RateLimit-Reset`（秒或毫秒 epoch）
-  能解析出恢复时刻 → 显示「{时间} 恢复」；
+口径只有一条：**恢复时刻与策略数字只来自上游明说的事实**。
+
+- 标准头：IETF `RateLimit` / `RateLimit-Policy`（`t`/`w` 是 **delta 秒**）、旧版独立头
+  `RateLimit-Limit` / `RateLimit-Remaining` / `RateLimit-Reset`（delta 秒）；
+- 事实标准头：`Retry-After`（RFC 9110：相对秒 / HTTP-date）、`X-RateLimit-Reset`
+  （epoch 秒或毫秒）；厂商头：OpenAI 风格 `x-ratelimit-*-{requests,tokens}`（reset 是
+  时长串）与 Anthropic 风格 `anthropic-ratelimit-<metric>-{limit,remaining,reset}`
+  （reset 是 RFC3339）；**只有 `remaining === 0` 的厂商策略才解释得通 429**；
 - 错误正文里的时刻也算。WorkBuddy `code:6004` 的文案形如
   `your usage will reset at 2026-10-30 14:20:02 UTC+8`；官方客户端对时区后缀
   是**可选**的（缺失时按 UTC+8 上海壁钟解释），插件采用同一口径，同时接受

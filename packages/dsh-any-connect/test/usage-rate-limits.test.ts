@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { registerUsageQueriers } from '../src/usage.js'
-import { RateLimitLedger, observeRateLimit } from '../src/rate-limit.js'
+import { RateLimitLedger, observeRateLimits } from '../src/rate-limit.js'
 import type { VariantRuntime } from '../src/variant-runtime.js'
 import type { WorkBuddyVariant } from '../src/variants.js'
 
@@ -49,7 +49,7 @@ function fakeRuntime(overrides: Partial<VariantRuntime> = {}): VariantRuntime {
 
 /** 造一条 429 观测（按模型）。 */
 function observe(provider: string, model: string, nowMs: number) {
-  return observeRateLimit({ provider, status: 429, kind: 'soft_rate', model, nowMs })!
+  return observeRateLimits({ provider, status: 429, kind: 'soft_rate', model, nowMs })[0]!
 }
 
 describe('usage 查询器：逐模型限流过 wire', () => {
@@ -95,6 +95,42 @@ describe('usage 查询器：逐模型限流过 wire', () => {
 
     const snapshot = await registry.queriers.get('workbuddy')!({ provider: 'workbuddy' })
     expect(snapshot.rateLimits).toBeUndefined()
+  })
+
+  it('策略字段（policy/limit/remaining/window/scope）随观测过 wire', async () => {
+    const ctx = new Context()
+    const registry = new CapturingRegistry()
+    ctx.provide('providerUsage', registry as never)
+    const ledger = new RateLimitLedger({ now: () => 1_000 })
+    for (const observation of observeRateLimits({
+      provider: 'workbuddy',
+      status: 429,
+      kind: 'soft_rate',
+      model: 'glm-5.3',
+      headers: {
+        get: (name: string) => ({
+          'ratelimit-policy': '"rpm";q=60;w=60',
+          ratelimit: '"rpm";r=0;t=30',
+        } as Record<string, string>)[name.toLowerCase()] ?? null,
+      },
+      nowMs: 1_000,
+    })) {
+      ledger.record(observation)
+    }
+
+    registerUsageQueriers(ctx, [fakeRuntime()], ledger)
+    await vi.waitFor(() => { expect(registry.queriers.has('workbuddy')).toBe(true) }, { timeout: 5000 })
+
+    const snapshot = await registry.queriers.get('workbuddy')!({ provider: 'workbuddy' })
+    expect(snapshot.rateLimits?.[0]).toMatchObject({
+      model: 'glm-5.3',
+      policy: 'rpm',
+      scope: 'model',
+      limit: 60,
+      remaining: 0,
+      windowSeconds: 60,
+      resetAt: 31_000,
+    })
   })
 
   it('别的 provider 的限流不会串进本 provider 的 rateLimits', async () => {

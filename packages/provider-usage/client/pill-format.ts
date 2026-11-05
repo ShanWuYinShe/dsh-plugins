@@ -5,7 +5,8 @@
  */
 
 import type { CSSProperties } from 'react'
-import type { UsageSnapshot } from '../src/types.js'
+import type { UsageRateLimit, UsageSnapshot } from '../src/types.js'
+import type { ProviderUsageLocaleKey } from './locales.js'
 
 export function fillStyle(percent: number): CSSProperties {
   const color = percent <= 5
@@ -32,6 +33,33 @@ export function getDotColor(snapshot?: UsageSnapshot, queried?: boolean): string
     if (pct <= 20) return 'var(--dsw-alias-state-warn-primary, #faad14)'
   }
   return 'var(--dsw-alias-state-success-primary, #52c41a)'
+}
+
+/**
+ * 限流策略详情行：上游披露 policy/metric、配额/余量与窗口时拼一行纯文本。
+ *
+ * 三条信息都没有时返回 undefined——界面不凭空造一个「策略」。
+ *
+ * @param limit - 一条限流观测。
+ * @param t - 文案函数（pill 注入面或本包兜底）。
+ * @returns 可直接渲染的详情文本；没有可展示信息时为 undefined。
+ */
+export function rateLimitPolicyDetail(
+  limit: UsageRateLimit,
+  t: (key: ProviderUsageLocaleKey, params?: Record<string, unknown>) => string,
+): string | undefined {
+  const parts: string[] = []
+  const policy = limit.policy ?? limit.metric
+  if (policy !== undefined) parts.push(policy)
+  if (limit.remaining !== undefined && limit.limit !== undefined) {
+    parts.push(t('windowRemaining', { remain: String(limit.remaining), limit: String(limit.limit) }))
+  } else if (limit.limit !== undefined) {
+    parts.push(String(limit.limit))
+  }
+  if (limit.windowSeconds !== undefined) {
+    parts.push(t('rateLimitWindow', { seconds: String(limit.windowSeconds) }))
+  }
+  return parts.length === 0 ? undefined : parts.join(' · ')
 }
 
 /**

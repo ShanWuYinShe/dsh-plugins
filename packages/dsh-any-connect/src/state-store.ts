@@ -28,6 +28,7 @@ import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { WorkBuddyCredential } from './auth-types.js'
 import type { CreditLedgerPersistence, CreditLedgerState } from './credit-ledger.js'
+import type { RateLimitObservation, RateLimitPersistence } from './rate-limit.js'
 
 /** 域内单条凭据记录：即插件统一的凭据形态（WorkBuddy 与 ZCode 共用）。 */
 const credentialSchema = z.object({
@@ -65,6 +66,34 @@ const ledgerSchema = z.object({
 }).strict()
 
 /**
+ * 限流观测（rate-limit.ts）的持久化形态。
+ *
+ * 只存**带明确重置时刻**的观测：没有 reset 的观测只活在本进程的 TTL 里，
+ * 重启后没有继续悬挂的意义；带 reset 的（如 WorkBuddy 6004 文案里的恢复时刻）
+ * 重启后仍然成立，是用户下次打开界面时仍要看到的事实。
+ */
+const rateLimitObservationSchema = z.object({
+  provider: z.string(),
+  blockedAtMs: z.number().finite(),
+  lastSeenAtMs: z.number().finite(),
+  resetAtMs: z.number().finite(),
+  status: z.number().finite(),
+  kind: z.string(),
+  model: z.string().optional(),
+  policy: z.string().optional(),
+  scope: z.enum(['model', 'account']).optional(),
+  metric: z.string().optional(),
+  limit: z.number().finite().optional(),
+  remaining: z.number().finite().optional(),
+  windowSeconds: z.number().finite().optional(),
+  hits: z.number().finite(),
+}).strict()
+
+const rateLimitSchema = z.object({
+  observations: z.array(rateLimitObservationSchema).max(64),
+}).strict()
+
+/**
  * 插件状态域声明。`layout: 'per-record'`：每条凭据一个文件，各变体互不影响；
  * 坏记录挪到备份位（`backup-and-skip`）而不是让整个域打不开。
  */
@@ -75,6 +104,8 @@ export const anyConnectDomain = defineDomain({
   tables: {
     auth: domainTable(credentialSchema),
     ledger: domainTable(ledgerSchema),
+    // 限流观测：按变体一条记录（表名受 UNIT_NAME_RE 约束）。
+    rate_limits: domainTable(rateLimitSchema),
   },
   invalidRecords: 'backup-and-skip',
 })
@@ -97,6 +128,9 @@ const AUTH_TABLE = 'auth'
 
 /** 域内台账表的表名。 */
 const LEDGER_TABLE = 'ledger'
+
+/** 域内限流观测表的表名。 */
+const RATE_LIMITS_TABLE = 'rate_limits'
 
 /** 宿主 storageDomain 域句柄的状态存取包装（插件运行时用）。 */
 export function domainStateStore(domain: Domain<typeof anyConnectDomain>): WorkBuddyStateStore {
@@ -123,6 +157,32 @@ export function domainCreditLedgerPersistence(domain: Domain<typeof anyConnectDo
     load: async variantId => table.get(variantId),
     save: async (variantId, state) => {
       await table.put(variantId, state)
+    },
+  }
+}
+
+/**
+ * 宿主域句柄的限流观测持久化（rate-limit.ts 的 RateLimitPersistence 实现）。
+ *
+ * 按变体（provider）一条记录；空数组等价于删除记录（不留空壳）。
+ * resetAtMs 在 schema 里是必填，这里过滤兜底——调用方（台账）只会传带 reset 的。
+ */
+export function domainRateLimitPersistence(domain: Domain<typeof anyConnectDomain>): RateLimitPersistence {
+  const table = domain.table(RATE_LIMITS_TABLE)
+  return {
+    load: async provider => {
+      const record = await table.get(provider)
+      return record?.observations as readonly RateLimitObservation[] | undefined
+    },
+    save: async (provider, observations) => {
+      const persistable = observations
+        .filter(observation => observation.resetAtMs !== undefined)
+        .map(observation => ({ ...observation, resetAtMs: observation.resetAtMs as number }))
+      if (persistable.length === 0) {
+        await table.delete(provider)
+        return
+      }
+      await table.put(provider, { observations: persistable })
     },
   }
 }

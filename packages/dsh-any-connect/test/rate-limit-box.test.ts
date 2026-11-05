@@ -19,6 +19,7 @@ const t = (key: string, params?: Record<string, unknown>): string => {
   if (key === 'rateLimitResetsAt') return `resets:${String(params!['time'])}`
   if (key === 'rateLimitUnknownReset') return `unknown:${String(params!['elapsed'])}`
   if (key === 'rateLimitMeta') return `meta:${String(params!['count'])}:${String(params!['model'])}`
+  if (key === 'rateLimitWindow') return `window:${String(params!['seconds'])}s`
   return key
 }
 
@@ -69,6 +70,18 @@ describe('RateLimitBox', () => {
     const now = 1_000_000
     const text = render([{ blockedAt: now, lastSeenAt: now, status: 429, hits: 5, model: 'glm-5.3' }], now)
     expect(text).toContain('meta:5:glm-5.3')
+  })
+
+  it('上游披露策略信息时补一行 policy/余量/配额/窗口；没披露则不补', () => {
+    const now = 1_000_000
+    const text = render([{
+      blockedAt: now, lastSeenAt: now, status: 429, hits: 1, model: 'glm-5.3',
+      policy: 'rpm', metric: 'requests', limit: 60, remaining: 0, windowSeconds: 60,
+    }], now)
+    expect(text).toContain('rpm · 0 / 60 · window:60s')
+
+    const bare = render([{ blockedAt: now, lastSeenAt: now, status: 429, hits: 1, model: 'glm-5.3' }], now)
+    expect(bare).not.toContain('window:')
   })
 
   it('模型未知时说「全部模型」而不是留空', () => {

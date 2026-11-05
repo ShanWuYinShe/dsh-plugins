@@ -267,6 +267,18 @@ export interface WorkBuddyWebRateLimit {
   status: number
   /** 触发限流的模型 id，若上游回执里带得到（WorkBuddy 按模型限流，通常都有）。 */
   model?: string
+  /** 策略/限额名（IETF RateLimit policy 名或厂商 metric 名；上游没给时缺席）。 */
+  policy?: string
+  /** 归属范围：有模型为 model，无模型（上游没给维度）为 account。 */
+  scope?: 'model' | 'account'
+  /** 计量维度（requests / tokens 等，上游给出时才有）。 */
+  metric?: string
+  /** 该策略声明的配额上限（上游给出时才有）。 */
+  limit?: number
+  /** 观测时的剩余额度（上游给出时才有）。 */
+  remaining?: number
+  /** 策略窗口长度（秒，上游给出时才有）。 */
+  windowSeconds?: number
   /** 同一段限流期内撞到的次数。 */
   hits: number
 }

@@ -141,6 +141,45 @@ describe('shim 把上游限流写进台账', () => {
     expect(active!.resetAtMs).toBeUndefined()
   })
 
+  it('请求体没有 model 时按 provider 级观测落账；成功请求清整条通道', async () => {
+    let next: WorkBuddyChatResult = {
+      ok: false, status: 429, kind: 'soft_rate', message: 'slow down',
+      headers: new Headers({ 'retry-after': '60' }),
+    }
+    const harness = await startShim(() => next)
+    const barePost = async (): Promise<Response> => await fetch(`${harness.shim.baseUrl()}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${harness.shim.token()}` },
+      body: JSON.stringify({ stream: true, messages: [{ role: 'user', content: 'hi' }] }),
+    })
+    await barePost()
+    const active = harness.ledger.activeFor('workbuddy')
+    expect(active?.scope).toBe('account')
+    expect(active?.model).toBeUndefined()
+
+    next = {
+      ok: true,
+      response: new Response('data: [DONE]\n\n', { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+    }
+    await barePost()
+    expect(harness.ledger.activeFor('workbuddy')).toBeUndefined()
+  })
+
+  it('一条 429 携带多条策略 → 逐条落账', async () => {
+    const harness = await startShim(() => ({
+      ok: false,
+      status: 429,
+      kind: 'soft_rate',
+      message: 'slow down',
+      headers: new Headers({
+        'ratelimit-policy': '"rpm";q=60;w=60, "tpd";q=1000;w=86400',
+        ratelimit: '"rpm";r=0;t=10, "tpd";r=0;t=60',
+      }),
+    }))
+    await postChat(harness)
+    expect(harness.ledger.activesFor('workbuddy').map(entry => entry.policy).sort()).toEqual(['rpm', 'tpd'])
+  })
+
   it('随后一次成功请求 → 台账自动清掉（限流已解除的实证）', async () => {
     let next: WorkBuddyChatResult = { ok: false, status: 429, kind: 'soft_rate', message: 'slow down' }
     const harness = await startShim(() => next)

@@ -24,7 +24,7 @@ import { applyDefaultEffort, applyDefaultThinking } from './reasoning-default.js
 import { hostIsLoopback, originIsLoopback } from './loopback.js'
 import { prepareChatBody, WorkBuddyUpstreamClient, type UpstreamErrorKind } from './upstream.js'
 import { isJsonContentType, KIND_STATUS, writeJson, writeOpenAIError, writeAnthropicError, RequestBodyTooLarge, readBody, upstreamFailureMessage } from './shim-http.js'
-import { observeRateLimit } from './rate-limit.js'
+import { observeRateLimits } from './rate-limit.js'
 import type { RateLimitObservation } from './rate-limit.js'
 import { safeMessage } from './values.js'
 
@@ -191,15 +191,17 @@ export function createWorkBuddyShim(options: WorkBuddyShimOptions): WorkBuddyShi
         rateLimits.clear(providerId, model)
         return
       }
-      const observation: RateLimitObservation | undefined = observeRateLimit({
+      // 一次 429 可能同时体现多条策略（RPM / TPM / 日额度），逐条落账。
+      for (const observation of observeRateLimits({
         provider: providerId,
         status: result.status,
         kind: result.kind,
         ...model === undefined || model === '' ? {} : { model },
         ...result.headers === undefined ? {} : { headers: result.headers },
         ...result.message === undefined ? {} : { body: result.message },
-      })
-      if (observation !== undefined) rateLimits.record(observation)
+      })) {
+        rateLimits.record(observation)
+      }
     } catch (error: unknown) {
       logger?.warn('dsh-any-connect: rate-limit bookkeeping failed', error)
     }

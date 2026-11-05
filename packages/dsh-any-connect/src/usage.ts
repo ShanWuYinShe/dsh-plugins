@@ -31,6 +31,12 @@ interface UsageRateLimitWire {
   resetAt?: number
   status: number
   model?: string
+  policy?: string
+  scope?: 'model' | 'account'
+  metric?: string
+  limit?: number
+  remaining?: number
+  windowSeconds?: number
   hits: number
 }
 
@@ -46,6 +52,12 @@ function toUsageRateLimits(
     ...observation.resetAtMs === undefined ? {} : { resetAt: observation.resetAtMs },
     status: observation.status,
     ...observation.model === undefined ? {} : { model: observation.model },
+    ...observation.policy === undefined ? {} : { policy: observation.policy },
+    ...observation.scope === undefined ? {} : { scope: observation.scope },
+    ...observation.metric === undefined ? {} : { metric: observation.metric },
+    ...observation.limit === undefined ? {} : { limit: observation.limit },
+    ...observation.remaining === undefined ? {} : { remaining: observation.remaining },
+    ...observation.windowSeconds === undefined ? {} : { windowSeconds: observation.windowSeconds },
     hits: observation.hits,
   }))
 }

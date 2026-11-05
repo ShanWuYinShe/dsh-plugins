@@ -15,10 +15,10 @@
       "lines": 100
     },
     "packages/dsh-any-connect/client/RateLimitBox.tsx": {
-      "statements": 88.23,
-      "branches": 85.71,
+      "statements": 90,
+      "branches": 89.18,
       "functions": 100,
-      "lines": 85.71
+      "lines": 88.46
     },
     "packages/dsh-any-connect/client/SignedOutRow.tsx": {
       "statements": 100,
@@ -333,10 +333,10 @@
       "lines": 100
     },
     "packages/dsh-any-connect/src/rate-limit.ts": {
-      "statements": 96.85,
-      "branches": 88.97,
+      "statements": 99.73,
+      "branches": 91.54,
       "functions": 100,
-      "lines": 99.05
+      "lines": 100
     },
     "packages/dsh-any-connect/src/reasoning-default.ts": {
       "statements": 94.82,
@@ -351,28 +351,28 @@
       "lines": 100
     },
     "packages/dsh-any-connect/src/runtime.ts": {
-      "statements": 82.67,
-      "branches": 57.14,
-      "functions": 78.78,
-      "lines": 86.84
+      "statements": 83.46,
+      "branches": 63.15,
+      "functions": 81.25,
+      "lines": 87.71
     },
     "packages/dsh-any-connect/src/shim-http.ts": {
-      "statements": 90.38,
-      "branches": 90,
+      "statements": 92.3,
+      "branches": 97.29,
       "functions": 92.85,
-      "lines": 89.79
+      "lines": 91.83
     },
     "packages/dsh-any-connect/src/shim.ts": {
-      "statements": 89.53,
-      "branches": 78.63,
+      "statements": 89.47,
+      "branches": 80,
       "functions": 96.66,
       "lines": 90.78
     },
     "packages/dsh-any-connect/src/state-store.ts": {
-      "statements": 95,
-      "branches": 37.5,
+      "statements": 96.29,
+      "branches": 50,
       "functions": 100,
-      "lines": 94.73
+      "lines": 96.15
     },
     "packages/dsh-any-connect/src/status-paths.ts": {
       "statements": 100,
@@ -453,10 +453,10 @@
       "lines": 100
     },
     "packages/dsh-any-connect/src/usage.ts": {
-      "statements": 87.5,
-      "branches": 77.77,
+      "statements": 88.88,
+      "branches": 82.55,
       "functions": 100,
-      "lines": 90.38
+      "lines": 92.15
     },
     "packages/dsh-any-connect/src/values.ts": {
       "statements": 100,
@@ -489,10 +489,10 @@
       "lines": 83.33
     },
     "packages/dsh-any-connect/src/web-status.ts": {
-      "statements": 92.3,
-      "branches": 85.89,
+      "statements": 92.42,
+      "branches": 88.29,
       "functions": 100,
-      "lines": 91.8
+      "lines": 91.93
     },
     "packages/dsh-any-connect/src/wsl.ts": {
       "statements": 90,
@@ -550,7 +550,7 @@
     },
     "packages/provider-usage/client/ProviderUsagePill.tsx": {
       "statements": 100,
-      "branches": 75,
+      "branches": 79.62,
       "functions": 100,
       "lines": 100
     },
@@ -586,7 +586,7 @@
     },
     "packages/provider-usage/client/pill-headline.ts": {
       "statements": 100,
-      "branches": 96.96,
+      "branches": 100,
       "functions": 100,
       "lines": 100
     },
@@ -615,10 +615,10 @@
       "lines": 100
     },
     "packages/provider-usage/client/useProviderUsage.ts": {
-      "statements": 90.51,
+      "statements": 90.67,
       "branches": 80.19,
       "functions": 89.47,
-      "lines": 92
+      "lines": 92.15
     },
     "packages/provider-usage/src/command.ts": {
       "statements": 100,
@@ -699,10 +699,10 @@
       "lines": 100
     },
     "packages/provider-usage/src/registry.ts": {
-      "statements": 95.05,
-      "branches": 88.04,
+      "statements": 95.52,
+      "branches": 89.42,
       "functions": 100,
-      "lines": 98.7
+      "lines": 98.83
     },
     "packages/provider-usage/src/resolve.ts": {
       "statements": 91.66,
@@ -867,10 +867,10 @@
       "lines": 93.75
     },
     "packages/session-archive/client/index.tsx": {
-      "statements": 93.33,
+      "statements": 94.44,
       "branches": 84.21,
-      "functions": 87.5,
-      "lines": 96.15
+      "functions": 90,
+      "lines": 96.77
     },
     "packages/session-archive/client/locales.ts": {
       "statements": 100,

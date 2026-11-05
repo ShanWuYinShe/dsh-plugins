@@ -76,11 +76,20 @@ interface UsageFixture {
   registrations: Map<string, () => void>
 }
 
+/** 组合里挂的 fixture：结构最小的 storageDomain（域表读写 + close 可观测）。 */
+interface StorageDomainFixture {
+  tables: Map<string, Map<string, unknown>>
+  /** 打开后设为 true 时，rate_limits 表读取抛错（覆盖恢复失败的降级路径）。 */
+  failRateLimitLoad: { value: boolean }
+  closed: { value: boolean }
+}
+
 interface Composition {
   ctx: Context
   origin: () => string
   anyConnectEntryId: string
   usage: UsageFixture
+  storageDomain: StorageDomainFixture
   /** 组合内的状态查询助手：当前 llm provider id 列表。 */
   providers: () => string[]
 }
@@ -89,17 +98,43 @@ interface Composition {
  * 用 Loader 的 entry-tree API 装配最小真实组合（等价于 Include 解析 YAML 后的
  * 结果；见模块头的阻塞点说明）。返回可观测句柄。
  */
-async function composeComposition(desktopFile: string): Promise<Composition> {
+async function composeComposition(desktopFile: string, options: { failRateLimitLoad?: boolean } = {}): Promise<Composition> {
   const ctx = new Context()
   context = ctx
   await ctx.plugin(Loader)
   ctx.baseUrl = `${pathToFileURL(root!).href}/`
 
   const usage: UsageFixture = { registrations: new Map() }
+  const storageDomain: StorageDomainFixture = {
+    tables: new Map(),
+    failRateLimitLoad: { value: options.failRateLimitLoad ?? false },
+    closed: { value: false },
+  }
+  const domainHandle = {
+    table(name: string) {
+      const records = storageDomain.tables.get(name) ?? new Map<string, unknown>()
+      storageDomain.tables.set(name, records)
+      return {
+        get: async (key: string) => {
+          if (name === 'rate_limits' && storageDomain.failRateLimitLoad.value) throw new Error('rate-limit table read failed')
+          return records.get(key)
+        },
+        put: async (key: string, value: unknown) => { records.set(key, value) },
+        delete: async (key: string) => { records.delete(key) },
+      }
+    },
+    close: async () => { storageDomain.closed.value = true },
+  }
   const modules = new Map<string, unknown>([
     ['@deepseek-ai/dsh-llm', LlmRuntime],
     ['@deepseek-ai/dsh-host-webserver', WebServer],
     ['@chaoset/dsh-any-connect', AnyConnect],
+    ['fixture-storage-domain', {
+      name: 'fixture-storage-domain',
+      apply(fixtureCtx: Context) {
+        fixtureCtx.provide('storageDomain', { open: async () => domainHandle as never })
+      },
+    }],
     ['fixture-provider-usage', {
       name: 'fixture-provider-usage',
       apply(fixtureCtx: Context) {
@@ -124,6 +159,7 @@ async function composeComposition(desktopFile: string): Promise<Composition> {
   } as unknown as NonNullable<typeof ctx.loader.internal>
 
   await ctx.loader.create({ name: 'fixture-provider-usage' })
+  await ctx.loader.create({ name: 'fixture-storage-domain' })
   await ctx.loader.create({ name: '@deepseek-ai/dsh-host-webserver', config: { host: '127.0.0.1', port: 0 } })
   await ctx.loader.create({ name: '@deepseek-ai/dsh-llm' })
   const anyConnectEntryId = await ctx.loader.create({
@@ -139,6 +175,7 @@ async function composeComposition(desktopFile: string): Promise<Composition> {
     origin: () => ctx.webServer.getOrigin(),
     anyConnectEntryId,
     usage,
+    storageDomain,
     providers: () => ctx.llm.listProviders().map(provider => provider.id),
   }
 }
@@ -224,6 +261,25 @@ describe('REAL Loader composition', () => {
 
     // 6) provider-usage seam：5 个变体各注册一条查询器（真实引用传递走完）
     expect(composition.usage.registrations.size).toBe(5)
+
+    // 7) storageDomain 注入后（真实 inject 时序）：限流持久化表被打开、恢复路径被调用。
+    await vi.waitFor(() => {
+      expect(composition.storageDomain.tables.has('rate_limits'), '限流持久化表应被打开').toBe(true)
+    }, { timeout: 10_000 })
+  }, 30_000)
+
+  it('storageDomain 读取限流表失败：只告警，不影响 provider 注册与 status 路由', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-loader-domain-fail-'))
+    const desktopFile = join(root, 'workbuddy-desktop.info')
+    await writeFile(desktopFile, signedInDocument())
+    stubUpstreamFetch()
+
+    const composition = await composeComposition(desktopFile, { failRateLimitLoad: true })
+    await awaitLive(composition)
+    const origin = composition.origin()
+    const statusResponse = await fetch(origin + WORKBUDDY_STATUS_PATH, { headers: sameOriginHeaders(origin) })
+    expect(statusResponse.status).toBe(200)
+    expect((await statusResponse.json() as { status?: string }).status).toBe('signed-in')
   }, 30_000)
 
   it('HMR dispose→移除：路由 / adapter / usage querier 三条注册面全部回滚', async () => {
@@ -251,6 +307,11 @@ describe('REAL Loader composition', () => {
 
     // 2) usage querier 回滚：每个变体的查询器 disposer 被调用
     expect(composition.usage.registrations.size, '卸载后 usage 查询器必须注销').toBe(0)
+
+    // 2b) 状态域随入口卸载关闭（storageDomain 的 ctx.effect 清理）
+    await vi.waitFor(() => {
+      expect(composition.storageDomain.closed.value, '卸载后状态域必须关闭').toBe(true)
+    }, { timeout: 10_000 })
 
     // 3) 路由回滚：status / probe 两条真实路由都不再响应 200
     const statusAfter = await fetch(origin + WORKBUDDY_STATUS_PATH, { headers: sameOriginHeaders(origin) })

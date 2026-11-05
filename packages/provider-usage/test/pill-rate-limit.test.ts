@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { exhaustedResetText, headlineText, rateLimitHeadline } from '../client/pill-headline.js'
+import { rateLimitPolicyDetail } from '../client/pill-format.js'
 import type { ProviderUsageLocaleKey } from '../client/locales.js'
 import type { UsageSnapshot } from '../src/types.js'
 
@@ -72,6 +73,33 @@ describe('headlineText：限流优先于额度数字', () => {
       { blockedAt: 0, lastSeenAt: 0, status: 429, hits: 1 },
     )
     expect(text).toContain('staleData')
+  })
+})
+
+describe('rateLimitPolicyDetail：策略详情行', () => {
+  const detailT = (key: ProviderUsageLocaleKey, params?: Record<string, unknown>): string => {
+    if (key === 'windowRemaining') return `${String(params!['remain'])}/${String(params!['limit'])}`
+    if (key === 'rateLimitWindow') return `${String(params!['seconds'])}s`
+    return key
+  }
+  const base = { blockedAt: 0, lastSeenAt: 0, status: 429, hits: 1 }
+
+  it('policy + 余量/配额 + 窗口 → 一行完整详情', () => {
+    expect(rateLimitPolicyDetail({ ...base, policy: 'rpm', remaining: 0, limit: 60, windowSeconds: 60 }, detailT))
+      .toBe('rpm · 0/60 · 60s')
+  })
+
+  it('没有 policy 时退回 metric', () => {
+    expect(rateLimitPolicyDetail({ ...base, metric: 'tokens', remaining: 2, limit: 10 }, detailT))
+      .toBe('tokens · 2/10')
+  })
+
+  it('只有配额、没有余量时只显示配额', () => {
+    expect(rateLimitPolicyDetail({ ...base, policy: 'rpm', limit: 60 }, detailT)).toBe('rpm · 60')
+  })
+
+  it('上游什么都没给 → undefined（不凭空造策略行）', () => {
+    expect(rateLimitPolicyDetail(base, detailT)).toBeUndefined()
   })
 })
 

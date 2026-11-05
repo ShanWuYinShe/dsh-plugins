@@ -19,8 +19,6 @@ import { WorkBuddyCatalogStore, workbuddyCatalogPath } from './catalog-store.js'
 import { createWorkBuddyAdapter } from './adapter.js'
 import { createWorkBuddyShim } from './shim.js'
 import { RateLimitLedger } from './rate-limit.js'
-import type { RateLimitObservation } from './rate-limit.js'
-import type { WorkBuddyWebRateLimit } from './status-paths.js'
 import { WorkBuddyUpstreamClient } from './upstream.js'
 import { ANYCONNECT_VERSION } from './version.js'
 import { PROVIDER_VARIANTS } from './variants.js'
@@ -29,7 +27,7 @@ import { ModelFilterStore } from './model-filter-store.js'
 import { WorkBuddyProbeService } from './probe-service.js'
 import { workbuddyProbePath, WorkBuddyProbeStore } from './probe-store.js'
 import { createProbeKey, registerWorkBuddyProbeRoute } from './probe-route.js'
-import { registerWorkBuddyStatusRoute } from './web-status.js'
+import { registerWorkBuddyStatusRoute, toWorkBuddyWebRateLimit } from './web-status.js'
 import { applyVariantConfig, configuredAuthFile, fallbackFor, variantIsStartPlan } from './variant-runtime.js'
 import type { VariantRuntime } from './variant-runtime.js'
 import { catalogSection, probeSection } from './runtime-sections.js'
@@ -217,7 +215,7 @@ export function createVariantRuntimeSet(deps: {
         // WorkBuddy 按模型限流，所以这里给逐模型数组（可能同时有多个模型被限）。
         rateLimits: () => {
           const actives = rateLimits.activesFor(runtime.variant.id)
-          return actives.length === 0 ? undefined : actives.map(toWebRateLimit)
+          return actives.length === 0 ? undefined : actives.map(toWorkBuddyWebRateLimit)
         },
         probeKey,
         // 卸载信号：status 文档里的额度查询与 probe 控制写入都受它约束（AC-33）。
@@ -312,6 +310,8 @@ export function createVariantRuntimeSet(deps: {
     // 先等在途心跳写完再清；顺序反过来会让最后一次写把文件"复活"。
     await Promise.all(heartbeatWrites)
     await clearHostHeartbeat()
+    // 3) 等限流观测的最后一笔落盘（错误只报告；不 reject dispose）。
+    await rateLimits.flush()
   }
 
   /** 启动定时器，并在每个 shim 就绪后注册它的 provider。 */
@@ -407,21 +407,4 @@ export function createVariantRuntimeSet(deps: {
   }
 
   return { runtimes, applyConfiguredAuthFiles, setState, setLedger, start, dispose, rateLimits }
-}
-
-/**
- * 台账观测 → 卡片文档。
- *
- * 刻意逐字段搬运而不是展开对象：文档契约在 status-paths.ts 里是对外的
- * 稳定面，台账内部形状（`kind`/`provider` 等诊断字段）不该顺带漏出去。
- */
-function toWebRateLimit(observation: RateLimitObservation): WorkBuddyWebRateLimit {
-  return {
-    blockedAt: observation.blockedAtMs,
-    lastSeenAt: observation.lastSeenAtMs,
-    ...observation.resetAtMs === undefined ? {} : { resetAt: observation.resetAtMs },
-    status: observation.status,
-    ...observation.model === undefined ? {} : { model: observation.model },
-    hits: observation.hits,
-  }
 }
