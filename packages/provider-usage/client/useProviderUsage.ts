@@ -25,6 +25,7 @@ import { fallbackTranslate } from './locales.js'
 import { usageResourceAddress } from './resource-provider.js'
 import { isStaleDisplay } from './pill-format.js'
 import { exhaustedResetText, headlineText } from './pill-headline.js'
+import { rateLimitForCurrentModel } from './pill-rate-limit-scope.js'
 import type { ProviderUsagePillProps } from './pill-types.js'
 
 /**
@@ -96,6 +97,11 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat, useLo
   }, [state.current, state.status, load])
 
   const currentProvider = state.current?.provider
+  // 当前选中的模型 id：限流是**按模型**的上游事实（WorkBuddy 各模型 cap-hit
+  // 独立记账），而 pill 是 provider 级表面。换了同一 provider 下的另一个模型后，
+  // 原模型被限的事实不该继续挂在 pill 上——那会把「A 被限」读成「整条通道不可用」。
+  // 目录未解析（current 为 null）或宿主未给 model 时保持 undefined，视为未知。
+  const currentModel = state.current?.model
   const lastProviderRef = useRef<string | undefined>(undefined)
   if (currentProvider !== undefined && currentProvider !== '') {
     lastProviderRef.current = currentProvider
@@ -245,7 +251,16 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat, useLo
   // 资源流失败、手动请求失败（保旧值）、目录重连中（current 为 null）、宿主折叠
   // 旧答案（degraded）均视为「数据可能过期」。
   const displayStale = isStaleDisplay(stale || isDisconnected || streamFailed, snapshot)
-  const headline = headlineText(effectiveAnswer, provider, displayStale, copy, localeId)
+  // 限流归属只看当前选中模型：与选中项无关的观测在这里就被摘掉，头行、圆点、
+  // 展开面板因此共用同一份判定，不会出现「头行说限流、面板说别的模型」。
+  const rateLimit = rateLimitForCurrentModel(snapshot?.rateLimit, currentModel)
+  const headline = headlineText(
+    snapshot === undefined ? effectiveAnswer : { ...snapshot, ...rateLimit === undefined ? { rateLimit: undefined } : { rateLimit } },
+    provider,
+    displayStale,
+    copy,
+    localeId,
+  )
   // 额度用尽时补「几点恢复」：这是用户「到什么时候能接着用」的直接答案。
   // 只在真用尽（remain === 0 且有 resetsAt）时出现，有余额时不打扰。
   const resetHint = snapshot === undefined ? undefined : exhaustedResetText(snapshot, copy, localeId)
@@ -267,6 +282,7 @@ export function useProviderUsage({ t, sessionId, useResource, resolveSeat, useLo
     refresh,
     queried,
     snapshot,
+    rateLimit,
     headlineText: headline,
     resetHint,
   }

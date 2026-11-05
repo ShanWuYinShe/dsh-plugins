@@ -2,6 +2,10 @@
 
 ### 修复
 
+* **Hy4 正式版目录同步**：上游已把预览期的单行 `hy4-preview` 换成按档位拆分的
+  `hy4free`（x0.00 / 免费）与 `hy4std`（x0.29），两者界面名同为「Hy4」。兜底名单
+  同步为这两行（上下文窗口取 live 目录：CN 960k / Global 1M）；旧的 `hy4-preview`
+  已下线，留着会让离线/未登录用户看到一个选不中、也永远没有额度的幽灵模型。
 * **解密助手子进程的环境变量**：`helperSpawnEnv` 改为「白名单 + 敏感剔除」（只保留
   Electron/WSL 必需项，剔除 `*KEY/*SECRET/*TOKEN/*PASSWORD/*CREDENTIAL*` 与具名宿主凭据），
   不再把宿主完整环境透传给第三方桌面 App 二进制。

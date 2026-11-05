@@ -35,8 +35,7 @@ export function ProviderUsagePill(props: ProviderUsagePillProps): React.ReactNod
   // 组件原样早退（与原实现同一分支）。
   const usage = useProviderUsage(props)
   if (usage === null) return null
-  const { t, provider, answer, open, setOpen, busy, stale, alignRight, setAlignRight, rootRef, buttonRef, panelRef, refresh, queried, snapshot, headlineText, resetHint, localeId } = usage
-  const rateLimit = snapshot?.rateLimit
+  const { t, provider, answer, open, setOpen, busy, stale, alignRight, setAlignRight, rootRef, buttonRef, panelRef, refresh, queried, snapshot, rateLimit, headlineText, resetHint, localeId } = usage
 
   return (
     <span ref={rootRef} style={{ ...rootStyle, position: 'relative' }}>
