@@ -271,7 +271,7 @@ describe("client bundles", () => {
         },
         locale: Object.assign(() => () => "", { bind: () => () => "", register: () => {} }),
         effect: (fn: () => void) => { fn(); },
-        remote: { $mount: async () => {} },
+        remote: { $mount: async () => async () => {} },
         get: (svc: string) =>
           typeof svc === "string" && svc.startsWith("remote.") ? configServiceStub : {},
       };
@@ -307,7 +307,7 @@ describe("client bundles", () => {
       },
       locale: Object.assign(() => () => "", { bind: () => () => "", register: () => {} }),
       effect: (fn: () => void) => { fn(); },
-      remote: { $mount: async (contribution: any) => mounted.push(contribution) },
+      remote: { $mount: async (contribution: any) => { mounted.push(contribution); return async () => {}; } },
       get: (svc: string) =>
         svc === "remote.sessionArchive" ? archiveServiceStub
         : svc === "workspaces" ? workspacesStub : {},
@@ -336,7 +336,7 @@ describe("client bundles", () => {
       },
       locale: Object.assign(() => () => "", { bind: () => () => "", register: () => {} }),
       effect: (fn: () => void) => { fn(); },
-      remote: { $mount: async () => {} },
+      remote: { $mount: async () => async () => {} },
       get: () => ({}),
     };
     await mod.apply(ctx as any);
@@ -376,7 +376,7 @@ describe("client bundles", () => {
           },
           locale: Object.assign(() => () => "", { bind: () => () => "", register: () => () => {} }),
           effect: (fn: () => void) => { fn(); },
-          remote: { $mount: async () => {} },
+          remote: { $mount: async () => async () => {} },
           get: () => ({}),
           // provider-usage 注册期直接 ctx.resources.register 额度协议 provider
           // （单一 resource 流通道，注册期不解析任何可选服务）。这里桩出最小
@@ -423,7 +423,7 @@ describe("client bundles", () => {
       },
       locale: Object.assign(() => () => "", { bind: () => () => "", register: () => () => {} }),
       effect: (fn: () => void) => { fn(); },
-      remote: { $mount: async () => {} },
+      remote: { $mount: async () => async () => {} },
       resources: {
         register: (provider: any) => {
           registeredProtocols.push(provider.protocol);

@@ -42,7 +42,7 @@ interface ClientContext {
     register(ns: string, dict: Record<string, Record<string, string>>): void | (() => void);
   };
   effect(fn: () => void | (() => void), label?: string): void;
-  remote: { $mount(contribution: TypertRemoteContribution): Promise<unknown> };
+  remote: { $mount(contribution: TypertRemoteContribution): Promise<() => Promise<void>> };
   get(name: string): unknown;
   slots: {
     inject(slot: string, fn: () => void): void;
@@ -62,12 +62,20 @@ const inject = ["slots", "locale", "remote"];
 // 降级为 console.error（侧边栏少一个徽标），不得把异常抛给宿主 loader
 // 炸出整页红条——纯 additive 的面板没有资格打断宿主。
 async function apply(ctx: ClientContext) {
+  // $mount 返回的卸载钩子归调用方所有：gateway 把挂载注册在自身 ctx 上，不会随本插件
+  // fiber 回收。丢弃它会让「禁用→启用」或客户端热重载后的第二次挂载命中 already mounted，
+  // 归档入口随之消失（须刷新页面恢复）。成功时把它作为 apply 的 disposer 交回 cordis，
+  // 失败降级时在这里自行卸载。
+  const mounted: Array<() => Promise<void>> = [];
+  const unmountRemote = async () => {
+    await Promise.allSettled(mounted.splice(0).map((unmount) => unmount()));
+  };
   try {
   // 字典注册的返回值就是 effect 的 disposer（官方 client-locale README 的
   // 注册写法）：HMR/卸载时先 dispose 再重新注册，旧字典不会残留。
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), "session-archive: dictionaries");
   // 贡献体来自生成工件（描述符与 codec 由官方生成器产出），本文件不再手写。
-  await ctx.remote.$mount(archiveRemote);
+  mounted.push(await ctx.remote.$mount(archiveRemote));
   const archiveService = ctx.get("remote.sessionArchive") as ArchiveRemoteService | undefined;
   if (archiveService === void 0) throw new Error("session-archive: remote.sessionArchive did not materialize after mount");
   const call: ArchiveCall = (async <M extends RemoteMethod>(method: M, ...args: Parameters<ArchiveRemoteService[M]>) => {
@@ -118,7 +126,9 @@ async function apply(ctx: ClientContext) {
       } : void 0,
     })
   }, ArchivePanel));
+  return unmountRemote;
   } catch (error: unknown) {
+    await unmountRemote();
     console.error("[session-archive] client panel failed to load (sidebar badge missing):", error);
   }
 }

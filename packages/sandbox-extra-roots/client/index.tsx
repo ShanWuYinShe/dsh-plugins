@@ -34,7 +34,7 @@ interface ClientContext {
     register(ns: string, dict: Record<string, Record<string, string>>): () => void;
   };
   effect(fn: () => void | (() => void), label?: string): void;
-  remote: { $mount(contribution: unknown): Promise<void> };
+  remote: { $mount(contribution: unknown): Promise<() => Promise<void>> };
   get(name: string): unknown;
   slots: {
     inject(slot: string, fn: () => void): void;
@@ -81,6 +81,14 @@ const inject = ["slots", "locale", "remote"];
 // 降级为 console.error（设置页少一张卡片），不得把异常抛给宿主 loader
 // 炸出整页红条——纯 additive 的配置卡没有资格打断宿主。
 async function apply(ctx: ClientContext) {
+  // $mount 返回的卸载钩子归调用方所有：gateway 把挂载注册在自身 ctx 上，不会随本插件
+  // fiber 回收。丢弃它会让「禁用→启用」或客户端热重载后的第二次挂载命中 already mounted，
+  // 设置卡片随之消失（须刷新页面恢复）。成功时把它作为 apply 的 disposer 交回 cordis，
+  // 失败降级时在这里自行卸载。
+  const mounted: Array<() => Promise<void>> = [];
+  const unmountRemote = async () => {
+    await Promise.allSettled(mounted.splice(0).map((unmount) => unmount()));
+  };
   try {
   // register 返回 disposer：必须交回 ctx.effect，卸载/HMR 后字典才会被回收、
   // 重载后的新字典才能替换旧文案（旧实现丢弃返回值并吞掉 "already" 重复注册
@@ -91,7 +99,7 @@ async function apply(ctx: ClientContext) {
   // 先挂载命名空间，再用 ctx.get 取回服务：cordis 的属性访问（ctx.remote.X）
   // 要求 X 出现在 inject 里，而本插件的命名空间由自己挂载，若写进 inject
   // 会和自己等待的服务形成死锁，因此用 ctx.get（对未声明的服务合法）。
-  await ctx.remote.$mount(remoteContribution);
+  mounted.push(await ctx.remote.$mount(remoteContribution));
   const configService = ctx.get("remote.sandboxExtraRootsConfig") as ConfigRemoteService | undefined;
   if (configService === void 0) throw new Error("sandbox-extra-roots: remote.sandboxExtraRootsConfig did not materialize after mount");
   const getConfig = () => configService.get().then((result) => {
@@ -118,7 +126,9 @@ async function apply(ctx: ClientContext) {
     locale: NS,
     inject: () => ({ getConfig, setConfig })
   }, SandboxRootsCard));
+  return unmountRemote;
   } catch (error: unknown) {
+    await unmountRemote();
     console.error("[sandbox-extra-roots] client card failed to load (settings card missing):", error);
   }
 }

@@ -30,6 +30,7 @@ function makeClientRuntime(options: RuntimeOptions = {}) {
   const dictionaries: string[] = []
   const removedDictionaries: string[] = []
   const mounted: any[] = []
+  let unmounts = 0
   let remoteResult: { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } } = { ok: true, value: { items: [] } }
   const remoteService = {
     list: async () => remoteResult,
@@ -58,7 +59,14 @@ function makeClientRuntime(options: RuntimeOptions = {}) {
         return () => { removedDictionaries.push(ns) }
       },
     },
-    remote: { $mount: async (contribution: unknown) => { mounted.push(contribution) } },
+    // 官方契约：$mount 返回 TypertDisposer，apply 必须把它作为清理交回（丢 discard 会在
+    // 热重载/再启用时命中 already mounted）。
+    remote: {
+      $mount: async (contribution: unknown) => {
+        mounted.push(contribution)
+        return async () => { unmounts += 1 }
+      },
+    },
     slots: {
       inject(_slot: string, fn: () => void | (() => void)) {
         const dispose = fn()
@@ -82,6 +90,7 @@ function makeClientRuntime(options: RuntimeOptions = {}) {
   }
   return {
     ctx, registrations, mounted, dictionaries, removedDictionaries, dispose,
+    unmountCount: () => unmounts,
     setRemoteResult(result: typeof remoteResult) { remoteResult = result },
   }
 }
@@ -89,8 +98,9 @@ function makeClientRuntime(options: RuntimeOptions = {}) {
 describe('client apply：slot 注册 / 远程贡献挂载 / HMR dispose', () => {
   it('apply 挂载生成贡献、注册 locale 字典与 sidebar 入口；dispose 后全部回收', async () => {
     const runtime = makeClientRuntime()
-    await apply(runtime.ctx)
+    const cleanup = await apply(runtime.ctx)
 
+    expect(typeof cleanup).toBe('function')
     expect(runtime.mounted).toHaveLength(1)
     expect(runtime.mounted[0].package).toBe('@chaoset/session-archive')
     expect(runtime.dictionaries).toEqual([NS])
@@ -98,15 +108,20 @@ describe('client apply：slot 注册 / 远程贡献挂载 / HMR dispose', () => 
     expect(runtime.registrations.get('session-archive')?.options.locale).toBe(NS)
 
     runtime.dispose()
-    // HMR 处置：locale 字典与 slot 注册都被移除，不残留旧引用。
+    await cleanup?.()
+    // HMR 处置：locale 字典与 slot 注册都被移除，不残留旧引用；
+    // Remote 贡献也必须被卸载（否则下一次挂载 already mounted）。
     expect(runtime.removedDictionaries).toEqual([NS])
     expect(runtime.registrations.size).toBe(0)
+    expect(runtime.unmountCount()).toBe(1)
 
     // dispose 后重新 apply（等价 HMR reload）→ 重新注册且只注册一份。
-    await apply(runtime.ctx)
+    const cleanupAfterReload = await apply(runtime.ctx)
     expect(runtime.mounted).toHaveLength(2)
     expect(runtime.dictionaries).toEqual([NS, NS])
     expect(runtime.registrations.size).toBe(1)
+    await cleanupAfterReload?.()
+    expect(runtime.unmountCount()).toBe(2)
   })
 
   it('注入业务面：call 成功取 value、失败抛带 code 的结构化错误', async () => {
@@ -155,6 +170,8 @@ describe('client apply：slot 注册 / 远程贡献挂载 / HMR dispose', () => 
     try {
       await expect(apply(runtime.ctx)).resolves.toBeUndefined()
       expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('client panel failed to load'), expect.any(Error))
+      // 降级路径也必须卸载已挂载的贡献，避免下次启用 already mounted。
+      expect(runtime.unmountCount()).toBe(1)
     } finally {
       consoleError.mockRestore()
     }

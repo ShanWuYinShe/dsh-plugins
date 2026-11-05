@@ -47,8 +47,11 @@ function makeClientCtx(options: ClientCtxOptions = {}): any {
   })
   const slotsRegister = vi.fn()
   const slotsInject = vi.fn((_slot: string, fn: () => void) => fn())
+  // 官方契约：$mount 返回 TypertDisposer，调用方必须在 apply 卸载时调用它。
+  const remoteUnmount = vi.fn(async () => {})
   const remoteMount = vi.fn(async (_contribution: unknown) => {
     if (options.mountError !== undefined) throw options.mountError
+    return remoteUnmount
   })
   const configService = options.configService ?? {
     get: async () => ok({ config: { extraWritableRoots: [] } }),
@@ -60,6 +63,7 @@ function makeClientCtx(options: ClientCtxOptions = {}): any {
     slotsRegister,
     slotsInject,
     remoteMount,
+    remoteUnmount,
     locale: {
       // 用真实 zh 字典：断言用户可见文案（含 {message} 模板替换）。
       bind: (_ns: string) => (key: string) => (zh as Record<string, string>)[key] ?? key,
@@ -104,7 +108,7 @@ describe("client/index.tsx（jsdom）", () => {
 
   it("apply：注册 locale 字典（disposer 交回 effect）、mount 贡献、注册 keyed slot", async () => {
     const ctx = makeClientCtx()
-    await apply(ctx)
+    const cleanup = await apply(ctx)
 
     expect(ctx.localeRegister).toHaveBeenCalledWith(NS, { zh: expect.any(Object), en: expect.any(Object) })
     expect(ctx.remoteMount).toHaveBeenCalledWith({ namespace: "sandboxExtraRootsConfig", mocked: true })
@@ -120,6 +124,10 @@ describe("client/index.tsx（jsdom）", () => {
     // 卸载时 locale 字典 disposer 被调用（不再丢弃）。
     ctx._disposers.forEach((dispose: () => void) => dispose())
     expect(ctx.localeDispose).toHaveBeenCalledTimes(1)
+    // apply 返回的 disposer 必须卸载 Remote 贡献：否则禁用→启用/热重载时
+    // 第二次 $mount 命中 already mounted，设置卡片消失。
+    await cleanup?.()
+    expect(ctx.remoteUnmount).toHaveBeenCalledTimes(1)
   })
 
   it("getConfig 返回整个 get 结果（含 degraded），不是只取 config", async () => {
@@ -196,6 +204,8 @@ describe("client/index.tsx（jsdom）", () => {
     const ctx = makeClientCtx({ mountError: new Error("mount failed") })
     await expect(apply(ctx)).resolves.toBeUndefined()
     expect(ctx.slotsInject).not.toHaveBeenCalled()
+    // 没挂上就没有可卸载的贡献（清空逻辑必须容忍空表，不得二次抛错）。
+    expect(ctx.remoteUnmount).not.toHaveBeenCalled()
     expect(consoleError).toHaveBeenCalledWith(
       "[sandbox-extra-roots] client card failed to load (settings card missing):",
       expect.any(Error),
@@ -209,6 +219,8 @@ describe("client/index.tsx（jsdom）", () => {
     expect(consoleError).toHaveBeenCalledTimes(1)
     const message = String(consoleError.mock.calls[0]?.[1])
     expect(message).toContain("did not materialize after mount")
+    // 已挂载后降级：兜底路径必须自己卸载贡献，否则残留 already mounted。
+    expect(ctx.remoteUnmount).toHaveBeenCalledTimes(1)
   })
 
   it("locale 注册抛错：入口兜底，不注册 slot", async () => {
@@ -216,5 +228,6 @@ describe("client/index.tsx（jsdom）", () => {
     await expect(apply(ctx)).resolves.toBeUndefined()
     expect(ctx.slotsInject).not.toHaveBeenCalled()
     expect(consoleError).toHaveBeenCalledTimes(1)
+    expect(ctx.remoteUnmount).not.toHaveBeenCalled()
   })
 })
