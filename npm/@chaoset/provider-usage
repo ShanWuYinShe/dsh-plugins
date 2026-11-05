@@ -4,9 +4,46 @@
   "license": "MIT",
   "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
   "dist-tags": {
-    "latest": "0.2.4"
+    "latest": "0.2.5"
   },
   "versions": {
+    "0.2.5": {
+      "name": "@chaoset/provider-usage",
+      "version": "0.2.5",
+      "description": "DSH plugin: show the current LLM provider's remaining quota in the composer dock — a generic querier registry any provider plugin can extend",
+      "license": "MIT",
+      "engines": {
+        "node": ">=24.9.0",
+        "dsh": "0.2.2-rc.1"
+      },
+      "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/provider-usage#readme",
+      "repository": {
+        "url": "https://github.com/ShanWuYinShe/dsh-plugins",
+        "directory": "packages/provider-usage"
+      },
+      "keywords": [],
+      "dsh": {
+        "manifestVersion": 1,
+        "bundle": {
+          "patch": "./cordis.patch.yml"
+        },
+        "client": {
+          "platform": "web",
+          "inject": [
+            "@deepseek-ai/dsh-client-locale",
+            "@deepseek-ai/dsh-client-resources",
+            "@deepseek-ai/dsh-client-ui-conversation",
+            "@deepseek-ai/dsh-client-ui-renderer",
+            "@deepseek-ai/dsh-client-ui-model-selection"
+          ]
+        }
+      },
+      "dist": {
+        "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/provider-usage-v0.2.5/chaoset-provider-usage-0.2.5.tgz",
+        "integrity": "sha512-gAzRXb3BXsdf3V848Vyz0BCfIxxiT2L2TCjL2kq77uTk9FHva0cIGI3m1wsMU8m9z/MqTmVnmF6Rp5N2jI1k4w==",
+        "shasum": "3d5815b4ddcd7232399a1029772faac64a22f27d"
+      }
+    },
     "0.2.4": {
       "name": "@chaoset/provider-usage",
       "version": "0.2.4",
@@ -1512,6 +1549,7 @@
     }
   },
   "time": {
+    "0.2.5": "2026-11-05T10:18:00.000Z",
     "0.2.4": "2026-11-05T03:56:54.000Z",
     "0.2.3": "2026-11-04T16:47:44.000Z",
     "0.2.2": "2026-11-04T11:31:13.000Z",
