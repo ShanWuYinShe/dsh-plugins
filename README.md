@@ -127,6 +127,12 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 
 ### 方式一：插件索引（推荐，发现页一键安装）
 
+0. **一次性前置**：在目标 profile 的 `.npmrc` 声明 `@chaoset` 的 scoped registry。**不配置时，重启 DSH 后的卸载/更新会回退默认 registry（npmjs）并报 `ERR_PNPM_META_FETCH_FAIL` 404**；配置后 GUI 与 CLI 都直接可用、CLI 不再需要 `--registry`：
+
+   ```bash
+   printf '@chaoset:registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/\n' >> "$DSH_HOME/profiles/web/.npmrc"
+   ```
+
 1. 打开 DSH → **插件** → **实验性插件**，打开 **自定义插件索引**（Custom plugin indexes）；插件页会出现**发现**标签页。
 2. **发现** → **添加索引源**，填入：
 
@@ -135,22 +141,10 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
    ```
 
 3. 在**发现**页浏览本仓四个插件并点**安装**（卡片显示的即与你当前 DSH 版本精确匹配的最高版本）；进入插件页的**版本**列表可以安装历史版本（与你的宿主版本不匹配的会标「不兼容」并禁用安装）。**索引安装默认只下载并登记插件、不自动启用**：安装完成弹窗点**立即启用**（或在「已安装」列表打开开关），插件随即在线生效。
-4. **更新**：DSH 对自建 registry 的自动更新检查只在安装会话内生效（重启后「已安装」页查不到自建 registry 的新版本，这是 DSH 当前的设计限制）——
-   - 安装后**同一会话内**：「已安装」页可直接点**更新**；
-   - **重启 DSH 后**：用 CLI 把插件更新到指定版本（`<版本>` 见「发现」页或 Releases 页）：
-
-     ```bash
-     dsh plugin --profile web add @chaoset/dsh-any-connect@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
-     ```
-
-     provider-usage / sandbox-extra-roots / session-archive 把包名替换成 `@chaoset/<包名>` 即可。
-5. 卸载：优先在**插件 → 已安装**里点**卸载**（管理器知道本次进程安装时用的注册表，在线生效）；用 CLI 卸载时**必须带上自建 registry**，否则重启后在默认 npmjs 解析自建 registry 的 tarball 会报 `ERR_PNPM_META_FETCH_FAIL`（`registry.npmjs.org/@chaoset/...: 404`）：
-
-   ```bash
-   dsh plugin --profile web remove @chaoset/<包名> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
-   ```
-
-   > 想一劳永逸：在 `$DSH_HOME/profiles/<name>/.npmrc` 写入 `@chaoset:registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/`，之后 `pnpm` / `dsh plugin` 的 add / remove 都会回退到自建 registry。
+4. **更新**：配好第 0 步的 scoped registry 后，更新在**安装后同一会话内**和**重启 DSH 后**都可用——
+   - GUI：**插件 → 已安装 → 插件详情 → 版本**，检查后点「更新到 `<版本>`」（重启后仍然有效）；
+   - CLI：`dsh plugin --profile web add @chaoset/<包名>@<版本>`（不再需要 `--registry`）。
+5. 卸载：GUI 用**插件 → 已安装 → 插件详情 → 卸载**；CLI 用 `dsh plugin --profile web remove @chaoset/<包名>`（配好第 0 步的 scoped registry 后不需要 `--registry`）。未配置 registry 的 profile 才需要临时补 `--registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/` 兜底。
 
 索引只提供元数据与安装来源（npm 包名 + 静态 registry），安装/更新仍走 DSH 自带的 pnpm 安装与 bundle 对账流程；索引收录的每个版本都对应本仓的一个 GitHub Release 资产。用索引安装时，插件的宿主运行时依赖由宿主 profile runner 的 runtime resolution 提供（不写入 profile 的 `node_modules`）；需要把依赖装进 profile 时请用下面的 tarball 方式。**因此本仓插件发布的 tarball 运行期零依赖**（`dependencies`/`optionalDependencies` 为空，宿主依赖只放 `devDependencies`）——否则 pnpm 会按 tarball 里的依赖声明去静态 registry 解析它们而 `ERR_PNPM_FETCH_404`，装过一个带运行期依赖的版本后，同一 profile 再装/更新其它插件会失败。
 
@@ -192,7 +186,7 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 # 从本地源码安装（开发调试时使用绝对路径）
 dsh plugin --profile web add /absolute/path/to/dsh-plugins/packages/dsh-any-connect
 
-# 卸载插件（必须带自建 registry：见上节说明；GUI 的「已安装 → 卸载」不需要）
+# 卸载插件（配好第 0 步的 scoped registry 后无需 --registry；未配置时才需要下面的 REGISTRY）
 REGISTRY=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
 dsh plugin --profile web remove @chaoset/dsh-any-connect --registry=$REGISTRY
 dsh plugin --profile web remove @chaoset/provider-usage --registry=$REGISTRY
@@ -204,7 +198,7 @@ dsh plugin --profile web remove @chaoset/session-archive --registry=$REGISTRY
 
 ### 常见安装排障
 
-- **重启后用 CLI 卸载/更新报 `ERR_PNPM_META_FETCH_FAIL`（`registry.npmjs.org/@chaoset/...: 404`）**：`pnpm remove` 会按默认 registry 校验/解析 lockfile 里来自自建 registry 的 tarball；`dsh plugin` 在常驻进程之外执行时拿不到「本进程安装该包时用的注册表」，回退到 pnpm 配置的默认 registry（npmjs）。处理：命令补 `--registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/`，或在 profile 目录配置上文说明的 scoped `.npmrc`；GUI「已安装 → 卸载/更新」由插件管理器带注册表执行，不受影响。
+- **重启后用 CLI 卸载/更新报 `ERR_PNPM_META_FETCH_FAIL`（`registry.npmjs.org/@chaoset/...: 404`）**：`pnpm remove` 会按默认 registry 校验/解析 lockfile 里来自自建 registry 的 tarball；`dsh plugin` 在常驻进程之外执行时拿不到「本进程安装该包时用的注册表」，回退到 pnpm 配置的默认 registry（npmjs）。处理：在 profile 目录配置第 0 步的 scoped `.npmrc`（一劳永逸，GUI/CLI 都恢复）；临时也可给命令补 `--registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/`。
 
 - **更新/卸载报「无法移除 X」+「其他配置仍在用这个组合包的组件，请先停用它们」**：这是 DSH 0.2.2-rc.1 插件管理器的已知误报，不代表真有别的配置在用它。管理器的卸载顺序是「取消选入 → 在线重组合 → 检查该组合包声明的行是否仍在运行 → `pnpm remove`」；当这次重组合只能等重启才生效（`restart-required`，例如运行时包目录/安装映射与磁盘不一致）时，宿主会先把这些行原地恢复并重启，紧接着的「行存活」检查就把它们误当成「其他配置仍在使用」。
   常见诱因：在插件管理器**之外**改动过 profile 依赖（手工编辑 `package.json`、删 `node_modules`、外部 `pnpm` 操作）后再安装/更新插件，安装映射与磁盘不一致。处理：重启 DSH（`dsh web`）后重新卸载/更新。失败不会回滚已写入的「取消选入」，若重启后仍看不到更新，按上面方式用 CLI 重新安装该插件（带 `--registry`）即可恢复。

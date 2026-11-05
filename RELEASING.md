@@ -671,13 +671,14 @@ node scripts/plugin-market.mjs build --out /tmp/market-site --registry-url http:
 - **安装**：发现页选版本 → `pluginManager.installBundle` → pnpm add 走索引里的 registry，可用。
 - **更新（同一进程内）**：安装成功后 plugin-manager 把 registry 记在内存，同一会话的
   「已安装」页版本检查/更新沿用该 registry，可用。
-- **更新（重启后）**：内存态丢失，「已安装」页回落到 profile 配置的 registry（npmjs/
-  npmmirror），查不到本仓新版本——这是 DSH 对非 npm 源的设计限制。发现页的更新标记仍会显示
-  （基于索引里的推荐版本），重启后请用
-  `dsh plugin --profile web add @chaoset/<pkg>@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/`，
-  或继续用 Release tarball URL。
-- **禁止**把自建 registry 写入用户 profile 的 pnpm 配置：那会劫持该 profile 的全局 registry，
-  影响其它插件安装；索引里的 `source.registry` 只对单次安装生效。
+- **更新/卸载（重启后）**：管理器只在内存里记「本进程安装时用的 registry」，重启后回落到 pnpm 配置。
+  只要 profile 的 `.npmrc` 里有 scoped `@chaoset:registry=<market>/npm/`（包 README「首次使用前」的一次性配置），
+  pnpm 的查询与 remove 都会命中自建 registry：重启后 GUI「已安装 → 插件详情 → 版本」仍能检查并更新，
+  GUI 卸载与 `dsh plugin add/remove` 也都不再需要 `--registry`。
+  未配置 scoped registry 的 profile 才会回退 npmjs 并报 404 / 查不到更新。
+- **只允许 scoped 形式**：profile 的 `.npmrc` 写 `@chaoset:registry=<market>/npm/`（只影响 `@chaoset` 包，是安装后的必要一次性配置）；
+  **禁止**写不成 scope 的全局 `registry=`——那会劫持该 profile 的所有 npm 解析，影响其它插件安装。
+  索引里的 `source.registry` 只对单次安装生效。
 
 ## 手动兜底
 

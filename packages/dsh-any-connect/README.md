@@ -62,11 +62,21 @@ https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/index.json
 ```
 
 即可在发现页一键安装本插件、查看与安装任意历史版本（索引与静态 registry 由 CI 从
-GitHub Releases 生成，发布在独立的 `market` 发布产物分支根目录（CI 生成，禁止手工编辑））。重启 DSH 后更新到指定版本
-（DSH 对自建 registry 的自动更新检查只在安装会话内生效）：
+GitHub Releases 生成，发布在独立的 `market` 发布产物分支根目录（CI 生成，禁止手工编辑））。
+
+**首次使用前（一次性）**：在目标 profile 的 `.npmrc` 里声明 `@chaoset` 的 scoped registry。不配置时，重启 DSH 后
+GUI/CLI 的卸载与更新会回退默认 registry（npmjs）并报 `ERR_PNPM_META_FETCH_FAIL` 404：
 
 ```bash
-dsh plugin --profile web add @chaoset/dsh-any-connect@<版本> --registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/
+printf '@chaoset:registry=https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/\n' >> "$DSH_HOME/profiles/web/.npmrc"
+```
+
+配置后，安装/启用/停用/卸载/更新都可在 GUI 完成（重启后同样可用，`已安装 → 插件详情 → 版本` 可直接更新）；
+CLI 也不再需要 `--registry`：
+
+```bash
+dsh plugin --profile web add @chaoset/dsh-any-connect@<版本>
+dsh plugin --profile web remove @chaoset/dsh-any-connect
 ```
 
 ### 方式二：tarball URL（手动）
@@ -86,7 +96,7 @@ dsh plugin --profile web add /absolute/path/to/dsh-plugins/packages/dsh-any-conn
 dsh plugin --profile web remove @chaoset/dsh-any-connect
 ```
 
-`<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。安装后重启 harness 生效。
+`<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。启用 HMR 的 web profile 会在线重组合，安装/启停/卸载/更新无需重启。
 
 > **运行时依赖**：本包不再自带 `@earendil-works/pi-ai` 副本（原 optionalDependency 会装出第二份
 > pi-ai 实例与整棵传递依赖）。pi-ai 随宿主 `dsh-llm-pi-ai` 的依赖闭包解析，与本插件共享同一
