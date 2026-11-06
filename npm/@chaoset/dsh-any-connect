@@ -4,9 +4,47 @@
   "license": "MIT",
   "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/dsh-any-connect#readme",
   "dist-tags": {
-    "latest": "0.4.33"
+    "latest": "0.5.0"
   },
   "versions": {
+    "0.5.0": {
+      "name": "@chaoset/dsh-any-connect",
+      "version": "0.5.0",
+      "description": "DSH plugin: bring models offered by WorkBuddy-style desktop agents into DeepSeek Harness — zero configuration, per-model thinking effort, and billing rate at a glance",
+      "license": "MIT",
+      "engines": {
+        "node": ">=24.9.0",
+        "dsh": "0.2.2-rc.1"
+      },
+      "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/dsh-any-connect#readme",
+      "repository": {
+        "url": "https://github.com/ShanWuYinShe/dsh-plugins",
+        "directory": "packages/dsh-any-connect"
+      },
+      "keywords": [],
+      "bin": {
+        "dsh-any-connect": "./lib/bin.js"
+      },
+      "dsh": {
+        "manifestVersion": 1,
+        "bundle": {
+          "patch": "./cordis.patch.yml"
+        },
+        "client": {
+          "platform": "web",
+          "inject": [
+            "@deepseek-ai/dsh-client-locale",
+            "@deepseek-ai/dsh-client-ui-plugin-manager",
+            "@deepseek-ai/dsh-client-ui-renderer"
+          ]
+        }
+      },
+      "dist": {
+        "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/dsh-any-connect-v0.5.0/chaoset-dsh-any-connect-0.5.0.tgz",
+        "integrity": "sha512-6IQI9MjZfh06cll/UIsl3RsKfXRn/w6wDBRQ657SXDOAA1gfqwRVfHlE55ToyWGAiotmjYVqxflazSlvN20kNA==",
+        "shasum": "0a56f3e28ac8b15d4772ccb99084ea33a1343505"
+      }
+    },
     "0.4.33": {
       "name": "@chaoset/dsh-any-connect",
       "version": "0.4.33",
@@ -2712,6 +2750,7 @@
     }
   },
   "time": {
+    "0.5.0": "2026-11-06T04:49:30.000Z",
     "0.4.33": "2026-11-05T10:13:26.000Z",
     "0.4.32": "2026-11-05T03:51:51.000Z",
     "0.4.31": "2026-11-04T16:43:01.000Z",
