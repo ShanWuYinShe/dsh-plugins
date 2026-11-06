@@ -1,3 +1,24 @@
+## 0.5.0 (2026-11-06)
+
+### 新增
+
+* **策略化限流观测（标准头 + 多策略 + 持久化）**：`rate-limit.ts` 升级为策略感知台账——
+  * 解析 IETF `RateLimit` / `RateLimit-Policy`（`t`/`w` 为 delta 秒）、旧版
+    `RateLimit-Limit`/`RateLimit-Remaining`/`RateLimit-Reset`、RFC 9110 `Retry-After`、
+    `X-RateLimit-Reset`（epoch 秒/毫秒，兼容 delta 秒写法），以及 OpenAI / Anthropic
+    风格厂商头（仅 `remaining === 0` 的策略用于解释 429）；恢复时刻仍只取上游明说的事实；
+  * 观测新增 `policy` / `scope` / `metric` / `limit` / `remaining` / `windowSeconds`，
+    台账行键改为 `provider + model + policy`：同一模型的多条策略分别记录、互不覆盖，
+    一次 429 可落多条；
+  * 带明确 `resetAt` 的观测经 storageDomain 新表 `rate_limits` 持久化，DSH 重启后
+    继续提示（无 reset 的观测仍只有进程内 TTL）；恢复不会用旧快照覆盖更新鲜的观测；
+  * 配置页卡片逐条展示策略详情（policy/metric/余量/配额/窗口）。
+
+### 文档
+
+* README「上游限流」补标准头/厂商头口径、持久化行为与「观测台账 ≠ 标准 RateLimit
+  状态机」的边界说明；安装/卸载章节补 scoped registry 一次性前置与重启后行为。
+
 ## 0.4.33 (2026-11-05)
 
 ### 修复
