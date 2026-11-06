@@ -4,9 +4,46 @@
   "license": "MIT",
   "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
   "dist-tags": {
-    "latest": "0.3.34"
+    "latest": "0.3.35"
   },
   "versions": {
+    "0.3.35": {
+      "name": "@chaoset/session-archive",
+      "version": "0.3.35",
+      "description": "DSH plugin: browse archived sessions, inspect their content, batch-restore or permanently delete them with multi-select",
+      "license": "MIT",
+      "engines": {
+        "dsh": "0.2.2-rc.1",
+        "node": ">=24.9.0"
+      },
+      "homepage": "https://github.com/ShanWuYinShe/dsh-plugins/tree/main/packages/session-archive#readme",
+      "repository": {
+        "url": "https://github.com/ShanWuYinShe/dsh-plugins",
+        "directory": "packages/session-archive"
+      },
+      "keywords": [],
+      "dsh": {
+        "manifestVersion": 1,
+        "bundle": {
+          "patch": "./cordis.patch.yml"
+        },
+        "client": {
+          "platform": "web",
+          "inject": [
+            "@deepseek-ai/dsh-client-ui-renderer",
+            "@deepseek-ai/dsh-client-locale",
+            "@deepseek-ai/dsh-api-remotes",
+            "@deepseek-ai/dsh-api-workspace-controller",
+            "@deepseek-ai/dsh-api-session-controller"
+          ]
+        }
+      },
+      "dist": {
+        "tarball": "https://github.com/ShanWuYinShe/dsh-plugins/releases/download/session-archive-v0.3.35/chaoset-session-archive-0.3.35.tgz",
+        "integrity": "sha512-R+wW719Ci2k6w09iSASRbVqf0Wcz68hQ4mdWq+hxm+hdNyBVRLbHzaDjOrigtQrJUhVEbmXGOUcFTDth2r5QWw==",
+        "shasum": "64888cdd96933dbfcebe42e6a4d8c8720e73bfdb"
+      }
+    },
     "0.3.34": {
       "name": "@chaoset/session-archive",
       "version": "0.3.34",
@@ -1509,6 +1546,7 @@
     }
   },
   "time": {
+    "0.3.35": "2026-11-06T05:02:13.000Z",
     "0.3.34": "2026-11-04T16:56:45.000Z",
     "0.3.33": "2026-11-04T11:39:32.000Z",
     "0.3.33-alpha.2": "2026-11-03T11:13:59.000Z",
