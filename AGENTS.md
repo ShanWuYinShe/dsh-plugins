@@ -14,7 +14,7 @@ bun run build           # 四段：tsc 编译 host → typert 工件生成 → e
 bun run typert          # 只生成 Typert 工件（./typert + ./remote，scripts/typert.mjs）
 bun run typecheck       # host + client 两套 tsconfig --noEmit（先自动生成 Typert 工件）
 bun run test            # vitest 回归（先跑 scripts/build.mjs 构建，含 typert + esbuild 产物）
-bun run test:ci         # build + typecheck + test（提交/发布前必跑）
+bun run test:ci         # build + typecheck + test（CI 门禁 Test job 执行；本地不在提交前必跑）
 bun run test:stability  # 测试确定性压测：多轮全量 + 多并发档位（见「约定」的确定性要求）
 bun run test:coverage   # build + vitest --coverage + 逐文件覆盖率棘轮（基线 scripts/coverage-baseline.json）
 bun run coverage:ratchet --write  # 覆盖率提升后刷新逐文件基线（只升不降；确需放宽用 --write --lower 并在提交信息说明）
@@ -29,6 +29,30 @@ bun run adapt <dsh 新线版本>    # dsh 宿主升级适配（--dry-run 预览�
 阶段 4 bin 自包含。client 源码用包自引用子路径 `import "@chaoset/<pkg>/remote"`，
 esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typert 生成必须
 在 client 打包之前。`lib/` 与 `client/client.cjs` 都是 gitignore 的构建产物。
+
+## CI 门禁与本地验证分工
+
+重活（全量测试、稳定性压测、覆盖率、依赖审计、打包）一律交给 GitHub Actions，本地只跑秒级检查。
+完整流程见全局 skill `github-ci-flow`：开发分支推送 → `gh pr create` → `gh pr checks --watch` 全绿 →
+`gh pr merge --rebase --delete-branch` → 本地 `git pull --ff-only` 并清理 worktree。
+
+- 本地（提交前，秒级；worktree 内先 `bun install --frozen-lockfile` 一次）：
+  - `bun run dsh-status`（约 3s，「分支选择铁律」的动手前置核对）；
+  - 改源码后 `bun run build`（约 2s：tsc + Typert 生成 + client 打包 + bin 自包含）与 `bun run typecheck`（约 2s：host/client 两套 tsconfig --noEmit）；
+  - `git diff --check`（改动无行尾空白、无冲突标记）；
+  - 改 AGENTS.md / skill 时跑 `~/.agents/bin/skill-lint`（必须无 ERROR）；纯文档改动只需 `git diff --check` + `skill-lint`。
+  `bun run test:ci`、`bun run test:stability`、`bun run test:coverage`、`bun run audit` 是分钟级重活，本地不跑。
+- CI 覆盖（`.github/workflows/test.yml` 的 `Test` job；`push` / `pull_request` 目标 `main` 与 `alpha`，
+  paths 过滤含 `*.md` 与 `.agents/**`，改 AGENTS.md 会触发）：
+  - `bun install --frozen-lockfile`；
+  - `bun run test:ci`（build + typecheck + vitest 全量回归）；
+  - `bun run test:stability`（仅 alpha 线：push `alpha` 或 PR 目标 `alpha`；main 待命期不跑）；
+  - `bun run audit`（OSV 依赖审计，命中已知漏洞即红灯）。
+  同一 ref 连续推送会取消旧 run（concurrency）。另有 `security-audit.yml` 每周一全量深查传递依赖；
+  `publish.yml` 在发版 tag 推送时执行测试 → 稳定性回归 → 发布门禁 → pack → GitHub Release。
+- 合并一律走 PR：待命期 PR 目标 `main`；活跃期功能/修复落 `alpha`，收敛时压缩成单个基于 main 的提交后同样以 PR 合入 `main`（分支模型见「分支选择铁律」与 RELEASING.md）。
+- CI 覆盖不到、必须本地/真机验证的：**真实 DSH 测试实例验证**（独立 `DSH_HOME` + 本地路径安装插件 + 浏览器验证功能与控制台）——发布前必须实际执行，CI 只跑自动化测试（见 RELEASING.md「日常发布流程」）；Linux 平台行为以 CI 的 ubuntu-24.04 为准，平台相关用例按「约定」保持平台无关，无需本地容器复跑。
+- 发版/发布门禁不变：发布门槛仍是「功能完成 + `bun run test:ci` 全绿 + DSH 测试实例验证通过」，其中 `test:ci` 与稳定性/门禁校验由 CI（`Test` job / `publish.yml`）执行；bump 版本后**逐个**推 tag 触发 `publish.yml`，tag 纪律见 RELEASING.md「tag 推送纪律」与 skill `dsh-plugin-tag`。`market` 分支是发布产物分支，禁止手工编辑、不作为 PR 目标。
 
 ## 分支选择铁律：动手前必跑 `bun run dsh-status`
 

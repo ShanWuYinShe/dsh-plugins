@@ -195,8 +195,8 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
 
 ## 日常发布流程
 
-**发布门槛：功能完全实现 + 本地 `bun run test:ci` 全绿 + dsh 测试实例真实
-验证通过，三者齐备才 bump 版本并推送。** 正式版 tag 的 publish 流水还会执行
+**发布门槛：功能完全实现 + CI `test.yml` 全绿（PR 与 main）+ dsh 测试实例真实
+验证通过，三者齐备才 bump 版本并合并发布。** 正式版 tag 的 publish 流水还会执行
 `node scripts/dsh-follow-status.mjs --strict`：main 基线必须等于 npm 最新正式版
 （最新 rc），否则阻断发布；活跃期 alpha 预发布不受此约束（main 按设计搁置）。 版本一旦归档（git tag + Release）不可
 撤回，"发布后
@@ -208,9 +208,9 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    先跑 `bun run dsh-status` 确认状态：
    - **待命期**（进行中预发布线为“无”）：**无需创建或维护 `alpha` 分支**，目标分支直接为 **`main`**，版本号使用**纯 semver 正式版**（如 `0.4.1`），发正式 Release。
    - **活跃期**（存在进行中的新 alpha 线）：若尚未创建 `alpha` 分支，先从最新 `main` 创建 `alpha` 分支（`git checkout -b alpha main`）并跑 `bun run adapt <新线版本>`；目标分支为 **`alpha`**，版本号带 **`-alpha.N` / `-rc.N`**，发 prerelease Release；`main` 搁置。
-   确认目标分支后，在目标分支修改代码，`bun run test:ci` 全绿。
+   确认目标分支后，在目标分支修改代码并推送分支开 PR，CI `test.yml` 全绿。
 2. 启动隔离测试实例（独立 `DSH_HOME` + 本地路径安装插件），在真实浏览器
-   里验证功能与控制台（详见 AGENTS.md「发布纪律」）。未通过就回到 1，
+   里验证功能与控制台（详见 AGENTS.md「CI 门禁与本地验证分工」）。未通过就回到 1，
    **不要 push**。
 3. 验证通过后，为每个受影响的包：
    - 在 `CHANGELOG.md` 顶部新增 `## <版本> (YYYY-MM-DD)` 小节——GitHub
@@ -225,9 +225,10 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    必须互相印证——提交信息声称的每一项变更都要能在 diff 里找到，diff 里的
    每一处行为变更都要有 CHANGELOG 与版本号对应。**任何一项对不上就不要推**。
    另跑一遍 `bun run gate` 干跑，确认门禁视角下该版本可发布。
-5. 推送分支。CI（`.github/workflows/test.yml`）只跑测试，永远不发布。
-6. **明确要发版时才打 tag**（annotated，详见 skill dsh-plugin-tag）：
-   `git tag -a <目录>-v<版本> -m "<包名> v<版本>"` 后，**逐个**执行
+5. 推分支并开 PR。CI（`.github/workflows/test.yml`）只跑测试，永远不发布；全绿后 `gh pr merge --rebase --delete-branch` 合入目标分支。
+6. **明确要发版时才打 tag**（annotated，详见 skill dsh-plugin-tag）：先
+   `git fetch --prune && git pull --ff-only` 让本地目标分支与远程一致（tag 必须落在已合并的提交上），再
+   `git tag -a <目录>-v<版本> -m "<包名> v<版本>"`，然后**逐个**执行
    `git push origin <目录>-v<版本>`——一次只推一个 tag，推完确认它触发了流水
    并跑完，再推下一个（纪律见下节）。
    tag 推出去即发版——CI（`.github/workflows/publish.yml`）对该 tag 执行：测试 →
@@ -251,14 +252,14 @@ Actions 里零条 push 流水，4 个 Release 全靠事后手工 `workflow_dispa
 36014048743 被顶成 cancelled、36014057179 成功）。等待不增加总耗时——并发组本来
 就把这些 run 串行化了。
 
-多包同发（monorepo 常态）的固定顺序：**先推分支**（`git push` 只跑测试，让 tag
-落在远程已存在的提交上）→ **再逐个 tag 推送并逐条确认**：
+多包同发（monorepo 常态）的固定顺序：**先合并 PR**（分支 push / PR 的 CI 只跑
+测试、不发布；tag 落在合并后的目标分支提交上）→ **再逐个 tag 推送并逐条确认**：
 
 ```bash
 bun run gate                       # 干跑，确认该版本可发布
+git fetch --prune && git pull --ff-only  # 确认目标分支已包含要发布的提交（PR 已合并）
 git tag -a <目录>-v<版本> -m "<包名> v<版本>"
 git show <tag> --stat              # 核对 tag 指向的提交与内容
-git push                           # 先推分支（只跑测试）
 
 for t in <目录1>-v<版本1> <目录2>-v<版本2>; do
   git push origin "$t" || break
@@ -314,7 +315,7 @@ done
   到达 main 后按稳定线宿主版本核对依赖，`bun install` 重新生成 lockfile。
   两分支的 lockfile 差异巨大，跨分支直接 merge 它们必然冲突。收敛的完整做法
   （`adapt` 到该线最新 rc、去预发布后缀、`reset --soft origin/main` 压缩成单个
-  提交、ff 合入 main）见「双线生命周期」第 4 步。
+  提交、以 PR 合入 main）见「双线生命周期」第 4 步。
 - **搁置期不搬「基础设施」**：根文档（`AGENTS.md` / `RELEASING.md` /
   `README.md`）、`scripts/`、`.github/workflows/`、根 `package.json` 等也只在
   alpha 更新，不在搁置期 cherry-pick 到 main——搁置期 main 不开发不发布，提前
@@ -339,7 +340,7 @@ bun pm why @deepseek-ai/dsh-agent            # 验收：应为唯一基线实例
 bun run build                               # 重新生成 lib/ 与 Typert 工件（见下节）
 # 对照新宿主的 diff 复核用到的契约（参照历史 CHANGELOG 的记录方式），
 # 升版本号、写 CHANGELOG，然后：
-bun run test:ci && git push
+git push                            # CI test.yml 在 alpha 分支上跑 test:ci
 ```
 
 宿主升级后必须重跑 `bun run build`：Typert 工件由构建期生成器按当前宿主契约
@@ -387,8 +388,8 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
 最新」这类历史搬运。
 
 > **起点必须是「当下的最新 main」**，不能复用上一轮的旧分支、也不能从旧
-> main 分叉。这样 alpha 永远是 main 的后代：收敛时 `merge --ff-only` 必然
-> 可行，且**基线天然继承稳定线的全部成果**，不依赖人工搬运。反例（2026-09-15
+> main 分叉。这样 alpha 永远是 main 的后代：收敛时以 PR 合入 main 必然可合并，
+> 且**基线天然继承稳定线的全部成果**，不依赖人工搬运。反例（2026-09-15
 > 实际发生）：某轮 alpha 从 09-13 的旧 main 分叉，而 main 在 09-14 又落了
 > 一次稳定线修复，导致 alpha 祖先链上**缺那次修复**，只能靠提交信息里的人工
 > 「同步稳定线修复」补内容——一旦漏搬，收敛时就会把稳定线的修复覆盖掉。
@@ -437,14 +438,15 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
       `git merge`（会产生 merge commit）；禁止 `git merge --squash`（会绕过
       alpha 历史，且本条流程要求压缩在 alpha 侧完成）。**
 
-   c. **验证后合入 main 并发布**：`bun run test:ci` 全绿 + 隔离实例真实
-      验证，然后 `git merge --ff-only <alpha 分支>`（此刻它已是 main 的
-      后代，必然可 ff）→ 推送 `main`（只跑测试），再给各包打 tag 发版
-      （无后缀正式版即 `latest`；**逐个推 tag、逐个确认**，见「tag 推送纪律」）。
+   c. **验证后合入 main 并发布**：CI `test.yml` 全绿 + 隔离实例真实
+      验证；从 alpha 开 PR（base `main`，head `alpha`）→ CI 全绿 →
+      `gh pr merge --rebase`。合并后在主工作树 `git fetch --prune && git pull --ff-only`，
+      再给各包打 tag 发版（无后缀正式版即 `latest`；**逐个推 tag、逐个确认**，
+      见「tag 推送纪律」）。alpha 分支保留到收敛发布完成，再按第 5 步彻底删除。
 
    > 若收敛期间 main 因**紧急热修**又前进了，`origin/main` 已不是刚才那位，
    > 需先把这条已压缩的提交 rebase 到最新 `origin/main` 之上（`git rebase
-   > origin/main`）再 ff 合并——`reset --soft` 的目标必须始终是当下的
+   > origin/main`），再推送 alpha 分支开 PR——`reset --soft` 的目标必须始终是当下的
    > `origin/main`。
 
    > **索引源 URL 固定，不受分支变化影响**：站点发布在独立的 `market` 分支，`alpha` 线、
@@ -698,7 +700,8 @@ node scripts/plugin-market.mjs build --out /tmp/market-site --registry-url http:
 
 > main 的 `publish.yml` 已是迁移后的 GitHub Release 流水（`bun pm pack` +
 > `gh release create`；alpha 线 926cbb8 完成迁移，已随收敛进入 main）：
-> 稳定线紧急热修照常推 main、打 tag 即可走 CI 产出 Release。下述完全手工
+> 稳定线紧急热修同样走 PR 合入 main（不得直推 main；已开启分支保护时如需
+> 紧急合并，由管理员按平台规则绕过），再打 tag 走 CI 产出 Release。下述完全手工
 > 兜底只在 CI 整体不可用时才需要。
 
 CI tag 流水失败、或需要完全手工发版时，按顺序兜底：
@@ -717,6 +720,7 @@ CI tag 流水失败、或需要完全手工发版时，按顺序兜底：
 
 ## 分支保护（暂不开启）
 
-当前只有仓库所有者一人提交，未开启分支保护。若未来开放协作或 PR，建议给
+合并按 PR + CI 全绿流程执行；当前未开启平台分支保护，required status checks 只是
+流程约定、不是平台强制（不要因为能合并就跳过等待）。若未来开放协作，建议给
 `main` 与 `alpha` 开保护并要求 "Test" check 通过；发版 tag（`<目录>-v*`）
 建议另用 ruleset 限制推送者——推 tag 即发版，tag 推送本身没有二次确认。
