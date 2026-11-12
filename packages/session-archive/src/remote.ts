@@ -38,14 +38,14 @@ import { stat, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-api-remote-access';
-import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session';
+import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session';
 import { foldSessionTitle } from '@deepseek-ai/dsh-session-title';
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { createHostContext } from './archive-host-context.js';
 import type { HostContext, StatFile } from './archive-host-context.js';
 import { assertSessionId, assertSessionIdArray } from './session-id.js';
 import type { SessionArchiveConfig } from './plugin-config.js';
-import { limitedConcurrency, messageText, removeSessionDirIfOwned, scanSession } from './session-scan.js';
+import { messageText, removeSessionDirIfOwned, scanSession } from './session-scan.js';
 import type {
   ArchiveCountResult,
   ArchiveDeleteResult,
@@ -209,29 +209,18 @@ export class SessionArchiveGateway extends TypertRemoteService {
 
   /** 列出全部归档会话（文件已删的幽灵归档记录不显示）。
    * 无具体会话参数，入口按 global 判定；返回前逐行过滤，非 owner 只看到
-   * 自己的会话（官方 session/list 同款）。 */
+   * 自己的会话（官方 session/list 同款）。
+   *
+   * 行的装配（存在性过滤、标题解析与体积/mtime）全部在 archivedRows 内：
+   * 标题优先读官方持久化 projection 缓存（零 I/O），只有未命中的 id 才回退
+   * 官方批量/直读；紧凑的元数据复用 stat 快照的 location 单次 stat。 */
   @Remote('list')
   async list(signal: AbortSignal): Promise<ArchiveListResult> {
     signal.throwIfAborted();
-    const { archivedSet, snapshotsByIds, readTitlesBulk, rowFor, cfg } = this.deps;
+    const { archivedSet, archivedRows } = this.deps;
     const archived = [...archivedSet()];
     if (archived.length === 0) return { items: [] };
-    const snapshots = await snapshotsByIds(archived, signal);
-    const rows: Array<{ sessionId: string; header: SessionHeader }> = [];
-    for (const sessionId of archived) {
-      const snapshot = snapshots.get(sessionId);
-      if (snapshot === undefined) continue; // 幽灵 id：会话文件已不存在
-      rows.push({ sessionId, header: snapshot.header });
-    }
-    // 标题优先走官方索引批量读（无 sessionQuery/整单失败时 readTitlesBulk
-    // 返回 null，逐行回退直读；单行 rejected 同理）。存在性过滤与体积/mtime
-    // 仍以文件为准，不受索引影响。
-    const bulk = await readTitlesBulk(rows.map(({ sessionId }) => sessionId as SessionId), signal);
-    const items = await limitedConcurrency(
-      cfg.titleReadConcurrency,
-      rows.map(({ sessionId, header }) => () => rowFor(sessionId as SessionId, header, bulk, signal)),
-      signal,
-    );
+    const items = await archivedRows(archived, signal);
     return { items: items.filter((item) => this.allows(item.sessionId)) };
   }
 

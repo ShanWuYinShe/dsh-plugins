@@ -933,10 +933,10 @@
       "lines": 96.29
     },
     "packages/session-archive/src/archive-host-context.ts": {
-      "statements": 90.08,
-      "branches": 85,
-      "functions": 94.11,
-      "lines": 93.06
+      "statements": 91.02,
+      "branches": 86.53,
+      "functions": 96.15,
+      "lines": 93.75
     },
     "packages/session-archive/src/config.ts": {
       "statements": 100,
@@ -957,12 +957,18 @@
       "lines": 100
     },
     "packages/session-archive/src/remote.ts": {
-      "statements": 86.24,
-      "branches": 78.37,
-      "functions": 91.42,
-      "lines": 88.55
+      "statements": 85.39,
+      "branches": 77.77,
+      "functions": 90.62,
+      "lines": 87.97
     },
     "packages/session-archive/src/session-id.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/session-archive/src/session-projection-bridge.ts": {
       "statements": 100,
       "branches": 100,
       "functions": 100,

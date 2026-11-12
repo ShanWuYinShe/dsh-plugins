@@ -61,9 +61,12 @@ dsh plugin --profile web remove @chaoset/session-archive
 ## 工作原理
 
 - **列表**：宿主归档集合 ∩ 逐 id 持久化快照（官方 `stat(id)`，不枚举实例上
-  的全部历史会话）；标题优先走宿主标题索引（`sessionQuery` 批量读，索引
-  可用时全程零事件流读取），索引缺席/失败时回退折叠会话事件流的最后一个
-  `session/title` 事件（事件流分块读取，峰值内存有界）；体积来自文件 stat。
+  的全部历史会话）；标题优先读宿主官方持久化 projection 缓存
+  （`ctx.sessionProjectionCache.cachedSnapshot()`，与官方会话列表同一数据源，
+  零 I/O，命中时不读日志），缓存未命中才回退 `sessionQuery` 批量标题/折叠会话
+  事件流的最后一个 `session/title` 事件（事件流分块读取，峰值内存有界），并按
+  文件 mtime 在进程内缓存结果；体积/修改时间来自快照 `location` 的单次文件 stat。
+  归档会话很多时，首屏成本不再与「逐条读整本日志」成正比。
 - **查看**：只读解析会话事件流，提取用户/助手文本消息；超过 `detailMaxMessages`
   条时截断并如实标注。
 - **恢复**：仅从归档集合移除仍存在持久化文件的会话 id，会话数据不动；文件已删
@@ -137,6 +140,9 @@ config 字段（`cordis.patch.yml`；配置只走官方 config-editor，旧版�
   无等待的文件复验：文件被重建会再删一次，仍存在则记 `reappeared` 失败。
 - 首行损坏的孤儿日志被宿主枚举静默跳过：面板既看不到也无法经面板删除（删除
   会因 `unenumerable` 被拒绝），只能手动清理文件。
+- 宿主未挂载持久化 projection 缓存（部分 headless/SDK 部署）时，列表标题只能在
+  首次展开时回退批量/逐条读日志（结果随后按 mtime 缓存）； `web` 部署默认挂载该
+  缓存，不付这笔成本。
 - 恢复归档走 DSH 官方的 `WorkspaceRegistry.unarchiveSession()`（宿主必填
   契约，缺失即契约漂移，typecheck 直接红灯）。
 - 归档会话的列表/计数对非 owner Peer 逐会话授权过滤；详情/删除/恢复沿用官方

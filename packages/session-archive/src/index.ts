@@ -12,6 +12,8 @@
  *   持久化句柄、文件/事件原语）；五个能力方法本体在 remote.ts
  * - session-scan.ts — 会话文件扫描与读取助手
  * - session-query-bridge.ts — sessionQuery 可选服务的唯一探测入口（自有最小契约）
+ * - session-projection-bridge.ts — 官方持久化 projection 缓存（sessionProjectionCache）
+ *   的唯一探测入口：归档列表标题的零 I/O 来源（自有最小契约）
  * - plugin-config.ts — 插件身份与配置默认值/归一化
  * - config.ts — 插件配置的公开形状与 Loader 校验 schema（入口导出的 Config）
  * - types.ts — Remote 服务面的公共边界类型（typert 生成器引用）
