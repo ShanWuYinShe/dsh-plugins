@@ -269,7 +269,9 @@ describe('host-heartbeat：写/读/清、进程起点与存活判定', () => {
       }
       return realKill(pid, signal)
     }) as typeof process.kill)
-    const base = { version: 1 as const, package: 'dsh-any-connect' as const, pluginVersion: 'x', registeredAt: 0, pid: 1234 }
+    // pid 取必然不存在的值：本用例模拟 kill(0) 成功、但读不到进程起点（沙盒拦截或不存在的 pid）。
+    // 若用真实可能存在的 pid（曾用 1234），在 ps 可用的环境会读到起点并被判成回收 pid，用例随环境漂移。
+    const base = { version: 1 as const, package: 'dsh-any-connect' as const, pluginVersion: 'x', registeredAt: 0, pid: 999_999_999 }
     ;(globalThis as { __killCode?: string }).__killCode = 'EPERM'
     expect(isHeartbeatProcessAlive(base)).toBe(true)
     ;(globalThis as { __killCode?: string }).__killCode = 'ESRCH'
