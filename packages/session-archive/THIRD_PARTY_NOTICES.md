@@ -15,7 +15,7 @@ runtime resolution 供给，不在本清单范围内。
 
 | 组件 | 版本 | 许可 | 版权声明 |
 | --- | --- | --- | --- |
-| `@deepseek-ai/dsh-typert-protocol`（`./remote-info`） | 0.2.2-rc.1 | MIT | Copyright (c) 2026 DeepSeek |
+| `@deepseek-ai/dsh-typert-protocol`（`./remote-info`） | 0.2.2-rc.2 | MIT | Copyright (c) 2026 DeepSeek |
 
 升级宿主基线（`engines.dsh`）或 `@deepseek-ai/dsh-typert-protocol` 后，请确认
 `client/client.cjs` 的内联闭包与本表一致（构建产物中出现 `jsonSchemaError` 即表示

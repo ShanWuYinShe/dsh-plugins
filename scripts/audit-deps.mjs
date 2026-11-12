@@ -37,14 +37,7 @@ const deep = process.argv.includes("--deep");
  * 本仓不受影响、或为什么不能单方面升级**。只登记确定无法在本仓内消解的项，
  * 并在宿主基线升级后复核删除（security-audit 的深层审计仍会引用这些条目）。
  */
-const ACCEPTED_ADVISORIES = new Map([
-  [
-    "GHSA-mrhx-c7xc-m3w5 zod@4.4.3",
-    "zod 只在本仓 devDependencies 里精确 pin 4.4.3（Typert 生成工件运行期从宿主平台表取同名实例，"
-      + "发布物零运行期依赖、不携带 zod）；该版本与宿主 DSH 0.2.2-rc.1 各包解析一致，单方面升级会与"
-      + "宿主运行时的 zod 实例不匹配。等宿主基线升级 zod 后随 adapt 同步。",
-  ],
-]);
+const ACCEPTED_ADVISORIES = new Map([]);
 
 // 收集逻辑见 ./lib/dep-collect.mjs（纯逻辑 + 单测）；这里只做分支选择与 I/O 供给。
 let deps;

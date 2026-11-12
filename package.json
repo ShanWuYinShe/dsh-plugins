@@ -28,8 +28,8 @@
   ],
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
-    "@deepseek-ai/dsh-plugin-market-index": "^0.2.2-rc.1",
-    "@deepseek-ai/dsh-typert-generator": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-plugin-market-index": "^0.2.2-rc.2",
+    "@deepseek-ai/dsh-typert-generator": "^0.2.2-rc.2",
     "@types/node": "^26.6.5",
     "esbuild": "^0.28.2",
     "semver": "^7.8.5",
@@ -55,6 +55,6 @@
     "audit": "node scripts/audit-deps.mjs"
   },
   "engines": {
-    "dsh": "0.2.2-rc.1"
+    "dsh": "0.2.2-rc.2"
   }
 }

@@ -46,14 +46,14 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
     // 分级过滤、去重，非法 patch 值经 warn 可见（不静默忽略）。每次 apply 换新
     // 目录缓存与生效根，下一次 resolve 即用「当前这一代配置」。
     const extraRoots = normalizeRoots(cfg, warn)
-    // Windows 官方 ACL 进程沙盒不支持 additionalWritableRoots：rc.1 的
-    // sandbox-local 在 windows-acl rung 的 confine() 里显式抛
-    // SandboxUnsupportedPolicyError（lib/index.js windowsAclRunnerArgv）。若把
-    // 根并入 policy，该平台每一条受限命令都会失败；因此这里不并入（fs fence
-    // 同样不授予，避免"文件工具可用、命令全挂"的分叉），并显式降级让设置卡
-    // 可见。README 的已知限制与此一致。
+    // Windows 官方 ACL 进程沙盒不消费 additionalWritableRoots：0.2.2-rc.2 的
+    // 官方语义是「进程沙盒忽略额外根、文件工具仍按策略生效」；rc.1 则是
+    // sandbox-local 在 windows-acl rung 的 confine() 里直接抛
+    // SandboxUnsupportedPolicyError（该错误类在 rc.2 已删除）。若把根并入 policy，
+    // 该平台会出现「文件工具能用、每条受限命令都用不了」的分叉；因此这里不并入，
+    // 并显式降级让设置卡可见。README 的已知限制与此一致。
     if (process.platform === 'win32' && extraRoots.length > 0) {
-      throw new Error('Windows ACL confinement does not support additional writable roots (official sandbox-local rejects the policy); extra writable roots are not applied on this platform')
+      throw new Error('Windows ACL process sandbox ignores additional writable roots (official rc.2 semantics: file tools honor the policy but the process sandbox does not); extra writable roots are not applied on this platform to keep command and file-tool behavior consistent')
     }
     merge.update(extraRoots, rootsFilter, warn)
     merge.install()

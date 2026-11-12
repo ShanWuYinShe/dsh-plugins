@@ -76,10 +76,11 @@ describe("npm bundle metadata", () => {
       // 官方生成器 workspace.ts 的 validateExport 用 Array.includes 逐字校验
       // （不认目录通配，"lib" 不等于包含 lib/typert.host.js），官方发布包同样
       // 逐个列出。少列一条 = 生成失败/发布产物缺入口。
-      // 配送面（2026-11-04 审计后）：只发布运行时真正加载的产物——
-      // - lib 用 `lib/*.js` + `lib/*.d.ts` 通配（不再整目录发布 sourcemap /
-      //   declaration map；官方 cookbook「Do not publish src, declaration maps,
-      //   JS maps」）；
+      // 配送面：只发布运行时真正加载的产物——
+      // - lib 用 `lib/*.js` + `lib/*.d.ts` 通配（不整目录发布 sourcemap / JS map）；
+      // - 唯一例外：有 Remote 服务面的包必须随包发布 Typert 客户端声明映射
+      //   `lib/typert.remote-client.d.ts.map`——生成声明带 sourceMappingURL，官方
+      //   生成器 workspace.ts 要求该文件逐条进 files，缺了构建直接失败；
       // - client 只发构建产物 `client/client.cjs`（源码 .tsx 不随包发布）。
       // 有 Remote 服务面的包仍**逐条**列出 Typert 工件与 ./types：官方生成器
       // workspace.ts 的 validateExport 用 Array.includes 逐字校验（不认目录通配），
@@ -106,6 +107,7 @@ describe("npm bundle metadata", () => {
             "lib/typert.host.d.ts",
             "lib/typert.remote-client.js",
             "lib/typert.remote-client.d.ts",
+            "lib/typert.remote-client.d.ts.map",
             "lib/types.js",
             "lib/types.d.ts",
             "client/client.cjs",

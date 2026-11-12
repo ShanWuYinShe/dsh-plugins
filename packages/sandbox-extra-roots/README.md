@@ -118,10 +118,10 @@ macOS 的 `/private`，仅 POSIX——Windows 暂无对应条目）被过滤，�
 
 - **Windows 不支持额外可写根（进程沙盒）**：官方 Windows ACL 进程沙盒
   （`@deepseek-ai/dsh-sandbox-local` 的 `windows-acl` rung）不消费
-  `SandboxExecutionPolicy.additionalWritableRoots`——0.2.2-rc.1 在
-  `workspace-write` 且存在额外根时会在 `confine()` 直接抛
-  `SandboxUnsupportedPolicyError`（`sandbox-local` 的 `windowsAclRunnerArgv`；
-  官方 README 也只承诺 Seatbelt/bwrap/Landlock 支持该字段）。因此本插件在
-  Windows 上**不会**把配置的额外根并入官方策略（否则每条受限命令都会失败），
-  设置卡显示「额外可写根当前未生效」；文件工具的 fs fence 在该平台同样不会获得
-  这些额外根。需要额外可写目录时请把工作区放在目标路径下，或改用 macOS/Linux。
+  `SandboxExecutionPolicy.additionalWritableRoots`——0.2.2-rc.2 的官方语义是
+  「进程沙盒忽略额外根、文件工具仍按策略生效」（rc.1 则在 `workspace-write` 且
+  存在额外根时于 `confine()` 直接抛 `SandboxUnsupportedPolicyError`，该错误类在
+  rc.2 已删除；官方 README 也只承诺 Seatbelt/bwrap/Landlock 支持该字段）。因此本插件
+  在 Windows 上**不会**把配置的额外根并入官方策略——避免出现「文件工具可用、每条
+  受限命令都失败」的能力分叉；设置卡显示「额外可写根当前未生效」。需要额外可写
+  目录时请把工作区放在目标路径下，或改用 macOS/Linux。

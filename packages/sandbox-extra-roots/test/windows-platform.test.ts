@@ -7,11 +7,12 @@ import { apply } from "../src/index.js"
 import { canon } from "../src/roots.js"
 
 /**
- * Windows 平台护栏：官方 win32 链只有 windows-acl runner，而 rc.1 的
- * @deepseek-ai/dsh-sandbox-local 在 `windowsAclRunnerArgv` 里对
- * workspace-write + additionalWritableRoots 显式抛 SandboxUnsupportedPolicyError
- * （lib/index.js windowsAclRunnerArgv）。本插件因此在该平台不并入配置根，
- * 并降级为「可见的未生效」，避免每条受限命令都失败。
+ * Windows 平台护栏：官方 win32 链只有 windows-acl runner，不消费
+ * SandboxExecutionPolicy.additionalWritableRoots——0.2.2-rc.2 的官方语义是
+ * 「进程沙盒忽略额外根、文件工具仍按策略生效」；rc.1 则在 windowsAclRunnerArgv 里
+ * 对 workspace-write + 额外根显式抛 SandboxUnsupportedPolicyError（该错误类已在
+ * rc.2 删除）。本插件因此在该平台不并入配置根，并降级为「可见的未生效」，避免
+ * 「文件工具可用、每条受限命令都用不了」的能力分叉。
  *
  * 平台用 getter 打桩（与宿主侧测试一致），用例结束恢复真实平台。
  */
@@ -86,8 +87,8 @@ describe("Windows ACL 平台护栏", () => {
     const ctx = makeCtx(policy)
     await apply(ctx, { extraWritableRoots: [extra] })
 
-    // 官方 policy 完全不变（不注入 additionalWritableRoots → 不会触发官方
-    // SandboxUnsupportedPolicyError），也不安装 resolve 包装。
+    // 官方 policy 完全不变（不注入 additionalWritableRoots → 不产生
+    // 文件工具与受限命令的能力分叉），也不安装 resolve 包装。
     expect(policy.resolve().additionalWritableRoots).toBeUndefined()
     expect(Object.hasOwn(policy, "resolve")).toBe(false);
 

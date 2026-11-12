@@ -71,7 +71,7 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   卡片标题回退裸包名、图标回退通用图形。文案/图标须与 `PACKAGE_DISPLAY` 同源，
   由 `test/plugin-display-meta.test.ts` 锁住。
 - **兼容声明**：插件对 DSH 的兼容性用官方 `engines.dsh`，且必须写**精确宿主版本**
-  （如 `0.2.2-rc.1`，不写 `^` / `~` / `>=`）；依赖 range 仍是 `^X`，由
+  （如 `0.2.2-rc.2`，不写 `^` / `~` / `>=`）；依赖 range 仍是 `^X`，由
   `bun run adapt` 同步维护，`dsh-baseline` 严格核对「range 的 `^X` ↔ `engines.dsh`
   的精确 `X`」。DSH 升级很可能不兼容旧版本，因此每次升级都要重发对应插件版本；
   不要使用自造字段 `dsh.host`（宿主不认识该字段）。
