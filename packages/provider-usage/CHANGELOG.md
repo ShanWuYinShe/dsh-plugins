@@ -1,3 +1,12 @@
+## 0.3.1 (2026-11-12)
+
+### 优化
+
+* **适配 DSH 宿主 0.2.2-rc.2（稳定线）**：`@deepseek-ai/dsh-*` 依赖 range → `^0.2.2-rc.2`，
+  `engines.dsh` → 精确 `0.2.2-rc.2`。宿主 `dsh-deepseek-account` 在本版重构为
+  `TypertRemoteService`，本插件依赖的 `getBalance()` 与 `AccountClientMetadata` /
+  `AccountDetails` / `AccountWallet` 均未变，无需代码改动。
+
 ## 0.3.0 (2026-11-06)
 
 ### 新增

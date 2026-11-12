@@ -1,3 +1,12 @@
+## 0.3.36 (2026-11-12)
+
+### 优化
+
+* **适配 DSH 宿主 0.2.2-rc.2（稳定线）**：`@deepseek-ai/dsh-*` 依赖 range → `^0.2.2-rc.2`，
+  `engines.dsh` → 精确 `0.2.2-rc.2`；`zod` 跟随宿主升到 `4.6.6`；Typert 客户端声明映射
+  `lib/typert.remote-client.d.ts.map` 按官方生成器 rc.2 的 `validateExport` 新要求随包发布。
+  rc.2 对 `dsh-api-session-controller` 的破坏性调整不在本插件 import 面内，无需代码改动。
+
 ## 0.3.35 (2026-11-06)
 
 ### 修复
