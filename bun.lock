@@ -104,7 +104,7 @@
     },
     "packages/session-archive": {
       "name": "@chaoset/session-archive",
-      "version": "0.3.36",
+      "version": "0.3.37",
       "devDependencies": {
         "@deepseek-ai/cordis": "~4.1.0",
         "@deepseek-ai/cordis-plugin-loader": "~1.1.0",
@@ -119,6 +119,7 @@
         "@deepseek-ai/dsh-session": "^0.2.2-rc.2",
         "@deepseek-ai/dsh-session-persistence": "^0.2.2-rc.2",
         "@deepseek-ai/dsh-session-persistence-jsonl": "^0.2.2-rc.2",
+        "@deepseek-ai/dsh-session-projection-cache": "^0.2.2-rc.2",
         "@deepseek-ai/dsh-session-query": "^0.2.2-rc.2",
         "@deepseek-ai/dsh-session-title": "^0.2.2-rc.2",
         "@deepseek-ai/dsh-typert-protocol": "^0.2.2-rc.2",
@@ -338,6 +339,8 @@
     "@deepseek-ai/dsh-session-persistence-jsonl": ["@deepseek-ai/dsh-session-persistence-jsonl@0.2.2-rc.2", "", { "dependencies": { "@deepseek-ai/dsh-llm": "0.2.2-rc.2", "@deepseek-ai/dsh-session-format": "0.2.2-rc.2", "@deepseek-ai/dsh-session-format-catalog": "0.2.2-rc.2", "@deepseek-ai/dsh-session-format-v3-to-v4": "0.2.2-rc.2", "@deepseek-ai/node-addon-system": "~0.1.2", "@deepseek-ai/schemastery": "~3.19.0", "koffi": "3.1.1", "p-limit": "7.3.3" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.1.0", "@deepseek-ai/dsh-session": "0.2.2-rc.2", "@deepseek-ai/dsh-session-persistence": "0.2.2-rc.2" } }, "sha512-kF/idyzf7sZM5JvoZFgxPSZC3+keDWTIZa8AfZ3KcAJ5m5RwUOx1CMcq7bKaZ4weV4fjg+LyZ1vHfGVb4nIs1g=="],
 
     "@deepseek-ai/dsh-session-projection": ["@deepseek-ai/dsh-session-projection@0.2.2-rc.2", "", { "dependencies": { "zod": "4.6.6" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.1.0", "@deepseek-ai/dsh-session": "0.2.2-rc.2" } }, "sha512-QF7WEX4SIe6qJmwJdgzX51F+ytVN1wl7ojUwnhGk39YXpgumuyVlQqCtBrqzuKMMdMjrCWCoPKCvVxZQKCWGhA=="],
+
+    "@deepseek-ai/dsh-session-projection-cache": ["@deepseek-ai/dsh-session-projection-cache@0.2.2-rc.2", "", { "dependencies": { "@deepseek-ai/dsh-util-values": "0.2.2-rc.2", "@deepseek-ai/schemastery": "~3.19.0", "zod": "4.6.6" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.1.0", "@deepseek-ai/dsh-session": "0.2.2-rc.2", "@deepseek-ai/dsh-session-projection": "0.2.2-rc.2", "@deepseek-ai/dsh-storage-domain": "0.2.2-rc.2" } }, "sha512-ULm5aUDv8cjSOfbaFUEAGlLje89yt3XqWMFutl/+vl57g+c5jX7a6TW9R8Nd1USVZLKXUTLUDYKqzYeN1mtggA=="],
 
     "@deepseek-ai/dsh-session-query": ["@deepseek-ai/dsh-session-query@0.2.2-rc.2", "", { "dependencies": { "@deepseek-ai/dsh-session-format-catalog": "0.2.2-rc.2" }, "peerDependencies": { "@deepseek-ai/cordis": "~4.1.0", "@deepseek-ai/dsh-brand": "0.2.2-rc.2", "@deepseek-ai/dsh-llm": "0.2.2-rc.2", "@deepseek-ai/dsh-session": "0.2.2-rc.2", "@deepseek-ai/dsh-session-persistence": "0.2.2-rc.2", "@deepseek-ai/dsh-session-projection": "0.2.2-rc.2", "@deepseek-ai/dsh-session-projection-cache": "0.2.2-rc.2", "@deepseek-ai/dsh-session-title": "0.2.2-rc.2", "@deepseek-ai/dsh-tool-todo": "0.2.2-rc.2" }, "optionalPeers": ["@deepseek-ai/dsh-session-persistence", "@deepseek-ai/dsh-session-projection", "@deepseek-ai/dsh-session-projection-cache"] }, "sha512-nzOU+s5ql+giHM3UuQuBNj4m7JGUffhgKgQ4nVAnNkBT2Oy203FWPpdHdFaxpBpBEUmUPgKbKX5AB6r7SQJ3OQ=="],
 

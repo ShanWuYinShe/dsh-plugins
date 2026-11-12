@@ -85,12 +85,18 @@ function makeFixture(options: {
   /** sessionQuery 标题索引桩：map 给 fulfilled 标题（缺席=无标题）、
    * reject 列单行 rejected、throwAll 整单抛错。不传=无该服务（回退直读）。 */
   titles?: { map?: Record<string, string>; reject?: string[]; throwAll?: boolean };
+  /** 官方持久化 projection 缓存桩：map 给零 I/O 标题（null=缓存明确无标题）、
+   * miss 列返回 undefined（缓存行不可用）、throwFor 列抛错（模拟坏行）。
+   * 不传=无该服务（回退 sessionQuery/直读）。 */
+  projectionTitles?: { map?: Record<string, string | null>; miss?: string[]; throwFor?: string[] };
   /** 观测点：ctx.sessions.get 每次被调用时回调。删除路径只在 exclusive
    * 临界区内部调它，用例据此获得「删除已持锁」的确定性同步点，不再靠
    * delay(50) 之类的墙钟窗口。 */
   onSessionGet?: (sessionId: string) => void;
   /** remoteAccess.allows 桩：默认全放行（owner）；给 false 走非 owner 过滤。 */
   remoteAllows?: (sessionId: string) => boolean;
+  /** 覆盖 stat 行为（测「快照 location 失效/竞态」等；返回 undefined = 枚举不到）。 */
+  stat?: (id: string) => Promise<Record<string, unknown> | undefined>;
 } = {}) {
   const registryState = {
     initialized: true,
@@ -130,6 +136,7 @@ function makeFixture(options: {
   // 四端点都走 stat 逐 id 定位，不做全量 list()。
   persistenceMock.stat = async (id: string) => {
     statCalls++;
+    if (options.stat !== undefined) return options.stat(id);
     if (!headers.some((h) => h.id === id) || !fs.existsSync(sessionPath(id))) return void 0;
     const header = headerOf(id);
     return {
@@ -184,6 +191,17 @@ function makeFixture(options: {
         });
     },
   };
+  // 官方持久化 projection 缓存桩（可选服务）：cachedSnapshot 零 I/O 读 title，
+  // cachedPredecessorTitle 在测试里恒不可用（跨代际 hint 由桥自身覆盖）。
+  const projectionCache = options.projectionTitles === undefined ? undefined : {
+    cachedSnapshot: (header: { id: string }, keys?: readonly string[]) => {
+      if (keys === undefined || !keys.includes("title")) throw new Error("fixture: projection keys must include title");
+      if (options.projectionTitles!.throwFor?.includes(header.id) === true) throw new Error("fixture: corrupt cached row");
+      if (options.projectionTitles!.miss?.includes(header.id) === true) return void 0;
+      return { values: { title: options.projectionTitles!.map?.[header.id] ?? null } };
+    },
+    cachedPredecessorTitle: () => void 0,
+  };
   // 刻意的部分桩：只实现被测路径用到的服务面，单点断言为完整 Context。
   // get() 按真实 Cordis 语义实现（缺席服务返回 undefined）：可选服务探测
   // 走 get，直读属性在真 Proxy 下会抛，没有 get 方法的极简 ctx 同样被覆盖。
@@ -192,6 +210,7 @@ function makeFixture(options: {
     sessionPersistence: persistenceMock,
     sessions: { get: (id: string) => { options.onSessionGet?.(id); return sessions.get(id); } },
     ...(sessionQuery === undefined ? {} : { sessionQuery }),
+    ...(projectionCache === undefined ? {} : { sessionProjectionCache: projectionCache }),
   };
   const ctx = {
     ...services,
@@ -345,6 +364,91 @@ describe("session-archive host", () => {
       throw new Error("expected session-archive/not-archived RemoteError");
     }
     expect((await archiveHost.detail("a1")).title === "T-a1").toBe(true);
+  });
+
+  it("list: 标题优先读官方 projection 缓存（零 I/O），不读日志也不调 sessionQuery", async () => {
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-projcache-"));
+    const f = makeFixture({
+      archived: ["p1", "p2"],
+      headers: [
+        { id: "p1", cwd: "/proj/p", createdAt: 1000 },
+        { id: "p2", cwd: "/proj/p", createdAt: 2000 },
+      ],
+      // 一旦被调用就会记数：用来证明 projection 命中时没有走这条贵路径。
+      titles: { map: {} },
+      projectionTitles: { map: { p1: "缓存标题 1", p2: null } },
+    });
+    const archiveHost = await f.gateway(baseCfg);
+    // 文件里写一个不同的标题：命中缓存时不应被读到。
+    writeSession("p1", [{ type: "session/title", seq: 1, time: 1, data: { title: "文件标题", messageSeqs: [], source: { kind: "fallback" } } }]);
+    writeSession("p2", []);
+    const beforeReads = f.eventReads();
+    const result = await archiveHost.list();
+    const rowOf = (id: string) => result.items.find((i) => i.sessionId === id)!;
+    expect(rowOf("p1").title).toBe("缓存标题 1");
+    expect(rowOf("p2").title === null).toBe(true);
+    expect(f.eventReads()).toBe(beforeReads);
+    expect(f.titleCalls()).toBe(0);
+  });
+
+  it("list: 快照 location 失效时回退完整定位（迁移/竞态），行仍带体积与 mtime", async () => {
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-locfallback-"));
+    const moved = path.join(saRoot, "--proj--", "r1", "moved.jsonl");
+    const f = makeFixture({
+      archived: ["r1"],
+      headers: [{ id: "r1", cwd: "/proj/r", createdAt: 1000 }],
+      projectionTitles: { map: { r1: "缓存标题" } },
+      // 快照 location 指向不存在的 moved.jsonl：locateSnapshotFile 的快路径
+      // stat 失败，回退 fileInfo → 目录里仍能扫到真实代际 session.jsonl。
+      stat: async (id: string) => (id === "r1"
+        ? { header: { id: "r1", cwd: "/proj/r", createdAt: 1000 }, revision: "r1:rev", sizeBytes: 1, location: { kind: "jsonl", path: moved } }
+        : void 0),
+    });
+    const archiveHost = await f.gateway(baseCfg);
+    writeSession("r1", []);
+    const row = (await archiveHost.list()).items[0]!;
+    expect(row.title).toBe("缓存标题");
+    expect(row.size > 0 && row.updatedAt > 0).toBe(true);
+  });
+
+  it("list: projection 未命中且批量标题缺该行时回退逐条直读", async () => {
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-bulkmiss-"));
+    const f = makeFixture({
+      archived: ["d1"],
+      headers: [{ id: "d1", cwd: "/proj/d", createdAt: 1000 }],
+      projectionTitles: { miss: ["d1"] },
+      titles: { reject: ["d1"] },
+    });
+    const archiveHost = await f.gateway(baseCfg);
+    writeSession("d1", [{ type: "session/title", seq: 1, time: 1, data: { title: "直读标题", messageSeqs: [], source: { kind: "fallback" } } }]);
+    const row = (await archiveHost.list()).items[0]!;
+    expect(row.title).toBe("直读标题");
+  });
+  it("list: projection 缓存未命中/坏行才回退批量标题，并写回 mtime 缓存", async () => {
+    saRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sa-projmiss-"));
+    const f = makeFixture({
+      archived: ["c1", "m2", "b3"],
+      headers: [
+        { id: "c1", cwd: "/proj/p", createdAt: 1000 },
+        { id: "m2", cwd: "/proj/p", createdAt: 2000 },
+        { id: "b3", cwd: "/proj/p", createdAt: 3000 },
+      ],
+      titles: { map: { m2: "索引标题", b3: "坏行回退标题" } },
+      projectionTitles: { map: { c1: "缓存标题" }, miss: ["m2"], throwFor: ["b3"] },
+    });
+    const archiveHost = await f.gateway(baseCfg);
+    for (const id of ["c1", "m2", "b3"]) writeSession(id, []);
+    const first = await archiveHost.list();
+    const rowOf = (id: string) => first.items.find((i) => i.sessionId === id)!;
+    expect(rowOf("c1").title).toBe("缓存标题");
+    expect(rowOf("m2").title).toBe("索引标题");
+    expect(rowOf("b3").title).toBe("坏行回退标题");
+    expect(f.titleCalls()).toBe(1); // 只对未命中的两个 id 调一次
+    // 第二轮：projection 命中的 c1 仍零 I/O，m2/b3 已写回 mtime 缓存（文件未变），
+    // 不再触发批量标题；两次 list 都不读事件流。
+    await archiveHost.list();
+    expect(f.titleCalls()).toBe(1);
+    expect(f.eventReads()).toBe(0);
   });
 
   it("删除语义:显式状态 busy/冷会话可删/ghost 不可确认即拒绝/not-archived/unenumerable 孤儿/批量部分失败聚合", async () => {

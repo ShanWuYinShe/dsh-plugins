@@ -18,6 +18,8 @@ import type { SessionPersistence, SessionPersistenceSnapshot } from '@deepseek-a
 // （SessionQueryTitles）。官方 d.ts 漂移不会再渗进 host 上下文。
 import { resolveSessionQueryTitles } from './session-query-bridge.js'
 import type { SessionQueryTitles } from './session-query-bridge.js'
+import { resolveCachedArchiveTitle } from './session-projection-bridge.js'
+import type { CachedArchiveTitle } from './session-projection-bridge.js'
 import type { WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import { name } from './plugin-config.js'
 import type { SessionArchiveConfig } from './plugin-config.js'
@@ -46,6 +48,11 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig, statF
   const ctxGet = (ctx as { get?: unknown }).get;
   const sessionQueryTitles: SessionQueryTitles | undefined =
     typeof ctxGet === 'function' ? resolveSessionQueryTitles(ctxGet.bind(ctx)) : undefined;
+  /** 官方持久化 projection 缓存（可选服务，运行时探测）。
+   * 归档列表的标题正常情况下全部由它零 I/O 提供——sessionQuery 的批量标题
+   * 对 cold 会话其实是逐条整读日志，不能当索引用（见 archivedRows）。 */
+  const readCachedTitle: CachedArchiveTitle | undefined =
+    typeof ctxGet === 'function' ? resolveCachedArchiveTitle(ctxGet.bind(ctx)) : undefined;
   const registry: WorkspaceRegistry = ctx.workspaceRegistry;
   const persistence: SessionPersistence = ctx.sessionPersistence;
 
@@ -234,9 +241,13 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig, statF
   }
 
   /**
-   * 批量读标题（官方标题索引存在时）：O(1)/id，不用 open 整条事件流。
-   * 返回 null 表示整单回退直读；Map 缺席的 id 表示该行 rejected，调用方
-   * 对该行回退直读。标题语义与直读一致（latest-wins fold，缺标题为 null）。
+   * 批量读标题（官方 sessionQuery 服务存在时）。
+   *
+   * 成本边界：官方实现对 **cold 会话** 是逐条整读日志折 title
+   * （`readColdSessionLog`），并非 O(1) 索引读——归档越多越贵。因此调用方
+   * 只在 projection 缓存与 mtime 缓存都未命中时才用它；返回 null 表示整单
+   * 回退直读，Map 缺席的 id 表示该行 rejected（调用方对该行回退直读）。
+   * 标题语义与直读一致（latest-wins fold，缺标题为 null）。
    *
    * live-preferred 的说明：归档会话已从会话列表移除、无法继续对话，不会
    * 再写持久化文件，内存与文件中的标题必然收敛；展示用标题取 fresher
@@ -267,56 +278,123 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig, statF
   const TITLE_CACHE_LIMIT = 500;
   const titleCache = new Map<string, { mtimeMs: number; title: string | null }>();
 
-  /** 单个归档会话的展示行。标题读取失败回退 null（面板显示目录名）。
-   * 标题按 mtime 缓存：readTitle 会解析整条事件流，而面板关闭态的徽标
-   * 轮询每 5 秒打一次 list——不缓存的话就是"读整本会话只为取一行标题"的
-   * 持续开销。mtime 不变即命中缓存；文件不可定位（宿主未给出 location）
-   * 时跳过缓存直接读，标题仍然可得。折叠用官方 foldSessionTitle。
-   * 缓存有上限（FIFO 淘汰最旧条目）：已删除会话的条目不再被 mtime 命中
-   * 更新，长驻 host 进程下无界累积。 */
-  async function rowFor(sessionId: SessionId, header: SessionHeader, titles: Map<string, string | null> | null, signal?: AbortSignal): Promise<ArchiveListRow> {
-    const file = await fileInfo(header, signal);
-    const located = file.state === 'located' ? file : null;
-    let title: string | null = null;
-    if (titles !== null && titles.has(sessionId)) {
-      // bulk 命中：索引本就新鲜，跳过缓存与直读。
-      title = titles.get(sessionId) ?? null;
-    } else if (located !== null) {
-      const cached = titleCache.get(sessionId);
-      if (cached !== undefined && cached.mtimeMs === located.mtimeMs) {
-        title = cached.title;
-      } else {
-        let readFailed = false;
-        try {
-          title = await readTitle(persistence, sessionId, signal);
-        } catch {
-          readFailed = true;
-        }
-        // 读取失败不写缓存:归档会话文件几乎不再变化,mtime 命中条件会把
-        // 一次瞬时 I/O 失败固化为长期"(无标题)"且永不重试。本次回退 null
-        //(面板显示目录名),下次轮询自然重试。
-        if (!readFailed) {
-          if (titleCache.size >= TITLE_CACHE_LIMIT) {
-            const oldest = titleCache.keys().next().value;
-            if (oldest !== undefined) titleCache.delete(oldest);
-          }
-          titleCache.set(sessionId, { mtimeMs: located.mtimeMs, title });
-        }
-      }
-    } else {
-      try {
-        title = await readTitle(persistence, sessionId, signal);
-      } catch {}
+  /** 标题 mtime 缓存命中：文件未变即复用上次折叠结果（null 是有效标题态）。 */
+  function titleFromMtimeCache(sessionId: SessionId, mtimeMs: number): string | null | undefined {
+    const cached = titleCache.get(sessionId);
+    return cached !== undefined && cached.mtimeMs === mtimeMs ? cached.title : undefined;
+  }
+
+  /** 记一条标题 mtime 缓存（FIFO 上限：已删除会话的条目不再被命中更新）。 */
+  function rememberTitle(sessionId: SessionId, mtimeMs: number, title: string | null): void {
+    if (titleCache.size >= TITLE_CACHE_LIMIT) {
+      const oldest = titleCache.keys().next().value;
+      if (oldest !== undefined) titleCache.delete(oldest);
     }
-    return {
-      sessionId,
-      title,
-      cwd: header.cwd ?? null,
-      createdAt: header.createdAt,
-      updatedAt: located !== null ? located.mtimeMs : header.createdAt,
-      size: located !== null ? located.size : 0,
-      live: isLive(sessionId),
-    };
+    titleCache.set(sessionId, { mtimeMs, title });
+  }
+
+  /**
+   * 从 stat 快照定位会话文件（列表行的快路径）。
+   *
+   * `persistence.stat()` 返回的 `location.path` 就是该会话当前代际的权威
+   * 落盘文件（后端已完成代际解析与首行校验），因此列表行直接 stat 它即可；
+   * 不再逐行重跑 `persistence.stat()`（每行 O(项目目录数) 的全目录扫描）+
+   * 代际目录 readdir。stat 失败（快照后迁移/删除的竞态）才退回 `fileInfo`
+   * 的完整定位与 unknown/absent 语义。
+   */
+  async function locateSnapshotFile(snapshot: SessionPersistenceSnapshot, signal?: AbortSignal): Promise<FileStatus> {
+    const locationPath = snapshot.location?.path;
+    if (typeof locationPath === 'string' && locationPath.length > 0) {
+      try {
+        const info = await stat(locationPath);
+        return { state: 'located', path: locationPath, size: info.size, mtimeMs: info.mtimeMs };
+      } catch {
+        // 竞态：快照之后文件被迁走/删除 → 走完整定位（旧代际扫描 + unknown 兜底）。
+      }
+    }
+    return fileInfo(snapshot.header, signal);
+  }
+
+  /**
+   * 归档会话的展示行（面板 list 的数据面）。
+   *
+   * 性能契约（大量归档时必须成立）：
+   * 1. 标题先读官方持久化 projection 缓存 `cachedSnapshot()`（零 I/O、同步），
+   *    命中即不再碰日志。列表慢路径是 `sessionQuery.readTitleSnapshots()`——
+   *    它对 cold 会话逐条整读日志，归档越多越慢，因此只作缓存未命中回退。
+   * 2. 未命中 projection 缓存时再看本插件 mtime 缓存（同文件不重复折叠），
+   *    仍未命中才走官方批量/逐条直读，并把成功结果写回 mtime 缓存。
+   * 3. 行元数据（size/updatedAt）复用 stat 快照的 location 单次 stat，
+   *    不再逐行重跑 persistence.stat + 代际目录扫描。
+   */
+  async function archivedRows(archived: readonly string[], signal?: AbortSignal): Promise<ArchiveListRow[]> {
+    if (archived.length === 0) return [];
+    const snapshots = await snapshotsByIds(archived, signal);
+    interface RowSeed {
+      sessionId: SessionId;
+      snapshot: SessionPersistenceSnapshot;
+      file: FileStatus;
+      title: string | null | undefined;
+    }
+    const entries: Array<{ sessionId: SessionId; snapshot: SessionPersistenceSnapshot }> = [];
+    for (const id of archived) {
+      const snapshot = snapshots.get(id);
+      if (snapshot === undefined) continue; // 幽灵 id：会话文件已不存在
+      entries.push({ sessionId: id as SessionId, snapshot });
+    }
+    const seeds = await limitedConcurrency<RowSeed>(
+      cfg.titleReadConcurrency,
+      entries.map(({ sessionId, snapshot }) => async () => {
+        const file = await locateSnapshotFile(snapshot, signal);
+        const cached = readCachedTitle?.(snapshot.header);
+        if (cached !== undefined) return { sessionId, snapshot, file, title: cached };
+        const located = file.state === 'located' ? file : null;
+        if (located !== null) {
+          const byMtime = titleFromMtimeCache(sessionId, located.mtimeMs);
+          if (byMtime !== undefined) return { sessionId, snapshot, file, title: byMtime };
+        }
+        return { sessionId, snapshot, file, title: undefined };
+      }),
+      signal,
+    );
+    // 只有真的未解析的 id 才走官方批量标题（cache 未命中才可能很贵）。
+    const unresolved = seeds.filter((seed) => seed.title === undefined).map((seed) => seed.sessionId);
+    const bulk = unresolved.length > 0 ? await readTitlesBulk(unresolved, signal) : null;
+    return limitedConcurrency(
+      cfg.titleReadConcurrency,
+      seeds.map((seed) => async (): Promise<ArchiveListRow> => {
+        const { sessionId, snapshot, file } = seed;
+        const located = file.state === 'located' ? file : null;
+        let title = seed.title;
+        if (title === undefined) {
+          if (bulk !== null && bulk.has(sessionId)) {
+            title = bulk.get(sessionId) ?? null;
+            if (located !== null) rememberTitle(sessionId, located.mtimeMs, title);
+          } else {
+            // 缓存与索引都没有：逐条直读折叠（失败回退 null，面板显示目录名）。
+            let readFailed = false;
+            try {
+              title = await readTitle(persistence, sessionId, signal);
+            } catch {
+              readFailed = true;
+              title = null;
+            }
+            // 读取失败不写缓存：一次瞬时 I/O 失败不应被固化成长期「无标题」。
+            if (!readFailed && located !== null) rememberTitle(sessionId, located.mtimeMs, title);
+          }
+        }
+        return {
+          sessionId,
+          title,
+          cwd: snapshot.header.cwd ?? null,
+          createdAt: snapshot.header.createdAt,
+          updatedAt: located !== null ? located.mtimeMs : snapshot.header.createdAt,
+          size: located !== null ? located.size : 0,
+          live: isLive(sessionId),
+        };
+      }),
+      signal,
+    );
   }
   return {
     ctx,
@@ -331,7 +409,7 @@ export function createHostContext(ctx: Context, cfg: SessionArchiveConfig, statF
     fileInfo,
     filePresent,
     readTitlesBulk,
-    rowFor,
+    archivedRows,
   }
 }
 
