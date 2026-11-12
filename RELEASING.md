@@ -345,6 +345,20 @@ bun run test:ci && git push
 宿主升级后必须重跑 `bun run build`：Typert 工件由构建期生成器按当前宿主契约
 的类型分析产出，手工复用旧工件会让 `./typert` / `./remote` 与新宿主失配。
 
+`adapt-dsh.mjs` 只改 `@deepseek-ai/dsh-*` 的 range，另外三处会随宿主漂移、每次适配都要人工复核：
+
+- **第三方运行时依赖漂移**：宿主包自己的 `dependencies` 可能升级（如 0.2.2-rc.2 把
+  `zod` 4.4.3 → 4.6.6，涉及 12 个宿主包）。插件直接 import 的库必须跟到宿主同一版本
+  （精确 pin），否则同进程存在两份实例、类型互不兼容；`bun pm why <库名>` 应只剩基线
+  版本，`bun run build` 报「`ZodObject<...>` is missing ...」这类两份同名类型的
+  报错即典型症状。
+- **Typert / 打包契约**：`@deepseek-ai/dsh-typert-generator` 可能新增发布契约（如
+  0.2.2-rc.2 的 `validateExport()` 要求发布 `./remote` 的包在 `package.json#files` 中
+  逐条列出 `lib/typert.remote-client.d.ts.map`）。`bun run build` 抛
+  `TypertAnalysisError` 时按报错补 `files`，并同步 `test/bundle.test.ts` 的清单锁。
+- **漏洞豁免复核**：`scripts/audit-deps.mjs` 的 `ACCEPTED_ADVISORIES` 里登记的豁免要
+  随宿主升级复核删除（如 zod 4.4.3 的 GHSA 豁免即随 rc.2 升级消解）。
+
 `adapt-dsh.mjs` 支持 `--dry-run` 预览，它只改各 package.json 的依赖 range。若 `bun install` 报某 dsh 包解析不到，先检查 adapt 是否已把 range 改写。稳定线（main）跟进 dsh 新的 rc（如 `0.1.1-rc.2` → `0.1.2-rc.1`）时同样在 main 上执行同一流程。
 
 `adapt-dsh.mjs` 同时把每个发布包 `package.json` 的 `engines.dsh` 兼容声明
