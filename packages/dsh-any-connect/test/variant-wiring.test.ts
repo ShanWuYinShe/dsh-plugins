@@ -29,6 +29,27 @@ describe("变体装配（CLI 与插件运行时共用）", () => {
     expect(upstreamClientFor(AI_VARIANT)).toBeInstanceOf(WorkBuddyUpstreamClient);
   });
 
+  it("upstreamClientFor 传入 config 时为 opencode 注入 cachePath、bunPath 与 childProcesses", () => {
+    let configReadCount = 0;
+    const fakeConfig = {
+      openCodeModelsCache: "/cache/path",
+      bunPath: "/custom/bun",
+    } as any;
+    const tracker: any = { track: (c: any) => c, dispose: async () => {} };
+    const client = upstreamClientFor(OPENCODE_VARIANT, {
+      config: () => {
+        configReadCount++;
+        return fakeConfig;
+      },
+      childProcesses: tracker,
+    }) as OpenCodeUpstreamClient;
+    expect(client).toBeInstanceOf(OpenCodeUpstreamClient);
+    expect((client as any).cachePath()).toBe("/cache/path");
+    expect((client as any).bunPath()).toBe("/custom/bun");
+    expect((client as any).childProcesses).toBe(tracker);
+    expect(configReadCount).toBe(2);
+  });
+
   it("非 zcode 变体没有计划语义", () => {
     expect(zcodePlanTransformFor(OPENCODE_VARIANT)).toBeUndefined();
     expect(zcodePlanTransformFor(CN_VARIANT)).toBeUndefined();

@@ -43,6 +43,11 @@ export interface Config {
    * 走 `OPENCODE_MODELS_CACHE` 环境变量与 XDG 缓存默认位置。
    */
   openCodeModelsCache: Volatile<string | undefined>
+  /**
+   * 显式指定 Bun 二进制路径，用于 OpenCode 免费通道的 Cloudflare TLS 指纹穿透；
+   * 空串 = 走 `BUN_PATH` 环境变量与默认安装路径（~/.bun/bin/bun 等）。
+   */
+  bunPath: Volatile<string | undefined>
   // schemastery strips unknown fields, so a stale field in a
   // cordis.patch.yml is ignored rather than rejected.
 }
@@ -63,5 +68,6 @@ export const Config = z.object({
   authFileOpenCode: z.string().default('').description('OpenCode auth / token (defaults to public free tier)').volatile(),
   zcodeBuiltinConfig: z.string().default('').description('ZCode built-in model whitelist (zcode-builtin.json); defaults to env and platform paths').volatile(),
   openCodeModelsCache: z.string().default('').description('OpenCode model metadata cache (models.json); defaults to env and XDG cache').volatile(),
+  bunPath: z.string().default('').description('Bun binary path for OpenCode free channel TLS transport; defaults to env and standard paths').volatile(),
 })
 

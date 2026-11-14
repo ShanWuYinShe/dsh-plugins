@@ -31,7 +31,8 @@
  * 上游通道
  * - upstream.ts upstream-shared.ts upstream-types.ts — 上游门面、协议共享层（常量与助手）、
  *   协议类型（纯声明，零运行时）
- * - upstream-opencode.ts — OpenCode 客户端（官方免费通道、过闸标头与工具守卫）
+ * - upstream-opencode.ts opencode-prompt.ts opencode-transport.ts — OpenCode 客户端（官方免费通道、
+ *   过闸标头与工具守卫）、官方提示词前缀与指纹守卫、Bun TLS 指纹穿透传输
  * - upstream-zcode.ts upstream-zcode-body.ts upstream-zcode-normalize.ts
 
  *   upstream-zcode-start-plan.ts — ZCode 客户端（通道分发与 Coding Plan）、请求体整形与兜底

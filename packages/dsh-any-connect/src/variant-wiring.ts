@@ -39,6 +39,7 @@ export function upstreamClientFor(
     models?: readonly WorkBuddyUpstreamModel[]
     /** 读取当前插件配置；缺省时两条路径只走环境变量/平台默认（CLI 场景）。 */
     config?: () => Options
+    childProcesses?: ChildProcessTracker
   } = {},
 ): WorkBuddyUpstreamClient | ZCodeUpstreamClient | OpenCodeUpstreamClient {
   const models = options.models === undefined ? {} : { models: options.models }
@@ -46,9 +47,13 @@ export function upstreamClientFor(
   if (variant.kind === 'opencode') {
     return new OpenCodeUpstreamClient({
       ...models,
+      childProcesses: options.childProcesses,
       ...readConfig === undefined
         ? {}
-        : { cachePath: () => readConfig().openCodeModelsCache },
+        : {
+            cachePath: () => readConfig().openCodeModelsCache,
+            bunPath: () => readConfig().bunPath,
+          },
     })
   }
   if (variant.kind !== 'zcode') return new WorkBuddyUpstreamClient()

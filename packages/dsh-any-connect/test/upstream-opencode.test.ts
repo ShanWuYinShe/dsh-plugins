@@ -269,6 +269,27 @@ describe('prepareOpenCodeChatBody', () => {
     const invalid = '{ not valid json'
     expect(prepareOpenCodeChatBody(invalid)).toBe(invalid)
   })
+
+  it('当提供 sessionId 时在已有 system 提示词前注入官方前缀守卫', () => {
+    const raw = JSON.stringify({
+      messages: [{ role: 'system', content: 'Base instruction' }, { role: 'user', content: 'hi' }],
+    })
+    const prepared = prepareOpenCodeChatBody(raw, 'ses_test123')
+    const json = JSON.parse(prepared)
+    expect(json.messages[0].content).toContain('<env>')
+    expect(json.messages[0].content).toContain('ses_test123')
+    expect(json.messages[0].content).toContain('Base instruction')
+  })
+
+  it('当提供 sessionId 且无 system 提示词时首部插入官方提示词前缀', () => {
+    const raw = JSON.stringify({
+      messages: [{ role: 'user', content: 'hi' }],
+    })
+    const prepared = prepareOpenCodeChatBody(raw, 'ses_test123')
+    const json = JSON.parse(prepared)
+    expect(json.messages[0].role).toBe('system')
+    expect(json.messages[0].content).toContain('ses_test123')
+  })
 })
 
 describe('resolveProtocolFromNpm', () => {
@@ -361,6 +382,17 @@ describe('prepareOpenCodeAnthropicBody', () => {
   it('处理非法 JSON 时安全回退原字符串', () => {
     const invalid = '{ broken json'
     expect(prepareOpenCodeAnthropicBody(invalid)).toBe(invalid)
+  })
+
+  it('当提供 sessionId 时在 Anthropic system 提示词中注入官方前缀守卫', () => {
+    const raw = JSON.stringify({
+      messages: [{ role: 'system', content: 'System instruction' }, { role: 'user', content: 'hi' }],
+    })
+    const prepared = prepareOpenCodeAnthropicBody(raw, 'ses_test123')
+    const json = JSON.parse(prepared)
+    expect(json.system).toContain('<env>')
+    expect(json.system).toContain('ses_test123')
+    expect(json.system).toContain('System instruction')
   })
 })
 
@@ -670,9 +702,10 @@ describe('OpenCodeUpstreamClient', () => {
       expect(result.ok).toBe(true)
       expect(capturedUrl).toBe(OPENCODE_ANTHROPIC_MESSAGES_URL)
 
-      // 验证 body 已经由 prepareOpenCodeAnthropicBody 处理
+      // 验证 body 已经由 prepareOpenCodeAnthropicBody 处理并注入官方提示词前缀守卫
       const parsedBody = JSON.parse(capturedBody)
-      expect(parsedBody.system).toBe('You are an AI assistant.')
+      expect(parsedBody.system).toContain('You are an AI assistant.')
+      expect(parsedBody.system).toContain('Current conversation session ID:')
       expect(parsedBody.max_tokens).toBe(4096)
       expect(parsedBody.tools).toContainEqual(OPENCODE_ANTHROPIC_READ_TOOL)
 
@@ -694,6 +727,112 @@ describe('OpenCodeUpstreamClient', () => {
       }
     } finally {
       globalThis.fetch = originalFetch
+    }
+  })
+
+  it('chatStream 遇到 FreeUsageLimitError 429 报错时包含 Bun 安装引导', async () => {
+    const client = new OpenCodeUpstreamClient()
+    const cred = makeCredential()
+
+    const fakeFetch = vi.fn(async () => {
+      return new Response('{"error":{"type":"FreeUsageLimitError","message":"Rate limit exceeded"}}', {
+        status: 429,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = fakeFetch as unknown as typeof fetch
+
+    try {
+      const result = await client.chatStream(cred, '{}')
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.status).toBe(429)
+        expect(result.message).toContain('提示: OpenCode 免费通道需要系统安装 Bun 运行时')
+      }
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('当配置 bunPath 且 Bun 可用时通过 Bun transport 发起请求', async () => {
+    const mockTransport = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers({ 'Content-Type': 'text/event-stream' }),
+      body: new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'))
+          c.close()
+        },
+      }),
+    }))
+
+    const client = new OpenCodeUpstreamClient({
+      bunPath: () => '/custom/bun',
+      transport: mockTransport,
+    })
+    const cred = makeCredential()
+    const result = await client.chatStream(cred, '{}')
+    expect(result.ok).toBe(true)
+    expect(mockTransport).toHaveBeenCalled()
+  })
+
+  it('当配置 bunPath 但未找到 Bun 时回退 fetch', async () => {
+    const fakeFetch = vi.fn(async () => new Response('data: {}\n\n', { status: 200 }))
+    const orig = globalThis.fetch
+    globalThis.fetch = fakeFetch as unknown as typeof fetch
+    try {
+      const client = new OpenCodeUpstreamClient({
+        bunPath: () => 'disabled',
+      })
+      const cred = makeCredential()
+      const result = await client.chatStream(cred, '{}')
+      expect(result.ok).toBe(true)
+      expect(fakeFetch).toHaveBeenCalled()
+    } finally {
+      globalThis.fetch = orig
+    }
+  })
+
+  it('当 transport 返回错误时正确包装错误结构', async () => {
+    const mockTransport = vi.fn(async () => ({
+      ok: false,
+      status: 502,
+      statusText: 'Bad Gateway',
+      headers: new Headers(),
+      body: null,
+      errorText: 'Gateway timeout',
+    }))
+
+    const client = new OpenCodeUpstreamClient({
+      transport: mockTransport,
+    })
+    const cred = makeCredential()
+    const result = await client.chatStream(cred, '{}')
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.status).toBe(502)
+      expect(result.message).toBe('Gateway timeout')
+    }
+  })
+
+  it('当以字符串形式传入 bunPath 时正确包装为 accessor 并解析', async () => {
+    const fakeFetch = vi.fn(async () => new Response('data: {}\n\n', { status: 200 }))
+    const orig = globalThis.fetch
+    globalThis.fetch = fakeFetch as unknown as typeof fetch
+    try {
+      const client = new OpenCodeUpstreamClient({
+        bunPath: 'disabled',
+      })
+      const cred = makeCredential()
+      const result = await client.chatStream(cred, '{}')
+      expect(result.ok).toBe(true)
+      expect(fakeFetch).toHaveBeenCalled()
+    } finally {
+      globalThis.fetch = orig
     }
   })
 })
@@ -826,6 +965,18 @@ describe('transformResponsesStreamToChatCompletions', () => {
     expect(out).toContain('{"object":"chat.completion.chunk","choices":[{"delta":{"content":"ok"}}]}')
     expect(out).toContain('data: [DONE]')
   })
+
+  it('调用 stream.cancel 时正确透传至底层 inputStream', async () => {
+    let cancelledReason: any
+    const mockInput = new ReadableStream({
+      cancel(reason) {
+        cancelledReason = reason
+      },
+    })
+    const transformed = transformResponsesStreamToChatCompletions(mockInput, 'test-model')
+    await transformed.cancel('cancel-reason-responses')
+    expect(cancelledReason).toBe('cancel-reason-responses')
+  })
 })
 
 describe('transformAnthropicStreamToChatCompletions', () => {
@@ -898,6 +1049,18 @@ describe('transformAnthropicStreamToChatCompletions', () => {
 
     expect(out).toContain('{"object":"chat.completion.chunk","choices":[{"delta":{"content":"direct"}}]}')
     expect(out).toContain('data: [DONE]')
+  })
+
+  it('调用 stream.cancel 时正确透传至底层 inputStream', async () => {
+    let cancelledReason: any
+    const mockInput = new ReadableStream({
+      cancel(reason) {
+        cancelledReason = reason
+      },
+    })
+    const transformed = transformAnthropicStreamToChatCompletions(mockInput, 'test-model')
+    await transformed.cancel('cancel-reason-anthropic')
+    expect(cancelledReason).toBe('cancel-reason-anthropic')
   })
 })
 

@@ -308,6 +308,18 @@
       "functions": 100,
       "lines": 96.87
     },
+    "packages/dsh-any-connect/src/opencode-prompt.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "packages/dsh-any-connect/src/opencode-transport.ts": {
+      "statements": 98.48,
+      "branches": 94.52,
+      "functions": 95.45,
+      "lines": 100
+    },
     "packages/dsh-any-connect/src/probe-route.ts": {
       "statements": 90.9,
       "branches": 90.16,
@@ -315,8 +327,8 @@
       "lines": 92.77
     },
     "packages/dsh-any-connect/src/probe-service.ts": {
-      "statements": 83.52,
-      "branches": 75,
+      "statements": 84.7,
+      "branches": 76.78,
       "functions": 93.33,
       "lines": 94.2
     },
@@ -387,10 +399,10 @@
       "lines": 100
     },
     "packages/dsh-any-connect/src/upstream-opencode.ts": {
-      "statements": 91.07,
-      "branches": 79.21,
-      "functions": 95,
-      "lines": 93.33
+      "statements": 93.06,
+      "branches": 82.92,
+      "functions": 100,
+      "lines": 95.18
     },
     "packages/dsh-any-connect/src/upstream-shared.ts": {
       "statements": 91.36,
@@ -471,10 +483,10 @@
       "lines": 85.71
     },
     "packages/dsh-any-connect/src/variant-wiring.ts": {
-      "statements": 88.88,
+      "statements": 94.73,
       "branches": 100,
-      "functions": 71.42,
-      "lines": 86.66
+      "functions": 87.5,
+      "lines": 93.75
     },
     "packages/dsh-any-connect/src/variants.ts": {
       "statements": 100,
