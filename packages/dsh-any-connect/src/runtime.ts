@@ -107,7 +107,7 @@ export function createVariantRuntimeSet(deps: {
     const kind = variant.kind
     const variantClient = kind === 'workbuddy'
       ? client
-      : upstreamClientFor(variant, { models: fallbackFor(variant), config: current })
+      : upstreamClientFor(variant, { models: fallbackFor(variant), config: current, childProcesses })
     const credentialStore = createVariantCredentialStore({
       variant,
       client: variantClient,

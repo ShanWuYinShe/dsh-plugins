@@ -12,6 +12,15 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { WorkBuddyCredential } from './auth-types.js'
+import type { ChildProcessTracker } from './child-processes.js'
+import { renderOpenCodePromptPrefix, withOpenCodePromptPrefix } from './opencode-prompt.js'
+import {
+  resolveBunPath,
+  executeOpenCodeTransportViaBun,
+  getTransportScriptPath,
+  type BunTransportOptions,
+  type BunTransportResult,
+} from './opencode-transport.js'
 import type { ProbeAttempt } from './probe.js'
 import { deadlineSignal } from './timeout.js'
 import {
@@ -25,7 +34,7 @@ import {
   type WorkBuddyChatResult,
 } from './upstream-shared.js'
 
-export const OPENCODE_CHAT_COMPLETIONS_URL = 'https://opencode.ai/inference/v1/chat/completions'
+export const OPENCODE_CHAT_COMPLETIONS_URL = 'https://opencode.ai/inference/openai/v1/chat/completions'
 export const OPENCODE_RESPONSES_URL = 'https://opencode.ai/inference/openai/v1/responses'
 export const OPENCODE_ANTHROPIC_MESSAGES_URL = 'https://opencode.ai/inference/anthropic/v1/messages'
 export const OPENCODE_MODELS_URL = 'https://opencode.ai/inference/v1/models'
@@ -97,8 +106,9 @@ function hasReadTool(tools: unknown[]): boolean {
  * 为 OpenCode 免费通道整形请求体：
  * 1. 确保 stream: true 与 stream_options.include_usage: true
  * 2. 注入 read tool 与 tool_choice: auto 守卫（解除 "free tier can only be used from within OpenCode" 网关拦截）
+ * 3. 注入包含会话 ID 的官方提示词前缀守卫（解除网关 429 FreeUsageLimitError 限制）
  */
-export function prepareOpenCodeChatBody(bodyJson: string): string {
+export function prepareOpenCodeChatBody(bodyJson: string, sessionId?: string): string {
   try {
     const parsed = JSON.parse(bodyJson) as Record<string, unknown>
     if (typeof parsed !== 'object' || parsed === null) return bodyJson
@@ -120,6 +130,29 @@ export function prepareOpenCodeChatBody(bodyJson: string): string {
     }
     if (!parsed['tool_choice']) {
       parsed['tool_choice'] = 'auto'
+    }
+
+    // 3. 注入包含会话 ID 的官方提示词前缀守卫
+    if (sessionId) {
+      const messages = Array.isArray(parsed['messages']) ? parsed['messages'] : []
+      let systemFound = false
+      for (const m of messages) {
+        if (typeof m === 'object' && m !== null) {
+          const msg = m as { role?: unknown; content?: unknown }
+          if (msg.role === 'system') {
+            const original = typeof msg.content === 'string' ? msg.content : ''
+            msg.content = withOpenCodePromptPrefix(original, sessionId)
+            systemFound = true
+            break
+          }
+        }
+      }
+      if (!systemFound) {
+        parsed['messages'] = [
+          { role: 'system', content: renderOpenCodePromptPrefix(sessionId) },
+          ...messages,
+        ]
+      }
     }
 
     return JSON.stringify(parsed)
@@ -159,8 +192,9 @@ function hasAnthropicReadTool(tools: unknown[]): boolean {
  * 2. 映射 messages 为 Anthropic user/assistant 规范
  * 3. 确保 max_tokens 与 stream: true
  * 4. 注入 Anthropic 格式的 read 工具守卫解除网关限制
+ * 5. 注入包含会话 ID 的官方提示词前缀守卫
  */
-export function prepareOpenCodeAnthropicBody(bodyJson: string): string {
+export function prepareOpenCodeAnthropicBody(bodyJson: string, sessionId?: string): string {
   try {
     const parsed = JSON.parse(bodyJson) as Record<string, unknown>
     if (typeof parsed !== 'object' || parsed === null) return bodyJson
@@ -188,6 +222,10 @@ export function prepareOpenCodeAnthropicBody(bodyJson: string): string {
 
     if (anthropicMessages.length === 0) {
       anthropicMessages.push({ role: 'user', content: ' ' })
+    }
+
+    if (sessionId) {
+      system = withOpenCodePromptPrefix(system, sessionId)
     }
 
     const maxTokens = typeof parsed['max_tokens'] === 'number' && parsed['max_tokens'] > 0
@@ -329,9 +367,10 @@ export function transformAnthropicStreamToChatCompletions(
     }
   }
 
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   return new ReadableStream<Uint8Array>({
     async start(controller) {
-      const reader = inputStream.getReader()
+      reader = inputStream.getReader()
       try {
         while (true) {
           const { done, value } = await reader.read()
@@ -360,6 +399,9 @@ export function transformAnthropicStreamToChatCompletions(
       }
     },
     cancel(reason) {
+      if (reader) {
+        return reader.cancel(reason)
+      }
       return inputStream.cancel(reason)
     },
   })
@@ -594,9 +636,10 @@ export function transformResponsesStreamToChatCompletions(
     }
   }
 
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   return new ReadableStream<Uint8Array>({
     async start(controller) {
-      const reader = inputStream.getReader()
+      reader = inputStream.getReader()
       try {
         while (true) {
           const { done, value } = await reader.read()
@@ -629,6 +672,9 @@ export function transformResponsesStreamToChatCompletions(
       }
     },
     cancel(reason) {
+      if (reader) {
+        return reader.cancel(reason)
+      }
       return inputStream.cancel(reason)
     },
   })
@@ -672,8 +718,10 @@ export function formatOpenCodeModelName(id: string): string {
     'nemotron-3.5-lightning-free': 'Nemotron 3.5 Lightning Free',
     'jev-1.13-free': 'Jev 1.13 Free',
     'step-5-preview-free': 'Step 5 Preview Free',
+    'longcat-2.5-free': 'LongCat 2.5 Free',
     'longcat-2.5-preview-free': 'LongCat 2.5 Preview Free',
     'deepseek-v4.1-flash-free': 'DeepSeek V4.1 Flash Free',
+    'glm-5.3-flash-free': 'GLM-5.3-Flash Free',
     'space-bunny-free': 'Space Bunny Free',
     'nemotron-3-ultra-free': 'Nemotron 3 Ultra Free',
   }
@@ -805,6 +853,8 @@ export function mergeOpenCodeCatalogue(
   })
 }
 
+export type OpenCodeTransportFn = (options: BunTransportOptions) => Promise<BunTransportResult>
+
 export interface OpenCodeUpstreamClientOptions {
   models?: readonly WorkBuddyUpstreamModel[]
   projectId?: string
@@ -815,6 +865,16 @@ export interface OpenCodeUpstreamClientOptions {
    */
   cachePath?: string | (() => string | undefined)
   specs?: Map<string, OpenCodeModelSpec>
+  /**
+   * Bun 二进制文件路径（用于 Cloudflare TLS 指纹穿透传输）。
+   * 可传函数以支持热更新配置读取。
+   */
+  bunPath?: string | (() => string | undefined)
+  childProcesses?: ChildProcessTracker
+  /**
+   * 自定义底层传输实现（测试注入或显式设为 null 强制直连 fetch）。
+   */
+  transport?: OpenCodeTransportFn | null
 }
 
 /**
@@ -828,6 +888,9 @@ export class OpenCodeUpstreamClient {
   private readonly idState: OpenCodeIdState = { lastTimestamp: 0, sequenceCounter: 0 }
   private readonly cachePath: () => string | undefined
   private readonly injectedSpecs?: Map<string, OpenCodeModelSpec>
+  private readonly bunPath?: () => string | undefined
+  private readonly childProcesses?: ChildProcessTracker
+  private readonly customTransport?: OpenCodeTransportFn | null
   /** 上次成功解析用的缓存路径：配置改了路径就让下一轮重新读盘。 */
   private specsPath?: string
   private specsCache?: Map<string, OpenCodeModelSpec>
@@ -838,6 +901,12 @@ export class OpenCodeUpstreamClient {
     const cachePath = options.cachePath
     this.cachePath = typeof cachePath === 'function' ? cachePath : () => cachePath
     this.injectedSpecs = options.specs
+    const bunPath = options.bunPath
+    this.bunPath = typeof bunPath === 'function'
+      ? bunPath
+      : (typeof bunPath === 'string' ? () => bunPath : undefined)
+    this.childProcesses = options.childProcesses
+    this.customTransport = options.transport
   }
 
   private resolveSpecs(): Map<string, OpenCodeModelSpec> | undefined {
@@ -859,7 +928,6 @@ export class OpenCodeUpstreamClient {
     signal?: AbortSignal,
   ): Promise<WorkBuddyChatResult> {
     const sessionId = `ses_${generateOpenCodeId(this.idState, true)}`
-    const requestId = `msg_${generateOpenCodeId(this.idState, false)}`
     const rawToken = credential.accessToken?.trim() ?? ''
     const token = rawToken !== ''
       && rawToken !== 'public'
@@ -870,6 +938,12 @@ export class OpenCodeUpstreamClient {
       ? rawToken
       : 'public'
     const auth = `Bearer ${token}`
+
+    const traceId = randomBytes(16).toString('hex')
+    const spanId = randomBytes(8).toString('hex')
+    const parentId = randomBytes(8).toString('hex')
+    const traceparent = `00-${traceId}-${spanId}-01`
+    const b3 = `${traceId}-${spanId}-1-${parentId}`
 
     let targetModel = ''
     try {
@@ -887,64 +961,116 @@ export class OpenCodeUpstreamClient {
 
     let preparedBody: string
     if (protocol === 'anthropic-messages') {
-      preparedBody = prepareOpenCodeAnthropicBody(bodyJson)
+      preparedBody = prepareOpenCodeAnthropicBody(bodyJson, sessionId)
     } else {
-      preparedBody = prepareOpenCodeChatBody(bodyJson)
+      preparedBody = prepareOpenCodeChatBody(bodyJson, sessionId)
     }
 
-    const settled = await settleChatFetch(signal, async (fetchSignal) => {
-      return fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream, */*',
-          'Authorization': auth,
-          'User-Agent': OPENCODE_CLI_USER_AGENT,
-          'X-Session-Id': sessionId,
-          'x-opencode-client': 'cli',
-          'x-opencode-project': this.projectId,
-          'x-opencode-session': sessionId,
-          'x-session-affinity': sessionId,
-        },
-        body: preparedBody,
-        signal: fetchSignal,
-      })
-    })
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': '*/*',
+      'Accept-Encoding': 'gzip, deflate, br, zstd',
+      'Authorization': auth,
+      'User-Agent': OPENCODE_CLI_USER_AGENT,
+      'Connection': 'close',
+      'traceparent': traceparent,
+      'b3': b3,
+      'x-opencode-client': 'cli',
+      'x-opencode-project': this.projectId,
+      'x-opencode-session': sessionId,
+      'x-session-affinity': sessionId,
+      'x-session-id': sessionId,
+      'X-Session-Id': sessionId,
+    }
 
-    if (settled.settled) {
-      if (settled.result.ok && settled.result.response.body) {
-        if (protocol === 'responses') {
-          const transformedBody = transformResponsesStreamToChatCompletions(settled.result.response.body, targetModel)
-          return {
-            ok: true,
-            response: new Response(transformedBody, {
-              status: settled.result.response.status,
-              statusText: settled.result.response.statusText,
-              headers: settled.result.response.headers,
-            }),
-          }
-        }
-        if (protocol === 'anthropic-messages') {
-          const transformedBody = transformAnthropicStreamToChatCompletions(settled.result.response.body, targetModel)
-          return {
-            ok: true,
-            response: new Response(transformedBody, {
-              status: settled.result.response.status,
-              statusText: settled.result.response.statusText,
-              headers: settled.result.response.headers,
-            }),
-          }
-        }
+    let transportFn = this.customTransport
+    let resolvedBunPath: string | undefined
+    if (transportFn === undefined && this.bunPath !== undefined) {
+      const configured = this.bunPath()
+      resolvedBunPath = resolveBunPath(configured)
+      if (resolvedBunPath !== undefined) {
+        transportFn = executeOpenCodeTransportViaBun
       }
-      return settled.result
     }
-    const { response, text } = settled
+
+    let status: number
+    let statusText: string
+    let respHeaders: Headers | undefined
+    let bodyStream: ReadableStream<Uint8Array> | null = null
+    let errorText: string | undefined
+
+    if (transportFn) {
+      const transportRes = await transportFn({
+        bunPath: resolvedBunPath ?? '',
+        scriptPath: getTransportScriptPath(),
+        url: endpoint,
+        headers,
+        body: preparedBody,
+        signal,
+        childProcesses: this.childProcesses,
+      })
+      status = transportRes.status
+      statusText = transportRes.statusText
+      respHeaders = transportRes.headers
+      if (transportRes.ok && transportRes.body) {
+        bodyStream = transportRes.body
+      } else {
+        errorText = transportRes.errorText ?? transportRes.statusText
+      }
+    } else {
+      const settled = await settleChatFetch(signal, async (fetchSignal) => {
+        return fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: preparedBody,
+          signal: fetchSignal,
+        })
+      })
+
+      if (settled.settled) {
+        if (settled.result.ok && settled.result.response.body) {
+          status = settled.result.response.status
+          statusText = settled.result.response.statusText
+          respHeaders = settled.result.response.headers
+          bodyStream = settled.result.response.body
+        } else {
+          return settled.result
+        }
+      } else {
+        status = settled.response.status
+        statusText = settled.response.statusText
+        respHeaders = settled.response.headers
+        errorText = settled.text
+      }
+    }
+
+    if (bodyStream) {
+      let transformedBody = bodyStream
+      if (protocol === 'responses') {
+        transformedBody = transformResponsesStreamToChatCompletions(bodyStream, targetModel)
+      } else if (protocol === 'anthropic-messages') {
+        transformedBody = transformAnthropicStreamToChatCompletions(bodyStream, targetModel)
+      }
+      return {
+        ok: true,
+        response: new Response(transformedBody, {
+          status,
+          statusText,
+          headers: respHeaders,
+        }),
+      }
+    }
+
+    let message = errorText || statusText
+    if (status === 429 && message.includes('FreeUsageLimitError')) {
+      message = `${message} (提示: OpenCode 免费通道需要系统安装 Bun 运行时通过 Cloudflare TLS 指纹校验，请安装 Bun: https://bun.sh 或在配置中设置 bunPath)`
+    }
     return {
       ok: false,
-      status: response.status,
-      kind: classifyUpstreamError(response.status, text),
-      message: text,
-      headers: response.headers,
+      status,
+      kind: classifyUpstreamError(status, message),
+      message,
+      headers: respHeaders,
     }
   }
 
