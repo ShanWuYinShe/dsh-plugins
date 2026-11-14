@@ -1,3 +1,9 @@
+## 0.5.4 (2026-11-14)
+
+### 重构
+
+* **移除 OpenCode 免费模型通道支持**：彻底移除 `opencode-free` 渠道及其网关提示词前缀守卫注入、TLS ClientHello 指纹穿透传输层（Bun bridge）与全套单测；清理配置项 `authFileOpenCode`、`openCodeModelsCache`、`bunPath` 以及前端卡片额度视图与多语言文案，变体渠道收敛为 `workbuddy`、`workbuddy-ai`、`zcode`、`zcode-start-plan` 4 种。
+
 ## 0.5.3 (2026-11-14)
 
 ### 修复
