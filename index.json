@@ -121,6 +121,17 @@
       },
       "versions": [
         {
+          "version": "0.5.4",
+          "publishTimestamp": 1794667903,
+          "source": {
+            "type": "npm",
+            "registry": "https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/"
+          },
+          "engines": {
+            "dsh": ">=0.2.2-rc.2 <0.2.3-0"
+          }
+        },
+        {
           "version": "0.5.3",
           "publishTimestamp": 1794664819,
           "source": {
