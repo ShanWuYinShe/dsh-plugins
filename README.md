@@ -20,7 +20,7 @@ DeepSeek Harness（DSH）host 层全局插件 monorepo，包含官方级能力�
 - **多上游通道无缝接入**：
   - **WorkBuddy 国内版 (`workbuddy`)**：零配置自动读取本机桌面 App 登录态；深度支持 WorkBuddy 5.6+ 针对 `accessToken`/`refreshToken` 的 `$wbEncrypted` 加密信封（自动定位 macOS Bundle 或 Windows 注册表/安装目录的 Electron 二进制充当解密助手，亦支持 `WORKBUDDY_ELECTRON_BIN` 覆盖）；支持图片多模态输入；模型选择器以原生徽标标明积分倍率与限免标签（`/model` 弹窗在模型名后缀显示倍率，如 `· x0.79`）。
   - **WorkBuddy AI 国际版 (`workbuddy-ai`)**：独立接入国际版桌面 App，提供独立的「WorkBuddy AI」模型分组（GPT、Gemini 系列等）、独立凭据与账号积分卡片。
-  - **ZCode Coding Plan (`zcode`)**：接入智谱 ZCode 桌面端 Coding Plan 官方渠道；按桌面端 `setting.json` 当前激活计划精准取用 API Key；以客户端本地内置白名单（`zcode-builtin.json`）动态约束模型，随客户端升级自动更新（智谱此前的 23:00–09:00 夜间免费限时活动已下线，现按 150% 额度与模型基准计费如实展示）。
+  - **ZCode Coding Plan (`zcode`)**：接入智谱 ZCode 桌面端 Coding Plan 官方渠道；按桌面端 `setting.json` 当前激活计划精准取用 API Key；以客户端本地内置白名单（`zcode-builtin.json`）动态约束模型，随客户端升级自动更新（现按 150% 额度与模型基准计费如实展示）。
   - **ZCode Start Plan (`zcode-start-plan`)**：独立专属通道（`zcode.z.ai/api/v1/zcode-plan/anthropic`）与独立额度池；采用账号 JWT + 设备标识认证，扣减当日一次性 Token 包（过期不结转）；每日领取活动自动探测并在设置卡片中醒目提醒（提供一键复制 Plan ID）；动态跟随用户今日实际权益展示模型，未领取或过期如实隐藏。
 - **思考强度智能适配**：
   - 支持 low / medium / high / max 等思考等级选项，在 DSH 模型选择器即可切换；
@@ -233,7 +233,7 @@ dsh plugin --profile web remove @chaoset/session-archive --registry=$REGISTRY
   dsh plugin --profile <name> add <同一个 tarball URL>
   ```
 
-  一次 `plugin add` 会按 package.json 把该 profile 已装的全部插件一并装回，store 位置直接写对。（2026-10-24 于宿主 0.2.1-rc.3 时代实测，当时内置 pnpm v11.28.5：web 与 desktop 两个 profile 各用一条命令重装四包；修复后核对 `node_modules/.modules.yaml` 的 `storeDir` 应指向 `$DSH_HOME` 内。）
+  一次 `plugin add` 会按 package.json 把该 profile 已装的全部插件一并装回，store 位置直接写对。修复后核对 `node_modules/.modules.yaml` 的 `storeDir` 应指向 `$DSH_HOME` 内。
 
 ### 给 AI Agent
 
