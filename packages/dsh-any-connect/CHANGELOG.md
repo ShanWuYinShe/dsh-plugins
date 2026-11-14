@@ -1,3 +1,13 @@
+## 0.5.5 (2026-11-15)
+
+### 修复
+
+* **适配 ZCode 3.18.2+ `enc:v2` 凭据加密与系统 Keyring 提取**：
+  * 支持 ZCode 3.18.2+ 引入的 `enc:v2:os:`（系统 OS Keyring / macOS Keychain）与 `enc:v2:env:`（环境变量与文件托管）密文格式，解析 24 位密钥指纹、IV 与 Auth Tag，完成 AES-256-GCM 凭据解密；
+  * macOS 下优先通过本地 ZCode 客户端可执行文件（带 `ELECTRON_RUN_AS_NODE=1`）执行轻量 helper 脚本读取 Keyring 密码，耗时约 80ms 且无弹窗阻塞，并保留原生模块与 macOS `security` CLI 兜底支持；
+  * 新增 32 字节 AES 密钥的内存缓存机制，避免频繁跨进程调用；
+  * 彻底解决升级后 ZCode API Key 无法解密导致的 `Invalid ZCode API key format` 鉴权失败与 Start Plan 额度 HTTP 401 报错。
+
 ## 0.5.4 (2026-11-14)
 
 ### 重构
