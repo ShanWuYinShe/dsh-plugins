@@ -94,11 +94,13 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   通过 `readPluginMeta` 读这两处（官方 skill「Display metadata and icon」），缺失时
   卡片标题回退裸包名、图标回退通用图形。文案/图标须与 `PACKAGE_DISPLAY` 同源，
   由 `test/plugin-display-meta.test.ts` 锁住。
-- **兼容声明**：插件对 DSH 的兼容性用官方 `engines.dsh`，且必须写**精确宿主版本**
-  （如 `0.2.2-rc.2`，不写 `^` / `~` / `>=`）；依赖 range 仍是 `^X`，由
-  `bun run adapt` 同步维护，`dsh-baseline` 严格核对「range 的 `^X` ↔ `engines.dsh`
-  的精确 `X`」。DSH 升级很可能不兼容旧版本，因此每次升级都要重发对应插件版本；
-  不要使用自造字段 `dsh.host`（宿主不认识该字段）。
+- **兼容声明**：插件对 DSH 的兼容性用官方 `engines.dsh`。发布包无破坏性变更时写
+  **同线兼容范围** `>=<下界> <下一线>-0`（如 `>=0.2.2-rc.2 <0.2.3-0`，同线多个已验证
+  旧宿主都能安装）；有破坏性变更时写**精确构建基线**（如 `0.2.2-rc.3`）。根 `package.json`
+  （private）写**精确构建基线**，是全仓「当前对着哪个宿主构建」的唯一事实源；上界必须带
+  `-0`（`<0.2.3` 会被宿主放过 `0.2.3-alpha.0`）。依赖 range 仍是 `^<构建基线>`，由
+  `bun run adapt <版本> [--compat <下界>]` 同步维护，`dsh-baseline` 严格核对三者一致
+  （判据见 RELEASING.md「兼容声明与 engines.dsh」）；不要使用自造字段 `dsh.host`。
 - **客户端 inject**：`dsh.client.inject` 声明的是**客户端模块包名**（服务提供方包），
   不是 cordis 服务名；`cordis` 运行时的服务依赖写在 client 入口的 `export const inject`。
 - **入口面**：Host 入口（`src/index.ts`）只导出 `name` / `inject` / `Config` / `apply`，
@@ -129,7 +131,7 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   - 禁止靠 `retry`/`skip`/放大 timeout 掩盖不稳定；偶发假红必须查明根因。
   - 改测试相关代码后跑 `bun run test:stability`（多轮 + 多并发档位）证明稳定；
     alpha 分支推送（`test.yml`）与发布流水（`publish.yml`）会自动跑同一脚本。
-- **依赖解析基线**：`engines.dsh` 与全部 `@deepseek-ai/dsh-*` range 必须统一到宿主最新正式版；
+- **依赖解析基线**：根 `engines.dsh`（精确构建基线）与全部 `@deepseek-ai/dsh-*` range 必须统一到宿主最新正式版；
   宿主升级后**必须从零重解 lock**（`rm -rf node_modules packages/*/node_modules bun.lock && bun install`），
   增量 `bun install` 不会重解 peer 图、会永久保留旧实例。`test/dep-resolution-baseline.test.ts`
   对「声明 range ↔ 实际解析版本 ↔ bun.lock」三方锁定。

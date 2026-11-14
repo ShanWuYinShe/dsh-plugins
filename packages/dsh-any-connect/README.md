@@ -80,7 +80,7 @@ dsh plugin --profile web remove @chaoset/dsh-any-connect
 ```
 
 ### 方式二：tarball URL（手动）
-> 适配的 DSH 版本见本包 `package.json` 的 `engines.dsh` 字段；仓库的 `dsh-v*` git tag 是各次稳定版适配的归档点。
+> 适配的 DSH 版本见本包 `package.json` 的 `engines.dsh` 字段（官方兼容声明：无破坏性变更的适配为同线兼容范围，宿主线内的 rc 都可安装）；仓库的 `dsh-v*` git tag 是各次稳定版适配的归档点。
 
 前置条件：若使用桌面 Agent 通道，需在本机安装并登录对应桌面 App（插件自动复用 App 的登录状态，账号切换自动跟随）。使用 OpenCode Free 渠道无需任何前置账号配置。
 

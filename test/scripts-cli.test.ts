@@ -80,7 +80,37 @@ describe("adapt-dsh", () => {
     const { code, stdout } = run("adapt-dsh.mjs", "0.1.2-rc.1", "--dry-run");
     expect(code, stdout).toBe(0);
     expect(stdout).toContain("dry-run");
+    // 无 --compat 时发布包写精确版本（保守默认）。
+    expect(stdout).toContain("（精确）");
+    expect(stdout).not.toContain("（兼容范围）");
     expect(gitStatus()).toBe(before);
+  });
+
+  it("--compat <下界> --dry-run：发布包打印同线兼容范围、根仍精确、不改动工作区", () => {
+    const before = gitStatus();
+    const { code, stdout } = run("adapt-dsh.mjs", "0.4.7-rc.2", "--compat", "0.4.7-rc.1", "--dry-run");
+    expect(code, stdout).toBe(0);
+    // 与宿主 includePrerelease 判定口径一致：上界固定为下一线 "-0"。
+    expect(stdout).toContain(">=0.4.7-rc.1 <0.4.8-0（兼容范围）");
+    // 根 package.json（private）永远写精确构建基线（旧值随仓库当前状态变化，不写死）。
+    expect(stdout).toMatch(/\[engines\] dsh: \S+ → 0\.4\.7-rc\.2（精确）/);
+    expect(stdout).toContain("dry-run");
+    expect(gitStatus()).toBe(before);
+  });
+
+  it("--compat 非法（形态/跨线/高于版本/缺值）：退出 2 并给出用法", () => {
+    const cases: string[][] = [
+      ["0.4.7-rc.2", "--compat", "latest"], // 形态非法
+      ["0.4.7-rc.2", "--compat"], // 缺下界
+      ["0.4.7-rc.2", "--compat", "0.4.6-rc.1"], // 跨宿主基础号
+      ["0.4.7-rc.2", "--compat", "0.4.7-rc.3"], // 下界高于构建基线
+      ["0.4.7-rc.2", "--compat", "0.4.7-rc.1+build.1"], // 下界带 build metadata（严格范围不支持）
+    ];
+    for (const args of cases) {
+      const { code, stderr } = run("adapt-dsh.mjs", ...args);
+      expect(code, args.join(" ")).toBe(2);
+      expect(stderr, args.join(" ")).toContain("用法");
+    }
   });
 });
 

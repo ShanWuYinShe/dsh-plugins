@@ -60,12 +60,11 @@ npm 的**版本列表**：稳定线目标 = 非进行中预发布的最高版（
 warning（刻意非阻塞——提醒，不是门禁）。
 
 发布侧的强校验由 `node scripts/dsh-baseline.mjs`（发布门禁步骤
-「Verify dsh baseline」）执行：所有 dsh-* 依赖必须是 `^<版本>` 形态；
-`engines.dsh` **必须写精确宿主版本**（如 `0.2.2-rc.2`，不能写
-`^X` / `~X` / `>=X`），且必须与依赖基线精确一致；任一不满足即
-exit 1 阻断发布。`engines.dsh` 是 DSH 官方 manifest 字段，宿主安装与 profile 启动按 **SemVer
-range**（`semver.satisfies(..., {includePrerelease:true})`）判定插件兼容性；本仓
-一律写**精确版本**，因此效果上等价于精确匹配——写范围会过度声明兼容性、误导用户。旧字段 `dsh.host` 已废弃，残留同样会被该脚本拦下。
+「Verify dsh baseline」）执行：所有 dsh-* 依赖必须是 `^<构建基线>` 形态；
+根 `package.json` 的 `engines.dsh` 必须精确等于构建基线；发布包的
+`engines.dsh` 必须是精确构建基线或覆盖基线的同线兼容范围（形态
+`>=<下界> <下一线>-0`）——判据与理由见「兼容声明与 engines.dsh」一节；任一不满足即
+exit 1 阻断发布。旧字段 `dsh.host` 已废弃，残留同样会被该脚本拦下。
 本地干跑直接执行该脚本即可（无网络、无 git 依赖，纯 manifest 校验）。
 
 依赖漏洞审计由 `bun run audit`（发布门禁步骤「Audit dependencies」）
@@ -172,8 +171,8 @@ DSH 0.1.6-alpha 新增的原生「设置 → 已归档会话」页（0.1.5 稳�
   `0.3.14`）。唯一的跳号例外见下方「稳定线热修占用基础号」——那是被迫让位，
   不是常规操作。
 - **插件版本号与 dsh 版本号无关**：跟随宿主升级只改依赖 range（仍是 `^版本`）与
-  `engines.dsh`（改为新的精确宿主版本），
-  不改插件自身版本号的基础号；`0.3.14-alpha.1` 收敛得到的是 `0.3.14`，不是
+  `engines.dsh`（改为新的构建基线：有破坏性变更写精确版本，无破坏性变更写覆盖旧宿主的
+  同线兼容范围，见「兼容声明与 engines.dsh」），不改插件自身版本号的基础号；`0.3.14-alpha.1` 收敛得到的是 `0.3.14`，不是
   「dsh 的版本」。
 - 预发布线发版：在 alpha 分支升 `-alpha.N` 的 N；dsh 线进入 rc 阶段后后缀换
   `-rc.N`（同一基础号内递增，`0.10.2-alpha.2` → `0.10.2-rc.1`），Release 自动
@@ -216,7 +215,8 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    - 在 `CHANGELOG.md` 顶部新增 `## <版本> (YYYY-MM-DD)` 小节——GitHub
      Release 说明自动取自这里（`scripts/release-notes.mjs`），不写就没有说明；
      CHANGELOG 只保留当前适配线的条目（更早历史以 GitHub Releases 为准），
-     适配小节把 `engines.dsh`（兼容声明，**精确宿主版本**，如 `0.2.2-rc.2`）与依赖 range（`^版本`）分开表述；
+     适配小节把 `engines.dsh`（兼容声明：精确构建基线如 `0.2.2-rc.3`，或无破坏性变更时的
+     同线兼容范围如 `>=0.2.2-rc.2 <0.2.3-0`）与依赖 range（`^版本`）分开表述；
    - 升 `package.json` 的 `version`（bump 是最后一步），随后重跑一次 `bun install`：
      `bun.lock` 会记录 workspace 各包的 `version` 字段，漏跑会让提交里的 lockfile
      仍停在旧版本号（收敛压缩提交时会被一起带进 main）。
@@ -238,7 +238,8 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    prerelease 标记）。**tag 由你明确打出，CI 绝不创建 tag**：没推 tag 就没有任何
    Release，不存在「顺手多发一版」。发版后核对 Release 的资产 tarball 与
    `engines.dsh` 字段符合预期（解包资产读 `package/package.json` 的
-   `engines.dsh`：`tar -xOf <tgz> package/package.json`——必须是精确版本，不是范围）。
+   `engines.dsh`：`tar -xOf <tgz> package/package.json`——与发布计划同源：
+    有破坏性变更的适配写精确构建基线，无破坏性变更的适配写 `>=<下界> <下一线>-0` 兼容范围）。
 
 ### tag 推送纪律（一次一个，推完确认再推下一个）
 
@@ -325,13 +326,53 @@ done
   宿主基线）；各分支的依赖差异只体现在 `bun.lock` 里，收敛时按 main 的新
   基线重建，不直接搬运 lockfile。
 
+## 兼容声明与 engines.dsh
+
+插件对 DSH 的兼容性由官方 manifest 字段 `engines.dsh` 声明。宿主安装与 profile 启动按
+**SemVer range** 判定：`semver.satisfies(runtimeVersion, engines.dsh, { includePrerelease: true })`
+（`packages/boot/app-boot/src/plugin-compatibility.ts`；存在 `engines.dsh` 时单独生效，
+peer 依赖不再参与）。本仓的声明分三类位置，各司其职：
+
+| 位置 | 形态 | 作用 |
+|---|---|---|
+| 发布包 `packages/*/package.json` 的 `engines.dsh` | **同线兼容范围** `>=<下界> <下一线>-0`（如 `>=0.2.2-rc.2 <0.2.3-0`）；**有破坏性变更时**写**精确构建基线**（如 `0.2.2-rc.3`） | 决定用户能看到/安装哪些版本：范围 = 该宿主线上已验证可跑的宿主版本集合 |
+| 发布包的全部 `@deepseek-ai/dsh-*` 依赖 range | `^<构建基线>` | npm 依赖语义；构建与测试永远针对最新 rc |
+| 根 `package.json`（`private`）的 `engines.dsh` | **精确构建基线** | 全仓「当前对着哪个宿主构建」的唯一事实源；`bun.lock` 与解析基线锁以它为准 |
+
+### 什么时候可以写范围（精确 vs 范围）
+
+**只有确认没有破坏性变更、且旧宿主隔离实例验证通过后，才写兼容范围**。判断依据：
+宿主 release notes 与 rc→rc 公共类型/运行时导出 diff、第三方依赖漂移核对，以及
+**旧宿主隔离实例的实际装载验证**（见「日常发布流程」第 2 步）。任何影响插件 API、客户端
+契约或依赖的变更，本轮只能写精确构建基线——范围会过度声明兼容性，让用户在不兼容的宿主
+上装上插件。
+
+范围是**同线**的：下界与构建基线必须同一宿主基础号（DSH 每条线是完整 `X.Y.Z` 基础号，
+下一线 = 补丁号 +1），当前不支持跨基础号的兼容声明。DSH 进入下一条线（如 `0.2.3-alpha.0`）
+后，旧范围不再匹配，插件仍需重新适配发布。
+
+### 上界为什么必须写 `-0`
+
+宿主判定带 `includePrerelease: true`：`<0.2.3` 会放过 `0.2.3-alpha.0`（下一线的预发布），
+只有 `<0.2.3-0`（数字标识符 `0` 小于任何 `alpha`/`rc`）才能把下一线的全部预发布挡在外面。
+上界因此固定写成「构建基线的下一线 + `-0`」。唯一判据实现在
+`scripts/lib/engines-compat.mjs`（adapt-dsh / dsh-baseline / dsh-follow-status / dsh-deps /
+索引生成器共用），手写其他形态会被发布门禁拒绝。
+
+### 索引侧行为
+
+新范围版本的 `engines.dsh` **原样进索引**，宿主按 range 判定兼容（同线多个 rc 都能看到可安装）；
+历史 tarball 的单界范围（`^X`）仍按「取最低满足版本」映射成精确 pin——已发布版本不可变，
+索引保留当时的严格语义。详见下方「插件索引与静态 registry」的收录规则。
+
 ## DSH 宿主升级适配
 
-DSH 出新高基础号的 alpha 线（如 `0.1.2` 终结后的 `0.1.3-alpha.0`）后，在
-alpha 分支：
+DSH 出新的 rc（稳定线跟进）或新高基础号的 alpha 线（如 `0.1.2` 终结后的
+`0.1.3-alpha.0`）后，在对应分支（稳定线在 `main`，预发布线在 `alpha`）：
 
 ```bash
-node scripts/adapt-dsh.mjs 0.1.3-alpha.0   # 改全部 @deepseek-ai/dsh-* range 与 engines.dsh
+node scripts/adapt-dsh.mjs 0.1.3-alpha.0                      # 有破坏性变更：只写精确构建基线
+node scripts/adapt-dsh.mjs 0.1.3-alpha.0 --compat 0.1.2-rc.5  # 无破坏性变更：发布包写同线兼容范围
 # 必须从零重生成 lock：增量 bun install 只会同步 workspace 版本字段，不会重解 peer 图，
 # 历史实例会永久留在 lock 里（2026-11-04 审计实测：lock 混着 alpha 线 peer 实例，
 # CI --frozen-lockfile 静默安装混版图）。这是 test/dep-resolution-baseline.test.ts 的锁面。
@@ -360,20 +401,23 @@ git push                            # CI test.yml 在 alpha 分支上跑 test:ci
 - **漏洞豁免复核**：`scripts/audit-deps.mjs` 的 `ACCEPTED_ADVISORIES` 里登记的豁免要
   随宿主升级复核删除（如 zod 4.4.3 的 GHSA 豁免即随 rc.2 升级消解）。
 
-`adapt-dsh.mjs` 支持 `--dry-run` 预览，它只改各 package.json 的依赖 range。若 `bun install` 报某 dsh 包解析不到，先检查 adapt 是否已把 range 改写。稳定线（main）跟进 dsh 新的 rc（如 `0.1.1-rc.2` → `0.1.2-rc.1`）时同样在 main 上执行同一流程。
+`adapt-dsh.mjs` 支持 `--dry-run` 预览（只打印计划、不写文件）；它同时改写依赖 range 与
+`engines.dsh`。若 `bun install` 报某 dsh 包解析不到，先检查 adapt 是否已把 range 改写。
+稳定线（main）跟进 dsh 新的 rc（如 `0.1.1-rc.2` → `0.1.2-rc.1`）时同样在 main 上执行同一
+流程，并按「兼容声明与 engines.dsh」决定要不要 `--compat`。
 
-`adapt-dsh.mjs` 同时把每个发布包 `package.json` 的 `engines.dsh` 兼容声明
-改写为**精确宿主版本**（如 adapt 到 `0.1.3-alpha.0` 就写 `0.1.3-alpha.0`，不写
-`^` / `~` / `>=`）——`engines.dsh` 是 DSH 官方 manifest 字段
-（`@deepseek-ai/dsh-package-manifest` 的 `DshEnginesManifest`），宿主按 SemVer
-range 判定兼容性；本仓声明精确版本，故效果上等价于精确匹配。存在时它单独生效、
-peer 依赖不再参与判定。
-**为什么精确**（用户裁定 2026-10-30）：每个插件版本都有匹配的 DSH 版本，DSH 升级
-很可能不兼容旧版本；写范围会过度声明兼容性、容易误导用户。代价是每次宿主升级
-（含同线 alpha→rc→下一 alpha）都要重新发布对应插件版本。
-`dsh-follow-status.mjs` 会核对它与依赖基线的一致性（漂移即 warning）；
-`dsh-baseline.mjs` 在发布门禁里严格核对「依赖 range `^X` ↔ 兼容声明精确 `X`」。
-旧字段 `dsh.host` 已废弃，adapt 会把残留一并删除。
+`adapt-dsh.mjs` 对 `engines.dsh` 的改写规则：
+- 不带 `--compat`：发布包写**精确构建基线**（如 adapt 到 `0.2.2-rc.3` 就写 `0.2.2-rc.3`）——
+  适用于有破坏性变更、或尚未验证旧宿主兼容的适配；
+- 带 `--compat <下界>`：发布包写**同线兼容范围** `>=<下界> <下一线>-0`
+  （如 `>=0.2.2-rc.2 <0.2.3-0`）——仅当确认无破坏性变更、且旧宿主隔离实例验证通过时使用；
+- 私有根 `package.json` 两种情况都写精确构建基线（全仓「当前对着哪个宿主构建」的事实源）。
+
+`engines.dsh` 是 DSH 官方 manifest 字段（`@deepseek-ai/dsh-package-manifest` 的
+`DshEnginesManifest`），宿主按 SemVer range 判定兼容性。`dsh-follow-status.mjs` 会核对声明与
+依赖基线的一致性（漂移即 warning）；`dsh-baseline.mjs` 在发布门禁里严格核对「依赖 range `^X`
+↔ 私有根精确 `X` ↔ 发布包精确 `X` 或覆盖 `X` 的同线兼容范围」。旧字段 `dsh.host`
+已废弃，adapt 会把残留一并删除。
 
 同一命令也用于让重建后的 alpha 分支跟进新预发布线：adapt 不比较新旧、按
 指定版本整块覆写，因此「待命的 alpha 分支等到 dsh 新 alpha 线后开始适配」
@@ -405,6 +449,7 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
    ```bash
    git checkout -b alpha main
    node scripts/adapt-dsh.mjs <新线版本>   # 改全部 @deepseek-ai/dsh-* range 与 engines.dsh
+   # ↑ 确认无破坏性变更、旧宿主验证通过后可加 --compat <同线下界> 写兼容范围（见「兼容声明与 engines.dsh」）
    bun install                             # 重新生成 lockfile
    ```
 
@@ -420,7 +465,7 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
    工作树里完成（不在主检出目录操作），分三件事：
 
    a. **`adapt` 到新正式版并去掉预发布后缀**：`node scripts/adapt-dsh.mjs
-      <该线最新 rc>` + `bun install`，让依赖基线与 `engines.dsh` 对齐这条线
+      <该线最新 rc>` + `bun install`，让依赖基线与兼容声明对齐这条线
       的正式版；把包版本去掉后缀（`0.3.2-alpha.0` → `0.3.2`；若稳定线热修已
       占用该基础号，先跳到下一个基础号），写 CHANGELOG。
 
@@ -567,23 +612,29 @@ packument 的 `dist.tarball` 直接指向对应 GitHub Release 资产（标准 n
 生成器只从 **GitHub Releases** 收集，不遍历 git tag：
 
 - tag 形如 `<包目录>-v<精确 SemVer>`，资产为 `chaoset-<包目录>-<版本>.tgz`；
-- 资产内 `package.json` 必须能确定该版本的**精确宿主版本**，且包名/版本与 tag 一致：
-  1. 声明了精确 `engines.dsh` → 原样使用（新发布的包）；
-  2. 声明的是范围（历史 tarball 全是 `^X`）→ 取**最低满足版本** X 作为精确 pin
-     （即发布时适配的宿主版本）；无法判定精确版本（`*` / `latest` / `||` 组合等）→
+- 资产内 `package.json` 必须能确定该版本的**宿主兼容声明**，且包名/版本与 tag 一致：
+  1. 声明了**同线兼容范围**（严格形态 `>=<下界> <下一线>-0`，即「兼容声明与 engines.dsh」
+     一节的口径）→ **原样收录**：索引与 packument 的 `engines.dsh` 都写这个范围，宿主按
+     range 判定兼容；形态不合规（`*` / `latest` / `||` 组合 / 未加界的范围等）→
      fail-safe 跳过并记 `invalid-engines-dsh`；
-  3. 否则旧字段 `dsh.host` 是**精确版本**（如 `0.2.1-rc.3`）→ 原样作为精确 pin；
+  2. 声明了**精确 `engines.dsh`** → 原样收录（`rangeSource=exact`，有破坏性变更的适配）；
+  3. 声明的是**历史单界范围**（`^X` / `~X` / `>=X`，旧 tarball 全部如此）→ 取**最低满足
+     版本** X 作为精确 pin（即发布时适配的宿主版本），保留 `dshMarket.declaredEnginesDsh`
+     供离线复核；无法判定精确版本 → 跳过并记 `invalid-engines-dsh`；
+  4. 旧字段 `dsh.host` 是**精确版本**（如 `0.2.1-rc.3`）→ 原样作为精确 pin；
      不是精确版本则跳过并记 `invalid-dsh-host-pin`；
-  4. 两者都没有 → 继续排除（`missing-engines-dsh`）。
-- **精确匹配的行为矩阵（不误导的代价，如实记录）**：索引里每个版本只对它精确声明的
-  那个宿主版本显示可安装；同线其它预发布/正式版都不匹配（宿主升级很可能不兼容旧版）。
-  - `0.2.2-rc.2` 宿主：只看到 `engines.dsh` pin 为 `0.2.2-rc.2` 的版本；
-  - 更早的稳定线版本 pin 在 `0.2.1-rc.2`/`rc.3`，以 `0.2.1-rc.5` 为参考版本的宿主
-    **不会看到旧稳定版**可安装——这是「精确匹配、不误导」的代价，收敛期发布对应版本后恢复；
-  - DSH 每次升级（含同线 alpha→rc→下一 alpha）都需要插件重新发布对应版本。
-- 映射来源保留供离线复核：范围取整的版本在 packument 里写
+  5. 都没有 → 继续排除（`missing-engines-dsh`）。
+- **兼容矩阵**：索引保留每个版本声明的**生效形态**——新版本是兼容范围（同线多个宿主可见可装），
+  历史版本是精确 pin（只对那一版宿主显示可安装）：
+  - 声明 `>=0.2.2-rc.2 <0.2.3-0` 的版本：`0.2.2-rc.2`、`0.2.2-rc.3` 乃至该线后续 rc
+    都显示可安装（宿主按 `semver.satisfies(..., { includePrerelease: true })` 判定）；
+  - 历史精确 pin 版本（如 `0.2.1-rc.3`）只对那一版宿主可见——已发布 tarball 不可变，
+    索引保留当时的严格语义（旧版本不因新策略被"放行"到不兼容的宿主）；
+  - DSH 跨基础号升级（如 `0.2.3-*`）后旧范围不再匹配，插件需重新适配发布。
+- 映射来源保留供离线复核：历史单界范围取整的版本在 packument 里写
   `dshMarket: { source: "engines-range", declaredEnginesDsh: "^X" }`；旧 `dsh.host` 版本
-  保留原 `dsh.host` 字段。`check` 据此验算精确 pin（`engines.dsh` 必须等于来源推出的版本）。
+  保留原 `dsh.host` 字段。`check` 据此验算精确 pin（`engines.dsh` 必须等于来源推出的版本）；
+  兼容范围版本的 `engines.dsh` 是范围本身（不写来源字段，`check` 校验其严格形态）。
   不为旧 tarball 重打包补 `engines.dsh`（Release 不可变），严格化只发生在索引/registry 侧；
   安装期检查对历史版本仍宽松（CLI 仍可强制装旧包），发现页不误导由索引保证。
 - `publishTimestamp` 取 Release `published_at`；同一版本重复出现时取发布时间较新的那条。
@@ -643,7 +694,8 @@ gitignore 的 `.workwork/` 下。
 
 `check` 的判据：文件集合恰为上述布局；JSON 为规范序列化（手改会被发现，README 内容必须与
 生成器内置一致）；官方 `parseMarketIndex` 接受；每个版本的 registry 常量、版本集合、
-`engines.dsh`（必须是单个精确宿主版本 pin，映射版本还能由保留的来源字段离线复核）、
+`engines.dsh`（单个精确宿主版本 pin，或严格的同线兼容范围；映射版本还能由保留的来源字段
+离线复核）、
 `publishTimestamp`、`dist.integrity/shasum` 形态与 `dist.tarball`
 （精确等于该版本的 Release 资产 URL）都与索引一致；图标存在且是 SVG。
 

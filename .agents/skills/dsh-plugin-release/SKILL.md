@@ -128,7 +128,8 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    一致、版本不落后已归档）→ 建 GitHub Release。**tag 由你明确打出，CI 绝不
    创建 tag**。发版后核对 Release 资产 tarball 与 `engines.dsh` 兼容声明
    符合预期（解包 `tar -xOf <tgz> package/package.json` 读 `engines.dsh`——
-   必须是**精确宿主版本**，不是 `^X` 范围）。
+   有破坏性变更的适配是**精确构建基线**，无破坏性变更的适配是
+   `>=<下界> <下一线>-0` **同线兼容范围**；其他形态一律视为发布门禁漏拦）。
 
    必须逐个推、且推完确认再推下一个，原因两条（**都不报错，只会静默失败**）：
    **单次推超过 3 个 tag 时 GitHub 不产生任何 `push` 事件**（CI 完全不触发）；
@@ -162,7 +163,8 @@ RELEASING.md「日常发布流程」——工作未完成期间代码可以本�
   （lockfile 记录本地包版本；漏跑会让提交里的 lockfile 与 `package.json` 不一致）。
   升版本必须同时补该包 `CHANGELOG.md` 的 `## <版本> (YYYY-MM-DD)` 小节
   （GitHub Release 说明自动取自这里）：**CHANGELOG 只保留当前适配线的条目**（更早历史以 GitHub Releases 为准），
-  适配小节把 `engines.dsh`（兼容声明，**精确宿主版本**，现取 `bun run dsh-status`）与依赖 range（`^版本`）分开表述。
+  适配小节把 `engines.dsh`（兼容声明：精确构建基线或同线兼容范围
+  `>=<下界> <下一线>-0`，取值以 `bun run dsh-status` 的基线为准）与依赖 range（`^版本`）分开表述。
 - 推送 `main` / `alpha` 只跑测试（test.yml），永远不发布；发版只由 tag 推送触发
   （GitHub Release tarball 分发，不经过 npm）。**tag 由你明确打出，CI 绝不创建 tag**——没推 tag 就没有任何 Release。
   tag 命名、annotated、逐个推送与逐条确认的完整流程见 skill dsh-plugin-tag「标准流程」
@@ -170,4 +172,4 @@ RELEASING.md「日常发布流程」——工作未完成期间代码可以本�
   门禁规则（打 tag 发版时强制执行）：版本号**严格低于**已归档版本会直接红；「改了代码没升版本号」
   不是 CI 红灯——那种推送只跑测试，想发版就升版本打新 tag。版本与已归档 tag 相同则幂等跳过。
   任何情况下不满足发布条件的包不会出现在 Release 资产里。
-- **待命期版本形态约束**：待命期发版必须为纯 semver 正式版，严禁发布 `-alpha.N` 预发布版本。发布门禁会校验 `engines.dsh` 与版本形态的一致性：`engines.dsh` 必须是精确宿主版本（不能写范围），且带 `-alpha` 后缀的包必须精确匹配到进行中的 alpha/beta 宿主线，否则门禁直接拒绝。
+- **待命期版本形态约束**：待命期发版必须为纯 semver 正式版，严禁发布 `-alpha.N` 预发布版本。发布门禁会校验 `engines.dsh` 与版本形态的一致性：发布包的 `engines.dsh` 必须是精确构建基线或覆盖基线的同线兼容范围（私有根必须精确等于基线），且带 `-alpha` 后缀的包其**构建基线**必须落在进行中的 alpha/beta 宿主线上，否则门禁直接拒绝。

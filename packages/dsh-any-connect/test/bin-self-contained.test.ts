@@ -114,14 +114,19 @@ describe('lib/bin.js 自包含 CLI', () => {
   it('bin 闭包依赖 @deepseek-ai/dsh-storage 在 devDependencies 显式声明', () => {
     // bin 是独立 node 进程，宿主 runtime resolution 不覆盖它；构建把依赖闭包
     // 内联进 lib/bin.js（scripts/build.mjs 阶段 4）。@deepseek-ai/dsh-storage 由
-    // 闭包里的 storage-domain / storage-json（精确 peer 0.2.2-alpha.2）引入，
-    // 本包源码不直接 import——不声明它时 bun.lock 会把它解析到旧版 0.2.1-rc.3，
+    // 闭包里的 storage-domain / storage-json（精确 peer 到宿主基线）引入，
+    // 本包源码不直接 import——不声明它时 bun.lock 会把它解析到旧版，
     // bin 就内联出与宿主 storage 域不兼容的版本。声明为 devDependency 才能让
-    // lock 锁到宿主基线；range 与 engines.dsh 同源（root test/bundle.test.ts 校验）。
+    // lock 锁到宿主构建基线；range 对齐根 package.json 的精确 engines.dsh
+    // （全仓唯一构建基事实源；发布包自己的 engines.dsh 可能是兼容范围）。
+    const rootDir = join(PKG_ROOT, '..', '..')
     const manifest = JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf8')) as {
-      engines?: { dsh?: string }
       devDependencies?: Record<string, string>
     }
-    expect(manifest.devDependencies?.['@deepseek-ai/dsh-storage']).toBe(`^${manifest.engines?.dsh}`)
+    const baseline = (JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8')) as {
+      engines?: { dsh?: string }
+    }).engines?.dsh
+    expect(baseline, '根 package.json 必须声明精确 engines.dsh 构建基线').toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/)
+    expect(manifest.devDependencies?.['@deepseek-ai/dsh-storage']).toBe(`^${baseline}`)
   })
 })

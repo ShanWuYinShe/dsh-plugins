@@ -99,8 +99,8 @@ export interface BuiltSite {
     readonly baseUrl: string;
     readonly registryUrl: string;
     readonly plugins: readonly { readonly name: string; readonly versions: readonly string[] }[];
-    /** 生效 engines.dsh 的来源统计：精确声明 / 范围取下界 / 旧清单 dsh.host 精确 pin。 */
-    readonly rangeSources: { readonly exact: number; readonly floor: number; readonly 'dsh-host': number };
+    /** 生效 engines.dsh 的来源统计：精确声明 / 严格兼容范围 / 历史单界范围取下界 / 旧清单 dsh.host 精确 pin。 */
+    readonly rangeSources: { readonly exact: number; readonly compat: number; readonly floor: number; readonly 'dsh-host': number };
     /** 运行期依赖事实：策略生效后发布的版本带依赖会让 check/build 失败；更早版本只告警。 */
     readonly runtimeDependencies: RuntimeDependencySummary;
     readonly skipped: readonly { readonly tag: string; readonly reason: string }[];
@@ -171,20 +171,20 @@ export declare function collectCandidates(
   releases: readonly unknown[],
   options?: { dirs?: readonly string[] },
 ): { candidates: MarketCandidate[]; skipped: { tag: string; reason: string }[] };
-/** 收录判定结果：生效的精确 engines.dsh pin 及其来源。 */
+/** 收录判定结果：生效的 engines.dsh（精确 pin 或兼容范围）及其来源。 */
 export type ManifestInspection =
   | {
       readonly eligible: true;
-      /** 精确宿主版本 pin（index/packument 里的 engines.dsh）。 */
+      /** 生效 engines.dsh（index/packument 里的 engines.dsh）：精确 pin 或严格形态的兼容范围。 */
       readonly enginesDsh: string;
-      readonly rangeSource: 'exact' | 'floor' | 'dsh-host';
-      /** 来源为 floor（声明了范围、取下界）时保留的原始声明，供离线复核。 */
+      readonly rangeSource: 'exact' | 'compat' | 'floor' | 'dsh-host';
+      /** 来源为 floor（历史单界范围、取下界）时保留的原始声明，供离线复核。 */
       readonly declaredEnginesDsh?: string;
       /** 该版本声明的运行期依赖（名 → 范围；已排除 @chaoset 内部互引）。 */
       readonly runtimeDependencies: Readonly<Record<string, string>>;
     }
   | { readonly eligible: false; readonly reason: string };
-/** 判断 tarball 内 package.json 是否收录（精确 engines.dsh 原样 / 范围取下界 / 旧 dsh.host 精确 pin）。 */
+/** 判断 tarball 内 package.json 是否收录（精确 engines.dsh / 严格兼容范围原样 / 历史单界范围取下界 / 旧 dsh.host 精确 pin）。 */
 export declare function inspectManifest(
   manifest: unknown,
   candidate: Pick<MarketCandidate, 'version' | 'tag'>,

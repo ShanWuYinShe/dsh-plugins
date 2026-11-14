@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createRequire } from "node:module";
+import { enginesDshKind, enginesDshProblems } from "../scripts/lib/engines-compat.mjs";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,10 +16,11 @@ import { fileURLToPath } from "node:url";
  * 而当时**没有任何测试能发现**。
  *
  * 判据：
- * 1. 每个 manifest（根 + packages/*）的 `engines.dsh` 是精确版本，且所有直接
- *    `@deepseek-ai/dsh-*` 依赖 range 都是 `^<engines.dsh>`（与根 test/bundle
- *    同口径，这里额外覆盖根 manifest）；
- * 2. 每个直接宿依赖从该 manifest 目录解析出的实际版本**精确等于** `engines.dsh`；
+ * 1. 每个 manifest（根 + packages/*）的全部直接 `@deepseek-ai/dsh-*` 依赖 range
+ *    都是 `^<构建基线>`；根 manifest 的 `engines.dsh` 精确等于基线（"当前对着哪个
+ *    宿主构建"的唯一事实源），发布包的 `engines.dsh` 是精确基线或覆盖基线的同线
+ *    兼容范围（与根 test/bundle 同口径，这里额外覆盖根 manifest）；
+ * 2. 每个直接宿依赖从该 manifest 目录解析出的实际版本**精确等于**构建基线；
  * 3. `bun.lock` 里出现的每个 `@deepseek-ai/dsh-*@<version>` 都等于基线
  *    （混入任何旧实例即红；将来确实需要旧线的条目必须进 OLDER_ALLOWED 并写理由）。
  *
@@ -67,7 +69,7 @@ function declared(json: Record<string, any>): [string, string][] {
   ] as [string, string][];
 }
 
-const BASELINE = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).engines?.dsh as string | undefined;
+const BASELINE = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).engines?.dsh as string;
 const MANIFESTS = manifests();
 
 describe("依赖解析基线：声明、实际解析与 lock 三方一致", () => {
@@ -75,16 +77,29 @@ describe("依赖解析基线：声明、实际解析与 lock 三方一致", () =
     expect(typeof BASELINE).toBe("string");
     expect(BASELINE).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
     expect(MANIFESTS.length).toBeGreaterThanOrEqual(5);
+    // 根的精确声明同时是依赖 range 的锚点：两者漂移说明 adapt 只改了一半。
+    const rootDshDeps = declared(MANIFESTS[0]!.json).filter(([dep]) => dep.startsWith("@deepseek-ai/dsh-"));
+    expect(rootDshDeps.length, "根 manifest 至少要有一条 dsh-* 依赖").toBeGreaterThan(0);
+    for (const [dep, range] of rootDshDeps) {
+      expect(range, `根 manifest: ${dep} 的 range 必须是 ^${BASELINE}`).toBe(`^${BASELINE}`);
+    }
   });
 
   for (const manifest of MANIFESTS) {
-    it(`${manifest.path}: 直接宿依赖 range 与 engines.dsh 一致`, () => {
-      const enginesDsh = manifest.json.engines?.dsh;
-      expect(enginesDsh, `${manifest.path}: 缺精确 engines.dsh`).toBe(BASELINE);
+    it(`${manifest.path}: 直接宿依赖 range 与构建基线一致`, () => {
       const dshDeps = declared(manifest.json).filter(([dep]) => dep.startsWith("@deepseek-ai/dsh-"));
       for (const [dep, range] of dshDeps) {
         expect(range, `${manifest.path}: ${dep} 的 range 必须是 ^${BASELINE}`).toBe(`^${BASELINE}`);
       }
+      const enginesDsh = manifest.json.engines?.dsh;
+      if (manifest.path === "package.json") {
+        // 私有根：精确构建基线（不支持旧宿主的适配在这里体现为"当前构建针对谁"）。
+        expect(enginesDsh, `${manifest.path}: 根必须写精确 engines.dsh`).toBe(BASELINE);
+        return;
+      }
+      const kind = enginesDshKind(enginesDsh);
+      expect(["exact", "compat"], `${manifest.path}: engines.dsh 必须是精确版本或同线兼容范围`).toContain(kind);
+      expect(enginesDshProblems(enginesDsh, BASELINE), `${manifest.path}: 兼容声明必须覆盖构建基线 ${BASELINE}`).toEqual([]);
     });
 
     it(`${manifest.path}: 直接宿依赖实际解析到基线版本`, () => {

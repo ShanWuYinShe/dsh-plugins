@@ -23,7 +23,8 @@ export declare function baselineOf(range: unknown): string | null;
 
 /**
  * 扫描一个 package.json 对象，收集 dsh-* 依赖基线与 engines.dsh 兼容声明。
- * engines.dsh 只接受精确宿主版本（`^X` / `~X` / `>=X` 等范围一律计入 invalid）；
+ * engines.dsh 接受精确宿主版本或严格形态的同线兼容范围（`>=<下界> <下一线>-0`）；
+ * 宽松范围（`^X` / `~X` / 单界 `>=X` 等）一律计入 invalid；
  * 废弃字段 dsh.host 出现即计入 invalid（严格模式据此阻断发布）。
  */
 export declare function scanManifest(manifest: Record<string, unknown>): {
@@ -32,7 +33,16 @@ export declare function scanManifest(manifest: Record<string, unknown>): {
   invalid: { section: string; name: string; range: unknown }[];
 };
 
-/** 聚合一组 manifest：共同依赖基线、engines.dsh 与非法项计数；不一致时给出标记字符串。 */
+/**
+ * 校验一个 manifest 的 engines.dsh 兼容声明相对构建基线是否自洽（空数组 = 通过）。
+ * private 清单（根）必须精确等于基线；发布包接受精确基线或覆盖基线的同线兼容范围。
+ */
+export declare function enginesProblems(manifest: Record<string, unknown>, baseline: string): string[];
+
+/**
+ * 聚合一组 manifest：共同依赖基线、发布包 engines.dsh 与非法项计数；不一致时给出标记字符串。
+ * 根 private 的精确 engines.dsh 不参与聚合（只统计发布包）。
+ */
 export declare function aggregateBaseline(
   reader: (path: string) => Record<string, unknown>,
   root?: string,
