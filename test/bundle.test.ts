@@ -5,6 +5,12 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
+
+// 兼容声明判据的单一来源（与 adapt-dsh / dsh-baseline / 索引生成器共用）。
+import { enginesDshKind, enginesDshProblems } from "../scripts/lib/engines-compat.mjs";
+
+// 构建基线（全仓唯一事实源）：根 package.json 的 engines.dsh 写精确宿主版本。
+const BASELINE = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).engines?.dsh as string;
 // 与 scripts/build.mjs 相同的目录派生策略,避免硬编码清单漂移。
 // 与 build.mjs 一致地跳过没有 package.json 的目录:包移除后的残留目录
 // (如 vision-router)不应让元数据回归测试直接 ENOENT。
@@ -134,19 +140,22 @@ describe("npm bundle metadata", () => {
         expect(existsSync(join(ROOT, "packages", name, entry)), `${name}: files 里的 ${entry} 在磁盘上存在`).toBe(true);
       }
     });
-    it(`${name}: 兼容声明用官方 engines.dsh，并精确匹配发布时适配的宿主版本`, () => {
+    it(`${name}: 兼容声明用官方 engines.dsh——精确构建基线或同线兼容范围`, () => {
       // DSH 0.2.2-alpha.2 起安装/profile 启动按引擎区间判定插件兼容性
       // （packages/boot/app-boot/src/plugin-compatibility.ts：engines.dsh 存在
       // 时单独生效，peer 不再参与）。dsh.host 是自造旧字段，不在官方
       // DshManifest 契约内，必须清零。
       //
-      // 兼容声明一律写**精确宿主版本**（不带 ^ / ~ / 比较符）：每个插件版本
-      // 只声明它发布时实际适配的 DSH 版本——DSH 升级后必须安装对应重新发布的
-      // 插件版本（用户 2026-10-30 决策；范围会过度声明兼容性、误导用户）。
-      // 依赖 range 仍是 ^<基线>（npm 依赖语义，与宿主兼容声明不同源）。
-      const dshPin = pkg.engines?.dsh;
-      expect(typeof dshPin, `${name}: engines.dsh 必须声明`).toBe("string");
-      expect(dshPin).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
+      // 兼容声明策略（RELEASING.md「兼容声明与 engines.dsh」）：
+      //  - 根 package.json（private）写精确构建基线，是"当前对着哪个宿主构建"的事实源；
+      //  - 发布包写精确基线（有破坏性变更时），或同线兼容范围
+      //    ">=<同线下界> <下一线>-0"（无破坏性变更且已验证旧宿主可跑时）；
+      //    上界必须带 -0：宿主按 includePrerelease 判定，写 <下一线> 会放过下一线预发布；
+      //  - 依赖 range 永远 ^<构建基线>（npm 依赖语义，与宿主兼容声明不同源）。
+      const dshDecl = pkg.engines?.dsh;
+      expect(typeof dshDecl, `${name}: engines.dsh 必须声明`).toBe("string");
+      expect(["exact", "compat"], `${name}: engines.dsh 必须是精确版本或同线兼容范围`).toContain(enginesDshKind(dshDecl));
+      expect(enginesDshProblems(dshDecl, BASELINE), `${name}: 兼容声明必须覆盖构建基线 ${BASELINE}`).toEqual([]);
       const depRanges = [
         ...Object.entries(pkg.dependencies || {}),
         ...Object.entries(pkg.devDependencies || {}),
@@ -155,7 +164,7 @@ describe("npm bundle metadata", () => {
       ].filter(([dep]) => dep.startsWith("@deepseek-ai/dsh-"));
       expect(depRanges.length, `${name}: 至少要有一条 dsh-* 依赖供基线对照`).toBeGreaterThan(0);
       for (const [dep, range] of depRanges) {
-        expect(range, `${name}: ${dep} 的 range 是 ^<engines.dsh 精确版本>`).toBe(`^${dshPin}`);
+        expect(range, `${name}: ${dep} 的 range 是 ^<构建基线>`).toBe(`^${BASELINE}`);
       }
       expect(pkg.dsh?.host, `${name}: 旧字段 dsh.host 不得保留`).toBeUndefined();
     });

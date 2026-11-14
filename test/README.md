@@ -51,7 +51,7 @@
 | `plugin-display-meta.test.ts` | 四包都有 `locale/en|zh.json` 的 `meta.title/description` 与 `icon.svg`，且与市场元数据（PACKAGE_DISPLAY）同源 |
 | `deprecated-api.test.ts` | 源码不使用 0.2.2-rc.1 已废弃的 4 个宿主调用面（`eventAt`/`snapshotEvents`/`ownEvents`/`SessionController.page`） |
 | `client-manifest-contract.test.ts` | `dsh.client` 取值域：`platform: 'web'`、导出 `./client`，feature 插件不设 `immediately`/`external` |
-| `dep-resolution-baseline.test.ts` | 声明 range、实际解析版本与 bun.lock 三方都等于 `engines.dsh` 基线（混入 pre-rc 实例即红） |
+| `dep-resolution-baseline.test.ts` | 声明 range、根精确基线、实际解析版本与 bun.lock 都对齐构建基线（混入 pre-rc 实例即红） |
 | `third-party-notices.test.ts` | client 产物内联第三方代码（typert remote-info）的包必须附 THIRD_PARTY_NOTICES 并进 `files`；**bin 构建闭包（esbuild metafile → `.workwork/bin-closure.json`）与 notices 表格的组件/版本逐条相等** |
 | `coverage-baseline.test.ts` | 逐文件覆盖率棘轮基线：基线文件与 `vitest.config.ts` 的 include/exclude 推导面完全一致；基线里的全局阈值与配置同源；容差/写入逻辑反向自检（回退必红、容差内放行、新文件须达全局阈值、过期记录须清理） |
 | `lock-index.test.ts` | 锁文件与索引表双向一致（单测在 UNIT_TESTS 登记，防索引腐烂） |

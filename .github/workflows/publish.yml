@@ -66,10 +66,10 @@ jobs:
       - name: Test stability
         run: bun run test:stability
 
-      # 发布基线门禁:所有 dsh-* 依赖必须是 ^<版本> 形态、基线与 engines.dsh
-      # 兼容声明都齐全且彼此一致——发布归档的 tag 不允许带糊的状态
-      # (engines.dsh 是 DSH 官方 manifest 字段,宿主安装/启动据此判定兼容性;
-      # 漂移/缺失此前只由每日 cron 的 follow-status 非阻塞告警兜着)。
+      # 发布基线门禁:所有 dsh-* 依赖必须是 ^<构建基线> 形态; 私有根 engines.dsh 精确等于
+      # 基线,发布包 engines.dsh 是精确基线或覆盖基线的同线兼容范围——发布归档的 tag 不允许
+      # 带糊的状态(engines.dsh 是 DSH 官方 manifest 字段,宿主安装/启动按 SemVer range 判定
+      # 兼容性; 漂移/缺失此前只由每日 cron 的 follow-status 非阻塞告警兜着)。
       # 规则见 scripts/dsh-baseline.mjs。
       - name: Verify dsh baseline
         run: node scripts/dsh-baseline.mjs

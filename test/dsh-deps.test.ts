@@ -8,6 +8,7 @@ import {
   DEP_SECTIONS,
   aggregateBaseline,
   baselineOf,
+  enginesProblems,
   manifestPaths,
   scanManifest,
 } from "../scripts/lib/dsh-deps.mjs";
@@ -87,15 +88,29 @@ describe("scanManifest", () => {
     ]);
   });
 
-  it("engines.dsh：必须是精确宿主版本才收集；缺失时为空", () => {
+  it("engines.dsh：精确宿主版本或同线兼容范围都收集；缺失时为空", () => {
     expect(scanManifest({ engines: { dsh: "0.2.1-alpha.1" } }).enginesDsh).toEqual(["0.2.1-alpha.1"]);
+    // 兼容范围原样（去首尾空白）收录，不取下界——形态/语义判定交给 enginesProblems。
+    expect(scanManifest({ engines: { dsh: ">=0.2.2-rc.2 <0.2.3-0" } }).enginesDsh).toEqual([">=0.2.2-rc.2 <0.2.3-0"]);
+    expect(scanManifest({ engines: { dsh: "  >=0.2.2-rc.2 <0.2.3-0  " } }).enginesDsh).toEqual([">=0.2.2-rc.2 <0.2.3-0"]);
+    // 形态合法但语义可疑（上界不是下一线）不归 scanManifest 管，由 enginesProblems 报。
+    expect(scanManifest({ engines: { dsh: ">=0.2.1-rc.5 <0.2.4-0" } }).enginesDsh).toEqual([">=0.2.1-rc.5 <0.2.4-0"]);
     expect(scanManifest({ engines: { node: ">=24.9.0" } }).enginesDsh).toEqual([]);
     expect(scanManifest({}).enginesDsh).toEqual([]);
   });
 
-  it("engines.dsh 写范围（^X/~X/>=X）一律进 invalid；旧字段 dsh.host 出现即 invalid", () => {
-    // 用户裁定：兼容声明必须精确匹配宿主版本，写范围会过度声明兼容性。
-    for (const range of ["^0.2.1-alpha.1", "~0.2.1-alpha.1", ">=0.2.1-alpha.1", "0.2.1-alpha.1 || 0.3.0-alpha.1"]) {
+  it("engines.dsh 写宽松范围（^X/~X/单界 >=X/*/||）一律进 invalid；旧字段 dsh.host 出现即 invalid", () => {
+    // 宽松范围会过度声明兼容性，且会与历史 tarball 的「范围取下界」口径混淆，
+    // 兼容范围只接受严格形态 `>=<下界> <下一线>-0`（见 engines-compat.mjs）。
+    for (const range of [
+      "^0.2.1-alpha.1",
+      "~0.2.1-alpha.1",
+      ">=0.2.1-alpha.1",
+      ">=0.2.2-rc.2 <0.2.3", // 上界缺 "-0"，会被宿主 includePrerelease 放过下一线预发布
+      "*",
+      "latest",
+      "0.2.1-alpha.1 || 0.3.0-alpha.1",
+    ]) {
       const bad = scanManifest({ engines: { dsh: range } });
       expect(bad.enginesDsh, range).toEqual([]);
       expect(bad.invalid, range).toEqual([{ section: "engines", name: "dsh", range }]);
@@ -112,10 +127,46 @@ describe("scanManifest", () => {
   });
 });
 
+describe("enginesProblems", () => {
+  // 构建基线 0.2.2-rc.3；同线兼容范围覆盖 rc.2 与 rc.3。
+  const BASELINE = "0.2.2-rc.3";
+  const COMPAT = ">=0.2.2-rc.2 <0.2.3-0";
+  const published = (enginesDsh?: unknown): Record<string, unknown> =>
+    enginesDsh === undefined ? {} : { engines: { dsh: enginesDsh } };
+  const root = (enginesDsh?: unknown): Record<string, unknown> => ({ private: true, ...published(enginesDsh) });
+
+  it("发布包：精确等于基线 / 覆盖基线的同线兼容范围 → 通过", () => {
+    expect(enginesProblems(published(BASELINE), BASELINE)).toEqual([]);
+    expect(enginesProblems(published(COMPAT), BASELINE)).toEqual([]);
+    // 基线前进到 rc.4 后，同一条兼容范围仍然覆盖基线。
+    expect(enginesProblems(published(COMPAT), "0.2.2-rc.4")).toEqual([]);
+  });
+
+  it("发布包：缺失 / 形态非法 / 精确值不符 → 报问题", () => {
+    expect(enginesProblems(published(), BASELINE).join("\n")).toContain("缺少 engines.dsh");
+    expect(enginesProblems(published("^0.2.2-rc.2"), BASELINE).join("\n")).toContain("形态非法");
+    expect(enginesProblems(published("0.2.2-rc.2"), BASELINE).join("\n")).toContain("不一致");
+  });
+
+  it("发布包：兼容范围不覆盖基线（上界/下界问题）→ 报问题", () => {
+    expect(enginesProblems(published(">=0.2.2-rc.2 <0.2.4-0"), BASELINE).join("\n")).toContain("上界必须切在构建基线的下一线");
+    expect(enginesProblems(published(">=0.2.1-rc.5 <0.2.3-0"), BASELINE).join("\n")).toContain("不在同一宿主基础号");
+    expect(enginesProblems(published(">=0.2.2-rc.4 <0.2.3-0"), BASELINE).join("\n")).toContain("高于构建基线");
+  });
+
+  it("private 根：必须精确等于基线，兼容范围也算问题", () => {
+    expect(enginesProblems(root(BASELINE), BASELINE)).toEqual([]);
+    expect(enginesProblems(root(), BASELINE).join("\n")).toContain("缺少 engines.dsh");
+    expect(enginesProblems(root("^0.2.2-rc.2"), BASELINE).join("\n")).toContain("形态非法");
+    expect(enginesProblems(root(COMPAT), BASELINE).join("\n")).toContain("不能写兼容范围");
+    expect(enginesProblems(root("0.2.2-rc.4"), BASELINE).join("\n")).toContain("不一致");
+  });
+});
+
 describe("aggregateBaseline", () => {
   const manifest = (version: string | undefined, enginesDsh?: string): Record<string, unknown> => ({
     dependencies: version === undefined ? {} : { [DEP_PREFIX + "atomic-write"]: "^" + version },
-    // 兼容声明是精确宿主版本（依赖 range 仍是 ^X）。
+    // 兼容声明可以是精确宿主版本或同线兼容范围（依赖 range 仍是 ^X）。
     ...(enginesDsh === undefined ? {} : { engines: { dsh: enginesDsh } }),
   });
 
@@ -148,6 +199,20 @@ describe("aggregateBaseline", () => {
     );
     expect(conflicting.enginesDsh).toBe("[不一致]");
     expect(aggregateBaseline(() => manifest("0.2.1-alpha.1"), ROOT, ["a/package.json"]).enginesDsh).toBeUndefined();
+  });
+
+  it("engines.dsh 聚合只统计发布包：根 private 的精确基线不参与", () => {
+    // 根写精确构建基线、发布包写同线兼容范围是本轮策略下的正常形态，
+    // 若把根也算进聚合会永远得到 [不一致]。
+    const compat = ">=0.2.2-rc.2 <0.2.3-0";
+    const reader = (path: string): Record<string, unknown> => path === "package.json"
+      ? { private: true, engines: { dsh: "0.2.2-rc.3" } }
+      : {
+        dependencies: { [DEP_PREFIX + "atomic-write"]: "^0.2.2-rc.3" },
+        engines: { dsh: compat },
+      };
+    const result = aggregateBaseline(reader, ROOT, ["package.json", "packages/a/package.json"]);
+    expect(result).toEqual({ baseline: "0.2.2-rc.3", enginesDsh: compat, invalid: 0 });
   });
 
   it("非法项计数跨 manifest 累加", () => {

@@ -13,6 +13,7 @@
 import { createHash } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 import { compareVersions, isStable, VERSION_RE } from './version-checks.mjs'
+import { enginesDshKind } from './engines-compat.mjs'
 
 /** 默认 GitHub 仓库（owner/name）；CI 里由 GITHUB_REPOSITORY 覆盖。 */
 export const DEFAULT_GITHUB_REPO = 'ShanWuYinShe/dsh-plugins'
@@ -489,11 +490,12 @@ export function collectCandidates(releases, options = {}) {
 /**
  * 判断一个 tarball 内 package.json 是否应被收录，并给出该版本要声明的 engines.dsh。
  * 收录条件（brief 六）：包名与包目录对应、版本与 tag 一致、dsh.bundle 存在，且：
- *  1. 声明了精确 engines.dsh → 原样使用；
- *  2. 声明了范围形态（历史版本全是 ^X）→ 取最低满足版本作为精确 pin（见 exactPinOfDeclared），
- *     无法判定则 fail-safe 跳过（invalid-engines-dsh）；
- *  3. 没有 engines.dsh 但旧字段 dsh.host 是精确版本 → 原样使用；非精确则跳过（invalid-dsh-host-pin）；
- *  4. 两者都没有 → 跳过（missing-engines-dsh）。
+ *  1. 声明了精确 engines.dsh → 原样使用（rangeSource=exact）；
+ *  2. 声明了严格形态的兼容范围（">=<下界> <下一线>-0"）→ 原样使用（rangeSource=compat）；
+ *  3. 声明了历史单界范围（^X / ~X / >=X）→ 取最低满足版本作为精确 pin（rangeSource=floor，
+ *     见 exactPinOfDeclared），无法判定则 fail-safe 跳过（invalid-engines-dsh）；
+ *  4. 没有 engines.dsh 但旧字段 dsh.host 是精确版本 → 原样使用；非精确则跳过（invalid-dsh-host-pin）；
+ *  5. 两者都没有 → 跳过（missing-engines-dsh）。
  * 另外扫描运行期依赖（见 runtimeDependenciesOf）：外部插件它必须为空，check 对每个插件的
  * 最高版本仍带运行期依赖会失败；历史版本只在 build/check 里告警（tarball 不可变）。
  * @param manifest - tarball 内 package.json 解析结果。
@@ -519,8 +521,19 @@ export function inspectManifest(manifest, candidate, expectedName) {
   const declared = engines !== null && typeof engines === 'object' && typeof engines.dsh === 'string' ? engines.dsh : undefined
   const runtimeDependencies = runtimeDependenciesOf(manifest)
   if (declared !== undefined) {
+    // 严格形态的同线兼容范围原样生效：范围本身就是宿主判定口径（includePrerelease 的
+    // semver.satisfies），不能像历史单界范围那样取下界 pin——那会把兼容区间缩成单点。
+    if (enginesDshKind(declared) === 'compat') {
+      return { eligible: true, enginesDsh: declared.trim(), rangeSource: 'compat', runtimeDependencies }
+    }
     const pin = exactPinOfDeclared(declared)
-    if (pin === undefined) return { eligible: false, reason: 'invalid-engines-dsh: ' + JSON.stringify(declared) }
+    if (pin === undefined) {
+      return {
+        eligible: false,
+        reason: 'invalid-engines-dsh: ' + JSON.stringify(declared)
+          + '（必须是精确宿主版本，或严格形态的同线兼容范围 ">=<下界> <下一线>-0"）',
+      }
+    }
     if (pin === declared.trim()) return { eligible: true, enginesDsh: pin, rangeSource: 'exact', runtimeDependencies }
     return { eligible: true, enginesDsh: pin, rangeSource: 'floor', declaredEnginesDsh: declared, runtimeDependencies }
   }
@@ -804,7 +817,7 @@ export function buildSite(input) {
   files.set('index.json', serializeJson(index))
   files.set('README.md', MARKET_README)
   const versionCount = plugins.reduce((total, plugin) => total + plugin.versions.length, 0)
-  const rangeSources = { exact: 0, floor: 0, 'dsh-host': 0 }
+  const rangeSources = { exact: 0, floor: 0, 'dsh-host': 0, compat: 0 }
   for (const entries of byDir.values()) for (const entry of entries) rangeSources[entry.rangeSource] += 1
   return {
     files,
@@ -858,7 +871,8 @@ function packumentOf(dir, name, entries, registryUrl) {
 function packumentVersion(entry, registryUrl) {
   const manifest = entry.manifest
   // dshMarket 是本站点自有的来源记录（npm 客户端忽略未知字段），check 据此离线复核：
-  //  - 范围取整版本保留原声明，验算精确 pin；
+  //  - 历史单界范围（取整下界 pin 的版本）保留原声明，验算精确 pin；
+  //    （精确声明与严格兼容范围的生效值本身就是原声明，无需来源字段就能还原。）
   //  - 声明了运行期依赖的版本保留依赖清单，供 check 判定「最新版本必须零运行期依赖」。
   const provenance = {}
   if (entry.rangeSource === 'floor') {
@@ -872,8 +886,9 @@ function packumentVersion(entry, registryUrl) {
     version: manifest.version,
     description: typeof manifest.description === 'string' ? manifest.description : undefined,
     license: typeof manifest.license === 'string' ? manifest.license : undefined,
-    // 生效 engines.dsh 永远是单个精确宿主版本：新清单原样、历史范围清单取下界、
-    // 旧 dsh.host 精确 pin 原样。DSH 安装/启动按精确匹配严格判定（宿主升级需重新发布）。
+    // 生效 engines.dsh：精确声明与严格兼容范围都原样（范围即宿主兼容区间），历史单界范围
+    // 取下界精确 pin、旧 dsh.host 精确 pin 原样。宿主按
+    // semver.satisfies(runtimeVersion, engines.dsh, { includePrerelease: true }) 判定。
     engines: { ...(manifest.engines === null || typeof manifest.engines !== 'object' ? {} : manifest.engines), dsh: entry.enginesDsh },
     homepage: requireHomepage(manifest.homepage),
     repository: requireRepository(manifest),
@@ -1046,8 +1061,8 @@ function renderIcon(display) {
  *   1. 文件集合恰好是 index.json + 每个插件一个图标 + 每个插件一个 packument；
  *   2. JSON 是规范序列化（两空格缩进 + 结尾换行）——外部手改会在这里被发现；
  *   3. 用官方 parseMarketIndex 校验格式，并与展示元数据（名称/顺序/图标/子路径）对齐；
- *   4. 索引与静态 registry 交叉一致：registry 常量、版本集合、engines.dsh（必须是单个精确
- *      宿主版本 pin，映射版本还能由保留的来源字段离线复核）、publishTimestamp、
+ *   4. 索引与静态 registry 交叉一致：registry 常量、版本集合、engines.dsh（单个精确宿主版本
+ *      pin 或严格形态的兼容范围；取整下界的映射版本还能由保留的来源字段离线复核）、publishTimestamp、
  *      dist.integrity/shasum 形态，以及每条 dist.tarball 精确等于该版本的 Release 资产 URL；
  *   5. 运行期依赖：每个插件的最新版本必须在 packument 的来源记录里零运行期依赖（否则
  *      error——索引安装后同 profile 的后续 pnpm 操作会去静态 registry 解析它们而 404）；
@@ -1213,13 +1228,15 @@ function validatePlugin(context) {
       errors.push(label + ' 版本 ' + version + ' 的 source.registry 期望 ' + registryUrl + '，实际 ' + String(entry.source.registry))
     }
     if (typeof entry.engines.dsh !== 'string' || entry.engines.dsh === '') errors.push(label + ' 版本 ' + version + ' 缺少 engines.dsh')
-    else if (!VERSION_RE.test(entry.engines.dsh)) {
-      errors.push(label + ' 版本 ' + version + ' 的 engines.dsh 必须是单个精确 SemVer（不能带 ^/~/> 操作符、空格或 ||）：' + entry.engines.dsh)
+    else if (enginesDshKind(entry.engines.dsh) === 'invalid') {
+      errors.push(label + ' 版本 ' + version + ' 的 engines.dsh 必须是单个精确 SemVer，或严格形态的兼容范围'
+        + '（">=<下界> <下一线>-0"，如 ">=0.2.2-rc.2 <0.2.3-0"；不能写 ^/~ 单界范围、* 或 || 组合）：' + entry.engines.dsh)
     }
     const packedVersion = packument.versions[version]
     if (packedVersion === null || typeof packedVersion !== 'object') continue
     // 来源记录必须保留在 packument 里供离线复核：
-    //  - 范围清单 → dshMarket.source = 'engines-range' + 原范围（旧 dsh.host → dsh.host 本身）；
+    //  - 历史单界范围清单 → dshMarket.source = 'engines-range' + 原范围（旧 dsh.host → dsh.host 本身）；
+    //    （精确声明与严格兼容范围的生效值就是原声明，不需要来源字段。）
     //  - 声明了运行期依赖的版本 → dshMarket.runtimeDependencies（名 → 范围）。
     const provenance = packedVersion.dshMarket
     let declaredRuntimeDependencies = undefined
@@ -1373,7 +1390,11 @@ export function previousManifests(input) {
   return result
 }
 
-/** 由 packument 记录还原原始 engines 声明（判断精确声明 / 范围取整 / 旧 dsh.host 三种来源）。 */
+/**
+ * 由 packument 记录还原原始 engines 声明（判断精确声明 / 兼容范围 / 历史单界范围取整 /
+ * 旧 dsh.host 四种来源）。精确声明与兼容范围的生效值就是原声明（packument 的 engines.dsh），
+ * 原样保留即可重新判定；只有历史单界范围要换回 dshMarket 里的原声明、旧 dsh.host 要去掉合成值。
+ */
 function reconstructedEngines(packed) {
   const engines = packed.engines === null || typeof packed.engines !== 'object' ? {} : { ...packed.engines }
   if (packed.dshMarket !== null && typeof packed.dshMarket === 'object' && typeof packed.dshMarket.declaredEnginesDsh === 'string') {
@@ -1405,9 +1426,9 @@ function manifestFromPackument(packed, packument) {
     description: typeof packed.description === 'string' ? packed.description : packument.description,
     license: packed.license,
     // 还原「生效 engines.dsh」的来源，保证 --previous 重建字节不变：
-    //  - 范围取整的版本：用 dshMarket 里的原范围重新算精确 pin；
+    //  - 历史单界范围取整的版本：用 dshMarket 里的原范围重新算精确 pin；
     //  - 旧 dsh.host 版本：原始清单本来就没有 engines.dsh，去掉合成值让来源重新判定为 dsh-host；
-    //  - 精确声明的版本：engines.dsh 原样。
+    //  - 精确声明与严格兼容范围的版本：engines.dsh 原样（重新判定仍为 exact / compat）。
     engines: reconstructedEngines(packed),
     homepage: packed.homepage,
     repository: packed.repository === null || typeof packed.repository !== 'object'

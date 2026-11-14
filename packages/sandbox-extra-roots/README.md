@@ -43,7 +43,7 @@ dsh plugin --profile web remove @chaoset/sandbox-extra-roots
 ```
 
 ### 方式二：tarball URL（手动）
-> 适配的 DSH 版本见本包 `package.json` 的 `engines.dsh` 字段（官方兼容声明）；
+> 适配的 DSH 版本见本包 `package.json` 的 `engines.dsh` 字段（官方兼容声明：无破坏性变更的适配为同线兼容范围，宿主线内的 rc 都可安装）；
 > 宿主 0.2.2 起要求 **Node.js >= 24.9**（`engines.node` 同步声明）。
 > 仓库的 `dsh-v*` git tag 是各次稳定版适配的归档点。
 

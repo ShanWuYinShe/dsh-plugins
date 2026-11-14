@@ -534,9 +534,10 @@ async function main(argv) {
       reportFailures(failures)
       reportRuntimeDependencies(runtimeDependencies)
       const exactCount = included.filter(entry => entry.rangeSource === 'exact').length
+      const compatCount = included.filter(entry => entry.rangeSource === 'compat').length
       const floorCount = included.filter(entry => entry.rangeSource === 'floor').length
       const hostCount = included.filter(entry => entry.rangeSource === 'dsh-host').length
-      process.stderr.write('plugin-market: plan 完成：收录 ' + String(included.length) + ' 个版本（精确声明 ' + String(exactCount) + ' / 范围取下界 ' + String(floorCount) + ' / dsh.host pin ' + String(hostCount) + '，复用历史站点 ' + String(reusedCount) + ' 个），排除 ' + String(excluded.length + collected.skipped.length) + ' 个'
+      process.stderr.write('plugin-market: plan 完成：收录 ' + String(included.length) + ' 个版本（精确声明 ' + String(exactCount) + ' / 兼容范围 ' + String(compatCount) + ' / 范围取下界 ' + String(floorCount) + ' / dsh.host pin ' + String(hostCount) + '，复用历史站点 ' + String(reusedCount) + ' 个），排除 ' + String(excluded.length + collected.skipped.length) + ' 个'
         + (failures.length === 0 ? '' : '，下载/解析失败 ' + String(failures.length) + ' 个') + '\n')
       return 0
     }
@@ -577,7 +578,7 @@ async function main(argv) {
     writeSite(options.out, site.files)
     const summary = { ...site.summary, out: resolve(options.out), files: site.files.size, reused: reusedCount, failures, warnings: validation.warnings }
     process.stdout.write(JSON.stringify(summary, null, 2) + '\n')
-    process.stderr.write('plugin-market: build 完成：' + String(summary.plugins.length) + ' 个插件 / ' + String(summary.versionCount) + ' 个版本（精确声明 ' + String(summary.rangeSources.exact) + ' / 范围取下界 ' + String(summary.rangeSources.floor) + ' / dsh.host pin ' + String(summary.rangeSources['dsh-host']) + '）/ ' + String(summary.files) + ' 个文件，'
+    process.stderr.write('plugin-market: build 完成：' + String(summary.plugins.length) + ' 个插件 / ' + String(summary.versionCount) + ' 个版本（精确声明 ' + String(summary.rangeSources.exact) + ' / 兼容范围 ' + String(summary.rangeSources.compat) + ' / 范围取下界 ' + String(summary.rangeSources.floor) + ' / dsh.host pin ' + String(summary.rangeSources['dsh-host']) + '）/ ' + String(summary.files) + ' 个文件，'
       + String(summary.warnings.length) + ' 条告警，digest ' + summary.digest + '\n')
     return 0
   } catch (error) {

@@ -25,17 +25,20 @@
 //   --ci      落后/漂移时输出 GitHub Actions `::warning::` annotation
 //             （非阻塞，永远 exit 0——这是提醒，不是门禁）。
 //   --strict  发布门禁用：main 分支的 dsh 依赖基线必须等于 npm 最新正式版
-//             （最新 rc；本项目把 rc 视为该线正式版），或任一分支 engines.dsh
-//             与基线不一致时报错 exit 1，拒绝发布旧基线插件；npm registry
-//             不可达时仍按「永远 exit 0」降级为 warning（网络抖动不阻塞发布，
-//             下一次运行/人工核对补上）。
+//             （最新 rc；本项目把 rc 视为该线正式版），或任一分支的 engines.dsh
+//             兼容声明与基线不自洽（根 private 不是精确基线、发布包既不是精确
+//             基线也不是覆盖基线的同线兼容范围）时报错 exit 1，拒绝发布兼容
+//             声明失真的插件；npm registry 不可达时仍按「永远 exit 0」降级为
+//             warning（网络抖动不阻塞发布，下一次运行/人工核对补上）。
 //
 // 本脚本只读：不改任何文件、不 install、不发布。
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { aggregateBaseline, manifestPaths, ROOT } from "./lib/dsh-deps.mjs";
+import { aggregateBaseline, enginesProblems, manifestPaths, ROOT } from "./lib/dsh-deps.mjs";
+// 兼容范围示例文案取自同一判据来源（不在这里手写范围形态）。
+import { formatCompatRange } from "./lib/engines-compat.mjs";
 // 与 publish-gate / adapt-dsh 同一口径的 semver 校验（共享单一来源，见 issue #6）。
 import { VERSION_RE, compareVersions, parseVersion } from "./lib/version-checks.mjs";
 
@@ -72,8 +75,10 @@ function branchExists(branch) {
 }
 
 /** 读某分支的全部 package.json 基线并聚合成单一基线（应全仓一致）；
- *  同时收集 engines.dsh 精确宿主版本声明（DSH 官方 manifest 字段，安装/启动据此
- *  判定兼容性），供一致性核对。
+ *  同时逐 manifest 校验 engines.dsh 兼容声明与基线是否自洽（DSH 官方 manifest
+ *  字段，安装/启动据此判定兼容性）：根 private 必须精确等于基线，发布包必须
+ *  精确等于基线或覆盖基线的同线兼容范围（判据见 lib/dsh-deps.mjs 的
+ *  enginesProblems / lib/engines-compat.mjs，与发布门禁同源）。
  *  分支不可读（CI checkout 只有当前分支、本地无该分支等）时返回 unmixed
  *  的哨兵形态，由调用方按「无法读取」呈报而非裸栈崩溃。
  *  包清单按目标分支自己枚举（git ls-tree），不取磁盘列表：磁盘列表属于
@@ -91,14 +96,22 @@ function branchBaseline(ref) {
     // resolved === null 分支触发 TDZ ReferenceError，令当前分支恒报
     // 「分支不可读」（2026-09-22 实测：HEAD 分支基线永远无法读取）。
     const paths = resolved === null ? manifestPaths(ROOT) : branchManifestPaths(resolved);
-    const { baseline, enginesDsh } = aggregateBaseline(read, ROOT, paths);
-    const mixed = baseline.startsWith("[不一致") || enginesDsh === "[不一致]";
+    // manifest 只读一次：聚合基线 + 逐 manifest 兼容声明校验共用。
+    const manifests = new Map(paths.map((path) => [path, read(path)]));
+    const { baseline } = aggregateBaseline((path) => manifests.get(path), ROOT, paths);
+    const mixed = baseline.startsWith("[不一致");
+    // 基线非法（不一致/无依赖/不可读）时无法判断「声明是否覆盖基线」，跳过
+    // 兼容声明核对——状态判定本身已按漂移处理。
+    const enginesIssues = VERSION_RE.test(baseline)
+      ? paths.flatMap((path) => enginesProblems(manifests.get(path), baseline)
+        .map((problem) => `${path}: ${problem}`))
+      : [];
     const packageDirs = paths
       .filter((p) => p.startsWith("packages/") && p.endsWith("/package.json"))
       .map((p) => p.slice("packages/".length, -"/package.json".length));
-    return { baseline, enginesDsh, mixed, unreadable: false, packageDirs };
+    return { baseline, mixed, unreadable: false, packageDirs, enginesIssues };
   } catch {
-    return { baseline: "(分支不可读)", enginesDsh: undefined, mixed: false, unreadable: true, packageDirs: [] };
+    return { baseline: "(分支不可读)", mixed: false, unreadable: true, packageDirs: [], enginesIssues: [] };
   }
 }
 
@@ -176,7 +189,7 @@ for (const branch of ["main", "alpha"]) {
       rows.push({
         branch,
         baseline: "(未创建)",
-        enginesDsh: undefined,
+        enginesIssues: [],
         target: `(待命：等待 >${stableBase} 的新线)`,
         state: "就位(待命)",
         packageDirs: [],
@@ -186,7 +199,7 @@ for (const branch of ["main", "alpha"]) {
       rows.push({
         branch,
         baseline: "(未创建)",
-        enginesDsh: undefined,
+        enginesIssues: [],
         target: devLine,
         state: "待从 main 创建",
         packageDirs: [],
@@ -195,7 +208,7 @@ for (const branch of ["main", "alpha"]) {
     continue;
   }
 
-  const { baseline, enginesDsh, mixed, unreadable, packageDirs } = branchBaseline(branch === head ? null : branch);
+  const { baseline, enginesIssues, mixed, unreadable, packageDirs } = branchBaseline(branch === head ? null : branch);
   // 基线不是合法版本号（无 dsh 依赖 / 包间不一致 / 分支不可读）时比较
   // 无意义——NaN 会让 compareVersions 的结果静默落进「超前」分支，报出荒谬
   // 状态；这里显式归入漂移并说明原因。
@@ -225,7 +238,7 @@ for (const branch of ["main", "alpha"]) {
     const cmp = compareVersions(baseline, stable);
     state = cmp === 0 ? "就位(待命)" : cmp < 0 ? "落后" : "超前";
   }
-  rows.push({ branch, baseline, enginesDsh, target, state, packageDirs });
+  rows.push({ branch, baseline, enginesIssues, target, state, packageDirs });
 }
 
 console.log(`dsh 稳定线(最新 rc) = ${stable}`);
@@ -241,12 +254,14 @@ if (devLine === null) {
   }
 }
 let problems = 0;
-for (const { branch, baseline, enginesDsh, target, state } of rows) {
+for (const { branch, baseline, enginesIssues, target, state } of rows) {
   const mark = state.startsWith("就位") ? "✔" : "✖";
   console.log(`${mark} ${branch.padEnd(5)} 依赖基线 ${baseline.padEnd(16)} ↔ ${String(target).padEnd(24)} ${state}`);
-  if (typeof enginesDsh === "string" && !enginesDsh.startsWith("[") && enginesDsh !== baseline) {
+  // 兼容声明就位口径：enginesProblems 全空（根精确=基线；发布包精确=基线或
+  // 覆盖基线的同线兼容范围）。任何问题都列出来，避免只报第一条漏掉别的包。
+  if (enginesIssues.length > 0) {
     problems++;
-    const message = `dsh 跟随: ${branch} 分支 package.json 的 engines.dsh (${enginesDsh}) 未精确匹配依赖基线 (${baseline})——宿主按精确版本判定兼容性，声明失真会导致插件被判不兼容，请改成该基线版本的精确 SemVer（不写范围）。`;
+    const message = `dsh 跟随: ${branch} 分支的 engines.dsh 兼容声明与依赖基线 (${baseline}) 不自洽：${enginesIssues.join("；")}。宿主按 SemVer range 判定兼容性，声明失真会导致插件被判不兼容；请改成精确基线 ${baseline}，或覆盖基线的同线兼容范围（如 ${formatCompatRange(baseline, baseline)}）。`;
     if (ci) console.log(`::warning::${message}`);
     console.log(`⚠ ${message}`);
   }
@@ -300,7 +315,7 @@ if (strict) {
     process.exit(1);
   }
   if (problems > 0) {
-    const message = `dsh 跟随(严格): 存在 ${problems} 项基线/engines 声明问题（见上方 ⚠/✖ 行），拒绝发布。`;
+    const message = `dsh 跟随(严格): 存在 ${problems} 项基线/兼容声明问题（见上方 ⚠/✖ 行），拒绝发布。`;
     if (ci) console.log(`::error::${message}`);
     console.error(`✗ ${message}`);
     process.exit(1);
