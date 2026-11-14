@@ -15,7 +15,7 @@
 
 import { WorkBuddyCredentialStore } from './auth.js'
 import type { WorkBuddyCredential } from './auth.js'
-import { OpenCodeUpstreamClient, WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
+import { WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
 import type { WorkBuddyUpstreamModel } from './upstream.js'
 import type { WorkBuddyVariant } from './variants.js'
 import { applyZCodePlanOverride } from './zcode-plan-store.js'
@@ -25,11 +25,10 @@ import type { ChildProcessTracker } from './child-processes.js'
 import type { Options } from './config.js'
 
 /**
- * 该变体对应的上游客户端：opencode 走 OpenCode，zcode 走专属通道，其余走 WorkBuddy。
+ * 该变体对应的上游客户端：zcode 走专属通道，其余走 WorkBuddy。
  *
- * `options.config` 是插件的实时配置快照读取口（见 index.ts 的 `current`）：两条
- * 「部署相关路径」——`zcodeBuiltinConfig`（Coding Plan 白名单文件）与
- * `openCodeModelsCache`（OpenCode 元数据缓存）——从这里注入，客户端按需读取，
+ * `options.config` 是插件的实时配置快照读取口（见 index.ts 的 `current`）：
+ * 「部署相关路径」——`zcodeBuiltinConfig`（Coding Plan 白名单文件）——从这里注入，客户端按需读取，
  * 因此 Loader 热更新后无需重建客户端即生效。CLI（bin.ts）不传 config，路径
  * 自然回落到环境变量/平台默认（同一份装配，语义不变）。
  */
@@ -41,21 +40,9 @@ export function upstreamClientFor(
     config?: () => Options
     childProcesses?: ChildProcessTracker
   } = {},
-): WorkBuddyUpstreamClient | ZCodeUpstreamClient | OpenCodeUpstreamClient {
+): WorkBuddyUpstreamClient | ZCodeUpstreamClient {
   const models = options.models === undefined ? {} : { models: options.models }
   const readConfig = options.config
-  if (variant.kind === 'opencode') {
-    return new OpenCodeUpstreamClient({
-      ...models,
-      childProcesses: options.childProcesses,
-      ...readConfig === undefined
-        ? {}
-        : {
-            cachePath: () => readConfig().openCodeModelsCache,
-            bunPath: () => readConfig().bunPath,
-          },
-    })
-  }
   if (variant.kind !== 'zcode') return new WorkBuddyUpstreamClient()
   return new ZCodeUpstreamClient({
     ...models,
@@ -91,7 +78,7 @@ export function zcodePlanTransformFor(
  */
 export function createVariantCredentialStore(options: {
   variant: WorkBuddyVariant
-  client: WorkBuddyUpstreamClient | ZCodeUpstreamClient | OpenCodeUpstreamClient
+  client: WorkBuddyUpstreamClient | ZCodeUpstreamClient
   desktopPath?: string | undefined
 
   onWarning?: ((message: string) => void) | undefined

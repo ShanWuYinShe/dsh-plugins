@@ -19,7 +19,6 @@
 import { describe, expect, it } from 'vitest'
 import { toPiModel } from '../src/adapter.js'
 import {
-  FALLBACK_OPENCODE_MODELS,
   FALLBACK_WORKBUDDY_AI_MODELS,
   FALLBACK_WORKBUDDY_MODELS,
   FALLBACK_ZCODE_MODELS,
@@ -44,7 +43,6 @@ describe('模型容量显式声明', () => {
       'workbuddy-ai': FALLBACK_WORKBUDDY_AI_MODELS,
       zcode: FALLBACK_ZCODE_MODELS,
       'zcode-start-plan': FALLBACK_ZCODE_START_PLAN_MODELS,
-      'opencode-free': FALLBACK_OPENCODE_MODELS,
     }
     for (const [name, roster] of Object.entries(rosters)) {
       expect(roster.length, `${name} 兜底名单不应为空`).toBeGreaterThan(0)

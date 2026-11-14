@@ -293,7 +293,6 @@ export function registerUsageQueriers(
           // dispose 时，在途请求立即中断，而不是等满 30s 内部超时。
           const credits = await runtime.client.fetchCredits(credential, context.signal)
           const isZCode = runtime.variant.kind === 'zcode'
-          const isOpenCode = runtime.variant.kind === 'opencode'
           const isStartPlan = variantIsStartPlan(runtime.variant)
           const isWorkBuddy = runtime.variant.kind === 'workbuddy'
           // 今日消耗台账（credit-ledger，仅积分制变体）：pill 每次成功拉到积分
@@ -328,23 +327,20 @@ export function registerUsageQueriers(
               ? (isStartPlan
                 ? 'Start Plan'
                 : credits.accounts.find(account => account.planName !== undefined)?.planName ?? 'Coding Plan')
-              : (isOpenCode ? 'Free Tier' : undefined),
-            // 四套口径，各有真源：
-            // - OpenCode Free：官方免密通道，直接标示「官方免费」，不显示虚假点数。
+              : undefined,
+            // 三套口径，各有真源：
             // - Coding Plan：客户端同款 monitor 端点的窗口额度（5 小时 / 7 天 /
             //   工具调用）——用户要的就是这三个；拿不到时回退订阅有效性窗口。
             // - Start Plan：token 池（有池子报真实 token 数，没领取时说
             //   「今日待领取」）。
             // - WorkBuddy：同币种分包求和的总积分。
-            windows: isOpenCode
-              ? [{ id: 'plan', label: 'OpenCode Free', unit: { en: 'free', zh: '官方免费' } }]
-              : isStartPlan
-                ? startPlanWindows(credits.accounts)
-                : quotaWindows.length > 0
-                  ? quotaWindows
-                  : isZCode
-                    ? currentPlanWindow(credits.accounts)
-                    : totalCreditsWindows(credits.accounts, todaySummary),
+            windows: isStartPlan
+              ? startPlanWindows(credits.accounts)
+              : quotaWindows.length > 0
+                ? quotaWindows
+                : isZCode
+                  ? currentPlanWindow(credits.accounts)
+                  : totalCreditsWindows(credits.accounts, todaySummary),
             fetchedAt: Date.now(),
             // 限流读数与额度窗口并列上报：额度是「还剩多少」，限流是「现在能不能发」。
             // 没有活跃观测（= 当前没被限）时整段缺席，不报空数组让界面去猜。

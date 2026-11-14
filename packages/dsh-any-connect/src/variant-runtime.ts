@@ -10,14 +10,13 @@
  */
 
 import {
-  FALLBACK_OPENCODE_MODELS,
   FALLBACK_WORKBUDDY_AI_MODELS,
   FALLBACK_WORKBUDDY_MODELS,
   FALLBACK_ZCODE_MODELS,
 } from './catalog.js'
 import type { WorkBuddyCatalog, WorkBuddyModelInfo } from './catalog.js'
 import { FALLBACK_ZCODE_START_PLAN_MODELS } from './zcode-plan-models.js'
-import { AI_VARIANT, CN_VARIANT, OPENCODE_VARIANT, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from './variants.js'
+import { AI_VARIANT, CN_VARIANT, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from './variants.js'
 import type { WorkBuddyVariant } from './variants.js'
 import type { WorkBuddyAuthStatus, WorkBuddyCredential, WorkBuddyCredentialStore } from './auth.js'
 import type { CreditLedger } from './credit-ledger.js'
@@ -26,7 +25,7 @@ import type { WorkBuddyProbeService } from './probe-service.js'
 import type { WorkBuddyProbeStore } from './probe-store.js'
 import type { WorkBuddyShim } from './shim.js'
 import type { WorkBuddyWebCatalog } from './status-paths.js'
-import type { OpenCodeUpstreamClient, WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
+import type { WorkBuddyUpstreamClient, ZCodeUpstreamClient } from './upstream.js'
 import type { Options } from './config.js'
 import type { ModelFilterStore } from './model-filter-store.js'
 
@@ -75,7 +74,7 @@ export interface VariantRuntime {
    */
   publishedCatalog: string
   /** 该变体的上游客户端（WorkBuddy 线是两变体共享的实例）。 */
-  client: WorkBuddyUpstreamClient | ZCodeUpstreamClient | OpenCodeUpstreamClient
+  client: WorkBuddyUpstreamClient | ZCodeUpstreamClient
   credentialStore: WorkBuddyCredentialStore
   catalogStore: WorkBuddyCatalogStore
   /** WorkBuddy-only parts：探针记录与档位检测服务。 */
@@ -96,7 +95,6 @@ const FALLBACK_BY_ID = new Map<string, readonly WorkBuddyModelInfo[]>([
   [AI_VARIANT.id, FALLBACK_WORKBUDDY_AI_MODELS],
   [ZCODE_VARIANT.id, FALLBACK_ZCODE_MODELS],
   [ZCODE_START_PLAN_VARIANT.id, FALLBACK_ZCODE_START_PLAN_MODELS],
-  [OPENCODE_VARIANT.id, FALLBACK_OPENCODE_MODELS],
 ])
 
 /**
@@ -127,13 +125,12 @@ export function variantIsStartPlan(variant: WorkBuddyVariant): boolean {
 }
 
 /** The auth-file config field a WorkBuddy variant edits, if it has one. */
-const AUTH_FILE_FIELD_BY_ID = new Map<string, 'authFile' | 'authFileAI' | 'authFileZCode' | 'authFileOpenCode'>([
+const AUTH_FILE_FIELD_BY_ID = new Map<string, 'authFile' | 'authFileAI' | 'authFileZCode'>([
   [CN_VARIANT.id, 'authFile'],
   [AI_VARIANT.id, 'authFileAI'],
   // 两个 ZCode 变体读同一份桌面凭据文档（各自取用专属材料）。
   [ZCODE_VARIANT.id, 'authFileZCode'],
   [ZCODE_START_PLAN_VARIANT.id, 'authFileZCode'],
-  [OPENCODE_VARIANT.id, 'authFileOpenCode'],
 ])
 
 

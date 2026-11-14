@@ -106,8 +106,8 @@ async function composePlugin(options: {
   } as never)
 
   await ctx.plugin(AnyConnect, { authFile: desktop, authFileAI: join(root, 'no-such-ai.info') })
-  await vi.waitFor(() => { expect(routes.handlers.size).toBeGreaterThanOrEqual(10) }, { timeout: 10_000 })
-  await vi.waitFor(() => { expect(ctx.llm.listProviders().length).toBe(5) }, { timeout: 10_000 })
+  await vi.waitFor(() => { expect(routes.handlers.size).toBeGreaterThanOrEqual(8) }, { timeout: 10_000 })
+  await vi.waitFor(() => { expect(ctx.llm.listProviders().length).toBe(4) }, { timeout: 10_000 })
   return { ctx, routes, settingsConfigure, domainClose, loggerError: loggerError! }
 }
 
@@ -146,7 +146,7 @@ describe('入口组装：settings / storageDomain 注入与卸载', () => {
   it('storageDomain open 失败：记 error 并继续走文件回落（模型通道不受影响）', async () => {
     const { ctx, loggerError } = await composePlugin({ storageDomainOpen: async () => { throw new Error('domain unavailable') } })
     // 插件活着的证明：provider 已注册（composePlugin 内已断言）。
-    expect(ctx.llm.listProviders()).toHaveLength(5)
+    expect(ctx.llm.listProviders()).toHaveLength(4)
     await vi.waitFor(() => { expect(loggerError, '域失败必须可见').toHaveBeenCalled() }, { timeout: 5_000 })
     expect(String(loggerError.mock.calls[0]?.[0])).toContain('state domain unavailable')
   })
@@ -157,7 +157,7 @@ describe('变体运行时：探针控制动作与状态路由读数', () => {
     const { ctx, routes } = await composePlugin()
     const statusHandler = routes.handlers.get('/plugins/dsh-any-connect/status')!
     const probeHandler = routes.handlers.get('/plugins/dsh-any-connect/probe')!
-    expect(routes.registrations).toBeGreaterThanOrEqual(10)
+    expect(routes.registrations).toBeGreaterThanOrEqual(8)
 
     const status = await callRoute(statusHandler)
     expect(status.status).toBe(200)

@@ -31,8 +31,6 @@
  * 上游通道
  * - upstream.ts upstream-shared.ts upstream-types.ts — 上游门面、协议共享层（常量与助手）、
  *   协议类型（纯声明，零运行时）
- * - upstream-opencode.ts opencode-prompt.ts opencode-transport.ts — OpenCode 客户端（官方免费通道、
- *   过闸标头与工具守卫）、官方提示词前缀与指纹守卫、Bun TLS 指纹穿透传输
  * - upstream-zcode.ts upstream-zcode-body.ts upstream-zcode-normalize.ts
 
  *   upstream-zcode-start-plan.ts — ZCode 客户端（通道分发与 Coding Plan）、请求体整形与兜底
@@ -94,16 +92,14 @@ export function apply(ctx: Context, config: Config): void {
    * without a remount (read fresh on every use — caching the values would pin
    * the install-time document); install-time values where no Loader runs.
    *
-   * 六个字段一律直接 `.get()`：schema 每个字段都有 `.default('')`，missing →
+   * 全部字段一律直接 `.get()`：schema 每个字段都有 `.default('')`，missing →
    * 空串由消费方当「未设置」处理；不给某个字段单独加 `?.` 来暗示它可能整个
    * 缺席（那会让「字段是否存在」与「值是否为空」两种事实混淆，RULE-053）。 */
   const current = (): Options => ({
     authFile: config.authFile.get(),
     authFileAI: config.authFileAI.get(),
     authFileZCode: config.authFileZCode.get(),
-    authFileOpenCode: config.authFileOpenCode.get(),
     zcodeBuiltinConfig: config.zcodeBuiltinConfig.get(),
-    openCodeModelsCache: config.openCodeModelsCache.get(),
   })
 
   // 变体运行时（构造 / 路由 / 目录生命周期 / 定时器 / 适配器注册）见 runtime.ts。

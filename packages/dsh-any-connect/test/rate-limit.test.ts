@@ -419,8 +419,8 @@ describe('observeRateLimits', () => {
     expect(observation!.resetAtMs).toBe(1_800_000_000_000)
   })
 
-  it('OpenCode 免费通道的 403 FreeTierError 也算限流（soft_rate）', () => {
-    const observations = observeRateLimits({ provider: 'opencode-free', status: 403, kind: 'soft_rate', nowMs: 5 })
+  it('403 状态码且 kind 为 soft_rate 时也算限流', () => {
+    const observations = observeRateLimits({ provider: 'custom-provider', status: 403, kind: 'soft_rate', nowMs: 5 })
     expect(observations).toHaveLength(1)
     expect(observations[0]!.status).toBe(403)
   })
@@ -725,7 +725,7 @@ describe('RateLimitLedger：持久化', () => {
       },
       save: async () => {},
     })
-    await expect(ledger.restoreAll(['workbuddy', 'zcode', 'opencode-free'], onError)).resolves.toBe(2)
+    await expect(ledger.restoreAll(['workbuddy', 'zcode', 'workbuddy-ai'], onError)).resolves.toBe(2)
     expect(onError).toHaveBeenCalledTimes(1)
     expect(ledger.activesFor('workbuddy')).toHaveLength(1)
   })

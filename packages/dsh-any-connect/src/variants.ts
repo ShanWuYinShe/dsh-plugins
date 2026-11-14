@@ -21,14 +21,12 @@ import {
   ZCODE_SP_PROBE_PATH,
   ZCODE_SP_STATUS_PATH,
   ZCODE_STATUS_PATH,
-  OPENCODE_PROBE_PATH,
-  OPENCODE_STATUS_PATH,
 } from './status-paths.js'
 import { WORKBUDDY_AI_CATALOG_FILENAME, WORKBUDDY_CATALOG_FILENAME } from './catalog-store.js'
 import type { WorkBuddyRegion } from './upstream.js'
 
 /** Which upstream family a variant talks to; selects the per-kind wiring. */
-export type VariantKind = 'workbuddy' | 'zcode' | 'opencode'
+export type VariantKind = 'workbuddy' | 'zcode'
 
 
 /**
@@ -217,27 +215,11 @@ export const ZCODE_START_PLAN_VARIANT: WorkBuddyVariant = {
   zcodePlanMode: 'start',
 }
 
-/** OpenCode provider variant: official free models channel (keyless public). */
-export const OPENCODE_VARIANT: WorkBuddyVariant = {
-  id: 'opencode-free',
-  kind: 'opencode',
-  displayName: 'OpenCode Free',
-  appName: 'OpenCode',
-  env: 'OPENCODE_API_KEY',
-  desktopFilename: 'auth.json',
-  ownFilename: '.opencode-auth.json',
-  probeFilename: '.opencode-probe.json',
-  catalogFilename: '.opencode-catalog.json',
-  statusPath: OPENCODE_STATUS_PATH,
-  probePath: OPENCODE_PROBE_PATH,
-}
-
 /** All provider variants, in registration order. */
 export const PROVIDER_VARIANTS: readonly WorkBuddyVariant[] = [
   ...WORKBUDDY_VARIANTS,
   ZCODE_VARIANT,
   ZCODE_START_PLAN_VARIANT,
-  OPENCODE_VARIANT,
 ]
 
 
@@ -255,7 +237,7 @@ export function variantFor(id: string): WorkBuddyVariant | undefined {
 /**
  * The Electron profile a WorkBuddy variant resolves its at-rest key helper with.
  *
- * `electron` 只属于两条 WorkBuddy 桌面产品线（ZCode/OpenCode 读明文凭据文档，
+ * `electron` 只属于两条 WorkBuddy 桌面产品线（ZCode 读明文凭据文档，
  * 没有 Electron 助手）。缺 profile 的变体此前按 id 静默回落到 CN/AI 产品
  * （「未知 custom 变体留在 CN」），效果是**执行另一个产品的二进制**——按
  * RULE-053/061 改为 fail loud：没有任何产品身份就不许 spawn 助手。
