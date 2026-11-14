@@ -67,59 +67,6 @@ describe('upstreamFailureMessage', () => {
     expect(message).toContain('11140')
   })
 
-  it('403 遇到 OpenCode FreeTierError 时说清是网关客户端校验，不是额度或密钥问题', () => {
-    const freeTierBody = JSON.stringify({
-      type: 'error',
-      error: {
-        type: 'FreeTierError',
-        message: "OpenCode's free tier can only be used from within OpenCode. Download it at https://opencode.ai and keep building.",
-      },
-    })
-    const message = upstreamFailureMessage('opencode-free', 'soft_rate', 403, freeTierBody)
-    expect(message).toContain('FreeTierError')
-    expect(message).toContain('只接受官方客户端形状的请求')
-    expect(message).toContain('与额度、密钥均无关')
-    expect(message).not.toContain('额度已用尽')
-    expect(message).not.toContain('authFileOpenCode')
-    expect(message).not.toContain('OPENCODE_API_KEY')
-    expect(message).not.toContain('账号权益问题')
-    expect(HOST_AUTH_RE.test(message)).toBe(false)
-  })
-
-  it('429 FreeUsageLimitError 说清是免费额度用尽，并给出响应头里的恢复时间', () => {
-    const quotaBody = JSON.stringify({
-      type: 'error',
-      error: {
-        type: 'FreeUsageLimitError',
-        message: 'Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go',
-      },
-    })
-    const message = upstreamFailureMessage(
-      'opencode-free',
-      'soft_rate',
-      429,
-      quotaBody,
-      new Headers({ 'retry-after': '3600' }),
-    )
-    expect(message).toContain('免费模型额度已用尽')
-    expect(message).toContain('FreeUsageLimitError')
-    expect(message).toContain('不是 API 密钥失效')
-    expect(message).toContain('恢复时间')
-    expect(message).toContain('OpenCode Go')
-    // 不能把额度耗尽说成 FreeTierError 的客户端校验。
-    expect(message).not.toContain('FreeTierError')
-    expect(HOST_AUTH_RE.test(message)).toBe(false)
-  })
-
-  it('OpenCode 传输错误（HTTP_0）不再被套上「频次限流」文案', () => {
-    const detail = 'transport error: TypeError: Headers.append: "Bearer {json}" is an invalid header value.'
-    const message = upstreamFailureMessage('opencode-free', 'server', 0, detail)
-    // 原样单行透出，交给宿主按真实状态码（502）归类。
-    expect(message).toBe(`opencode-free upstream server (HTTP_0): ${detail}`)
-    expect(message).not.toContain('频次限流')
-    expect(message).not.toContain('FreeTierError')
-  })
-
   it('WorkBuddy 6004 的 429 把错误体里的恢复时刻写进文案', () => {
     const resetAt = new Date(Date.now() + 2 * 3_600_000)
     const beijing = new Date(resetAt.getTime() + 8 * 3_600_000)
@@ -308,23 +255,6 @@ describe('auth_forbidden 分类', () => {
 
   it('会话标记仍优先于 403（body 含 session 标记时归 session_dead）', () => {
     expect(classifyUpstreamError(403, 'Offline user session not found')).toBe('session_dead')
-  })
-
-  it('OpenCode 429（非 FreeUsageLimitError）走通用免费通道限流文案', () => {
-    const message = upstreamFailureMessage('opencode-free', 'soft_rate', 429, 'too many requests', new Headers({ 'retry-after': '60' }))
-    expect(message).toContain('上游限流')
-    expect(message).toContain('恢复时间')
-  })
-
-  it('429 只给响应头 epoch 也给出恢复时间', () => {
-    const message = upstreamFailureMessage('opencode-free', 'soft_rate', 429, '{"error":{"type":"FreeUsageLimitError"}}', new Headers({ 'x-ratelimit-reset': '1800000000' }))
-    expect(message).toContain('恢复时间')
-    expect(message).not.toContain('未给出恢复时间')
-  })
-
-  it('429 既无响应头也无正文时刻 → 明说「未给出恢复时间」', () => {
-    const message = upstreamFailureMessage('opencode-free', 'soft_rate', 429, '{"error":{"type":"FreeUsageLimitError"}}', new Headers())
-    expect(message).toContain('未给出恢复时间')
   })
 
   it('KIND_STATUS：auth_forbidden 刻意映射 400（而非 403，避免宿主误判 AUTH）', () => {

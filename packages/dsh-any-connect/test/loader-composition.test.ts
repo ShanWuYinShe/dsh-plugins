@@ -40,7 +40,7 @@ import { WORKBUDDY_PROBE_PATH, WORKBUDDY_STATUS_PATH } from '../src/status-paths
  *   解析 YAML 之后走的那条路径，入口/服务/生命周期完全一致。
  */
 
-const PROVIDER_IDS = ['workbuddy', 'workbuddy-ai', 'zcode', 'zcode-start-plan', 'opencode-free'] as const
+const PROVIDER_IDS = ['workbuddy', 'workbuddy-ai', 'zcode', 'zcode-start-plan'] as const
 
 /**
  * 只 mock **上游** HTTP：真实 fetch 留给 127.0.0.1 上的真实 WebServer（本测试
@@ -180,10 +180,10 @@ async function composeComposition(desktopFile: string, options: { failRateLimitL
   }
 }
 
-/** 等组合进入「已注册 5 条路由 + 适配器就绪」的稳定态。 */
+/** 等组合进入「已注册 4 条路由 + 适配器就绪」的稳定态。 */
 async function awaitLive(composition: Composition): Promise<void> {
   await vi.waitFor(() => {
-    expect(composition.providers().slice().sort(), '5 个 provider 都应注册').toEqual([...PROVIDER_IDS].sort())
+    expect(composition.providers().slice().sort(), '4 个 provider 都应注册').toEqual([...PROVIDER_IDS].sort())
   }, { timeout: 15_000 })
 }
 
@@ -205,7 +205,7 @@ function sameOriginHeaders(origin: string, extra: Record<string, string> = {}): 
 }
 
 describe('REAL Loader composition', () => {
-  it('装载真实组合：插件 ACTIVE、5 条 provider、status/probe 路由真实可响应', async () => {
+  it('装载真实组合：插件 ACTIVE、4 条 provider、status/probe 路由真实可响应', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-any-connect-loader-'))
     const desktopFile = join(root, 'workbuddy-desktop.info')
     await writeFile(desktopFile, signedInDocument())
@@ -220,7 +220,7 @@ describe('REAL Loader composition', () => {
     const entry = anyConnectEntry(composition)
     expect(entry.fiber?.state, 'Loader 的入口 fiber 应为 ACTIVE').toBe(2)
 
-    // 2) llm provider 注册表：5 条真实路由
+    // 2) llm provider 注册表：4 条真实路由
     expect(composition.providers().slice().sort()).toEqual([...PROVIDER_IDS].sort())
 
     // 3) status 路由走真实 WebServer：同源 GET 返回已登录文档 + 写路由门槛 key
@@ -259,8 +259,8 @@ describe('REAL Loader composition', () => {
     })
     expect(foreign.status).toBe(403)
 
-    // 6) provider-usage seam：5 个变体各注册一条查询器（真实引用传递走完）
-    expect(composition.usage.registrations.size).toBe(5)
+    // 6) provider-usage seam：4 个变体各注册一条查询器（真实引用传递走完）
+    expect(composition.usage.registrations.size).toBe(4)
 
     // 7) storageDomain 注入后（真实 inject 时序）：限流持久化表被打开、恢复路径被调用。
     await vi.waitFor(() => {
@@ -291,7 +291,7 @@ describe('REAL Loader composition', () => {
     const composition = await composeComposition(desktopFile)
     await awaitLive(composition)
     const origin = composition.origin()
-    expect(composition.usage.registrations.size).toBe(5)
+    expect(composition.usage.registrations.size).toBe(4)
 
     // HMR：卸载入口 entry（等价于宿主卸载/重载插件）。Loader.remove 对
     // fiber.dispose() 是 fire-and-forget（宿主 loader 的 remove 不 await），
@@ -302,7 +302,7 @@ describe('REAL Loader composition', () => {
     await disposing
     await composition.ctx.loader.await()
 
-    // 1) adapter 回滚：llm 注册表不再含本包 5 条路由
+    // 1) adapter 回滚：llm 注册表不再含本包 4 条路由
     expect(composition.providers(), '卸载后 adapter 注册必须回滚').toEqual([])
 
     // 2) usage querier 回滚：每个变体的查询器 disposer 被调用
@@ -332,6 +332,6 @@ describe('REAL Loader composition', () => {
     })
     await composition.ctx.loader.await()
     await awaitLive(composition)
-    expect(composition.usage.registrations.size, '重载后 usage 查询器重新注册').toBe(5)
+    expect(composition.usage.registrations.size, '重载后 usage 查询器重新注册').toBe(4)
   }, 45_000)
 })

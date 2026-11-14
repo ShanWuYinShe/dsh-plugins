@@ -18,8 +18,6 @@ import {
   ZCODE_SP_PROBE_PATH,
   ZCODE_SP_STATUS_PATH,
   ZCODE_STATUS_PATH,
-  OPENCODE_PROBE_PATH,
-  OPENCODE_STATUS_PATH,
   type WorkBuddyWebCatalog,
   type WorkBuddyWebStatus,
 } from '../src/status-paths.js'
@@ -80,14 +78,6 @@ export const CARD_VARIANTS: readonly WorkBuddyCardVariant[] = [
     titleKey: 'titleZCodeSP',
     introKey: 'introZCodeSP',
     signedOutHintKey: 'signedOutHintZCodeSP',
-  },
-  {
-    id: 'anyconnect-opencode',
-    statusPath: OPENCODE_STATUS_PATH,
-    probePath: OPENCODE_PROBE_PATH,
-    titleKey: 'titleOpenCode',
-    introKey: 'introOpenCode',
-    signedOutHintKey: 'signedOutHintOpenCode',
   },
 ]
 

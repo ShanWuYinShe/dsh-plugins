@@ -3,8 +3,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { upstreamClientFor, zcodePlanTransformFor } from "../src/variant-wiring.js";
-import { OpenCodeUpstreamClient, WorkBuddyUpstreamClient, ZCodeUpstreamClient } from "../src/upstream.js";
-import { AI_VARIANT, CN_VARIANT, OPENCODE_VARIANT, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from "../src/variants.js";
+import { WorkBuddyUpstreamClient, ZCodeUpstreamClient } from "../src/upstream.js";
+import { AI_VARIANT, CN_VARIANT, ZCODE_START_PLAN_VARIANT, ZCODE_VARIANT } from "../src/variants.js";
 import type { WorkBuddyCredential } from "../src/auth.js";
 
 /** 最小合法凭据：这些用例只看 zcodePlan 的折叠结果。 */
@@ -21,37 +21,14 @@ function credential(overrides: Partial<WorkBuddyCredential> = {}): WorkBuddyCred
 }
 
 describe("变体装配（CLI 与插件运行时共用）", () => {
-  it("客户端选择：opencode 走 OpenCode，zcode 走专属通道，其余走 WorkBuddy", () => {
-    expect(upstreamClientFor(OPENCODE_VARIANT)).toBeInstanceOf(OpenCodeUpstreamClient);
+  it("客户端选择：zcode 走专属通道，其余走 WorkBuddy", () => {
     expect(upstreamClientFor(ZCODE_VARIANT)).toBeInstanceOf(ZCodeUpstreamClient);
     expect(upstreamClientFor(ZCODE_START_PLAN_VARIANT)).toBeInstanceOf(ZCodeUpstreamClient);
     expect(upstreamClientFor(CN_VARIANT)).toBeInstanceOf(WorkBuddyUpstreamClient);
     expect(upstreamClientFor(AI_VARIANT)).toBeInstanceOf(WorkBuddyUpstreamClient);
   });
 
-  it("upstreamClientFor 传入 config 时为 opencode 注入 cachePath、bunPath 与 childProcesses", () => {
-    let configReadCount = 0;
-    const fakeConfig = {
-      openCodeModelsCache: "/cache/path",
-      bunPath: "/custom/bun",
-    } as any;
-    const tracker: any = { track: (c: any) => c, dispose: async () => {} };
-    const client = upstreamClientFor(OPENCODE_VARIANT, {
-      config: () => {
-        configReadCount++;
-        return fakeConfig;
-      },
-      childProcesses: tracker,
-    }) as OpenCodeUpstreamClient;
-    expect(client).toBeInstanceOf(OpenCodeUpstreamClient);
-    expect((client as any).cachePath()).toBe("/cache/path");
-    expect((client as any).bunPath()).toBe("/custom/bun");
-    expect((client as any).childProcesses).toBe(tracker);
-    expect(configReadCount).toBe(2);
-  });
-
   it("非 zcode 变体没有计划语义", () => {
-    expect(zcodePlanTransformFor(OPENCODE_VARIANT)).toBeUndefined();
     expect(zcodePlanTransformFor(CN_VARIANT)).toBeUndefined();
     expect(zcodePlanTransformFor(AI_VARIANT)).toBeUndefined();
   });

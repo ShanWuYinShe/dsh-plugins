@@ -18,7 +18,7 @@ import z from '@deepseek-ai/schemastery'
  * plain-value shape callers pass to `ctx.plugin()`; Cordis parses it through
  * this schema into the `Config` references.
  *
- * 六个字段全部带 `.default('')`：schema/接口/实际语义三者一致——「未设置」
+ * 全部字段带 `.default('')`：schema/接口/实际语义三者一致——「未设置」
  * 在运行时就是空串，由各字段的消费方当「走平台默认/环境变量」处理，而不是
  * 靠某个字段恰好缺席（`?.`）来暗示可选性。
  */
@@ -29,8 +29,6 @@ export interface Config {
   authFileAI: Volatile<string | undefined>
   /** Explicit ZCode desktop auth-file path, overriding env and platform defaults. */
   authFileZCode: Volatile<string | undefined>
-  /** Explicit OpenCode desktop auth-file / token path, overriding env and platform defaults. */
-  authFileOpenCode: Volatile<string | undefined>
   /**
    * 显式指定 ZCode 桌面客户端内置 provider 配置
    * （`zcode-builtin.json`，Coding Plan 模型白名单）的路径；空串 = 走
@@ -38,16 +36,6 @@ export interface Config {
    * Config 字段（RULE-059）：env 不会随 patch/profile 迁移保留。
    */
   zcodeBuiltinConfig: Volatile<string | undefined>
-  /**
-   * 显式指定 OpenCode 官方模型元数据本地缓存（`models.json`）的路径；空串 =
-   * 走 `OPENCODE_MODELS_CACHE` 环境变量与 XDG 缓存默认位置。
-   */
-  openCodeModelsCache: Volatile<string | undefined>
-  /**
-   * 显式指定 Bun 二进制路径，用于 OpenCode 免费通道的 Cloudflare TLS 指纹穿透；
-   * 空串 = 走 `BUN_PATH` 环境变量与默认安装路径（~/.bun/bin/bun 等）。
-   */
-  bunPath: Volatile<string | undefined>
   // schemastery strips unknown fields, so a stale field in a
   // cordis.patch.yml is ignored rather than rejected.
 }
@@ -65,9 +53,6 @@ export const Config = z.object({
   authFile: z.string().default('').description('WorkBuddy desktop auth file (defaults to the app\'s own location)').volatile(),
   authFileAI: z.string().default('').description('WorkBuddy AI desktop auth file (defaults to the app\'s own location)').volatile(),
   authFileZCode: z.string().default('').description('ZCode desktop auth file (defaults to the app\'s own location)').volatile(),
-  authFileOpenCode: z.string().default('').description('OpenCode auth / token (defaults to public free tier)').volatile(),
   zcodeBuiltinConfig: z.string().default('').description('ZCode built-in model whitelist (zcode-builtin.json); defaults to env and platform paths').volatile(),
-  openCodeModelsCache: z.string().default('').description('OpenCode model metadata cache (models.json); defaults to env and XDG cache').volatile(),
-  bunPath: z.string().default('').description('Bun binary path for OpenCode free channel TLS transport; defaults to env and standard paths').volatile(),
 })
 

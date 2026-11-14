@@ -92,7 +92,6 @@ const MODEL_ROW: WorkBuddyWebModelRow = {
 const CN_VARIANT = CARD_VARIANTS[0]!
 const ZCODE_CODING = CARD_VARIANTS[2]!
 const ZCODE_START = CARD_VARIANTS[3]!
-const OPENCODE = CARD_VARIANTS[4]!
 
 type SignedIn = Extract<WorkBuddyWebStatus, { status: 'signed-in' }>
 
@@ -250,14 +249,6 @@ describe('VariantCardQuota：三种变体的额度展示', () => {
     expect(text()).toContain(t('claimUnknown', { reason: 'timeout' }))
   })
 
-  it('OpenCode：官方免费渠道不给虚假点数；刷新按钮可点', async () => {
-    await renderCard(OPENCODE, signedIn({ credits: undefined }))
-    expect(text()).toContain(t('openCodeFreeBadge'))
-    const refresh = buttonByAria(t('refresh'))
-    expect(refresh, 'OpenCode 卡也应有刷新入口').toBeDefined()
-    await act(async () => { refresh!.click() })
-  })
-
   it('WorkBuddy：积分 + 今日统计 + 历史；缺失时如实说「暂无积分数据」', async () => {
     await renderCard(CN_VARIANT, signedIn({
       credits: {
@@ -409,7 +400,7 @@ describe('VariantsPage：未登录提示与重试', () => {
     // 折叠头（onToggle）→ 展开露出额度区刷新按钮。
     // 首个已登录变体会被自动展开（useVariantsPage 的自动展开一次）。
     const headers = [...container.querySelectorAll('button.wb-header')] as HTMLButtonElement[]
-    expect(headers.length, '五个变体各一行').toBe(5)
+    expect(headers.length, '四个变体各一行').toBe(4)
     expect(buttonByAria(t('refresh')), '自动展开的卡片应有额度区刷新按钮').toBeDefined()
 
     // 折叠头（onToggle）：收起后卡体消失，再展开又回来——用户可见的展开态变化。

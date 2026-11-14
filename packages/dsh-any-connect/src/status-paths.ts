@@ -30,11 +30,6 @@ export const ZCODE_SP_STATUS_PATH = '/plugins/dsh-any-connect/zcode-sp/status'
 /** ZCode Start Plan variant probe route. */
 export const ZCODE_SP_PROBE_PATH = '/plugins/dsh-any-connect/zcode-sp/probe'
 
-/** OpenCode variant status route. */
-export const OPENCODE_STATUS_PATH = '/plugins/dsh-any-connect/opencode/status'
-
-/** OpenCode variant probe route. */
-export const OPENCODE_PROBE_PATH = '/plugins/dsh-any-connect/opencode/probe'
 
 
 /** One model's recorded probe observation, as the card displays it. */
@@ -263,7 +258,7 @@ export interface WorkBuddyWebRateLimit {
    * 按 UTC+8 解释（与 WorkBuddy 官方客户端口径一致）。缺失即「上游没说」。
    */
   resetAt?: number
-  /** 上游状态码（429；OpenCode FreeTierError 为 403）。 */
+  /** 上游状态码（通常为 429）。 */
   status: number
   /** 触发限流的模型 id，若上游回执里带得到（WorkBuddy 按模型限流，通常都有）。 */
   model?: string

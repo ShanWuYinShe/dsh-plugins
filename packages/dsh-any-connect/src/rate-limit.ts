@@ -21,10 +21,9 @@
  *   （delta 秒）。
  * - GLM Coding Plan（zcode）：并发限流（1302/1305）按订阅档位动态调整、官方明确
  *   不给固定窗口；积分额度走额度通道（窗口自带 resetsAt），与本模块各管一段。
- * - WorkBuddy / OpenCode 免费通道：WorkBuddy 的限流**按模型**（官方客户端把
+ * - WorkBuddy：WorkBuddy 的限流**按模型**（官方客户端把
  *   cap-hit 以 modelId 为键落盘，code:6004，恢复时刻写在错误正文里，省略时区按
- *   UTC+8）；OpenCode 的 FreeUsageLimitError（429）带 Retry-After，FreeTierError
- *   （403）不带恢复时刻。
+ *   UTC+8）。
  *
  * 契约：resetAt 只来自上游**明说**的事实（标准/事实头或错误正文里的显式时刻）。
  * 两者都没有就只报「何时被限」，让界面如实说「恢复时间未知」，而不是编一个会
@@ -54,7 +53,7 @@ export type RateLimitScope = 'model' | 'account'
  * 因此台账的行级键是 provider + model (+ policy)，而不是整个 provider 一条。
  */
 export interface RateLimitObservation {
-  /** 变体 id，与 provider route 键一致（workbuddy / zcode / opencode-free 等）。 */
+  /** 变体 id，与 provider route 键一致（workbuddy / zcode 等）。 */
   provider: string
   /** 首次观测到限流的时刻（毫秒 epoch）。持续被限时保留最早值，便于「等了多久」。 */
   blockedAtMs: number
@@ -68,7 +67,7 @@ export interface RateLimitObservation {
    * undefined——界面必须如实说「恢复时间未知」。
    */
   resetAtMs?: number
-  /** 上游原始状态码（通常是 429；OpenCode FreeTierError 是 403）。 */
+  /** 上游原始状态码（通常是 429）。 */
   status: number
   /** 分类结果，与 shim 的错误分类同源。 */
   kind: string
@@ -117,7 +116,7 @@ export interface RateLimitLogger {
 /** 没有 resetAtMs 的观测保留多久：够用户看懂「刚才被限了」，又不会永远挂着。 */
 export const DEFAULT_RATE_LIMIT_TTL_MS = 30 * 60 * 1000
 
-/** 观测里允许出现的状态码：429 与 OpenCode FreeTierError 的 403。 */
+/** 观测里允许出现的状态码：429 与 403。 */
 const RATE_LIMIT_STATUSES: ReadonlySet<number> = new Set([429, 403])
 
 /** 单 provider 最多持久化的观测条数：一份记录保持很小，足够覆盖一个渠道的活跃策略。 */

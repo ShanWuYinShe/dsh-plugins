@@ -72,7 +72,7 @@ function preparedModelId(prepared: string): string | undefined {
 
 /** Constructor dependencies. */
 export interface WorkBuddyShimOptions {
-  kind: 'workbuddy' | 'zcode' | 'opencode'
+  kind: 'workbuddy' | 'zcode'
   /** Provider route key (variant id); used to file rate-limit observations. */
   providerId?: string
   store: Pick<WorkBuddyCredentialStore, 'resolve'>

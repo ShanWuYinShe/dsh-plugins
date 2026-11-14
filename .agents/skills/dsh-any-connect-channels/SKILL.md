@@ -1,11 +1,11 @@
 ---
 name: dsh-any-connect-channels
-description: dsh-any-connect 多渠道接入（WorkBuddy 国内/国际、ZCode Coding Plan/Start Plan、OpenCode Free）的事实与排障：凭据与账号选择、各渠道额度语义、zcode-plan 通道风控现状、模型目录刷新与重载窗口、额度展示与积分台账、反编译取证、隔离实例验证。触发：改 dsh-any-connect 的任一渠道（workbuddy / workbuddy-ai / zcode / zcode-start-plan / opencode-free）代码；排查额度或套餐名显示不对；判断 zcode-plan 模型通道能否使用；需要反编译 ZCode / WorkBuddy 客户端或跑插件隔离实测。细节见 references/。
+description: dsh-any-connect 多渠道接入（WorkBuddy 国内/国际、ZCode Coding Plan/Start Plan）的事实与排障：凭据与账号选择、各渠道额度语义、zcode-plan 通道风控现状、模型目录刷新与重载窗口、额度展示与积分台账、反编译取证、隔离实例验证。触发：改 dsh-any-connect 的任一渠道（workbuddy / workbuddy-ai / zcode / zcode-start-plan）代码；排查额度或套餐名显示不对；判断 zcode-plan 模型通道能否使用；需要反编译 ZCode / WorkBuddy 客户端或跑插件隔离实测。细节见 references/。
 ---
 
-# dsh-any-connect × 多渠道接入（WorkBuddy / ZCode / OpenCode Free）
+# dsh-any-connect × 多渠道接入（WorkBuddy / ZCode）
 
-本 skill 覆盖 dsh-any-connect 全部渠道：WorkBuddy（`workbuddy` 国内 / `workbuddy-ai` 国际）、ZCode（`zcode` Coding Plan / `zcode-start-plan` Start Plan）、OpenCode Free（`opencode-free`）。
+本 skill 覆盖 dsh-any-connect 全部渠道：WorkBuddy（`workbuddy` 国内 / `workbuddy-ai` 国际）、ZCode（`zcode` Coding Plan / `zcode-start-plan` Start Plan）。
 取证口径：ZCode 桌面版与其内置 agent `zcode.cjs`、WorkBuddy 桌面版（版本以本机安装为准，应用内「关于」现取）；DSH 线路以 `bun run dsh-status` 为准。
 结论取证方法与最小探针见 `references/start-plan-channel.md`；一次性复现脚本不入库。长取证过程、响应样本与排除实验见 `references/`，本文件只留现行结论、判据与最小探针。
 
@@ -125,7 +125,7 @@ GET https://zcode.z.ai/api/v1/zcode-plan/billing/balance[?app_version=<ver>]
 ### 5.1 拉取链（插件侧定时拉）
 
 - 启动时 `refreshCatalog('startup')`；每 60s `sweep` 做身份核对（身份变了才真拉，稳态零上游请求）；每 60 分钟 `catalogTimer` 全量重拉。
-  五个变体（workbuddy / workbuddy-ai / zcode / zcode-start-plan / opencode-free）都接上了这三条（main 源码 runtime.ts：
+  四个变体（workbuddy / workbuddy-ai / zcode / zcode-start-plan）都接上了这三条（main 源码 runtime.ts：
   `PROVIDER_VARIANTS.map(createRuntime)`，启动 refresh / 60s sweep / 60min timer 三处都遍历全部 runtimes），没有变体被条件跳过。
 - **名单真源是客户端白名单，不是上游 `/api/paas/v4/models`**：后者是 BigModel 开放平台目录，对 coding-plan key 返回 11 个 id，
   其中 7 个（glm-4.5 / 4.5-air / 4.6 / 4.7 / 5 / 5.1 / 5.3-flashx）在官方客户端配置里完全没有绑定到 coding-plan。

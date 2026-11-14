@@ -1,5 +1,5 @@
 /**
- * VariantCardQuota.tsx — 卡片「额度」区块：ZCode 套餐卡 / OpenCode / WorkBuddy 积分。
+ * VariantCardQuota.tsx — 卡片「额度」区块：ZCode 套餐卡 / WorkBuddy 积分。
  *
  * 2026-10-29 从 380 行的 VariantCard.tsx 拆出：三种变体的额度展示是同一张卡里
  * 最长的互斥分支，单独成文件后 VariantCard 只剩卡头与组合。
@@ -66,11 +66,11 @@ function CardRefreshButton({ busy, onClick, t }: { busy: boolean; onClick: () =>
 /** 额度区块（限流块放最前：通道正在拒收请求时这是用户唯一能行动的信息）。 */
 export function VariantCardQuota({ card }: { card: VariantCardView }): React.ReactNode {
   const { t, status, busy, rateLimits, refreshWithCatalog, copiedPlanId, copyPlanId, startPlanClaim, view } = card
-  const { isZCode, isOpenCode, isStartPlanCard, zcodePlan, zcodePools, isPlanActive, planStateLabel, displayPlanName } = view
+  const { isZCode, isStartPlanCard, zcodePlan, zcodePools, isPlanActive, planStateLabel, displayPlanName } = view
   return (
     <>
       {/* 限流块放最前：通道正在拒收请求时，这是用户唯一能行动的信息
-          （还要等多久 / 等不到确切时间）。三个分支（ZCode/OpenCode/WorkBuddy）
+          （还要等多久 / 等不到确切时间）。ZCode/WorkBuddy
           共用同一份展示，因为 429 是所有上游共有的事实。 */}
       <RateLimitBox t={t} rateLimits={rateLimits} />
       {isZCode ? (
@@ -127,19 +127,6 @@ export function VariantCardQuota({ card }: { card: VariantCardView }): React.Rea
               "已领"（无需动作，不打扰）；unknown **绝不渲染成 none**——探测失败
               时说"没得领"会让用户白丢一次领取机会。 */}
           <StartPlanClaimBox t={t} claim={startPlanClaim} copied={copiedPlanId} onCopy={copyPlanId} />
-        </>
-      ) : isOpenCode ? (
-        <>
-          <hr style={dividerStyle} />
-          <div style={summaryRowStyle}>
-            <span style={summaryLabelStyle}>{t('creditsLabel')}</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={summaryValueStyle} title={status.domain}>
-                {t('openCodeFreeBadge')}
-              </span>
-              <CardRefreshButton busy={busy} onClick={() => { void refreshWithCatalog() }} t={t} />
-            </span>
-          </div>
         </>
       ) : (
         <>

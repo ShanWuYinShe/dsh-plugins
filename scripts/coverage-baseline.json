@@ -46,7 +46,7 @@
     },
     "packages/dsh-any-connect/client/VariantCardQuota.tsx": {
       "statements": 100,
-      "branches": 95.91,
+      "branches": 95.74,
       "functions": 100,
       "lines": 100
     },
@@ -111,9 +111,9 @@
       "lines": 98.7
     },
     "packages/dsh-any-connect/client/variant-card-view.ts": {
-      "statements": 93.1,
-      "branches": 90.62,
-      "functions": 90,
+      "statements": 92.59,
+      "branches": 90.32,
+      "functions": 88.88,
       "lines": 100
     },
     "packages/dsh-any-connect/src/adapter.ts": {
@@ -135,10 +135,10 @@
       "lines": 87.5
     },
     "packages/dsh-any-connect/src/auth-desktop-read.ts": {
-      "statements": 88.46,
-      "branches": 78.35,
+      "statements": 88.88,
+      "branches": 78.57,
       "functions": 100,
-      "lines": 91.54
+      "lines": 95.65
     },
     "packages/dsh-any-connect/src/auth-document.ts": {
       "statements": 86.04,
@@ -147,10 +147,10 @@
       "lines": 97.22
     },
     "packages/dsh-any-connect/src/auth-paths.ts": {
-      "statements": 95.45,
-      "branches": 89.58,
+      "statements": 94.73,
+      "branches": 89.74,
       "functions": 100,
-      "lines": 95.34
+      "lines": 94.59
     },
     "packages/dsh-any-connect/src/auth-refresh.ts": {
       "statements": 87.09,
@@ -208,7 +208,7 @@
     },
     "packages/dsh-any-connect/src/catalog-refresh.ts": {
       "statements": 86.99,
-      "branches": 79.03,
+      "branches": 78.33,
       "functions": 100,
       "lines": 89.52
     },
@@ -308,18 +308,6 @@
       "functions": 100,
       "lines": 96.87
     },
-    "packages/dsh-any-connect/src/opencode-prompt.ts": {
-      "statements": 100,
-      "branches": 100,
-      "functions": 100,
-      "lines": 100
-    },
-    "packages/dsh-any-connect/src/opencode-transport.ts": {
-      "statements": 98.48,
-      "branches": 94.52,
-      "functions": 95.45,
-      "lines": 100
-    },
     "packages/dsh-any-connect/src/probe-route.ts": {
       "statements": 90.9,
       "branches": 90.16,
@@ -327,8 +315,8 @@
       "lines": 92.77
     },
     "packages/dsh-any-connect/src/probe-service.ts": {
-      "statements": 84.7,
-      "branches": 76.78,
+      "statements": 83.52,
+      "branches": 75,
       "functions": 93.33,
       "lines": 94.2
     },
@@ -345,10 +333,10 @@
       "lines": 100
     },
     "packages/dsh-any-connect/src/rate-limit.ts": {
-      "statements": 99.73,
-      "branches": 91.54,
+      "statements": 99.46,
+      "branches": 91.23,
       "functions": 100,
-      "lines": 100
+      "lines": 99.68
     },
     "packages/dsh-any-connect/src/reasoning-default.ts": {
       "statements": 94.82,
@@ -369,10 +357,10 @@
       "lines": 87.71
     },
     "packages/dsh-any-connect/src/shim-http.ts": {
-      "statements": 92.3,
-      "branches": 97.29,
-      "functions": 92.85,
-      "lines": 91.83
+      "statements": 89.18,
+      "branches": 95.45,
+      "functions": 92.3,
+      "lines": 88.57
     },
     "packages/dsh-any-connect/src/shim.ts": {
       "statements": 89.47,
@@ -398,17 +386,11 @@
       "functions": 100,
       "lines": 100
     },
-    "packages/dsh-any-connect/src/upstream-opencode.ts": {
-      "statements": 93.06,
-      "branches": 82.92,
-      "functions": 100,
-      "lines": 95.18
-    },
     "packages/dsh-any-connect/src/upstream-shared.ts": {
-      "statements": 91.36,
-      "branches": 80.71,
+      "statements": 91.24,
+      "branches": 80.14,
       "functions": 87.5,
-      "lines": 93.91
+      "lines": 93.8
     },
     "packages/dsh-any-connect/src/upstream-types.ts": {
       "statements": 100,
@@ -465,10 +447,10 @@
       "lines": 100
     },
     "packages/dsh-any-connect/src/usage.ts": {
-      "statements": 88.88,
-      "branches": 82.55,
+      "statements": 88.7,
+      "branches": 84.14,
       "functions": 100,
-      "lines": 92.15
+      "lines": 92
     },
     "packages/dsh-any-connect/src/values.ts": {
       "statements": 100,
@@ -483,10 +465,10 @@
       "lines": 85.71
     },
     "packages/dsh-any-connect/src/variant-wiring.ts": {
-      "statements": 94.73,
+      "statements": 93.33,
       "branches": 100,
-      "functions": 87.5,
-      "lines": 93.75
+      "functions": 83.33,
+      "lines": 91.66
     },
     "packages/dsh-any-connect/src/variants.ts": {
       "statements": 100,

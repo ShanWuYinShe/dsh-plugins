@@ -34,7 +34,6 @@ export interface CardView {
   label: string
   isZCode: boolean
   isStartPlanCard: boolean
-  isOpenCode: boolean
   zcodePlan: { remain: number; size: number; planName?: string; packageName: string; sameDay?: boolean; expiredAt?: string } | undefined
   zcodePools: readonly { label: string; remain: number; size: number }[]
   isPlanActive: boolean
@@ -61,7 +60,6 @@ export function deriveCardView({ t, variant, status, probe }: CardViewInputs): C
   const zcodeSide = variant.id === 'anyconnect-zcode' ? 'coding' : variant.id === 'anyconnect-zcode-sp' ? 'start' : undefined
   const isZCode = zcodeSide !== undefined
   const isStartPlanCard = zcodeSide === 'start'
-  const isOpenCode = variant.id === 'anyconnect-opencode'
   const zcodePlan = isZCode && status.credits?.accounts !== undefined
     ? (status.credits.accounts.find(a => a.remain > 0) ?? status.credits.accounts[0])
     : undefined
@@ -110,17 +108,15 @@ export function deriveCardView({ t, variant, status, probe }: CardViewInputs): C
             ? `${displayPlanName} · ${planStateLabel ?? t('codingPlanActive')}`
             : (status.credits !== undefined ? t('codingPlanActive') : undefined),
         ].filter(part => part !== undefined).join(' · ')
-      : isOpenCode
-        ? [label, t('openCodeFreeBadge')].filter(part => part !== undefined).join(' · ')
-        : [
-            label,
-            status.credits !== undefined ? t('creditsTotal', { total: formatNumber(status.credits.total) }) : undefined,
-            // 裂变包每天发新包/旧包到期，「当前积分」每天双向跳动；卡头带上
-            // 「今日已用」，收起态也能一眼读出今天的消耗（台账有样本才显示）。
-            status.credits?.today !== undefined
-              ? t('creditsTodayShort', { used: formatNumber(status.credits.today.consumed) })
-              : undefined,
-          ].filter(part => part !== undefined).join(' · '),
+      : [
+          label,
+          status.credits !== undefined ? t('creditsTotal', { total: formatNumber(status.credits.total) }) : undefined,
+          // 裂变包每天发新包/旧包到期，「当前积分」每天双向跳动；卡头带上
+          // 「今日已用」，收起态也能一眼读出今天的消耗（台账有样本才显示）。
+          status.credits?.today !== undefined
+            ? t('creditsTodayShort', { used: formatNumber(status.credits.today.consumed) })
+            : undefined,
+        ].filter(part => part !== undefined).join(' · '),
     ...(catalogOffline ? [t('catalogOfflineShort')] : []),
   ].filter(part => part !== '').join(' · ')
 
@@ -138,7 +134,6 @@ export function deriveCardView({ t, variant, status, probe }: CardViewInputs): C
     label,
     isZCode,
     isStartPlanCard,
-    isOpenCode,
     zcodePlan,
     zcodePools,
     isPlanActive,
