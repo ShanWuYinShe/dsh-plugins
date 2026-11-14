@@ -1,3 +1,12 @@
+## 0.5.3 (2026-11-14)
+
+### 修复
+
+* **适配 OpenCode 免费模型通道网关提示词守卫与 TLS 指纹穿透**：
+  * **TLS 指纹穿透 (Bun Bridge)**：OpenCode 免费通道（Cloudflare）强制核验 TLS ClientHello 指纹（BoringSSL），Node.js 内置 OpenSSL 会被网关判定为未授权客户端并拦截报 `429 FreeUsageLimitError`（即便账号额度未用）；新增透明传输层自动通过配置 `bunPath`、环境变量 `BUN_PATH` 或系统常见路径（`PATH`、`~/.bun/bin/bun`）寻找 Bun 运行时，通过短命子进程流式透传穿透检测，并在无 Bun 且遇到 429 时提供友好安装与配置引导；
+  * **提示词前缀守卫注入**：免费端点强制要求 system 消息开头注入包含会话 ID 的官方提示词模板（包含会话 ID，截止至 `</env>`），请求发出前自动在 system 消息首部补全该守卫前缀；
+  * **端点与模型补齐**：规范端点对齐为 `https://opencode.ai/inference/openai/v1/chat/completions`，并补充 `longcat-2.5-free`、`glm-5.3-flash-free`、`big-pickle` 等 fallback 免费模型。
+
 ## 0.5.2 (2026-11-14)
 
 ### 优化
