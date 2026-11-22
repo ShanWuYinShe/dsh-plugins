@@ -21,7 +21,13 @@ import { createRequire } from 'node:module'
 import os from 'node:os'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { isWsl, windowsPathForWsl } from './auth-paths.js'
+import {
+  findWslWindowsUserDirs,
+  helperSpawnEnv,
+  isWsl,
+  windowsPathForWsl,
+  wslPathVariantsForWindows,
+} from './wsl.js'
 
 const require = createRequire(import.meta.url)
 
@@ -68,13 +74,18 @@ export function computeZCodeKeyFingerprint(key: Buffer): string {
 /** ZCode 客户端 Keyring 服务名。 */
 const KEYRING_SERVICE = 'ZCode Credential Encryption'
 
-/** 单行内嵌 helper 脚本：通过 ZCode 客户端内部的 @napi-rs/keyring 读取系统密钥。 */
-const KEYRING_HELPER_SCRIPT = 'const p=require("node:path"),f=require("node:fs"),a=process.argv[1],c=[p.join(p.dirname(p.dirname(process.execPath)),"Resources","app.asar.unpacked","node_modules","@napi-rs"),p.join(p.dirname(process.execPath),"resources","app.asar.unpacked","node_modules","@napi-rs")];let k;for(const d of c){try{for(const s of f.readdirSync(d)){if(s.startsWith("keyring-")){for(const n of f.readdirSync(p.join(d,s))){if(n.endsWith(".node")){k=p.join(d,s,n);break;}}if(k)break;}}}catch{}if(k)break;}if(!k)process.exit(1);const m=require(k),e=new m.Entry("ZCode Credential Encryption",a),w=e.getPassword();if(!w)process.exit(2);process.stdout.write(w);'
+/** 单行内嵌 helper 脚本：通过 ZCode 客户端内部的 @napi-rs/keyring 读取系统密钥（支持传入多个候选 account 顺序尝试）。 */
+const KEYRING_HELPER_SCRIPT = 'const p=require("node:path"),f=require("node:fs"),c=[p.join(p.dirname(p.dirname(process.execPath)),"Resources","app.asar.unpacked","node_modules","@napi-rs"),p.join(p.dirname(process.execPath),"resources","app.asar.unpacked","node_modules","@napi-rs")];let k;for(const d of c){try{for(const s of f.readdirSync(d)){if(s.startsWith("keyring-")){for(const n of f.readdirSync(p.join(d,s))){if(n.endsWith(".node")){k=p.join(d,s,n);break;}}if(k)break;}}}catch{}if(k)break;}if(!k)process.exit(1);const m=require(k);for(let i=1;i<process.argv.length;i++){try{const e=new m.Entry("ZCode Credential Encryption",process.argv[i]),w=e.getPassword();if(w){process.stdout.write(w);process.exit(0);}}catch{}}process.exit(2);'
 
 /** 候选 ZCode 可执行文件发现。 */
-function resolveZCodeBin(configured?: string, platform: string = process.platform): string | undefined {
+function resolveZCodeBin(
+  configured?: string,
+  platform: string = process.platform,
+  wsl: boolean = isWsl(),
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
   if (configured && existsSync(configured)) return configured
-  const envBin = process.env.ZCODE_ELECTRON_BIN?.trim()
+  const envBin = (env.ZCODE_ELECTRON_BIN ?? process.env.ZCODE_ELECTRON_BIN)?.trim()
   if (envBin && existsSync(envBin)) return envBin
 
   const home = homedir()
@@ -85,8 +96,8 @@ function resolveZCodeBin(configured?: string, platform: string = process.platfor
       join(home, 'Applications', 'ZCode.app', 'Contents', 'MacOS', 'ZCode'),
     )
   } else if (platform === 'win32') {
-    const localAppData = process.env.LOCALAPPDATA ?? join(home, 'AppData', 'Local')
-    const programFiles = process.env.ProgramFiles ?? 'C:\\Program Files'
+    const localAppData = env.LOCALAPPDATA ?? process.env.LOCALAPPDATA ?? join(home, 'AppData', 'Local')
+    const programFiles = env.ProgramFiles ?? process.env.ProgramFiles ?? 'C:\\Program Files'
     candidates.push(
       join(localAppData, 'Programs', 'ZCode', 'ZCode.exe'),
       join(localAppData, 'ZCode', 'ZCode.exe'),
@@ -98,13 +109,26 @@ function resolveZCodeBin(configured?: string, platform: string = process.platfor
       '/usr/bin/zcode',
       join(home, '.local', 'share', 'zcode', 'zcode'),
     )
-    if (isWsl()) {
-      const winProfile = windowsPathForWsl(process.env['USERPROFILE'])
-      const winLocal = windowsPathForWsl(process.env['LOCALAPPDATA'])
+    if (wsl) {
+      for (const drive of ['c', 'd']) {
+        candidates.push(
+          join('/mnt', drive, 'Program Files', 'ZCode', 'ZCode.exe'),
+          join('/mnt', drive, 'Program Files (x86)', 'ZCode', 'ZCode.exe'),
+        )
+      }
+      for (const winDir of findWslWindowsUserDirs(env, home)) {
+        candidates.push(
+          join(winDir, 'AppData', 'Local', 'Programs', 'ZCode', 'ZCode.exe'),
+          join(winDir, 'AppData', 'Local', 'ZCode', 'ZCode.exe'),
+        )
+      }
+      const winLocal = windowsPathForWsl(env['LOCALAPPDATA'] ?? process.env['LOCALAPPDATA'])
       if (winLocal) {
         candidates.push(join(winLocal, 'Programs', 'ZCode', 'ZCode.exe'))
         candidates.push(join(winLocal, 'ZCode', 'ZCode.exe'))
-      } else if (winProfile) {
+      }
+      const winProfile = windowsPathForWsl(env['USERPROFILE'] ?? process.env['USERPROFILE'])
+      if (winProfile) {
         candidates.push(join(winProfile, 'AppData', 'Local', 'Programs', 'ZCode', 'ZCode.exe'))
       }
     }
@@ -166,11 +190,19 @@ function resolveZCodeKeyringNode(configured?: string, platform: string = process
   return undefined
 }
 
-/** 通过 ZCode Electron 二进制（ELECTRON_RUN_AS_NODE=1）运行 helper 提取密码。 */
-function resolveKeyringPasswordViaHelper(zcodeBin: string, account: string): string | undefined {
+/** 通过 ZCode Electron 二进制（ELECTRON_RUN_AS_NODE=1）运行 helper 提取密码（支持单 account 或多候选 accounts）。 */
+function resolveKeyringPasswordViaHelper(
+  zcodeBin: string,
+  accounts: string | string[],
+  options?: { isWsl?: boolean; env?: NodeJS.ProcessEnv },
+): string | undefined {
+  const accountList = Array.isArray(accounts) ? accounts : [accounts]
+  if (accountList.length === 0) return undefined
   try {
-    const stdout = execFileSync(zcodeBin, ['-e', KEYRING_HELPER_SCRIPT, account], {
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    const runningWsl = options?.isWsl ?? isWsl()
+    const baseEnv = options?.env ?? process.env
+    const stdout = execFileSync(zcodeBin, ['-e', KEYRING_HELPER_SCRIPT, ...accountList], {
+      env: helperSpawnEnv(baseEnv, runningWsl),
       timeout: 5000,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -310,13 +342,39 @@ function decryptV2(encStr: string, options?: DecryptZCodeKeyOptions): string {
       const credFilePath = options?.desktopPath
         ? resolve(options.desktopPath)
         : resolve(homedir(), '.zcode', 'v2', 'credentials.json')
-      const account = crypto.createHash('sha256').update(credFilePath).digest('hex')
+
+      const candidateAccounts: string[] = [
+        crypto.createHash('sha256').update(credFilePath).digest('hex'),
+      ]
+
+      // 若为 WSL 挂载的 Windows 路径或在 WSL 环境中，派生 Windows 原生路径格式的候选 account
+      const winPathVariants = wslPathVariantsForWindows(credFilePath)
+      if (winPathVariants) {
+        candidateAccounts.push(
+          crypto.createHash('sha256').update(winPathVariants.backslash).digest('hex'),
+          crypto.createHash('sha256').update(winPathVariants.slash).digest('hex'),
+        )
+      } else if (isWsl()) {
+        for (const userDir of findWslWindowsUserDirs()) {
+          const winVariants = wslPathVariantsForWindows(join(userDir, '.zcode', 'v2', basename(credFilePath)))
+          if (winVariants) {
+            candidateAccounts.push(
+              crypto.createHash('sha256').update(winVariants.backslash).digest('hex'),
+              crypto.createHash('sha256').update(winVariants.slash).digest('hex'),
+            )
+          }
+        }
+      }
+      const uniqueAccounts = [...new Set(candidateAccounts)]
 
       // 1. 优先自定义 keyResolver
       if (options?.keyResolver) {
-        const resolved = options.keyResolver({ source, keyFingerprint, desktopPath: options.desktopPath, account })
-        if (resolved && resolved.length === 32 && computeZCodeKeyFingerprint(resolved) === keyFingerprint) {
-          key = resolved
+        for (const account of uniqueAccounts) {
+          const resolved = options.keyResolver({ source, keyFingerprint, desktopPath: options.desktopPath, account })
+          if (resolved && resolved.length === 32 && computeZCodeKeyFingerprint(resolved) === keyFingerprint) {
+            key = resolved
+            break
+          }
         }
       }
 
@@ -332,7 +390,7 @@ function decryptV2(encStr: string, options?: DecryptZCodeKeyOptions): string {
       if (!key) {
         const zcodeBin = resolveZCodeBin(options?.zcodeBin, options?.platform)
         if (zcodeBin) {
-          const pwd = resolveKeyringPasswordViaHelper(zcodeBin, account)
+          const pwd = resolveKeyringPasswordViaHelper(zcodeBin, uniqueAccounts)
           if (pwd) {
             key = tryKeyCandidate(pwd, keyFingerprint)
           }
@@ -343,18 +401,24 @@ function decryptV2(encStr: string, options?: DecryptZCodeKeyOptions): string {
       if (!key) {
         const nodePath = resolveZCodeKeyringNode(options?.keyringNodePath, options?.platform)
         if (nodePath) {
-          const pwd = resolveKeyringPasswordViaNodeModule(nodePath, account)
-          if (pwd) {
-            key = tryKeyCandidate(pwd, keyFingerprint)
+          for (const account of uniqueAccounts) {
+            const pwd = resolveKeyringPasswordViaNodeModule(nodePath, account)
+            if (pwd) {
+              key = tryKeyCandidate(pwd, keyFingerprint)
+              if (key) break
+            }
           }
         }
       }
 
       // 5. 尝试系统 CLI（macOS security）
       if (!key) {
-        const pwd = resolveKeyringPasswordViaCli(account, options?.platform)
-        if (pwd) {
-          key = tryKeyCandidate(pwd, keyFingerprint)
+        for (const account of uniqueAccounts) {
+          const pwd = resolveKeyringPasswordViaCli(account, options?.platform)
+          if (pwd) {
+            key = tryKeyCandidate(pwd, keyFingerprint)
+            if (key) break
+          }
         }
       }
 
@@ -446,6 +510,11 @@ function decryptV1(encStr: string, options?: DecryptZCodeKeyOptions): string {
     secrets.push(`zcode-credential-fallback:win32:C:/Users/${winUser}:${winUser}`)
     secrets.push(`zcode-credential-fallback:win32:C:\\Users\\${currentUsername}:${currentUsername}`)
     secrets.push(`zcode-credential-fallback:win32:C:/Users/${currentUsername}:${currentUsername}`)
+    for (const winDir of findWslWindowsUserDirs()) {
+      const u = basename(winDir)
+      secrets.push(`zcode-credential-fallback:win32:C:\\Users\\${u}:${u}`)
+      secrets.push(`zcode-credential-fallback:win32:C:/Users/${u}:${u}`)
+    }
   }
 
   // 6. If on Windows, check USERPROFILE and USERNAME env vars
@@ -487,5 +556,5 @@ export function decryptZCodeEncryptedKey(
   throw new Error('Unsupported ZCode credential encryption version')
 }
 
-// 供单元测试覆盖平台发现分支
-export { resolveZCodeBin, resolveZCodeKeyringNode, resolveKeyringPasswordViaCli }
+// 供单元测试覆盖平台发现分支与 helper 调用
+export { resolveZCodeBin, resolveZCodeKeyringNode, resolveKeyringPasswordViaCli, resolveKeyringPasswordViaHelper }

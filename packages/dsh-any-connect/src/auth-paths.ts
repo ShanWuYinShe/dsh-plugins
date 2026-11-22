@@ -10,12 +10,12 @@
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
-import { isWsl, windowsPathForWsl } from './wsl.js'
+import { findWslWindowsUserDirs, isWsl, windowsPathForWsl, wslPathForWindows } from './wsl.js'
 import type { WorkBuddyVariant } from './variants.js'
 
 // WSL 判定与路径转换本体在 ./wsl.ts（desktop-discovery 链路同源共用）；这里
 // re-export 维持拆分前的对外 API 不变。
-export { isWsl, windowsPathForWsl }
+export { findWslWindowsUserDirs, isWsl, windowsPathForWsl, wslPathForWindows }
 
 /** Basename of the plugin-owned credential copy inside the Harness home. */
 const WORKBUDDY_AUTH_FILENAME = '.workbuddy-auth.json'
@@ -94,13 +94,29 @@ function wslZCodeDesktopCandidates(home: string, filename: string = 'credentials
     ?? join(profile, 'AppData', 'Local')
   const roamingAppData = windowsPathForWsl(process.env['APPDATA'])
     ?? join(profile, 'AppData', 'Roaming')
-  return [
+
+  const candidates: string[] = [
     join(profile, '.zcode', 'v2', filename),
     join(localAppData, '.zcode', 'v2', filename),
     join(roamingAppData, '.zcode', 'v2', filename),
     join(localAppData, 'zcode', 'v2', filename),
     join(roamingAppData, 'zcode', 'v2', filename),
   ]
+
+  // 如果 WSL 用户名和 Windows 用户名不同，通过枚举 Windows 用户目录补充候选
+  const userDirs = findWslWindowsUserDirs(process.env, home)
+  for (const dir of userDirs) {
+    if (dir === profile) continue
+    candidates.push(
+      join(dir, '.zcode', 'v2', filename),
+      join(dir, 'AppData', 'Local', '.zcode', 'v2', filename),
+      join(dir, 'AppData', 'Roaming', '.zcode', 'v2', filename),
+      join(dir, 'AppData', 'Local', 'zcode', 'v2', filename),
+      join(dir, 'AppData', 'Roaming', 'zcode', 'v2', filename),
+    )
+  }
+
+  return [...new Set(candidates)]
 }
 
 /**

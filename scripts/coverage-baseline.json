@@ -147,10 +147,10 @@
       "lines": 97.22
     },
     "packages/dsh-any-connect/src/auth-paths.ts": {
-      "statements": 94.73,
-      "branches": 89.74,
+      "statements": 95.45,
+      "branches": 90.24,
       "functions": 100,
-      "lines": 94.59
+      "lines": 95.23
     },
     "packages/dsh-any-connect/src/auth-refresh.ts": {
       "statements": 87.09,
@@ -171,10 +171,10 @@
       "lines": 100
     },
     "packages/dsh-any-connect/src/auth-zcode-crypto.ts": {
-      "statements": 88.46,
-      "branches": 74.28,
+      "statements": 89.31,
+      "branches": 81.73,
       "functions": 100,
-      "lines": 88.23
+      "lines": 89.75
     },
     "packages/dsh-any-connect/src/auth-zcode.ts": {
       "statements": 91.91,
@@ -489,8 +489,8 @@
       "lines": 91.93
     },
     "packages/dsh-any-connect/src/wsl.ts": {
-      "statements": 90,
-      "branches": 84.84,
+      "statements": 94.52,
+      "branches": 88,
       "functions": 100,
       "lines": 100
     },

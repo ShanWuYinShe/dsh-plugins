@@ -13,8 +13,9 @@
  * @module dsh-any-connect/wsl
  */
 
-import { release } from 'node:os'
-import { join } from 'node:path'
+import { readdirSync } from 'node:fs'
+import { homedir, release } from 'node:os'
+import { basename, join } from 'node:path'
 
 /**
  * Whether this Linux process is running inside Windows Subsystem for Linux.
@@ -44,6 +45,91 @@ export function windowsPathForWsl(value: string | undefined): string | undefined
   const drivePath = /^([a-z]):[\\/](.*)$/iu.exec(path)
   if (drivePath === null) return undefined
   return join('/mnt', drivePath[1]!.toLowerCase(), ...drivePath[2]!.split(/[\\/]+/u))
+}
+
+/**
+ * Convert a WSL `/mnt/<drive>/...` path back to Windows native formats (backslash and slash).
+ *
+ * 如果是 `/mnt/c/Users/foo`，返回 `{ backslash: 'C:\\Users\\foo', slash: 'C:/Users/foo' }`。
+ * 如果已经是 `C:\...` 或 `C:/...`，同样返回对应的反斜杠与正斜杠形态。
+ * 其他情况返回 undefined。
+ */
+export function wslPathVariantsForWindows(
+  value: string | undefined,
+): { backslash: string; slash: string } | undefined {
+  const path = value?.trim()
+  if (!path) return undefined
+  const winMatch = /^([a-z]):[\\/](.*)$/iu.exec(path)
+  if (winMatch !== null) {
+    const drive = winMatch[1]!.toUpperCase()
+    const restParts = winMatch[2]!.split(/[\\/]+/).filter(Boolean)
+    return {
+      backslash: `${drive}:\\${restParts.join('\\')}`,
+      slash: `${drive}:/${restParts.join('/')}`,
+    }
+  }
+  const mntMatch = /^\/mnt\/([a-z])\/(.*)$/iu.exec(path)
+  if (mntMatch !== null) {
+    const drive = mntMatch[1]!.toUpperCase()
+    const restParts = mntMatch[2]!.split(/[\\/]+/).filter(Boolean)
+    return {
+      backslash: `${drive}:\\${restParts.join('\\')}`,
+      slash: `${drive}:/${restParts.join('/')}`,
+    }
+  }
+  return undefined
+}
+
+/** Convert a WSL `/mnt/<drive>/...` path back to Windows native backslash format. */
+export function wslPathForWindows(value: string | undefined): string | undefined {
+  return wslPathVariantsForWindows(value)?.backslash
+}
+
+const WSL_IGNORED_WIN_USERS: ReadonlySet<string> = new Set([
+  'public',
+  'default',
+  'default user',
+  'all users',
+  'desktop.ini',
+])
+
+/**
+ * 发现 WSL 中挂载的 Windows 用户主目录候选（POSIX 路径，如 `/mnt/c/Users/<user>`）。
+ *
+ * 优先级：
+ * 1. 显式环境变量 USERPROFILE（经 windowsPathForWsl 转换）
+ * 2. 基于当前 Linux 用户名的猜测路径（/mnt/c/Users/<username>）
+ * 3. 扫描 Windows 用户根目录（默认 /mnt/c/Users 与 /mnt/d/Users）下真实存在的非系统用户目录
+ */
+export function findWslWindowsUserDirs(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+  usersRoots: readonly string[] = ['/mnt/c/Users', '/mnt/d/Users'],
+): string[] {
+  const candidates: string[] = []
+
+  const profile = windowsPathForWsl(env['USERPROFILE'])
+  if (profile) candidates.push(profile)
+
+  const linuxUser = basename(home)
+  if (linuxUser) {
+    candidates.push(join('/mnt/c/Users', linuxUser))
+  }
+
+  for (const usersRoot of usersRoots) {
+    try {
+      const entries = readdirSync(usersRoot, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+        if (WSL_IGNORED_WIN_USERS.has(entry.name.toLowerCase())) continue
+        candidates.push(join(usersRoot, entry.name))
+      }
+    } catch {
+      // 盘符未挂载或不可读：静默忽略
+    }
+  }
+
+  return [...new Set(candidates)]
 }
 
 /**

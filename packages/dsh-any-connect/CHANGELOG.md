@@ -1,3 +1,13 @@
+## 0.5.8-alpha.2 (2026-11-22)
+
+### 修复
+
+* **支持 WSL 跨环境识别与解密 Windows 宿主下的 ZCode 凭据与白名单**：
+  * **凭据发现**：在 WSL 环境下自动扫描 `/mnt/c/Users/` 下真实 Windows 用户目录（排除系统保留目录），解决 WSL 默认未透传 `USERPROFILE` 且 Linux 与 Windows 用户名不一致时凭据文件定位失败的问题；
+  * **白名单发现**：在 WSL 环境下补充 Windows 端安装路径探测（涵盖系统级 `/mnt/c/Program Files/ZCode/...` 与用户级 `AppData/Local/Programs/ZCode/...`），解决 WSL 无法读取官方 Coding Plan 模型白名单（`zcode-builtin.json`）导致模型目录无法展示的问题；
+  * **`enc:v2` 解密与 Keyring 账号哈希匹配**：Windows 原生客户端存入 Keyring 时的 `account` 哈希键基于 Windows 原生路径计算；WSL 下读取到的 POSIX 挂载路径自动反转还原 Windows 反斜杠/正斜杠原生路径哈希并去重，确保与 Credential Manager 账号名一致；
+  * **WSL 跨环境 helper 调用与安全环境变量继承**：通过 `helperSpawnEnv` 将 `ELECTRON_RUN_AS_NODE/w` 注入 `WSLENV` 跨环境透传给 Windows 进程，确保 Windows 端 `ZCode.exe` 以 node 模式运行 helper 脚本，避免以 GUI 模式拉起导致超时挂起；同时严格剔除敏感凭据环境变量。
+
 ## 0.5.8-alpha.1 (2026-11-22)
 
 ### 优化

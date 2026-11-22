@@ -22,6 +22,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { findWslWindowsUserDirs, isWsl, windowsPathForWsl } from './wsl.js'
 
 /** ZCode 客户端内置 provider 配置在 macOS app bundle 内的相对路径。 */
 const BUILTIN_CONFIG_RELATIVE = ['Contents', 'Resources', 'config', 'provider', 'zcode-builtin.json'] as const
@@ -65,17 +66,65 @@ function linuxBuiltinConfigCandidates(): string[] {
   ]
 }
 
+function wslBuiltinConfigCandidates(
+  env: NodeJS.ProcessEnv = process.env,
+  usersRoots?: readonly string[],
+): string[] {
+  const candidates: string[] = []
+
+  // 1. 系统级候选路径（全系统安装）
+  for (const drive of ['c', 'd']) {
+    candidates.push(
+      join('/mnt', drive, 'Program Files', 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
+      join('/mnt', drive, 'Program Files (x86)', 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
+    )
+  }
+
+  // 2. Windows 用户级候选路径（单用户安装）
+  for (const userDir of findWslWindowsUserDirs(env, undefined, usersRoots)) {
+    candidates.push(
+      join(userDir, 'AppData', 'Local', 'Programs', 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
+      join(userDir, 'AppData', 'Local', 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
+      join(userDir, 'AppData', 'Roaming', 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
+    )
+  }
+
+  // 3. 环境变量覆盖
+  const programFiles = windowsPathForWsl(env['ProgramFiles'])
+  if (programFiles) {
+    candidates.push(join(programFiles, 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'))
+  }
+  const localAppData = windowsPathForWsl(env['LOCALAPPDATA'])
+  if (localAppData) {
+    candidates.push(
+      join(localAppData, 'Programs', 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
+      join(localAppData, 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
+    )
+  }
+
+  return [...new Set(candidates)]
+}
+
 /** 平台相关的候选路径；`configuredPath` 是 Config 里的显式路径（最高优先级）。 */
-function builtinConfigCandidates(configuredPath?: string): string[] {
+export function builtinConfigCandidates(
+  configuredPath?: string,
+  platform: NodeJS.Platform = process.platform,
+  wsl: boolean = isWsl(),
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
   const fromConfig = configuredPath?.trim()
   if (fromConfig !== undefined && fromConfig !== '') return [fromConfig]
   const override = process.env[BUILTIN_CONFIG_ENV]
   if (override !== undefined && override.trim() !== '') {
     return [override]
   }
-  if (process.platform === 'darwin') return darwinBuiltinConfigCandidates()
-  if (process.platform === 'win32') return windowsBuiltinConfigCandidates()
-  if (process.platform === 'linux') return linuxBuiltinConfigCandidates()
+  if (platform === 'darwin') return darwinBuiltinConfigCandidates()
+  if (platform === 'win32') return windowsBuiltinConfigCandidates()
+  if (platform === 'linux') {
+    return wsl
+      ? [...new Set([...wslBuiltinConfigCandidates(env), ...linuxBuiltinConfigCandidates()])]
+      : linuxBuiltinConfigCandidates()
+  }
   return []
 }
 

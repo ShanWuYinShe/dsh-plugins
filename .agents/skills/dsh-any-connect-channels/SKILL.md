@@ -26,6 +26,11 @@ oauth:bigmodel:access_token / oauth:active_provider / zcodejwttoken ...
 - **计划归属以 selection 为准，不是"选中的 key"**：账号计划在凭据里**没有**对应的 api-key 条目，accessToken 只能回落到别的账号的 key；
   把回落的 key 当计划会让额度读到别的账号上去（常见错法）。
 - `enc:v1:<iv>.<tag>.<ct>` = AES-256-GCM（base64url 三段），密钥 = SHA-256(`zcode-credential-fallback:<platform>:<homedir>:<username>`)，或 env `ZCODE_CREDENTIAL_SECRET`。
+- `enc:v2:<source>:<keyFingerprint>:<iv>.<tag>.<ct>` = AES-256-GCM（32 字节密钥），source 为 `os` 时密钥托管在系统 Keyring（服务名 `"ZCode Credential Encryption"`，account 为 `credentials.json` 规范路径的 SHA-256）。
+- **WSL 跨环境发现与解密**：
+  - 凭据路径：WSL 环境默认未通过 `WSLENV` 共享 `USERPROFILE`，且 Linux 与 Windows 用户名常有差异；插件自动扫描 `/mnt/c/Users/` 下真实用户目录（排除系统保留目录）定位 `.zcode/v2/credentials.json`。
+  - 白名单路径：Coding Plan 模型白名单（`zcode-builtin.json`）在 WSL 下自动扫描 Windows 挂载路径（系统级 `/mnt/c/Program Files/ZCode/...` 及用户级 `AppData/Local/Programs/ZCode/...`）。
+  - Keyring 账号哈希与 Helper 跨环境调用：Windows 端 ZCode 存入 Keyring 时的 `account` 哈希键是 Windows 原生路径（`C:\Users\<user>\.zcode\v2\credentials.json`）；WSL 下由 POSIX 路径反转还原 Windows 路径派生候选 `account`。跨环境拉起 Windows 端 `ZCode.exe` 执行 helper 时必须将 `ELECTRON_RUN_AS_NODE/w` 写入 `WSLENV`，否则 Windows 进程以 GUI 模式拉起导致超时。
 - **计划标识与发请求用的 key 解耦**：`zcodePlan`（客户端 selection）标识账号，`accessToken`（实际 key）用于签名；不要从后者推断前者。
 
 ## 二、双计划：Coding Plan 与 Start Plan 是两个产品
