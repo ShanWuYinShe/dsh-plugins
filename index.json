@@ -2139,6 +2139,17 @@
       },
       "versions": [
         {
+          "version": "0.3.41-alpha.0",
+          "publishTimestamp": 1795345696,
+          "source": {
+            "type": "npm",
+            "registry": "https://raw.githubusercontent.com/ShanWuYinShe/dsh-plugins/market/npm/"
+          },
+          "engines": {
+            "dsh": "0.2.3-alpha.2"
+          }
+        },
+        {
           "version": "0.3.40",
           "publishTimestamp": 1795052439,
           "source": {
