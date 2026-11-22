@@ -169,8 +169,8 @@ describe("npm bundle metadata", () => {
       expect(pkg.dsh?.host, `${name}: 旧字段 dsh.host 不得保留`).toBeUndefined();
     });
     it(`${name}: 声明 DSH 最低支持的 Node.js 版本与宿主一致`, () => {
-      // 0.2.2-alpha.2 起宿主最低 Node.js 24.9（release notes「其他变更」首条）。
-      expect(pkg.engines?.node).toBe(">=24.9.0");
+      // 0.2.3-alpha.1 起宿主要求 Node.js ^24.22.3 || >=26.13.1（upgrade-guide「node-24-22-3」）。
+      expect(pkg.engines?.node).toBe("^24.22.3 || >=26.13.1");
     });
     it(`${name}: 声明 dsh.manifestVersion 1`, () => {
       expect(pkg.dsh?.manifestVersion).toBe(1);

@@ -60,7 +60,7 @@ dsh plugin --profile web add https://github.com/ShanWuYinShe/dsh-plugins/release
 
 `<版本>` 以 [Releases 页](https://github.com/ShanWuYinShe/dsh-plugins/releases)为准。
 
-前置：DSH 宿主兼容范围见本包 `package.json` 的 `engines.dsh`（当前为**同线兼容范围** `>=0.2.2-rc.2 <0.2.3-0`：宿主按 SemVer range 判定兼容，0.2.2 线内的 rc 都可安装；DSH 跨基础号升级后请安装为新宿主重新发布的本插件）；宿主 0.2.2 起要求 Node.js >= 24.9。
+前置：DSH 宿主兼容范围见本包 `package.json` 的 `engines.dsh`（宿主按 SemVer range 判定兼容；DSH 跨基础号升级后请安装为新宿主重新发布的本插件）；宿主 0.2.3 起要求 Node.js ^24.22.3 || >=26.13.1。
 
 ## 内置查询器
 

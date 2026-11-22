@@ -55,6 +55,7 @@
     "audit": "node scripts/audit-deps.mjs"
   },
   "engines": {
-    "dsh": "0.2.3-alpha.2"
+    "dsh": "0.2.3-alpha.2",
+    "node": "^24.22.3 || >=26.13.1"
   }
 }

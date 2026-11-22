@@ -1,13 +1,13 @@
 {
   "name": "@chaoset/sandbox-extra-roots",
-  "version": "0.4.37-alpha.0",
+  "version": "0.4.37-alpha.1",
   "description": "DSH host plugin: extra writable roots for the workspace-write sandbox (Seatbelt/bwrap/Landlock profiles and the fs fence)",
   "icon": "./icon.svg",
   "type": "module",
   "license": "MIT",
   "engines": {
     "dsh": "0.2.3-alpha.2",
-    "node": ">=24.9.0"
+    "node": "^24.22.3 || >=26.13.1"
   },
   "files": [
     "lib/*.js",
