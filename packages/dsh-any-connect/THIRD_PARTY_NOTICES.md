@@ -15,15 +15,16 @@
 
 | 组件 | 版本 | 许可 | 版权声明 |
 | --- | --- | --- | --- |
-| `@deepseek-ai/cordis` | 4.1.0 | MIT | Copyright (c) 2021-present Shigma |
-| `@deepseek-ai/cosmokit` | 1.9.0 | MIT | Copyright (c) 2021-present Shigma |
-| `@deepseek-ai/dsh-atomic-write` | 0.2.2-rc.5 | MIT | Copyright (c) 2026 DeepSeek |
-| `@deepseek-ai/dsh-home-paths` | 0.2.2-rc.5 | MIT | Copyright (c) 2026 DeepSeek |
-| `@deepseek-ai/dsh-storage` | 0.2.2-rc.5 | MIT | Copyright (c) 2026 DeepSeek |
-| `@deepseek-ai/dsh-storage-domain` | 0.2.2-rc.5 | MIT | Copyright (c) 2026 DeepSeek |
-| `@deepseek-ai/dsh-storage-json` | 0.2.2-rc.5 | MIT | Copyright (c) 2026 DeepSeek |
-| `@deepseek-ai/dsh-timeout` | 0.2.2-rc.5 | MIT | Copyright (c) 2026 DeepSeek |
-| `@deepseek-ai/schemastery` | 3.19.0 | MIT | Copyright (c) 2021-present Shigma |
+| `@deepseek-ai/cordis` | 4.2.0-alpha.1 | MIT | Copyright (c) 2021-present Shigma |
+| `@deepseek-ai/cosmokit` | 1.10.0-alpha.1 | MIT | Copyright (c) 2021-present Shigma |
+| `@deepseek-ai/dsh-atomic-write` | 0.2.3-alpha.2 | MIT | Copyright (c) 2026 DeepSeek |
+| `@deepseek-ai/dsh-error` | 0.2.3-alpha.2 | MIT | Copyright (c) 2026 DeepSeek |
+| `@deepseek-ai/dsh-home-paths` | 0.2.3-alpha.2 | MIT | Copyright (c) 2026 DeepSeek |
+| `@deepseek-ai/dsh-storage` | 0.2.3-alpha.2 | MIT | Copyright (c) 2026 DeepSeek |
+| `@deepseek-ai/dsh-storage-domain` | 0.2.3-alpha.2 | MIT | Copyright (c) 2026 DeepSeek |
+| `@deepseek-ai/dsh-storage-json` | 0.2.3-alpha.2 | MIT | Copyright (c) 2026 DeepSeek |
+| `@deepseek-ai/dsh-timeout` | 0.2.3-alpha.2 | MIT | Copyright (c) 2026 DeepSeek |
+| `@deepseek-ai/schemastery` | 3.20.0-alpha.1 | MIT | Copyright (c) 2021-present Shigma |
 | `zod` | 4.6.6 | MIT | Copyright (c) 2025 Colin McDonnell |
 
 上游源码：`@deepseek-ai/*` 组件来自 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，

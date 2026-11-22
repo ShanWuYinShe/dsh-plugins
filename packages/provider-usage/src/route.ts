@@ -189,6 +189,7 @@ export function registerProviderUsageRoute(ctx: Context, options: ProviderUsageR
       kind: 'exact',
       path: options.path ?? PROVIDER_USAGE_PATH,
       handler: providerUsageHandler(options),
+      auth: 'anonymous',
     }), 'provider-usage: usage route')
   })
 }

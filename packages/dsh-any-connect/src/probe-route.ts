@@ -217,6 +217,7 @@ export function registerWorkBuddyProbeRoute(
       kind: 'exact',
       path: deps.path,
       handler: workBuddyProbeHandler(deps, key),
+      auth: 'anonymous',
     })
     return () => {
       dispose()

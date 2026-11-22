@@ -1,3 +1,14 @@
+## 0.5.8-alpha.0 (2026-11-22)
+
+### 优化
+
+* **适配 DSH 宿主 0.2.3-alpha.2（预发布线）**：
+  * 全仓 `@deepseek-ai/dsh-*` 依赖 range → `^0.2.3-alpha.2`，`engines.dsh` → 精确构建基线 `0.2.3-alpha.2`；
+  * 底层依赖同步宿主升级：`@deepseek-ai/cordis` 升至 `~4.2.0-alpha.1`，`@deepseek-ai/cordis-plugin-loader` 升至 `~1.2.0-alpha.1`，`@deepseek-ai/schemastery` 升至 `~3.20.0-alpha.1`；
+  * 适配 `dsh-llm-pi-ai` 的 `ResolvedPiAiProviderProfile` 新增的 `requestImageBudgetCount` 必需配置，按宿主默认补齐 `20`（固定分摊张数）；
+  * 适配 `dsh-host-webserver` 路由认证加固，Web 状态与探针路由显式声明 `auth: 'anonymous'`，支持免登录态环回访问；
+  * 独立 CLI `lib/bin.js` 自包含闭包同步宿主版本，并补齐新增内联包 `@deepseek-ai/dsh-error@0.2.3-alpha.2` 的许可告知。
+
 ## 0.5.7 (2026-11-19)
 
 ### 优化

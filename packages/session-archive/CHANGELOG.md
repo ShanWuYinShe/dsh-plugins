@@ -1,3 +1,12 @@
+## 0.3.41-alpha.0 (2026-11-22)
+
+### 优化
+
+* **适配 DSH 宿主 0.2.3-alpha.2（预发布线）**：
+  * 全仓 `@deepseek-ai/dsh-*` 依赖 range → `^0.2.3-alpha.2`，`engines.dsh` → 精确构建基线 `0.2.3-alpha.2`；
+  * 底层依赖同步宿主升级：`@deepseek-ai/cordis` 升至 `~4.2.0-alpha.1`，`@deepseek-ai/cordis-plugin-loader` 升至 `~1.2.0-alpha.1`，`@deepseek-ai/schemastery` 升至 `~3.20.0-alpha.1`；
+  * 宿主 0.2.3-alpha.2 会话持久化与投影缓存契约无破坏性变更。
+
 ## 0.3.40 (2026-11-19)
 
 ### 优化

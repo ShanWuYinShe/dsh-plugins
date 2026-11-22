@@ -163,6 +163,27 @@ describe("dsh-follow-status", () => {
     return manifest.engines?.dsh ?? "";
   }
 
+  /**
+   * 当前 alpha 分支的依赖基线（存在时）。--strict 校验全仓无基线问题，
+   * 活跃期存在 alpha 分支时假 npm 须包含该预发布线，否则 alpha 会被判超前报错。
+   */
+  function alphaBaseline(): string | undefined {
+    const main = mainBaseline();
+    for (const ref of ["alpha", "origin/alpha"]) {
+      try {
+        const manifest = JSON.parse(execFileSync("git", ["show", `${ref}:package.json`], { cwd: ROOT, encoding: "utf8", stdio: "pipe" })) as { engines?: { dsh?: string } };
+        if (typeof manifest.engines?.dsh === "string" && manifest.engines.dsh !== main) return manifest.engines.dsh;
+      } catch {
+        // 没有该 ref
+      }
+    }
+    const manifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { engines?: { dsh?: string } };
+    if (typeof manifest.engines?.dsh === "string" && manifest.engines.dsh !== main) {
+      return manifest.engines.dsh;
+    }
+    return undefined;
+  }
+
   it("活跃期判定（假 npm 供数）：输入定，输出定", () => {
     // dist-tags 的 next（0.2.1-alpha.1）高于稳定线 ⇒ 应判【活跃期】并给出阶段指引；
     // 分支基线行来自本地 git 与 package.json，✔/⚠/✗ 由仓库状态决定，只断言行存在。
@@ -194,8 +215,11 @@ describe("dsh-follow-status", () => {
   it.skipIf(!mainRefReadable())("--strict：main 基线 = npm 最新正式 rc 时通过（exit 0）", () => {
     const baseline = mainBaseline()
     expect(baseline).toMatch(/^\d+\.\d+\.\d+/)
+    const versions = ["0.1.0-rc.1", baseline]
+    const alpha = alphaBaseline()
+    if (alpha) versions.push(alpha)
     const { code, stdout } = runWithEnv("dsh-follow-status.mjs", {
-      PATH: fakePath("ok", ["0.1.0-rc.1", baseline]),
+      PATH: fakePath("ok", versions),
       FAKE_NPM_MODE: "ok",
     }, "--strict")
     expect(code, stdout).toBe(0)

@@ -308,6 +308,7 @@ export function registerWorkBuddyStatusRoute(ctx: Context, deps: WorkBuddyStatus
       kind: 'exact',
       path: deps.path,
       handler: workBuddyStatusHandler(deps),
+      auth: 'anonymous',
     })
     return () => {
       dispose()
