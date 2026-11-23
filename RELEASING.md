@@ -44,11 +44,11 @@ npm 的**版本列表**：稳定线目标 = 非进行中预发布的最高版（
 - **alpha 跟「基础号高于该 rc 的进行中 `-alpha` 线」**。这样的线存在
   时，从最新 main 分叉创建 alpha 分支跟进；**不存在时不用创建 alpha 分支，
   也不用更新 alpha 分支**——仓库保持单分支 main 运转，日常功能演进与修复
-  一律直接在 main 进行，等 dsh 出更高基础号的新 alpha 线再建分支 `adapt` 跟进。
+  一律以 PR 合入 main 的方式推进，等 dsh 出更高基础号的新 alpha 线再建分支 `adapt` 跟进。
 
 配套不变式：
 
-- **待命期无需 alpha 分支**：没有进行中预发布线时，仓库仅有 main 分支。此状态下不维护 alpha，日常开发直接在 main 发纯 semver 正式版；直到 dsh 发布新 alpha 线，才从最新 main 创建 alpha 分支并 bump 成 `-alpha.N` 推出。
+- **待命期无需 alpha 分支**：没有进行中预发布线时，仓库仅有 main 分支。此状态下不维护 alpha，日常开发以 PR 合入 main 并发纯 semver 正式版；直到 dsh 发布新 alpha 线，才从最新 main 创建 alpha 分支并 bump 成 `-alpha.N` 推出。
 - **不再维护「上一条线的 alpha 锚点」**：旧流程会让 alpha 维持
   `^0.1.2-alpha.5` 这类锚点，靠同基础号的 prerelease range 向上覆盖稳定线。
   现改为分支直接由 main 重建，基线天然等于稳定线目标，无需靠 semver 技巧
@@ -205,9 +205,9 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
 
 1. **核对宿主阶段与目标分支（动手第一步）**：
    先跑 `bun run dsh-status` 确认状态：
-   - **待命期**（进行中预发布线为“无”）：**无需创建或维护 `alpha` 分支**，目标分支直接为 **`main`**，版本号使用**纯 semver 正式版**（如 `0.4.1`），发正式 Release。
-   - **活跃期**（存在进行中的新 alpha 线）：若尚未创建 `alpha` 分支，先从最新 `main` 创建 `alpha` 分支（`git checkout -b alpha main`）并跑 `bun run adapt <新线版本>`；目标分支为 **`alpha`**，版本号带 **`-alpha.N` / `-rc.N`**，发 prerelease Release；`main` 搁置。
-   确认目标分支后，在目标分支修改代码并推送分支开 PR，CI `test.yml` 全绿。
+   - **待命期**（进行中预发布线为“无”）：**无需创建或维护 `alpha` 分支**，目标分支（PR 的 base）为 **`main`**，版本号使用**纯 semver 正式版**（如 `0.4.1`），发正式 Release。
+   - **活跃期**（存在进行中的新 alpha 线）：若尚未创建 `alpha` 分支，先从最新 `main` 创建 `alpha` 分支（`git checkout -b alpha main`）并跑 `bun run adapt <新线版本>`；目标分支（PR 的 base）为 **`alpha`**，版本号带 **`-alpha.N` / `-rc.N`**，发 prerelease Release；`main` 搁置。
+   **所有分支（含 `main` / `alpha` 长期分支）一律不接受直接 push 代码**。确认目标分支后，**从目标分支拉出一个工作分支**（如 `fix/glm54-whitelist`、`adapt/0.2.3`，用 worktree 隔离），在工作分支修改代码、提交、推远程、开 PR（base = 目标分支，head = 工作分支），CI `test.yml` 全绿后 `gh pr merge --rebase --delete-branch` 合入目标分支。禁止把改动直接提交/推送到目标分支。
 2. 启动隔离测试实例（独立 `DSH_HOME` + 本地路径安装插件），在真实浏览器
    里验证功能与控制台（详见 AGENTS.md「CI 门禁与本地验证分工」）。未通过就回到 1，
    **不要 push**。
@@ -225,7 +225,7 @@ Releases 页取对应版本 tarball 资产的 URL，`dsh plugin add <tarball URL
    必须互相印证——提交信息声称的每一项变更都要能在 diff 里找到，diff 里的
    每一处行为变更都要有 CHANGELOG 与版本号对应。**任何一项对不上就不要推**。
    另跑一遍 `bun run gate` 干跑，确认门禁视角下该版本可发布。
-5. 推分支并开 PR。CI（`.github/workflows/test.yml`）只跑测试，永远不发布；全绿后 `gh pr merge --rebase --delete-branch` 合入目标分支。
+5. 推**工作分支**并开 PR（base = 目标分支，head = 工作分支；**不要直接推目标分支**）。CI（`.github/workflows/test.yml`）只跑测试，永远不发布；全绿后 `gh pr merge --rebase --delete-branch` 合入目标分支，随后 `git fetch --prune && git pull --ff-only` 同步并清理 worktree 与工作分支。
 6. **明确要发版时才打 tag**（annotated，详见 skill dsh-plugin-tag）：先
    `git fetch --prune && git pull --ff-only` 让本地目标分支与远程一致（tag 必须落在已合并的提交上），再
    `git tag -a <目录>-v<版本> -m "<包名> v<版本>"`，然后**逐个**执行
@@ -508,7 +508,7 @@ main** 重新拉一条 alpha 分支来适配它；该线发完最新 rc（即其
    ```
 
    **删除后不再从 main 重建 alpha 分支**。仓库回到第 1 步待命期（保持单主干 `main`
-   运行，日常演进在 `main` 直接推进），直到 DSH 出下一条更高基础号的 alpha 线，
+   运行，日常演进以 PR 合入 `main`），直到 DSH 出下一条更高基础号的 alpha 线，
    才再次按第 2 步分叉。
 
 若某个时期同时活跃的宿主线超过两条，照同样模型再拉一条分支即可——分支数

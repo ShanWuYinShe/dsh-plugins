@@ -50,7 +50,7 @@ esbuild 解析的是 **生成产物** `lib/typert.remote-client.js`，因此 Typ
   - `bun run audit`（OSV 依赖审计，命中已知漏洞即红灯）。
   同一 ref 连续推送会取消旧 run（concurrency）。另有 `security-audit.yml` 每周一全量深查传递依赖；
   `publish.yml` 在发版 tag 推送时执行测试 → 稳定性回归 → 发布门禁 → pack → GitHub Release。
-- 合并一律走 PR：待命期 PR 目标 `main`；活跃期功能/修复落 `alpha`，收敛时压缩成单个基于 main 的提交后同样以 PR 合入 `main`（分支模型见「分支选择铁律」与 RELEASING.md）。
+- **合并一律走 PR，任何分支都不例外**：待命期 PR 目标 `main`；活跃期 PR 目标 `alpha`（**禁止直接 push 到 `alpha`**），收敛时压缩成单个基于 main 的提交后同样以 PR 合入 `main`（分支模型见「分支选择铁律」与 RELEASING.md）。工作分支基于目标分支创建，改动在工作分支提交 → 推远程 → 开 PR（base = 目标分支）→ CI `test.yml` 全绿 → `gh pr merge --rebase --delete-branch`。发版 tag 只能落在 PR 已合并的提交上。
 - CI 覆盖不到、必须本地/真机验证的：**真实 DSH 测试实例验证**（独立 `DSH_HOME` + 本地路径安装插件 + 浏览器验证功能与控制台）——发布前必须实际执行，CI 只跑自动化测试（见 RELEASING.md「日常发布流程」）；Linux 平台行为以 CI 的 ubuntu-24.04 为准，平台相关用例按「约定」保持平台无关，无需本地容器复跑。
 - 发版/发布门禁不变：发布门槛仍是「功能完成 + `bun run test:ci` 全绿 + DSH 测试实例验证通过」，其中 `test:ci` 与稳定性/门禁校验由 CI（`Test` job / `publish.yml`）执行；bump 版本后**逐个**推 tag 触发 `publish.yml`，tag 纪律见 RELEASING.md「tag 推送纪律」与 skill `dsh-plugin-tag`。`market` 分支是发布产物分支，禁止手工编辑、不作为 PR 目标。
 
