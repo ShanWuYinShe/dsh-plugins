@@ -142,7 +142,7 @@ GET https://zcode.z.ai/api/v1/zcode-plan/billing/balance[?app_version=<ver>]
 
 ### 5.2 推送链（选择框实时刷新）
 
-**DSH 0.2.2 起走公开事件 `llm/models-updated(provider)`**：目录内容真变化时直接
+**先 `bun run dsh-status` 确认当前宿主版本；0.2.2+ 走公开事件 `llm/models-updated(provider)`**：目录内容真变化时直接
 `ctx.emit('llm/models-updated', provider)`——事件声明在 `dsh-llm` 的 `Events` 上，语义就是「该路由的模型或展示元数据变了，
 消费者重拉 `listModels()`」；客户端 `ModelCatalogDirectory` 订阅后直接 `refresh()`，且该事件在 `dsh-api-remotes` 的转发白名单里，
 Host 一发浏览器就收到（取证见 `catalog-refresh.ts` 的 `notifyCatalogChanged`）。`emit` 只是本地派发、没有可抛点，
@@ -253,12 +253,13 @@ worktree 里跑 `bun run test:ci` 前必须先 `bun install`（缺 node_modules 
 ## 十、隔离实例端到端验证（改插件后必跑）
 
 ```bash
+PORT=8932   # 启动前先 lsof -iTCP:$PORT -sTCP:LISTEN 确认空闲；占用则换端口并同步下面两条 curl
 H=<workspace>/.workwork/dsh-verify/home
 DSH_HOME=$H dsh plugin --profile web add <repo>/packages/dsh-any-connect
-DSH_HOME=$H ZCODE_AUTH_FILE=<带指定 selection 的凭据副本> dsh web --port 8932 --no-open
+DSH_HOME=$H ZCODE_AUTH_FILE=<带指定 selection 的凭据副本> dsh web --port $PORT --no-open
 # 两个 ZCode 变体各一条（卡片数据走宿主路由，不必开浏览器即可核对）：
-curl -sS "http://127.0.0.1:8932/plugins/dsh-any-connect/zcode/status"    -H "Host: 127.0.0.1:8932"
-curl -sS "http://127.0.0.1:8932/plugins/dsh-any-connect/zcode-sp/status" -H "Host: 127.0.0.1:8932"
+curl -sS "http://127.0.0.1:$PORT/plugins/dsh-any-connect/zcode/status"    -H "Host: 127.0.0.1:$PORT"
+curl -sS "http://127.0.0.1:$PORT/plugins/dsh-any-connect/zcode-sp/status" -H "Host: 127.0.0.1:$PORT"
 ```
 
 - 验证"客户端选了 start-plan"：把真实 `credentials.json` 复制到临时目录，旁边放一份 `setting.json`
