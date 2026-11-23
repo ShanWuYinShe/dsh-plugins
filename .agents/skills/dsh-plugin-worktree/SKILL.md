@@ -9,7 +9,7 @@ description: DSH 插件跨分支 worktree 操作纪律。触发：在 main 与 a
 
 - **待命期**（无进行中的 alpha 预发布线）：仓库单主干 `main` 运转，**不创建也不维护 `alpha` 分支与 worktree**，直接在 `main` 工作。
 - **活跃期**（DSH 发布了新 alpha 线）：主检出切到从最新 `main` 建出的 `alpha`，`main` 另建 worktree 并存
-  （RELEASING「跨分支同步」的工作区隔离）；**绝不在主检出目录里来回 checkout**——`lib/` 与 `node_modules` 被 gitignore，切分支后残留的是上一条分支的构建产物与依赖解析。
+  （RELEASING「跨分支同步」的工作区隔离）；**主检出可切分支，但切完必须重新 `bun install` + `bun run build`**——`lib/` 与 `node_modules` 被 gitignore，切分支后残留的是上一条分支的构建产物与依赖解析；需要频繁来回切时用独立 worktree 隔离。
 
 ## 创建与使用
 
