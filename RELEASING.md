@@ -308,9 +308,10 @@ done
 压缩成单个提交搬进 main 并适配该正式版。
 
 - **工作区隔离**：`main` 与 `alpha` 用 git worktree 并存（主检出目录停在活跃
-  的 `alpha`，`.agents/worktrees/main` 是稳定线工作树），不要在主检出目录里切分支——
-  `lib/` 与 `node_modules` 不受 git 管理，切分支会残留上一条线的构建产物与
-  依赖解析。进入任一工作树后先 `bun install`，构建产物可疑就重新 build。
+  的 `alpha`，`.agents/worktrees/main` 是稳定线工作树）；主检出可切分支，但切完
+  必须重新 `bun install` + `bun run build`——`lib/` 与 `node_modules` 不受 git
+  管理，切分支会残留上一条线的构建产物与依赖解析；需要频繁来回切时改用独立
+  worktree 隔离。进入任一工作树后先 `bun install`，构建产物可疑就重新 build。
 - **收敛时搬源码**：只搬 `src/`、`client/`、`CHANGELOG.md` 和 `package.json`
   里与依赖无关的字段；**依赖 range 与 `bun.lock` 永不跨分支搬运**——
   到达 main 后按稳定线宿主版本核对依赖，`bun install` 重新生成 lockfile。
