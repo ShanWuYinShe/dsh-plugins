@@ -1,3 +1,19 @@
+## 0.5.8-alpha.3 (2026-11-23)
+
+### 修复
+
+* **发现 ZCode 4.0 热更新上架的 GLM-5.4 模型**：
+  * **根因**：ZCode 4.0 起通过远端 release 热更新用户数据目录下的 provider 配置
+    （`~/.zcode/v2/runtime/provider/<platform>-<arch>/<version>/<endpoint>/zcode-builtin.json`，实测 revision 48），
+    新上架的 GLM-5.4 只出现在该缓存的 `builtinModelIds`；安装目录静态副本停留在发版时的 revision 44（无 5.4）。
+    插件原先只读静态副本，导致客户端可选、插件模型选择框却看不到 5.4；
+  * **修复**：白名单读取优先级改为「运行时热更新缓存 > 安装目录静态副本」，递归扫描并按 semver 取最高版本；
+    macOS/Windows/Linux/WSL 均覆盖；显式 `zcodeBuiltinConfig` / `ZCODE_BUILTIN_CONFIG` 仍为最高优先级；
+  * **模型目录**：`FALLBACK_ZCODE_MODELS` 增加 GLM-5.4（1M 上下文 / 128K 输出 / 视觉 / 150% 额度）；
+    运行时配置不可得时保守回退，不影响既有 5.3 / 5.3-Flash 展示；
+  * **验证**：`bun run test:ci` 全绿（173 文件 / 2147 用例）；DSH 0.2.3-alpha.2 隔离实例 `zcode/status`
+    的 live catalog 已包含 GLM-5.4；skill 与 README 同步记录根因与取证口径。
+
 ## 0.5.8-alpha.2 (2026-11-22)
 
 ### 修复

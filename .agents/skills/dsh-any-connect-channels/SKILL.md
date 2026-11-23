@@ -134,10 +134,12 @@ GET https://zcode.z.ai/api/v1/zcode-plan/billing/balance[?app_version=<ver>]
   `PROVIDER_VARIANTS.map(createRuntime)`，启动 refresh / 60s sweep / 60min timer 三处都遍历全部 runtimes），没有变体被条件跳过。
 - **名单真源是客户端白名单，不是上游 `/api/paas/v4/models`**：后者是 BigModel 开放平台目录，对 coding-plan key 返回 11 个 id，
   其中 7 个（glm-4.5 / 4.5-air / 4.6 / 4.7 / 5 / 5.1 / 5.3-flashx）在官方客户端配置里完全没有绑定到 coding-plan。
-  现行实现（`zcode-builtin-catalog.ts`）读本机 `zcode-builtin.json`（权威、随客户端发版）→ 白名单为闸门 → 再过滤上游并集与本地保留行；
+  现行实现（`zcode-builtin-catalog.ts`）读本机 `zcode-builtin.json` → 白名单为闸门 → 再过滤上游并集与本地保留行。
+  **读取优先级（2026-11-23 补）**：先读用户数据目录下的运行时热更新缓存 `<zcode-home>/runtime/provider/<platform>-<arch>/<version>/<endpoint>/zcode-builtin.json`（ZCode 4.0 起官方经远端 release 热更新，多版本共存取最高版本），
+  再回退安装目录里的静态副本。原因：GLM-5.4 只在缓存 revision 48 里，4.0.0 安装目录静态副本停留在 revision 44（无 5.4）——只读静态副本会永远漏掉热更新上架的模型。
   白名单不可得（客户端未装 / 不可读 / 结构演进）时回退已注册名单且**不发上游请求**。口径是 `builtinModelIds`（展示面最严）；
   GLM-5.2 / 5-Turbo 只在 rules 里配了参数、不进 builtinModelIds，探针 200 也不展示。要放宽只需并上 rules 绑定的模型 id，一行改动。
-  路径口：macOS 标准安装位置 + `ZCODE_BUILTIN_CONFIG` 环境变量覆盖；其余平台未经实测不猜路径，一律降级。
+  路径口：`Config.zcodeBuiltinConfig` > `ZCODE_BUILTIN_CONFIG` 环境变量 > 运行时缓存 > 各平台安装位置（含 WSL Windows 侧路径）。
 - **saved 目录必须按白名单过滤后再发布**：`catalogStore` 存的是上次成功拉取的名单（可能由旧实现/旧白名单写入，含越界模型）；
   saved 先于 live 发布，因此发布前必须用同一份白名单过滤（`filterByCodingPlanWhitelist`），白名单不可得则原样返回。
 - **空名单的恢复延迟**：start-plan 今日未领取 → 空名单 → 分组隐藏；用户领取后最长要等 60 分钟（小时刷新），

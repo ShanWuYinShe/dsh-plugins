@@ -222,7 +222,7 @@ it('attributes the plan to the client selection, not to the fallback key', async
         resolveCodingPlanWhitelist: whitelistOf(['glm-5.3', 'glm-5.3-flash']),
       })
       const models = await client.fetchModels(dummyCredential)
-      expect(models.map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+      expect(models.map(m => m.id)).toEqual(['glm-5.4', 'glm-5.3', 'glm-5.3-flash'])
       expect(models.find(m => m.id === 'glm-5.3')?.contextWindow).toBe(1000000)
       expect(models.find(m => m.id === 'glm-5.3')?.maxTokens).toBe(128000)
       expect(models.find(m => m.id === 'glm-5.3')?.billing?.badges).toContain('150% 额度')
@@ -359,7 +359,7 @@ it('attributes the plan to the client selection, not to the fallback key', async
           models: FALLBACK_ZCODE_MODELS,
           resolveCodingPlanWhitelist: whitelistOf(['glm-5.3', 'glm-5.3-flash']),
         }).fetchModels(dummyCredential)
-        expect(models.map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+        expect(models.map(m => m.id)).toEqual(['glm-5.4', 'glm-5.3', 'glm-5.3-flash'])
       }
       vi.unstubAllGlobals()
     })
@@ -369,13 +369,13 @@ it('attributes the plan to the client selection, not to the fallback key', async
       expect((await new ZCodeUpstreamClient({
         models: FALLBACK_ZCODE_MODELS,
         resolveCodingPlanWhitelist: whitelistOf(['glm-5.3', 'glm-5.3-flash']),
-      }).fetchModels(dummyCredential)).map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+      }).fetchModels(dummyCredential)).map(m => m.id)).toEqual(['glm-5.4', 'glm-5.3', 'glm-5.3-flash'])
 
       vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down') }))
       expect((await new ZCodeUpstreamClient({
         models: FALLBACK_ZCODE_MODELS,
         resolveCodingPlanWhitelist: whitelistOf(['glm-5.3', 'glm-5.3-flash']),
-      }).fetchModels(dummyCredential)).map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+      }).fetchModels(dummyCredential)).map(m => m.id)).toEqual(['glm-5.4', 'glm-5.3', 'glm-5.3-flash'])
       vi.unstubAllGlobals()
     })
 
@@ -415,7 +415,7 @@ it('attributes the plan to the client selection, not to the fallback key', async
       }).fetchModels(dummyCredential)
       // 产品面真源不可得 → 保守回退已注册名单；此时上游目录不可信，
       // 不值得为它发请求（白名单是闸门，不是事后过滤器）。
-      expect(models.map(m => m.id)).toEqual(['glm-5.3', 'glm-5.3-flash'])
+      expect(models.map(m => m.id)).toEqual(['glm-5.4', 'glm-5.3', 'glm-5.3-flash'])
       expect(fetchSpy).not.toHaveBeenCalled()
       vi.unstubAllGlobals()
     })

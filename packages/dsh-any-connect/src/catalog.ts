@@ -98,6 +98,27 @@ export const FALLBACK_WORKBUDDY_AI_MODELS: readonly WorkBuddyModelInfo[] = [
  */
 export const FALLBACK_ZCODE_MODELS: readonly WorkBuddyModelInfo[] = [
   {
+    // 2026-11-23 上架：Coding Plan V2/V3/团队版使用 5.4 额度 ×1.5；
+    // 参数按客户端 modelRules 的 GLM-5 基线（1M 上下文 / 128K 输出）+ 官方视觉能力。
+    id: 'glm-5.4',
+    name: 'GLM-5.4',
+    contextWindow: 1000000,
+    maxTokens: 128000,
+    supportsImages: true,
+    reasoning: {
+      supports: true,
+      onlyReasoning: true,
+      supportedEfforts: ['low', 'high', 'max'],
+      defaultEffort: 'high',
+      canDisableThinking: true,
+    },
+    billing: {
+      credits: 'x1.00',
+      badges: ['150% 额度'],
+      free: false,
+    },
+  },
+  {
     id: 'glm-5.3',
     name: 'GLM-5.3',
     contextWindow: 1000000,

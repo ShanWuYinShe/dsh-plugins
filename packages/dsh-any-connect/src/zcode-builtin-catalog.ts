@@ -1,12 +1,17 @@
 /**
  * ZCode 桌面客户端内置目录的只读访问：Coding Plan 的官方模型白名单。
  *
- * 权威来源是客户端安装目录里的 provider 配置
- * （`<app>/Contents/Resources/config/provider/zcode-builtin.json`）：
- * `providerConfigRules.providerRules[]` 中 accountType 为 `bigmodel`、providerId
+ * 权威来源是 ZCode 的 provider 配置（`zcode-builtin.json`）中的
+ * `providerConfigRules.providerRules[]`：accountType 为 `bigmodel`、providerId
  * 为 `account:bigmodel-<kind>-coding-plan` 的条目，其 `config.builtinModelIds`
- * 就是客户端向 Coding Plan 用户展示的模型名单（2026-10-06 实测 revision 30：
- * GLM-5.3、GLM-5.3-Flash）。
+ * 就是客户端向 Coding Plan 用户展示的模型名单。
+ *
+ * 读取优先级（命中即止）：
+ * 1. 用户数据目录下的运行时缓存 `<zcode-home>/runtime/provider/<platform>-<arch>/<version>/<endpoint>/zcode-builtin.json`。
+ *    ZCode 4.0 起官方通过远端 release 热更新这份缓存（实测 revision 48 已含
+ *    GLM-5.4），而安装目录里的静态副本仍停留在发版时的 revision（44，无 5.4）。
+ *    必须先读缓存，否则新上架模型永远进不了选择框。
+ * 2. 安装目录里的静态副本（`zcode-builtin.json`，见下方平台路径）。
  *
  * 上游 `open.bigmodel.cn/api/paas/v4/models` 是**开放平台 API** 的模型目录，
  * 不是 Coding Plan 的产品面：实测对 coding-plan key 返回 11 个 id，其中 7 个
@@ -19,13 +24,20 @@
  * @module dsh-any-connect/zcode-builtin-catalog
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { findWslWindowsUserDirs, isWsl, windowsPathForWsl } from './wsl.js'
 
 /** ZCode 客户端内置 provider 配置在 macOS app bundle 内的相对路径。 */
 const BUILTIN_CONFIG_RELATIVE = ['Contents', 'Resources', 'config', 'provider', 'zcode-builtin.json'] as const
+
+/**
+ * ZCode 运行时热更新缓存的相对路径片段：`<zcode-home>/runtime/provider/<platform>/<version>/<endpoint>/zcode-builtin.json`。
+ * 结构随平台/版本/endpoint 分层，endpoint 目录名不可猜，故按两层目录递归。
+ */
+const RUNTIME_PROVIDER_RELATIVE = ['runtime', 'provider'] as const
+const BUILTIN_FILENAME = 'zcode-builtin.json'
 
 /**
  * 环境变量覆盖口：显式指定 zcode-builtin.json 的路径。
@@ -37,18 +49,17 @@ const BUILTIN_CONFIG_RELATIVE = ['Contents', 'Resources', 'config', 'provider', 
 const BUILTIN_CONFIG_ENV = 'ZCODE_BUILTIN_CONFIG'
 
 /** macOS 上 ZCode.app 的标准安装位置（实测 3.14.4）。 */
-function darwinBuiltinConfigCandidates(): string[] {
+function darwinBuiltinConfigCandidates(home: string = homedir()): string[] {
   return [
     '/Applications/ZCode.app',
-    join(homedir(), 'Applications', 'ZCode.app'),
+    join(home, 'Applications', 'ZCode.app'),
   ].map(dir => join(dir, ...BUILTIN_CONFIG_RELATIVE))
 }
 
-function windowsBuiltinConfigCandidates(): string[] {
-  const home = homedir()
-  const localAppData = process.env['LOCALAPPDATA'] ?? join(home, 'AppData', 'Local')
-  const appData = process.env['APPDATA'] ?? join(home, 'AppData', 'Roaming')
-  const programFiles = process.env['ProgramFiles'] ?? 'C:\\Program Files'
+function windowsBuiltinConfigCandidates(home: string = homedir(), env: NodeJS.ProcessEnv = process.env): string[] {
+  const localAppData = env['LOCALAPPDATA'] ?? join(home, 'AppData', 'Local')
+  const appData = env['APPDATA'] ?? join(home, 'AppData', 'Roaming')
+  const programFiles = env['ProgramFiles'] ?? 'C:\\Program Files'
   return [
     join(localAppData, 'Programs', 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
     join(localAppData, 'ZCode', 'resources', 'config', 'provider', 'zcode-builtin.json'),
@@ -57,8 +68,7 @@ function windowsBuiltinConfigCandidates(): string[] {
   ]
 }
 
-function linuxBuiltinConfigCandidates(): string[] {
-  const home = homedir()
+function linuxBuiltinConfigCandidates(home: string = homedir()): string[] {
   return [
     '/opt/ZCode/resources/config/provider/zcode-builtin.json',
     '/usr/share/zcode/resources/config/provider/zcode-builtin.json',
@@ -105,27 +115,115 @@ function wslBuiltinConfigCandidates(
   return [...new Set(candidates)]
 }
 
+/** 依据 semver 版本串降序排列；非纯版本目录排最后（如 0.0.0-dev）。 */
+function byVersionDesc(a: string, b: string): number {
+  const parse = (name: string): number[] => {
+    const m = /^(\d+)\.(\d+)\.(\d+)$/u.exec(name)
+    return m === null ? [] : [Number(m[1]), Number(m[2]), Number(m[3])]
+  }
+  const av = parse(a)
+  const bv = parse(b)
+  if (av.length === 0 || bv.length === 0) return av.length === 0 ? 1 : -1
+  for (let i = 0; i < 3; i++) {
+    if (av[i] !== bv[i]) return bv[i]! - av[i]!
+  }
+  return 0
+}
+
+/**
+ * 枚举用户数据目录下的运行时热更新缓存。
+ *
+ * 返回按版本号降序排列的最新配置优先（多版本共存时热更新总落在最新版本）。
+ * 目录结构为 `<home>/runtime/provider/<platform-arch>/<version>/<endpoint>/zcode-builtin.json`。
+ */
+function runtimeProviderCandidates(home: string): string[] {
+  const providerRoot = join(home, ...RUNTIME_PROVIDER_RELATIVE)
+  if (!existsSync(providerRoot)) return []
+  const found: { path: string; version: string }[] = []
+  try {
+    for (const platformDir of readdirSync(providerRoot, { withFileTypes: true })) {
+      if (!platformDir.isDirectory()) continue
+      const platformPath = join(providerRoot, platformDir.name)
+      for (const versionEntry of readdirSync(platformPath, { withFileTypes: true })) {
+        if (!versionEntry.isDirectory()) continue
+        const versionPath = join(platformPath, versionEntry.name)
+        for (const endpointEntry of readdirSync(versionPath, { withFileTypes: true })) {
+          if (!endpointEntry.isDirectory()) continue
+          const configPath = join(versionPath, endpointEntry.name, BUILTIN_FILENAME)
+          if (existsSync(configPath)) found.push({ path: configPath, version: versionEntry.name })
+        }
+      }
+    }
+  } catch {
+    // 目录读取失败（权限/竞态）不致命：降级到静态副本。
+    return []
+  }
+  found.sort((a, b) => byVersionDesc(a.version, b.version))
+  return found.map(entry => entry.path)
+}
+
+/** ZCode 用户数据目录根（各平台与凭据发现同源，见 auth-paths.ts）。 */
+function zcodeHomeCandidates(platform: NodeJS.Platform = process.platform, home: string = homedir(), env: NodeJS.ProcessEnv = process.env): string[] {
+  if (platform === 'darwin') {
+    return [...new Set([
+      join(home, '.zcode', 'v2'),
+      join(home, 'Library', 'Application Support', 'zcode', 'v2'),
+      join(home, 'Library', 'Application Support', '.zcode', 'v2'),
+    ])]
+  }
+  if (platform === 'win32') {
+    const localAppData = env['LOCALAPPDATA'] ?? join(home, 'AppData', 'Local')
+    const roamingAppData = env['APPDATA'] ?? join(home, 'AppData', 'Roaming')
+    return [...new Set([
+      join(home, '.zcode', 'v2'),
+      join(localAppData, '.zcode', 'v2'),
+      join(roamingAppData, '.zcode', 'v2'),
+      join(localAppData, 'zcode', 'v2'),
+      join(roamingAppData, 'zcode', 'v2'),
+    ])]
+  }
+  if (platform === 'linux') {
+    const linux = [
+      join(home, '.zcode', 'v2'),
+      join(home, '.config', 'zcode', 'v2'),
+      join(home, '.config', '.zcode', 'v2'),
+    ]
+    if (!isWsl(platform, env)) return linux
+    const wsl: string[] = []
+    for (const userDir of findWslWindowsUserDirs(env)) {
+      wsl.push(join(userDir, '.zcode', 'v2'), join(userDir, 'AppData', 'Roaming', '.zcode', 'v2'))
+    }
+    return [...new Set([...wsl, ...linux])]
+  }
+  return []
+}
+
 /** 平台相关的候选路径；`configuredPath` 是 Config 里的显式路径（最高优先级）。 */
 export function builtinConfigCandidates(
   configuredPath?: string,
   platform: NodeJS.Platform = process.platform,
   wsl: boolean = isWsl(),
   env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
 ): string[] {
   const fromConfig = configuredPath?.trim()
   if (fromConfig !== undefined && fromConfig !== '') return [fromConfig]
-  const override = process.env[BUILTIN_CONFIG_ENV]
+  const override = env[BUILTIN_CONFIG_ENV]
   if (override !== undefined && override.trim() !== '') {
     return [override]
   }
-  if (platform === 'darwin') return darwinBuiltinConfigCandidates()
-  if (platform === 'win32') return windowsBuiltinConfigCandidates()
+  // 运行时热更新缓存优先于安装目录静态副本：GLM-5.4 只在缓存 revision 48 里，
+  // 静态副本（4.0.0 发版时 revision 44）没有它（实测 2026-11-23）。
+  const runtime = zcodeHomeCandidates(platform, home, env).flatMap(dir => runtimeProviderCandidates(dir))
+  const staticPaths: string[] = []
+  if (platform === 'darwin') staticPaths.push(...darwinBuiltinConfigCandidates(home))
+  if (platform === 'win32') staticPaths.push(...windowsBuiltinConfigCandidates(home, env))
   if (platform === 'linux') {
-    return wsl
-      ? [...new Set([...wslBuiltinConfigCandidates(env), ...linuxBuiltinConfigCandidates()])]
-      : linuxBuiltinConfigCandidates()
+    staticPaths.push(...(wsl
+      ? [...wslBuiltinConfigCandidates(env), ...linuxBuiltinConfigCandidates(home)]
+      : linuxBuiltinConfigCandidates(home)))
   }
-  return []
+  return [...new Set([...runtime, ...staticPaths])]
 }
 
 /** Provider 条目形状（zcode-builtin.json revision 30；未知结构一律容忍）。 */
@@ -174,8 +272,8 @@ export function codingPlanWhitelistFromConfig(config: unknown): ReadonlySet<stri
  * 无需重启插件即生效。任何读取/解析失败都静默降级——这里没有比「回退已
  * 注册名单」更正确的答案。
  */
-export function readZcodeCodingPlanWhitelist(configuredPath?: string): ReadonlySet<string> | undefined {
-  for (const path of builtinConfigCandidates(configuredPath)) {
+export function readZcodeCodingPlanWhitelist(configuredPath?: string, home?: string): ReadonlySet<string> | undefined {
+  for (const path of builtinConfigCandidates(configuredPath, process.platform, isWsl(), process.env, home)) {
     try {
       if (!existsSync(path)) continue
       const parsed = codingPlanWhitelistFromConfig(JSON.parse(readFileSync(path, 'utf8')) as unknown)

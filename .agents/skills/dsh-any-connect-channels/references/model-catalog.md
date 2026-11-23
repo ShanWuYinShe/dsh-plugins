@@ -14,7 +14,14 @@
    越界模型探针可能 200，但订阅内费率/额度语义未验证（可能扣 API 余额而非订阅）——「分组里出现」不是已验证可用的主张。
    规则（`zcode-builtin-catalog.ts`）：读本机 `zcode-builtin.json` 作白名单，`fetchModels` 先取白名单再过滤上游并集**和本地保留行**；
    白名单不可得时回退已注册名单且**不发上游请求**（白名单是闸门，不是事后过滤器）。
-   路径口：macOS 标准安装位置 + `ZCODE_BUILTIN_CONFIG` 环境变量覆盖；其余平台不猜路径，一律降级。
+   路径口：`Config.zcodeBuiltinConfig` > `ZCODE_BUILTIN_CONFIG` 环境变量 > **用户数据目录运行时热更新缓存** > 各平台安装位置。
+
+   **热更新缓存是首要真源（2026-11-23 实测）**：ZCode 4.0 起官方通过远端 release 热更新用户数据目录下的
+   `<zcode-home>/runtime/provider/<platform-arch>/<version>/<endpoint>/zcode-builtin.json`（macOS 实测
+   `~/.zcode/v2/runtime/provider/darwin-aarch64/4.0.0/endpoint-*/zcode-builtin.json`）。
+   实例：GLM-5.4（2026-11-23 上架）只出现在缓存 revision 48 的 `builtinModelIds`，安装目录静态副本停留在 revision 44（无 5.4）——
+   **只读静态副本必然漏掉热更新上架模型，表现为「客户端有、插件选择框没有」**。
+   多版本缓存共存（实测 3.12.3～4.0.0 全在）时取 semver 最高版本；缓存读取失败降级静态副本。
 
 ## 空名单的第二来源：上游间歇性答空
 

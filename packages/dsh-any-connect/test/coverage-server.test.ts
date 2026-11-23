@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -287,16 +288,22 @@ describe('zcode-builtin-catalog：候选路径与解析容错', () => {
   it('win32/linux/darwin 平台候选都能构造且缺失文件时安全返回 undefined', () => {
     const platform = vi.spyOn(process, 'platform', 'get')
     vi.stubEnv('ZCODE_BUILTIN_CONFIG', '')
-    for (const p of ['win32', 'linux'] as const) {
-      platform.mockReturnValue(p)
-      expect(readZcodeCodingPlanWhitelist(), p).toBeUndefined()
+    // 注入空 home，保证不读本机真实 ZCode 运行时缓存（否则 win32 也会命中 darwin 缓存）。
+    const emptyHome = mkdtempSync(join(tmpdir(), 'zcode-empty-home-'))
+    try {
+      for (const p of ['win32', 'linux'] as const) {
+        platform.mockReturnValue(p)
+        expect(readZcodeCodingPlanWhitelist(undefined, emptyHome), p).toBeUndefined()
+      }
+      // darwin 候选在装了 ZCode 的机器上会真的读到白名单：只断言不抛错、类型正确。
+      platform.mockReturnValue('darwin')
+      const darwin = readZcodeCodingPlanWhitelist(undefined, emptyHome)
+      expect(darwin === undefined || darwin instanceof Set).toBe(true)
+      platform.mockReturnValue('aix' as NodeJS.Platform)
+      expect(readZcodeCodingPlanWhitelist(undefined, emptyHome)).toBeUndefined()
+    } finally {
+      rmSync(emptyHome, { recursive: true, force: true })
     }
-    // darwin 候选在装了 ZCode 的机器上会真的读到白名单：只断言不抛错、类型正确。
-    platform.mockReturnValue('darwin')
-    const darwin = readZcodeCodingPlanWhitelist()
-    expect(darwin === undefined || darwin instanceof Set).toBe(true)
-    platform.mockReturnValue('aix' as NodeJS.Platform)
-    expect(readZcodeCodingPlanWhitelist()).toBeUndefined()
   })
 
   it('损坏 JSON 与非法计划结构降级为 undefined，不抛错', async () => {

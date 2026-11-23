@@ -195,6 +195,34 @@ describe('WSL 环境下 ZCode 白名单发现', () => {
 
     expect(builtinConfigCandidates(undefined, 'freebsd' as NodeJS.Platform, false)).toEqual([])
   })
+
+  it('运行时热更新缓存优先于安装目录静态副本，且最新版本优先', async () => {
+    const homeRoot = tempDir
+    const zcodeHome = join(homeRoot, '.zcode', 'v2')
+    const doc = (ids: string[]) => JSON.stringify({
+      config: { providerConfigRules: { providerRules: [
+        { providerId: 'account:bigmodel-individual-coding-plan', config: { access: { accountType: 'bigmodel' }, builtinModelIds: ids } },
+      ] } },
+    })
+    // 老版本 3.14.4（无 5.4）与新版本 4.0.0（含 5.4）共存；
+    // 目录名字典序 3.14.4 在前，必须按 semver 降序让 4.0.0 先命中。
+    for (const [version, ids] of [['3.14.4', ['GLM-5.3']], ['4.0.0', ['GLM-5.4', 'GLM-5.3']]] as const) {
+      const dir = join(zcodeHome, 'runtime', 'provider', 'darwin-aarch64', version, 'endpoint-abc')
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'zcode-builtin.json'), doc([...ids]), 'utf8')
+    }
+    const whitelist = readZcodeCodingPlanWhitelist(undefined, homeRoot)
+    expect(whitelist?.has('glm-5.4')).toBe(true)
+    const candidates = builtinConfigCandidates(undefined, 'darwin', false, {}, homeRoot)
+    expect(candidates[0]).toContain(join('4.0.0', 'endpoint-abc'))
+  })
+
+  it('本机 ZCode 4.0 运行时缓存能发现 GLM-5.4（有安装时）', () => {
+    if (process.platform !== 'darwin') return
+    const whitelist = readZcodeCodingPlanWhitelist()
+    if (whitelist === undefined) return // 未安装 ZCode 的机器无可断言
+    expect(whitelist.has('glm-5.4')).toBe(true)
+  })
 })
 
 describe('WSL 下 ZCode 可执行文件发现（resolveZCodeBin）', () => {

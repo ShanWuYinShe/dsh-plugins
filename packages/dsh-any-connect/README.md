@@ -152,7 +152,7 @@ dsh-any-connect status --provider zcode-start-plan
   - **诊断未登录问题**：`dsh-any-connect doctor --json` 会报告 `desktopAuthFile.present`、`desktopAuthFile.format` 与 `atRestHelper`。若格式为 `encrypted` 但助手不可用，按引导设置上述环境变量即可。
 - **ZCode**：macOS（`~/.zcode/v2/credentials.json` 及 `Library/Application Support`）、Windows（`%USERPROFILE%\.zcode\v2\credentials.json` 及 Local/Roaming AppData）、WSL（优先通过 WSL 挂载探测 Windows 宿主用户目录与 AppData，并自动计算跨系统解密密钥，随后回落 Linux 原生目录）、Linux（`~/.zcode/v2/credentials.json` 及 `~/.config`）；亦可用 `ZCODE_AUTH_FILE` 环境变量显式指定。
   - **Coding Plan 与 Start Plan 是两个独立连接**：`zcode` 与 `zcode-start-plan` 各自拥有独立的模型分组、模型名单、额度池与请求通道；
-  - **Coding Plan 白名单**：以本机 ZCode 客户端内置目录（`zcode-builtin.json` 的 `builtinModelIds`）为白名单，随客户端发版自动更新（当前为 GLM-5.3、GLM-5.3-Flash）；可用 `zcodeBuiltinConfig` 配置项（`cordis.patch.yml`）或 `ZCODE_BUILTIN_CONFIG` 环境变量显式指定该文件路径（配置优先）；
+  - **Coding Plan 白名单**：以本机 ZCode 客户端的 `zcode-builtin.json` 的 `builtinModelIds` 为白名单。优先读用户数据目录下的运行时热更新缓存（如 `~/.zcode/v2/runtime/provider/<platform>/<version>/<endpoint>/zcode-builtin.json`）——ZCode 4.0 起官方通过远端 release 热更新该缓存（GLM-5.4 只在缓存里，安装目录静态副本没有）；缓存不可用时回退安装目录静态副本。多个版本共存时取最高版本。可用 `zcodeBuiltinConfig` 配置项（`cordis.patch.yml`）或 `ZCODE_BUILTIN_CONFIG` 环境变量显式指定该文件路径（配置优先）；
   - **Start Plan 专属通道与每日领取**：走 `zcode.z.ai/api/v1/zcode-plan/anthropic`，扣减一次性 token 包；每日领取需通过客户端完成，插件每天自动探测可领活动并在卡片醒目提示；
   - **夜间免费限时活动已下线**：智谱此前的 23:00–09:00 夜间免费窗（曾为 Coding Plan 专属权益，Start Plan 不享受）已下线，插件已移除夜免徽标与费率改写，模型按 150% 额度与基准计费如实展示。
 
