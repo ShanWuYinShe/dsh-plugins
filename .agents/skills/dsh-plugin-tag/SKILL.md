@@ -64,10 +64,11 @@ git tag -a <目录>-v<版本> -m "<包名> v<版本>" <发布提交>
 git rev-parse <tag>^{commit}       # 必须等于 git rev-parse <发布提交>
 git show <tag> --stat              # 顺带确认内容
 
-# 4. 先推分支（只跑测试），确保 tag 落在远程已存在的提交上
+# 4. 前置：工作分支已开 PR 且 CI 全绿合并入目标分支（见 git-workflow / dsh-plugin-release）
+#    这一步 git push 只是确保本地目标分支同步（rebase 合并后本地可能仍落后）
 git push
 
-# 5. 再逐个推 tag：推一个 → 等它跑完 → 推下一个
+# 5. 再逐个推 tag：推一个 → 等它跑完 → 推下一个（tag 落在已合并提交上）
 git push origin <tag>
 gh run list --workflow=publish.yml --branch <tag> \
   --limit 1 --json databaseId,event \

@@ -37,15 +37,16 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
 ## 发布纪律（重要）
 
 **任何插件更新（功能、修复、依赖调整一律适用）：必须先在本地的隔离测试
-环境中全部测试通过，才能更新版本号、提交、推送——推送分支只跑测试，打 tag
+环境中全部测试通过，才能更新版本号、提交、推工作分支开 PR——PR / 分支推送只跑测试，打 tag
 发版永远排在验证之后，顺序不可颠倒，无例外。**
 版本号是发布动作的一部分，不是开发动作——功能有问题就修功能，绝不靠
 "再发一版"解决。一次功能开发的完整顺序：
 
 0. **核对宿主阶段与目标分支（动手第一步）**：必须先跑 `bun run dsh-status`。
    - 若为**待命期**（进行中预发布线为“无”）：**无需创建或更新 `alpha` 分支**，目标分支直接为 **`main`**，版本号使用**纯 semver 正式版**（如 `0.4.1`），发正式 Release；
-   - 若为**活跃期**（存在进行中的新 alpha 线）：若尚未创建 `alpha` 分支，先从最新 `main` 创建 `alpha` 分支（`git checkout -b alpha main`）并跑 `bun run adapt <新线版本>`；目标分支为 **`alpha`**，版本号带 **`-alpha.N` / `-rc.N`**，发 prerelease Release；`main` 搁置。
-1. 在目标分支开发 + `bun run test:ci`（build + typecheck + test）全绿；
+   - 若为**活跃期**（存在进行中的新 alpha 线）：若尚未创建 `alpha` 分支，先从最新 `main` 创建 `alpha` 分支（`git checkout -b alpha main`）并跑 `bun run adapt <新线版本>`；目标分支（PR 的 base）为 **`alpha`**，版本号带 **`-alpha.N` / `-rc.N`**，发 prerelease Release；`main` 搁置。
+   **所有分支（含 `main` / `alpha`）一律不接受直接 push 代码**：从目标分支拉工作分支（worktree 隔离）开发，推远程后开 PR（base = 目标分支），CI 全绿后 `gh pr merge --rebase --delete-branch`，tag 只落在已合并的提交上。
+1. 在**工作分支**开发（基于目标分支）+ `bun run test:ci`（build + typecheck + test）全绿；
 2. 启动隔离测试实例真实验证（不占用用户的 `~/.dsh`）：
 
    ```bash
@@ -118,10 +119,12 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
 4. **推送前逐提交复核**：`git log --oneline origin/<分支>..HEAD` 与
    `git diff origin/<分支>..HEAD` 对照——提交信息声称的每项变更都要在
    diff 里找到，diff 里每处行为变更都要有 CHANGELOG 与版本号对应；
-   对不上就不要推。另跑一遍 `bun run gate` 干跑确认。然后 push
-   （分支推送只跑测试，不发布）。
-5. **明确要发版时才打 tag，且一次只推一个 tag**：
-   `git tag -a <目录>-v<版本> -m "<包名> v<版本>"` 后，**逐个**执行
+   对不上就不要推。另跑一遍 `bun run gate` 干跑确认。然后推**工作分支**
+   并开 PR（base = 目标分支；PR / 分支推送只跑测试，不发布），CI 全绿后
+   `gh pr merge --rebase --delete-branch` 合入目标分支。
+5. **PR 已合并后才打 tag，且一次只推一个 tag**：`git fetch --prune && git pull --ff-only`
+   同步目标分支，确认发版提交已由 PR 合入。然后
+   `git tag -a <目录>-v<版本> -m "<包名> v<版本>"`，**逐个**执行
    `git push origin <目录>-v<版本>`——推一个、确认它触发了流水并跑完、再推
    下一个。tag 推出去即发版——CI（`.github/workflows/publish.yml`）对该 tag
    执行：测试 → 门禁校验（tag 形态、annotated、tag 与 package.json 版本
@@ -137,11 +140,12 @@ description: DSH 插件双分支发布体系。触发：发版、升版本号、
    **新排队的 run 会取消前一个 pending 的 run**（中间流水被顶成 cancelled，Release 永远不建）。
    机制权威见全局 `git-workflow`「打 tag 与推送纪律」，本仓库操作见 skill dsh-plugin-tag。
 
-   多包同发时顺序固定为：**先推分支**（`git push`，只跑测试）→ **再逐个 tag
-   推送并逐条确认**（完整循环脚本见 skill dsh-plugin-tag「标准流程」）。
+   多包同发时顺序固定为：**先推工作分支 → 开 PR → CI 全绿后合并入目标分支**
+   （分支 / PR 推送只跑测试）→ **再逐个 tag 推送并逐条确认**
+   （完整循环脚本见 skill dsh-plugin-tag「标准流程」）。
 6. **验证通过即推发（常设约定：实例验证即发版授权）**：改动在**独立 dsh 测试
    实例**（独立 `DSH_HOME`、link 装待发产物、真实宿主版本与适配目标一致）中
-   完成端到端验证且无问题后，**自动继续推送分支并打 tag 发版**，无需每次再向
+   完成端到端验证且无问题后，**自动继续推工作分支 → 开 PR → CI 全绿后合并 → 打 tag 发版**，无需每次再向
    用户确认——第 2 步的实例验证本身就是发版授权。要点：
    - 「实例验证」的标准：真实宿主跑起来、覆盖本次改动的核心链路（如设置页
      读写、卡片读回、迁移）、控制台与宿主日志零异常。`test:ci` 全绿只是前置，
